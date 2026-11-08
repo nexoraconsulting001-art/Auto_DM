@@ -28,7 +28,15 @@ export const config = {
   // and /l/<slug> links in that app's DMs are redirected to PLUGIN_URL/r/<slug>.
   forwardWebhookUrl: process.env.FORWARD_WEBHOOK_URL || '',
   pluginUrl: (process.env.PLUGIN_URL || '').replace(/\/+$/, ''),
-  // Database: Postgres connection string, or empty for the built-in database in data/pgdata
+  // Database: Postgres connection string. Empty uses the built-in database in data/pgdata, which is only
+  // for tests and quick local runs (one process at a time).
   databaseUrl: process.env.DATABASE_URL || '',
   dataDir: process.env.DATA_DIR || path.join(rootDir, 'data', 'pgdata'),
+  // Businesses (tenants). Each business is found from the web address:
+  //   <slug>.PLATFORM_DOMAIN (e.g. mehtamart.bhavahq.com), or a custom domain added for it.
+  // DEFAULT_TENANT is the business served on any other address, and the one webhooks fall back to;
+  // it is created on start if missing. Leave it empty once every business has its own address.
+  platformDomain: (process.env.PLATFORM_DOMAIN || '').toLowerCase(),
+  defaultTenant: process.env.DEFAULT_TENANT ?? 'default',
+  defaultTenantName: process.env.DEFAULT_TENANT_NAME || 'My store',
 };

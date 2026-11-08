@@ -1,3 +1,5 @@
+import { tenantId } from '../tenancy.js';
+
 export const SETTING_DEFAULTS = {
   store_name: 'Shopping For Her',
   tagline: 'Everything from our reels, in one place.',
@@ -24,7 +26,7 @@ export const SETTING_DEFAULTS = {
 export function settingsRepo(db) {
   return {
     async getAll() {
-      const rows = await db.query('SELECT key, value FROM settings');
+      const rows = await db.query('SELECT key, value FROM settings WHERE tenant_id = $1', [tenantId()]);
       const out = { ...SETTING_DEFAULTS };
       for (const { key, value } of rows) if (key in out) out[key] = value;
       return out;
@@ -33,8 +35,8 @@ export function settingsRepo(db) {
       for (const [key, value] of Object.entries(values)) {
         if (!(key in SETTING_DEFAULTS)) continue;
         await db.query(
-          'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
-          [key, String(value ?? '')],
+          'INSERT INTO settings (tenant_id, key, value) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value',
+          [tenantId(), key, String(value ?? '')],
         );
       }
     },

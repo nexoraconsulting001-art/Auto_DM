@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { SEED_FILE, newestReels, seedDemo } from '../../scripts/seed.js';
 import crypto from 'node:crypto';
 import { SETTING_DEFAULTS } from '../repos/settings.js';
+import { currentTenant } from '../tenancy.js';
 import {
   activityPage, adminLayout, categoriesPage, categoryFormPage, categoryValues, customersPage, dashboardPage,
   orderDetailPage, ordersPage, productFormPage, productValues, productsPage, reelFormPage, reelValues, reelsPage, settingsPage,
@@ -23,12 +24,22 @@ const FLASH = {
   category_deleted: 'Category deleted. Its products are still in your catalog.',
 };
 
-export const baseUrlFor = (req, config) =>
-  config.publicBaseUrl || `${req.protocol}://${req.get('x-forwarded-host') || req.get('host')}`;
+/** Public address of the current business. PUBLIC_BASE_URL applies to the default business only. */
+export const baseUrlFor = (req, config) => {
+  const t = currentTenant();
+  if (config.publicBaseUrl && (!t?.slug || !config.defaultTenant || t.slug === config.defaultTenant)) return config.publicBaseUrl;
+  return `${req.protocol}://${req.get('x-forwarded-host') || req.get('host')}`;
+};
+
+/** Public address of a business when there is no request from its own site (e.g. in a webhook). */
+export const tenantBaseUrl = (tenant, config) => {
+  if (tenant.slug === config.defaultTenant && config.publicBaseUrl) return config.publicBaseUrl;
+  return config.platformDomain ? `https://${tenant.slug}.${config.platformDomain}` : config.publicBaseUrl;
+};
 
 const list = (v) => [].concat(v ?? []).filter((x) => x !== '');
 
-export function adminRoutes({ db, repos, ig, auth, config }) {
+export function adminRoutes({ repos, ig, auth, config }) {
   const r = express.Router();
   const upload = multer({
     storage: multer.memoryStorage(),
@@ -55,7 +66,7 @@ export function adminRoutes({ db, repos, ig, auth, config }) {
   }
 
   async function setupChecklist(settings, stats, reels) {
-    const [[{ comments }]] = await Promise.all([db.query('SELECT count(*)::int AS comments FROM activity')]);
+    const comments = await repos.activity.count();
     const storeChanged = settings.store_name !== SETTING_DEFAULTS.store_name || Boolean(settings.logo_url);
     return {
       dismissed: settings.checklist_dismissed === '1',
@@ -375,7 +386,7 @@ export function adminRoutes({ db, repos, ig, auth, config }) {
       if (reels.length < data.reels.length) {
         throw new ValidationError(`Found only ${reels.length} reel(s) on your Instagram account. Demo data needs ${data.reels.length}.`);
       }
-      await seedDemo({ db, repos }, data, reels);
+      await seedDemo({ repos }, data, reels);
       res.redirect(303, '/admin/reels?ok=demo');
     } catch (err) {
       const message = err instanceof ValidationError ? err.message : `Couldn’t load demo data: ${err.message}`;

@@ -1,5 +1,5 @@
 import { openDb } from '../src/db/index.js';
-import { createRepos } from '../src/repos/index.js';
+import { bindTenant, createRepos } from '../src/repos/index.js';
 import { createApp } from '../src/server.js';
 import { config } from '../src/config.js';
 
@@ -21,10 +21,15 @@ export function fakeIg({ failButton = false } = {}) {
   };
 }
 
+/**
+ * A fresh in-memory database with one business ("default", the DEFAULT_TENANT the app falls back to).
+ * `repos` are bound to that business; `platform` are the unbound repos.
+ */
 export async function setup() {
   const db = await openDb();
-  const repos = createRepos(db);
-  return { db, repos };
+  const platform = createRepos(db);
+  const tenant = await platform.tenants.ensure({ slug: 'default', name: 'Test store' });
+  return { db, repos: bindTenant(platform, tenant), platform, tenant };
 }
 
 /** Creates `n` products and a reel showing them. */
@@ -40,16 +45,16 @@ export async function seedReel(repos, { n = 2, keywords = 'LINK', active = 'on',
 export const OWNER = { phone: '9000000001', password: 'owner-pass' };
 
 export async function startApp({ ig = fakeIg(), overrides = {} } = {}) {
-  const { db, repos } = await setup();
+  const { db, repos, platform, tenant } = await setup();
   await repos.users.ensureOwner(OWNER);
   const app = createApp({
     db,
     ig,
-    config: { ...config, adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dryRun: false, oneDmPerUser: false, ...overrides },
+    config: { ...config, defaultTenant: 'default', platformDomain: 'bhava.test', adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dryRun: false, oneDmPerUser: false, ...overrides },
   });
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
-  return { db, repos, ig, base, close: () => server.close() };
+  return { db, repos, platform, tenant, ig, base, port: server.address().port, close: () => server.close() };
 }
 
 /** Logs in through /login and returns the session cookie plus a CSRF token read from `csrfPage`. */

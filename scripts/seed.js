@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { config } from '../src/config.js';
 import { openDb } from '../src/db/index.js';
 import { createRepos } from '../src/repos/index.js';
+import { withTenant } from '../src/tenancy.js';
 import { SETTING_DEFAULTS } from '../src/repos/settings.js';
 import * as instagram from '../src/instagram.js';
 
@@ -23,7 +24,7 @@ export const SEED_FILE = path.join(config.rootDir, 'seed', 'mehtamart.json');
  *   products?: [{ name, price, mrp, description, images, categories: [names], featured }],
  *   reels: [{ headline, slug, keywords, dm_message, products: [names, or product objects as above] }] }
  */
-export async function seedDemo({ db, repos }, data, reels) {
+export async function seedDemo({ repos }, data, reels) {
   if (reels.length < data.reels.length) throw new Error(`Need ${data.reels.length} reels, got ${reels.length}`);
 
   // Settings: only fill in values that are still at their defaults, so your own edits are kept.
@@ -58,14 +59,12 @@ export async function seedDemo({ db, repos }, data, reels) {
   async function ensureProduct(p) {
     if (productIds.has(p.name)) return productIds.get(p.name);
     const cats = (p.categories || []).map((n) => categoryIds.get(n)).filter(Boolean);
-    const [existing] = await db.query('SELECT id FROM products WHERE name = $1 LIMIT 1', [p.name]);
+    const existing = await repos.products.findByName(p.name);
     let id;
     if (existing) {
       id = existing.id;
       // Add the demo categories without removing any the owner picked.
-      for (const cid of cats) {
-        await db.query('INSERT INTO product_categories (product_id, category_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [id, cid]);
-      }
+      await repos.products.addCategories(id, cats);
       summary.products.reused++;
     } else {
       const created = await repos.products.create({
@@ -151,7 +150,9 @@ async function main() {
   }
 
   const db = await openDb({ url: config.databaseUrl, dataDir: config.dataDir });
-  const summary = await seedDemo({ db, repos: createRepos(db) }, data, reels);
+  const repos = createRepos(db);
+  const tenant = await repos.tenants.ensure({ slug: config.defaultTenant || 'default', name: config.defaultTenantName });
+  const summary = await withTenant(tenant, () => seedDemo({ repos }, data, reels));
   await db.close();
 
   const base = config.publicBaseUrl || `http://localhost:${config.port}`;

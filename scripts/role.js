@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { config } from '../src/config.js';
 import { openDb } from '../src/db/index.js';
 import { createRepos } from '../src/repos/index.js';
+import { withTenant } from '../src/tenancy.js';
 import { normalizePhone } from '../src/util.js';
 
 /** Returns a one-line result message, or throws with a reason. */
@@ -36,12 +37,18 @@ async function main() {
   const db = await openDb({ url: config.databaseUrl, dataDir: config.dataDir });
   const repos = createRepos(db);
   try {
-    if (first === 'list') {
-      const admins = await repos.users.listAdmins();
-      console.log(admins.length ? admins.map((u) => `${u.phone}  ${u.name}`).join('\n') : 'No admins yet.');
-    } else {
-      console.log(await changeRole(repos, { phone: first, role, ownerPhone: config.adminPhone }));
-    }
+    // Which business: TENANT=<slug>, or the default business.
+    const slug = process.env.TENANT || config.defaultTenant;
+    const tenant = slug ? await repos.tenants.getBySlug(slug) : null;
+    if (!tenant) throw new Error(`No business called "${slug}". Run with TENANT=<business slug>.`);
+    await withTenant(tenant, async () => {
+      if (first === 'list') {
+        const admins = await repos.users.listAdmins();
+        console.log(admins.length ? admins.map((u) => `${u.phone}  ${u.name}`).join('\n') : 'No admins yet.');
+      } else {
+        console.log(await changeRole(repos, { phone: first, role, ownerPhone: config.adminPhone }));
+      }
+    });
   } finally {
     await db.close();
   }

@@ -4,10 +4,17 @@ import { mediaRepo } from './media.js';
 import { ordersRepo } from './orders.js';
 import { productsRepo } from './products.js';
 import { reelsRepo } from './reels.js';
+import { sessionsRepo } from './sessions.js';
 import { settingsRepo } from './settings.js';
 import { statsRepo } from './stats.js';
+import { tenantsRepo } from './tenants.js';
 import { usersRepo } from './users.js';
+import { withTenant } from '../tenancy.js';
 
+/**
+ * Every repo except `tenants` works on the current business only (see tenancy.js) and throws when
+ * called outside withTenant(). `tenants` is the platform-level repo.
+ */
 export function createRepos(db) {
   return {
     activity: activityRepo(db),
@@ -16,8 +23,25 @@ export function createRepos(db) {
     orders: ordersRepo(db),
     products: productsRepo(db),
     reels: reelsRepo(db),
+    sessions: sessionsRepo(db),
     settings: settingsRepo(db),
     stats: statsRepo(db),
+    tenants: tenantsRepo(db),
     users: usersRepo(db),
   };
+}
+
+/**
+ * The same repos, with every call run as `tenant` (scripts, jobs and tests). Web requests don't need
+ * this: the business is already set from the web address.
+ */
+export function bindTenant(repos, tenant) {
+  const bound = {};
+  for (const [name, repo] of Object.entries(repos)) {
+    bound[name] = {};
+    for (const [key, value] of Object.entries(repo)) {
+      bound[name][key] = typeof value === 'function' ? (...args) => withTenant(tenant, () => value.apply(repo, args)) : value;
+    }
+  }
+  return bound;
 }

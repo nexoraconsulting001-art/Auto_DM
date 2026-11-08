@@ -41,7 +41,7 @@ export function accountRoutes({ repos, auth, config }) {
       auth.recordFailure(req);
       return page(res, loginPage({ settings, next: next || '/', phone, error: 'That mobile number and password don’t match.' }), 401);
     }
-    auth.login(req, res, user);
+    await auth.login(req, res, user);
     res.redirect(303, next && next !== '/' ? next : home(user));
   });
 
@@ -59,7 +59,7 @@ export function accountRoutes({ repos, auth, config }) {
     }
     try {
       const user = await repos.users.create({ ...values, password: req.body.password });
-      auth.login(req, res, user);
+      await auth.login(req, res, user);
       res.redirect(303, next !== '/' ? next : '/account');
     } catch (err) {
       if (!(err instanceof ValidationError)) throw err;
@@ -68,8 +68,8 @@ export function accountRoutes({ repos, auth, config }) {
     }
   });
 
-  r.post('/logout', (req, res) => {
-    auth.logout(res);
+  r.post('/logout', async (req, res) => {
+    await auth.logout(req, res);
     res.redirect(303, '/');
   });
 
@@ -105,6 +105,8 @@ export function accountRoutes({ repos, auth, config }) {
       if (err instanceof ValidationError) return renderError(err.message);
       throw err;
     }
+    // The password change logged this account out everywhere; keep this browser logged in.
+    await auth.login(req, res, req.user);
     res.redirect(303, '/account?saved=1');
   });
 

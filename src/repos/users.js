@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { ValidationError, normalizePhone } from '../util.js';
+import { tenantId } from '../tenancy.js';
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -27,13 +28,13 @@ const PUBLIC = 'id, name, phone, email, role, address, created_at';
 export function usersRepo(db) {
   return {
     async get(id) {
-      const [row] = await db.query(`SELECT ${PUBLIC} FROM users WHERE id = $1`, [Number(id) || 0]);
+      const [row] = await db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND id = $2`, [tenantId(), Number(id) || 0]);
       return row || null;
     },
     async findByPhone(phone) {
       const p = normalizePhone(phone);
       if (!p) return null;
-      const [row] = await db.query(`SELECT ${PUBLIC} FROM users WHERE phone = $1`, [p]);
+      const [row] = await db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND phone = $2`, [tenantId(), p]);
       return row || null;
     },
     async create({ name, phone, email = '', password, role = 'customer' }) {
@@ -44,11 +45,11 @@ export function usersRepo(db) {
       const e = String(email ?? '').trim();
       if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new ValidationError('Enter a valid email, or leave it empty');
       validatePassword(password);
-      const [exists] = await db.query('SELECT 1 FROM users WHERE phone = $1', [p]);
+      const [exists] = await db.query('SELECT 1 FROM users WHERE tenant_id = $1 AND phone = $2', [tenantId(), p]);
       if (exists) throw new ValidationError('An account with this number already exists. Log in instead.');
       const [row] = await db.query(
-        `INSERT INTO users (name, phone, email, password_hash, role) VALUES ($1, $2, $3, $4, $5) RETURNING ${PUBLIC}`,
-        [n.slice(0, 80), p, e.slice(0, 120), await hashPassword(password), role === 'admin' ? 'admin' : 'customer'],
+        `INSERT INTO users (tenant_id, name, phone, email, password_hash, role) VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${PUBLIC}`,
+        [tenantId(), n.slice(0, 80), p, e.slice(0, 120), await hashPassword(password), role === 'admin' ? 'admin' : 'customer'],
       );
       return row;
     },
@@ -56,26 +57,33 @@ export function usersRepo(db) {
     async verify(phone, password) {
       const p = normalizePhone(phone);
       if (!p) return null;
-      const [row] = await db.query('SELECT * FROM users WHERE phone = $1', [p]);
+      const [row] = await db.query('SELECT * FROM users WHERE tenant_id = $1 AND phone = $2', [tenantId(), p]);
       if (!row || !(await checkPassword(password, row.password_hash))) return null;
       delete row.password_hash;
       return row;
     },
     async setPassword(id, password) {
       validatePassword(password);
-      await db.query('UPDATE users SET password_hash = $2 WHERE id = $1', [Number(id), await hashPassword(password)]);
+      const hashed = await hashPassword(password);
+      await db.tx(async (t) => {
+        await t.query('UPDATE users SET password_hash = $3 WHERE tenant_id = $1 AND id = $2', [tenantId(), Number(id), hashed]);
+        // A new password logs the account out everywhere.
+        await t.query('UPDATE sessions SET revoked_at = now() WHERE tenant_id = $1 AND user_id = $2 AND revoked_at IS NULL', [
+          tenantId(), Number(id),
+        ]);
+      });
     },
     /** Only the server command (scripts/role.js) and ensureOwner change roles; signup always makes customers. */
     async setRole(id, role) {
       if (!['admin', 'customer'].includes(role)) throw new ValidationError('Role must be admin or customer');
-      await db.query('UPDATE users SET role = $2 WHERE id = $1', [Number(id), role]);
+      await db.query('UPDATE users SET role = $3 WHERE tenant_id = $1 AND id = $2', [tenantId(), Number(id), role]);
       return this.get(id);
     },
     async listAdmins() {
-      return db.query(`SELECT ${PUBLIC} FROM users WHERE role = 'admin' ORDER BY created_at`);
+      return db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND role = 'admin' ORDER BY created_at`, [tenantId()]);
     },
     async saveAddress(id, address) {
-      await db.query('UPDATE users SET address = $2 WHERE id = $1', [Number(id), JSON.stringify(address)]);
+      await db.query('UPDATE users SET address = $3 WHERE tenant_id = $1 AND id = $2', [tenantId(), Number(id), JSON.stringify(address)]);
     },
     /**
      * Makes sure the owner account from .env exists and has the admin role.
@@ -84,9 +92,9 @@ export function usersRepo(db) {
     async ensureOwner({ phone, password, name = 'Store owner' }) {
       const p = normalizePhone(phone);
       if (!p || !password) return null;
-      const [row] = await db.query('SELECT id FROM users WHERE phone = $1', [p]);
+      const [row] = await db.query('SELECT id FROM users WHERE tenant_id = $1 AND phone = $2', [tenantId(), p]);
       if (row) {
-        await db.query("UPDATE users SET role = 'admin', password_hash = $2 WHERE id = $1", [row.id, await hashPassword(password)]);
+        await db.query("UPDATE users SET role = 'admin', password_hash = $3 WHERE tenant_id = $1 AND id = $2", [tenantId(), row.id, await hashPassword(password)]);
         return this.get(row.id);
       }
       return this.create({ name, phone: p, password, role: 'admin' });
@@ -94,12 +102,12 @@ export function usersRepo(db) {
     async listCustomers({ search = '' } = {}) {
       return db.query(
         `SELECT u.id, u.name, u.phone, u.email, u.role, u.created_at,
-           (SELECT count(*)::int FROM orders o WHERE o.user_id = u.id) AS order_count,
-           (SELECT coalesce(sum(total_paise), 0)::bigint FROM orders o WHERE o.user_id = u.id AND o.status <> 'cancelled') AS spent
+           (SELECT count(*)::int FROM orders o WHERE o.tenant_id = u.tenant_id AND o.user_id = u.id) AS order_count,
+           (SELECT coalesce(sum(total_paise), 0)::bigint FROM orders o WHERE o.tenant_id = u.tenant_id AND o.user_id = u.id AND o.status <> 'cancelled') AS spent
          FROM users u
-         WHERE ($1 = '' OR u.name ILIKE '%' || $1 || '%' OR u.phone LIKE '%' || $1 || '%')
+         WHERE u.tenant_id = $2 AND ($1 = '' OR u.name ILIKE '%' || $1 || '%' OR u.phone LIKE '%' || $1 || '%')
          ORDER BY u.role = 'admin' DESC, u.created_at DESC LIMIT 500`,
-        [search.trim()],
+        [search.trim(), tenantId()],
       );
     },
   };

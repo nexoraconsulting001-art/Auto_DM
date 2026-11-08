@@ -22,26 +22,25 @@ export const safeNext = (n, fallback = '/') =>
   typeof n === 'string' && /^\/(?!\/)[\w\-./?=&%#]*$/.test(n) && !n.startsWith('/login') ? n : fallback;
 
 /**
- * One login for the whole site. Shoppers and the owner sign in with phone + password; the owner's
- * account has role "admin". The session is a signed, HttpOnly cookie (no server-side session store).
+ * One login per business site. Shoppers and the owner sign in with phone + password; the owner's
+ * account has role "admin". The cookie holds a random session token; the session itself lives in the
+ * database (see repos/sessions.js), so it works across web servers and can be revoked.
  * Every POST made while logged in must carry a CSRF token derived from the session.
+ *
+ * Sign-in methods (Google, WhatsApp code, Sign in with Apple) plug in by verifying the person and then
+ * calling login(); nothing else here depends on how they proved who they are.
  */
-export function createAuth({ secret, users }) {
+export function createAuth({ secret, users, sessions }) {
   const attempts = new Map();
-
-  function sessionToken(req) {
-    const token = readCookie(req, COOKIE);
-    const [uid, exp, sig] = token.split('.');
-    if (!uid || !exp || !sig || Number(exp) < Date.now()) return null;
-    return safeEqual(sig, hmac(secret, `session:${uid}:${exp}`)) ? { token, userId: Number(uid) } : null;
-  }
 
   return {
     /** Loads the logged-in user (if any) into req.user / res.locals.user, and the CSRF token. */
     async load(req, res, next) {
-      const s = sessionToken(req);
-      req.user = s ? await users.get(s.userId) : null;
-      req.csrf = s && req.user ? hmac(secret, `csrf:${s.token}`) : '';
+      const token = readCookie(req, COOKIE);
+      const userId = token ? await sessions.userIdFor(token) : null;
+      req.user = userId ? await users.get(userId) : null;
+      req.sessionToken = req.user ? token : '';
+      req.csrf = req.user ? hmac(secret, `csrf:${token}`) : '';
       res.locals.user = req.user;
       res.locals.csrf = req.csrf;
       next();
@@ -68,10 +67,10 @@ export function createAuth({ secret, users }) {
       attempts.set(req.ip, a);
     },
 
-    login(req, res, user) {
+    async login(req, res, user) {
       attempts.delete(req.ip);
-      const exp = Date.now() + SESSION_DAYS * 86_400_000;
-      res.cookie(COOKIE, `${user.id}.${exp}.${hmac(secret, `session:${user.id}:${exp}`)}`, {
+      const token = await sessions.create(user.id, SESSION_DAYS);
+      res.cookie(COOKIE, token, {
         httpOnly: true,
         sameSite: 'lax',
         secure: req.secure,
@@ -80,7 +79,8 @@ export function createAuth({ secret, users }) {
       });
     },
 
-    logout(res) {
+    async logout(req, res) {
+      if (req.sessionToken) await sessions.revoke(req.sessionToken);
       res.clearCookie(COOKIE, { path: '/' });
     },
 

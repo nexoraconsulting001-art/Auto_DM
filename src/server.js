@@ -9,7 +9,8 @@ import { createAuth } from './auth.js';
 import { handleComment } from './handler.js';
 import * as instagram from './instagram.js';
 import { accountRoutes } from './routes/account.js';
-import { adminRoutes, baseUrlFor } from './routes/admin.js';
+import { adminRoutes, baseUrlFor, tenantBaseUrl } from './routes/admin.js';
+import { createTenantResolver, withTenant } from './tenancy.js';
 import { apiRoutes, mediaRoutes, storeRoutes } from './routes/store.js';
 
 export function verifySignature(rawBody, header, secret) {
@@ -22,7 +23,17 @@ export function verifySignature(rawBody, header, secret) {
 /** Builds the web app. `db` comes from openDb(); `ig` can be swapped for a fake in tests. */
 export function createApp({ db, ig = instagram, config = defaultConfig }) {
   const repos = createRepos(db);
-  const auth = createAuth({ secret: config.sessionSecret, users: repos.users });
+  const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions });
+  const tenants = createTenantResolver({ tenants: repos.tenants, platformDomain: config.platformDomain, defaultTenant: config.defaultTenant });
+
+  /** The business that owns an Instagram account: linked accounts first, then the default business. */
+  async function tenantForIgAccount(igUserId) {
+    if (igUserId) {
+      const linked = await repos.tenants.getByIgAccount(igUserId);
+      if (linked) return linked;
+    }
+    return config.defaultTenant ? repos.tenants.getBySlug(config.defaultTenant) : null;
+  }
   const app = express();
 
   app.set('trust proxy', 1); // exactly one proxy (Caddy, Codespaces or Render) terminates HTTPS in front of the app
@@ -53,21 +64,29 @@ export function createApp({ db, ig = instagram, config = defaultConfig }) {
     // Acknowledge fast; Meta retries deliveries that are slow to get a 200.
     res.sendStatus(200);
 
-    const base = baseUrlFor(req, config);
-    const storeUrl = (slug) => `${base}/r/${encodeURIComponent(slug)}?src=dm`;
     let unmapped = false;
     for (const entry of req.body?.entry || []) {
-      const ownIds = new Set([entry.id, config.igUserId].filter(Boolean).map(String));
-      for (const change of entry.changes || []) {
-        if (change.field !== 'comments') continue;
-        try {
-          const result = await handleComment(change.value, { repos, ig, ownIds, storeUrl, oneDmPerUser: config.oneDmPerUser });
-          console.log(`comment ${change.value?.id} on ${change.value?.media?.id}: ${result}`);
-          if (result === 'skip:unmapped-reel') unmapped = true;
-        } catch (err) {
-          console.error(`Failed to handle comment ${change.value?.id}: ${err.message}`);
-        }
+      const tenant = await tenantForIgAccount(entry.id);
+      if (!tenant) {
+        console.warn(`Webhook for Instagram account ${entry.id} that no business owns; ignored`);
+        unmapped = true;
+        continue;
       }
+      const base = tenantBaseUrl(tenant, config) || baseUrlFor(req, config);
+      const storeUrl = (slug) => `${base}/r/${encodeURIComponent(slug)}?src=dm`;
+      const ownIds = new Set([entry.id, config.igUserId].filter(Boolean).map(String));
+      await withTenant(tenant, async () => {
+        for (const change of entry.changes || []) {
+          if (change.field !== 'comments') continue;
+          try {
+            const result = await handleComment(change.value, { repos, ig, ownIds, storeUrl, oneDmPerUser: config.oneDmPerUser });
+            console.log(`[${tenant.slug}] comment ${change.value?.id} on ${change.value?.media?.id}: ${result}`);
+            if (result === 'skip:unmapped-reel') unmapped = true;
+          } catch (err) {
+            console.error(`[${tenant.slug}] Failed to handle comment ${change.value?.id}: ${err.message}`);
+          }
+        }
+      });
     }
     // Reels this store doesn't use may belong to another app on the same Instagram account. It gets the
     // delivery byte for byte, with Meta's signature, and checks it with the same app secret.
@@ -91,11 +110,19 @@ export function createApp({ db, ig = instagram, config = defaultConfig }) {
     });
   }
 
+  // Everything below belongs to one business, found from the web address.
+  app.use(async (req, res, next) => {
+    // req.hostname honours X-Forwarded-Host only from the trusted proxy in front (Caddy).
+    const tenant = await tenants.resolve(req.hostname);
+    if (!tenant) return res.status(404).type('text').send('There is no store at this address.');
+    withTenant(tenant, next);
+  });
+
   app.use('/media', mediaRoutes({ repos }));
   // Everything below knows who is logged in, and logged-in POSTs need the session's CSRF token.
   app.use(auth.load, auth.checkCsrf);
   app.use('/', accountRoutes({ repos, auth, config }));
-  app.use('/admin', adminRoutes({ db, repos, ig, auth, config }));
+  app.use('/admin', adminRoutes({ repos, ig, auth, config }));
   app.use('/api', apiRoutes({ repos }));
   app.use('/', storeRoutes({ repos, ig, auth }));
 
@@ -114,10 +141,14 @@ export function createApp({ db, ig = instagram, config = defaultConfig }) {
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = defaultConfig;
   const db = await openDb({ url: config.databaseUrl, dataDir: config.dataDir });
-  const owner = await createRepos(db).users.ensureOwner({ phone: config.adminPhone, password: config.adminPassword });
+  const repos = createRepos(db);
+  if (!config.databaseUrl) console.warn('DATABASE_URL is empty: using the built-in database, which is only for tests and quick local runs');
+  const tenant = config.defaultTenant ? await repos.tenants.ensure({ slug: config.defaultTenant, name: config.defaultTenantName }) : null;
+  const owner = tenant ? await withTenant(tenant, () => repos.users.ensureOwner({ phone: config.adminPhone, password: config.adminPassword })) : null;
   createApp({ db, config }).listen(config.port, () => {
     console.log(`auto-dm listening on :${config.port}${config.dryRun ? ' (DRY_RUN)' : ''}`);
     console.log(`Database: ${config.databaseUrl ? 'Postgres (DATABASE_URL)' : config.dataDir}`);
+    if (tenant) console.log(`Default business: ${tenant.name} (${tenant.slug})`);
     if (owner) console.log(`Store owner: log in on /login with ${owner.phone} and ADMIN_PASSWORD`);
     else console.log('No store owner yet: set ADMIN_PHONE and ADMIN_PASSWORD in .env to use /admin');
     if (!process.env.SESSION_SECRET) console.log('Tip: set SESSION_SECRET in .env so logins survive restarts');
