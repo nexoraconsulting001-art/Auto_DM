@@ -2,6 +2,8 @@
 
 This file holds the full context of the project, so a new chat (or a new person) can pick up from here. Paste the "Start here" section at the bottom into a new chat.
 
+> **Bhava, the multi-business platform, is being built on branch `bhava/p0-foundation`.** Requirements are in the "Bhava PRD" doc and the phases in the "Bhava Build Plan" doc. On that branch: migrations in `src/db/migrations`, the current business in `src/tenancy.js` (every business repo refuses to run without one), switchable modules in `src/platform`, background jobs in `src/worker.js`, and the QA deploy in `deploy/bhava`. The rest of this file describes the live single-shop Mehta Mart app. It stays on `claude/affectionate-rubin-it8bkq` until the switch in Phase 10. Never merge Bhava work into that branch: the VM deploys it with `git pull`.
+
 ## 1. Summary
 
 When someone comments a keyword (e.g. `LINK`) on an Instagram reel, they get an automatic DM with a **Shop now** button. The button opens a store page with only that reel's products (1–20). Each reel has its own link.

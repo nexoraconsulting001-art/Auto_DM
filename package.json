@@ -9,6 +9,10 @@
   },
   "scripts": {
     "start": "node src/server.js",
+    "worker": "node src/worker.js",
+    "tenant": "node scripts/tenant.js",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js",
     "seed": "node scripts/seed.js",
     "role": "node scripts/role.js",
     "test": "node --test test/*.test.js"

@@ -24,10 +24,13 @@ export async function openDb({ url = '', dataDir, migrate = true, poolSize = 10 
 
 /** Applies migrations/NNN_name.sql in order, each in its own transaction. Returns the versions applied. */
 export async function runMigrations(db, dir = MIGRATIONS_DIR) {
-  await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-    version    text PRIMARY KEY,
-    applied_at timestamptz NOT NULL DEFAULT now()
-  )`);
+  await db.tx(async (t) => {
+    await t.query('SELECT pg_advisory_xact_lock($1)', [MIGRATION_LOCK]);
+    await t.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+      version    text PRIMARY KEY,
+      applied_at timestamptz NOT NULL DEFAULT now()
+    )`);
+  });
   const files = fs.readdirSync(dir).filter((f) => /^\d{3}_[\w-]+\.sql$/.test(f)).sort();
   const applied = [];
   for (const file of files) {
@@ -49,7 +52,7 @@ export async function runMigrations(db, dir = MIGRATIONS_DIR) {
 async function openPg(url, poolSize) {
   const { default: pg } = await import('pg');
   const ssl = /sslmode=disable|localhost|127\.0\.0\.1|@postgres[:/]/.test(url) ? false : { rejectUnauthorized: false };
-  const pool = new pg.Pool({ connectionString: url, ssl, max: poolSize });
+  const pool = new pg.Pool({ connectionString: url, ssl, max: poolSize, allowExitOnIdle: true });
   const query = async (sql, params = []) => (await pool.query(sql, params)).rows;
   return {
     kind: 'postgres',

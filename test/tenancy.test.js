@@ -2,10 +2,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { openDb, runMigrations } from '../src/db/index.js';
+import { runMigrations } from '../src/db/index.js';
 import { bindTenant, createRepos } from '../src/repos/index.js';
 import { NoTenantError, createTenantResolver } from '../src/tenancy.js';
-import { OWNER, REEL_ID, login, seedReel, setup, startApp } from './helpers.js';
+import { OWNER, REEL_ID, login, openTestDb, seedReel, setup, startApp } from './helpers.js';
 
 const form = (o) => new URLSearchParams(o);
 
@@ -22,7 +22,7 @@ test('business data cannot be used without a current business', async () => {
 });
 
 test('migrations run once and are safe to run again', async () => {
-  const db = await openDb();
+  const db = await openTestDb();
   assert.deepEqual(await runMigrations(db), []);
   const rows = await db.query('SELECT version FROM schema_migrations');
   assert.deepEqual(rows.map((r) => r.version), ['001', '002']);
@@ -202,11 +202,93 @@ test('compliance and audit logs cannot be edited', async () => {
 });
 
 test('bindTenant keeps repos on their own business', async () => {
-  const db = await openDb();
+  const db = await openTestDb();
   const platform = createRepos(db);
   const t1 = await platform.tenants.create({ slug: 'one', name: 'One' });
   const t2 = await platform.tenants.create({ slug: 'two', name: 'Two' });
   await bindTenant(platform, t1).products.create({ name: 'A', price: '1', active: 'on' });
   assert.equal((await bindTenant(platform, t2).products.list()).length, 0);
   assert.equal((await bindTenant(platform, t1).products.list()).length, 1);
+});
+
+test('R-01: every route, used by another business’s owner, finds nothing of business A', async () => {
+  const app = await startApp();
+  try {
+    // Business A (the default business) with one of everything, all marked so a leak is easy to spot.
+    const a = app.repos;
+    const MARK = 'SECRET-A';
+    const product = await a.products.create({ name: `${MARK} Lamp`, price: '499', stock: '5', active: 'on' });
+    const category = await a.categories.save(null, { name: `${MARK} Cat`, visible: 'on' });
+    await a.reels.save(REEL_ID, { headline: `${MARK} Reel`, keywords: 'LINK', productIds: [product.id], active: 'on' });
+    const customer = await a.users.create({ name: `${MARK} Customer`, phone: '9876543210', password: 'secret1' });
+    const order = await a.orders.create({
+      items: [{ productId: product.id, qty: 1 }],
+      customer: { name: `${MARK} Buyer`, phone: '9876543210', address: '12 MG Road', city: 'Pune', state: 'MH', pincode: '411001' },
+    }, await a.settings.getAll());
+    const mediaId = await a.media.save(Buffer.from('img'), 'image/png');
+    await a.activity.log({ commentId: 'c-a', reelId: REEL_ID, username: `${MARK}-user`, result: 'skip:no-keyword' });
+
+    // Business B, with its own owner, logged in on its own site.
+    const other = await app.platform.tenants.create({ slug: 'leaf', name: 'Leaf and Clay' });
+    const b = bindTenant(app.platform, other);
+    await b.users.ensureOwner({ phone: '9000000009', password: 'leaf-owner' });
+    const own = await b.products.create({ name: 'Plant pot', price: '199', active: 'on' });
+    const host = { 'x-forwarded-host': 'leaf.bhava.test' };
+    const loginRes = await fetch(`${app.base}/login`, { method: 'POST', headers: host, body: form({ phone: '9000000009', password: 'leaf-owner' }), redirect: 'manual' });
+    assert.equal(loginRes.status, 303);
+    const cookie = loginRes.headers.get('set-cookie').split(';')[0];
+    const headers = { ...host, cookie };
+    const accountPage = await (await fetch(`${app.base}/account`, { headers })).text();
+    const csrf = /name="_csrf" value="([^"]+)"/.exec(accountPage)[1];
+
+    const gets = [
+      '/', '/shop', '/reels', '/about', '/checkout', '/account', `/c/${category.slug}`, `/p/${product.slug}`, `/r/${(await a.reels.get(REEL_ID)).slug}`,
+      `/r/${(await a.reels.get(REEL_ID)).slug}/p/${product.slug}`, `/order/${order.public_token}`, `/media/${mediaId}`,
+      '/api/products', '/api/reels', '/admin', '/admin/products', `/admin/products/${product.id}`, '/admin/categories',
+      `/admin/categories/${category.id}`, '/admin/customers', '/admin/reels', `/admin/reels/${REEL_ID}`, '/admin/orders',
+      `/admin/orders/${order.id}`, '/admin/activity', '/admin/settings',
+    ];
+    for (const path of gets) {
+      const res = await fetch(`${app.base}${path}`, { headers });
+      const body = await res.text();
+      assert.ok(!body.includes(MARK), `GET ${path} leaked business A's data`);
+      assert.ok(res.status < 500, `GET ${path} failed with ${res.status}`);
+    }
+    assert.equal((await fetch(`${app.base}/media/${mediaId}`, { headers })).status, 404);
+    assert.equal((await fetch(`${app.base}/order/${order.public_token}`, { headers })).status, 404);
+
+    const posts = [
+      [`/admin/products/${product.id}`, { name: 'Hijacked', price: '1', active: 'on' }],
+      [`/admin/products/${product.id}/delete`, {}],
+      [`/admin/categories/${category.id}`, { name: 'Hijacked', visible: 'on' }],
+      [`/admin/categories/${category.id}/delete`, {}],
+      [`/admin/customers/${customer.id}/reset`, {}],
+      [`/admin/reels/${REEL_ID}`, { headline: 'Hijacked', keywords: 'LINK', productIds: String(own.id), active: 'on' }],
+      [`/admin/reels/${REEL_ID}/delete`, {}],
+      [`/admin/orders/${order.id}/status`, { status: 'cancelled' }],
+      [`/order/${order.public_token}/paid`, {}],
+    ];
+    for (const [path, fields] of posts) {
+      const res = await fetch(`${app.base}${path}`, { method: 'POST', headers, body: form({ ...fields, _csrf: csrf }), redirect: 'manual' });
+      assert.ok(res.status < 500, `POST ${path} failed with ${res.status}`);
+    }
+    const apiOrder = await fetch(`${app.base}/api/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify({ items: [{ productId: product.id, qty: 1 }], customer: { name: 'Bob K', phone: '9876543211', address: '12 MG Road', city: 'Pune', state: 'MH', pincode: '411001' } }),
+    });
+    assert.ok(apiOrder.status >= 400 && apiOrder.status < 500, 'an order for another business’s product is refused');
+
+    // Business A is exactly as it was.
+    const after = await a.products.get(product.id);
+    assert.equal(after.name, `${MARK} Lamp`);
+    assert.equal(after.stock, 4, 'only A’s own order reduced stock');
+    assert.equal((await a.categories.get(category.id)).name, `${MARK} Cat`);
+    assert.equal((await a.reels.get(REEL_ID)).headline, `${MARK} Reel`);
+    assert.equal((await a.orders.get(order.id)).status, 'awaiting_payment');
+    assert.ok(await a.users.verify('9876543210', 'secret1'), 'A’s customer password is unchanged');
+    assert.equal(await b.reels.get(REEL_ID), null);
+  } finally {
+    app.close();
+  }
 });

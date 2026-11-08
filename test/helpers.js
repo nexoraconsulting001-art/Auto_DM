@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { openDb } from '../src/db/index.js';
 import { bindTenant, createRepos } from '../src/repos/index.js';
 import { createApp } from '../src/server.js';
@@ -22,11 +23,27 @@ export function fakeIg({ failButton = false } = {}) {
 }
 
 /**
+ * A fresh, empty database: in memory by default, or a new database on the Postgres server at
+ * TEST_DATABASE_URL (how CI proves everything also works on real Postgres).
+ */
+export async function openTestDb() {
+  const url = process.env.TEST_DATABASE_URL;
+  if (!url) return openDb();
+  const admin = await openDb({ url, migrate: false, poolSize: 1 });
+  const name = `t_${crypto.randomUUID().replace(/-/g, '')}`;
+  await admin.exec(`CREATE DATABASE ${name}`);
+  await admin.close();
+  const target = new URL(url);
+  target.pathname = `/${name}`;
+  return openDb({ url: target.href, poolSize: 3 });
+}
+
+/**
  * A fresh in-memory database with one business ("default", the DEFAULT_TENANT the app falls back to).
  * `repos` are bound to that business; `platform` are the unbound repos.
  */
 export async function setup() {
-  const db = await openDb();
+  const db = await openTestDb();
   const platform = createRepos(db);
   const tenant = await platform.tenants.ensure({ slug: 'default', name: 'Test store' });
   return { db, repos: bindTenant(platform, tenant), platform, tenant };
@@ -50,7 +67,7 @@ export async function startApp({ ig = fakeIg(), overrides = {} } = {}) {
   const app = createApp({
     db,
     ig,
-    config: { ...config, storageDriver: 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dryRun: false, oneDmPerUser: false, ...overrides },
+    config: { ...config, storageDriver: 'memory', queueDriver: 'pg', analyticsDriver: 'pg', cacheDriver: 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dryRun: false, oneDmPerUser: false, ...overrides },
   });
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;

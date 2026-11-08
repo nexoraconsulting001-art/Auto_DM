@@ -52,6 +52,15 @@ export const config = {
   redisUrl: process.env.REDIS_URL || '',
   clickhouseUrl: process.env.CLICKHOUSE_URL || '',
   clickhouseDb: process.env.CLICKHOUSE_DB || 'bhava',
+  // Nightly database backup, stored off the server. Empty BACKUP_STORAGE_DRIVER turns backups off.
+  backupStorageDriver: process.env.BACKUP_STORAGE_DRIVER || '',
+  backupStorageDir: process.env.BACKUP_STORAGE_DIR || '',
+  backupS3Bucket: process.env.BACKUP_S3_BUCKET || '',
+  backupS3Region: process.env.BACKUP_S3_REGION || '',
+  backupS3Endpoint: process.env.BACKUP_S3_ENDPOINT || '',
+  backupS3AccessKeyId: process.env.BACKUP_S3_ACCESS_KEY_ID || '',
+  backupS3SecretAccessKey: process.env.BACKUP_S3_SECRET_ACCESS_KEY || '',
+  workerHealthPort: Number(process.env.WORKER_HEALTH_PORT) || 3001,
   // Encrypts stored tokens and keys (see src/platform/secrets.js).
   dataKey: process.env.DATA_KEY || '',
   dataKeyOld: process.env.DATA_KEY_OLD || '',

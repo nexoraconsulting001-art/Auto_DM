@@ -33,12 +33,12 @@ export function accountRoutes({ repos, auth, config }) {
     const settings = await repos.settings.getAll();
     const next = safeNext(req.body.next, '');
     const phone = String(req.body.phone || '').slice(0, 20);
-    if (auth.tooManyAttempts(req)) {
+    if (await auth.tooManyAttempts(req)) {
       return page(res, loginPage({ settings, next: next || '/', phone, error: 'Too many tries. Wait 15 minutes and try again.' }), 429);
     }
     const user = await repos.users.verify(phone, req.body.password);
     if (!user) {
-      auth.recordFailure(req);
+      await auth.recordFailure(req);
       return page(res, loginPage({ settings, next: next || '/', phone, error: 'That mobile number and password don’t match.' }), 401);
     }
     await auth.login(req, res, user);
@@ -54,7 +54,7 @@ export function accountRoutes({ repos, auth, config }) {
     const settings = await repos.settings.getAll();
     const next = safeNext(req.body.next, '/');
     const values = { name: String(req.body.name || '').slice(0, 80), phone: String(req.body.phone || '').slice(0, 20) };
-    if (auth.tooManyAttempts(req)) {
+    if (await auth.tooManyAttempts(req)) {
       return page(res, signupPage({ settings, next, values, error: 'Too many tries. Wait 15 minutes and try again.' }), 429);
     }
     try {
@@ -63,7 +63,7 @@ export function accountRoutes({ repos, auth, config }) {
       res.redirect(303, next !== '/' ? next : '/account');
     } catch (err) {
       if (!(err instanceof ValidationError)) throw err;
-      auth.recordFailure(req);
+      await auth.recordFailure(req);
       page(res, signupPage({ settings, next, values, error: err.message }), 400);
     }
   });
@@ -94,9 +94,9 @@ export function accountRoutes({ repos, auth, config }) {
       page(res, view.replace('<h2>Change password</h2>', `<h2>Change password</h2><p class="form-error" role="alert">${message}</p>`), 400);
     };
     if (isEnvOwner(req.user)) return renderError('The owner password is set in .env (ADMIN_PASSWORD).');
-    if (auth.tooManyAttempts(req)) return renderError('Too many tries. Wait 15 minutes and try again.');
+    if (await auth.tooManyAttempts(req)) return renderError('Too many tries. Wait 15 minutes and try again.');
     if (!(await repos.users.verify(req.user.phone, req.body.current))) {
-      auth.recordFailure(req);
+      await auth.recordFailure(req);
       return renderError('Your current password isn’t right.');
     }
     try {

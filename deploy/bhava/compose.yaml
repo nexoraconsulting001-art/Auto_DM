@@ -1,0 +1,62 @@
+# Bhava QA on the shared Oracle VM. Its own project, volumes and localhost port; see README.md here.
+# Never run "docker compose down -v": it deletes the database and the uploaded files.
+name: bhava
+
+x-app: &app
+  build: { context: ../.. }
+  restart: unless-stopped
+  env_file: .env
+  environment: &app-env
+    DATABASE_URL: postgres://bhava:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/bhava
+    STORAGE_DIR: /data/files
+  volumes: ["files:/data/files"]
+  depends_on:
+    postgres: { condition: service_healthy }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bhava
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: bhava
+    # Sized for a shared 6 GB VM and up to 10 test businesses. No ports: only web and worker can reach it.
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=40"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bhava -d bhava"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    <<: *app
+    command: ["node", "src/server.js"]
+    environment:
+      <<: *app-env
+      PORT: "8120"
+    ports: ["127.0.0.1:8120:8120"]     # localhost only; Caddy is the way in
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8120/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    <<: *app
+    command: ["node", "src/worker.js"]
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  pgdata: {}
+  files: {}

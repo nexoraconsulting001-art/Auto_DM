@@ -80,6 +80,8 @@ function s3Storage(config) {
         region: config.s3Region || 'auto',
         endpoint: config.s3Endpoint || undefined,
         forcePathStyle: Boolean(config.s3ForcePathStyle),
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+        responseChecksumValidation: 'WHEN_REQUIRED',
         credentials: config.s3AccessKeyId ? { accessKeyId: config.s3AccessKeyId, secretAccessKey: config.s3SecretAccessKey } : undefined,
       }),
     })));

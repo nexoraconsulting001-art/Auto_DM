@@ -7,7 +7,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { openDb } from '../src/db/index.js';
 import { bindTenant, createRepos } from '../src/repos/index.js';
 import { withTenant } from '../src/tenancy.js';
 import { createStorage } from '../src/platform/storage.js';
@@ -17,7 +16,7 @@ import { createCache } from '../src/platform/cache.js';
 import { createSecrets } from '../src/platform/secrets.js';
 import { createMetrics } from '../src/platform/metrics.js';
 import { log, setLogSink, withRequestId, reportError, onError } from '../src/platform/log.js';
-import { login, startApp } from './helpers.js';
+import { login, openTestDb, startApp } from './helpers.js';
 
 const env = process.env;
 const drivers = {
@@ -45,7 +44,7 @@ const until = async (check, ms = 10_000) => {
 };
 
 async function businesses() {
-  const db = await openDb();
+  const db = await openTestDb();
   const platform = createRepos(db);
   const a = await platform.tenants.create({ slug: 'a', name: 'A' });
   const b = await platform.tenants.create({ slug: 'b', name: 'B' });
@@ -128,7 +127,7 @@ test(`queue (${drivers.queueDriver}): jobs run once, as their own business`, asy
 });
 
 test(`queue (${drivers.queueDriver}): a failing job is retried, then marked failed`, async () => {
-  const db = await openDb();
+  const db = await openTestDb();
   const queue = createQueue({ ...drivers, queuePollMs: 20 }, { db });
   const name = `t-${crypto.randomUUID()}`;
   let tries = 0;
@@ -154,7 +153,7 @@ test(`queue (${drivers.queueDriver}): a failing job is retried, then marked fail
 });
 
 test('queue (pg): a job running when its worker died becomes unknown unless safe to repeat (R-02)', async () => {
-  const db = await openDb();
+  const db = await openTestDb();
   const queue = createQueue({ queueDriver: 'pg' }, { db });
   await queue.enqueue('dm', { to: 'x' });
   await queue.enqueue('refresh', {}, { retryInFlight: true });
@@ -170,7 +169,7 @@ test('queue (pg): a job running when its worker died becomes unknown unless safe
 });
 
 test('queue (pg): 500 queued jobs survive a restart and none runs twice (R-02)', async () => {
-  const db = await openDb();
+  const db = await openTestDb();
   const first = createQueue({ queueDriver: 'pg' }, { db });
   for (let i = 0; i < 500; i++) await first.enqueue('dm', { i });
   const runs = new Map();
@@ -184,7 +183,7 @@ test('queue (pg): 500 queued jobs survive a restart and none runs twice (R-02)',
 });
 
 test(`queue (${drivers.queueDriver}): every() enqueues one job per interval across servers`, async () => {
-  const db = await openDb();
+  const db = await openTestDb();
   const one = createQueue(drivers, { db });
   const two = createQueue(drivers, { db });
   const name = `cron-${crypto.randomUUID()}`;

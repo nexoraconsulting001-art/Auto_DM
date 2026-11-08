@@ -28,7 +28,7 @@ export function verifySignature(rawBody, header, secret) {
  */
 export function createApp({ db, ig = instagram, config = defaultConfig, platform = createPlatform(config, { db }) }) {
   const repos = createRepos(db, { storage: platform.storage });
-  const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions });
+  const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions, cache: platform.cache });
   const tenants = createTenantResolver({ tenants: repos.tenants, platformDomain: config.platformDomain, defaultTenant: config.defaultTenant });
 
   /** The business that owns an Instagram account: linked accounts first, then the default business. */
@@ -167,7 +167,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (!config.databaseUrl) console.warn('DATABASE_URL is empty: using the built-in database, which is only for tests and quick local runs');
   const tenant = config.defaultTenant ? await repos.tenants.ensure({ slug: config.defaultTenant, name: config.defaultTenantName }) : null;
   const owner = tenant ? await withTenant(tenant, () => repos.users.ensureOwner({ phone: config.adminPhone, password: config.adminPassword })) : null;
-  createApp({ db, config, platform }).listen(config.port, () => {
+  const server = createApp({ db, config, platform }).listen(config.port, () => {
     log.info('modules', describePlatform(platform));
     console.log(`auto-dm listening on :${config.port}${config.dryRun ? ' (DRY_RUN)' : ''}`);
     console.log(`Database: ${config.databaseUrl ? 'Postgres (DATABASE_URL)' : config.dataDir}`);
@@ -176,4 +176,12 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     else console.log('No store owner yet: set ADMIN_PHONE and ADMIN_PASSWORD in .env to use /admin');
     if (!process.env.SESSION_SECRET) console.log('Tip: set SESSION_SECRET in .env so logins survive restarts');
   });
+  // On a deploy, finish the requests in progress before stopping.
+  const stop = () => server.close(async () => {
+    await platform.cache.close();
+    await db.close();
+    process.exit(0);
+  });
+  process.once('SIGTERM', stop);
+  process.once('SIGINT', stop);
 }

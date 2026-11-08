@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: ['bhava/**', main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (built-in database)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm test
+
+  postgres:
+    name: Tests (real Postgres)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: ci }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:ci@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Install pg_dump and pg_restore 16
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npm ci
+      - run: node --test --test-concurrency=1 test/*.test.js
+
+  production-profile:
+    name: Modules on production drivers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: ci }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8-alpine
+        env: { CLICKHOUSE_USER: ci, CLICKHOUSE_PASSWORD: ci, CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1' }
+        ports: ['8123:8123']
+        options: >-
+          --health-cmd "wget -qO- http://127.0.0.1:8123/ping"
+          --health-interval 5s --health-timeout 3s --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://postgres:ci@localhost:5432/postgres
+      QUEUE_DRIVER: redis
+      CACHE_DRIVER: redis
+      REDIS_URL: redis://localhost:6379
+      ANALYTICS_DRIVER: clickhouse
+      CLICKHOUSE_URL: http://ci:ci@localhost:8123
+      STORAGE_DRIVER: s3
+      S3_BUCKET: bhava-ci
+      S3_REGION: us-east-1
+      S3_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY_ID: minioci
+      S3_SECRET_ACCESS_KEY: minioci-secret
+      S3_FORCE_PATH_STYLE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Start MinIO (S3) and create the bucket
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioci -e MINIO_ROOT_PASSWORD=minioci-secret \
+            minio/minio:RELEASE.2024-12-18T13-15-44Z server /data
+          for i in $(seq 1 30); do curl -fs http://localhost:9000/minio/health/ready && break; sleep 1; done
+          node --input-type=module -e "
+            import { S3Client, CreateBucketCommand } from '@aws-sdk/client-s3';
+            const s3 = new S3Client({ region: 'us-east-1', endpoint: 'http://localhost:9000', forcePathStyle: true,
+              credentials: { accessKeyId: 'minioci', secretAccessKey: 'minioci-secret' } });
+            await s3.send(new CreateBucketCommand({ Bucket: 'bhava-ci' }));"
+      - run: node --test --test-concurrency=1 test/modules.test.js
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t bhava:ci .
+      - name: The image has the backup tools
+        run: docker run --rm bhava:ci pg_dump --version
+      - name: The QA compose file is valid
+        working-directory: deploy/bhava
+        run: POSTGRES_PASSWORD=ci docker compose --env-file /dev/null config -q || (cp .env.example .env && POSTGRES_PASSWORD=ci docker compose config -q)

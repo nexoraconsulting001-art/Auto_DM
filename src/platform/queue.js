@@ -169,7 +169,11 @@ function redisQueue(config) {
     async enqueue(queue, payload = {}, { tenantId = null, delayMs = 0, dedupeKey = null, maxAttempts = 5, retryInFlight = false } = {}) {
       const q = await queueFor(queue);
       const jobId = dedupeKey ? String(dedupeKey).replace(/:/g, '_') : undefined; // BullMQ ids can't contain ':'
-      if (jobId && (await q.getJob(jobId))) return null;
+      if (jobId) {
+        const client = await q.client;
+        const first = await client.set(`bhava:dedupe:${queue}:${jobId}`, '1', 'EX', 30 * 86_400, 'NX');
+        if (!first) return null;
+      }
       const job = await q.add(queue, { payload, tenantId, retryInFlight }, {
         jobId,
         delay: delayMs,

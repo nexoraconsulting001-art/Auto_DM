@@ -30,8 +30,10 @@ export const safeNext = (n, fallback = '/') =>
  * Sign-in methods (Google, WhatsApp code, Sign in with Apple) plug in by verifying the person and then
  * calling login(); nothing else here depends on how they proved who they are.
  */
-export function createAuth({ secret, users, sessions }) {
-  const attempts = new Map();
+export function createAuth({ secret, users, sessions, cache }) {
+  // Failed-login counts live in the cache module, so the limit holds across several web servers.
+  const attemptsKey = (req) => `login-attempts:${req.ip}`;
+  const WINDOW_SECONDS = 15 * 60;
 
   return {
     /** Loads the logged-in user (if any) into req.user / res.locals.user, and the CSRF token. */
@@ -55,20 +57,18 @@ export function createAuth({ secret, users, sessions }) {
     },
 
     /** Login rate limit: 10 failed tries per IP per 15 minutes. */
-    tooManyAttempts(req) {
-      const a = attempts.get(req.ip);
-      if (a && Date.now() > a.reset) attempts.delete(req.ip);
-      return (attempts.get(req.ip)?.n || 0) >= 10;
+    async tooManyAttempts(req) {
+      return ((await cache.get(attemptsKey(req)))?.n || 0) >= 10;
     },
-    recordFailure(req) {
+    async recordFailure(req) {
       const now = Date.now();
-      const a = attempts.get(req.ip) || { n: 0, reset: now + 15 * 60_000 };
+      const a = (await cache.get(attemptsKey(req))) || { n: 0, reset: now + WINDOW_SECONDS * 1000 };
       a.n++;
-      attempts.set(req.ip, a);
+      await cache.set(attemptsKey(req), a, Math.max(1, (a.reset - now) / 1000));
     },
 
     async login(req, res, user) {
-      attempts.delete(req.ip);
+      await cache.del(attemptsKey(req));
       const token = await sessions.create(user.id, SESSION_DAYS);
       res.cookie(COOKIE, token, {
         httpOnly: true,
