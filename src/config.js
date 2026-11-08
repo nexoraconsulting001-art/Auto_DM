@@ -37,6 +37,26 @@ export const config = {
   // DEFAULT_TENANT is the business served on any other address, and the one webhooks fall back to;
   // it is created on start if missing. Leave it empty once every business has its own address.
   platformDomain: (process.env.PLATFORM_DOMAIN || '').toLowerCase(),
+  // Switchable modules (see src/platform/index.js). QA defaults shown; production changes these only.
+  storageDriver: process.env.STORAGE_DRIVER || 'local',
+  storageDir: process.env.STORAGE_DIR || path.join(rootDir, 'data', 'files'),
+  s3Bucket: process.env.S3_BUCKET || '',
+  s3Region: process.env.S3_REGION || '',
+  s3Endpoint: process.env.S3_ENDPOINT || '',
+  s3AccessKeyId: process.env.S3_ACCESS_KEY_ID || '',
+  s3SecretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
+  s3ForcePathStyle: process.env.S3_FORCE_PATH_STYLE === '1',
+  queueDriver: process.env.QUEUE_DRIVER || 'pg',
+  analyticsDriver: process.env.ANALYTICS_DRIVER || 'pg',
+  cacheDriver: process.env.CACHE_DRIVER || 'memory',
+  redisUrl: process.env.REDIS_URL || '',
+  clickhouseUrl: process.env.CLICKHOUSE_URL || '',
+  clickhouseDb: process.env.CLICKHOUSE_DB || 'bhava',
+  // Encrypts stored tokens and keys (see src/platform/secrets.js).
+  dataKey: process.env.DATA_KEY || '',
+  dataKeyOld: process.env.DATA_KEY_OLD || '',
+  // /metrics is served only with this token (Authorization: Bearer <token>).
+  metricsToken: process.env.METRICS_TOKEN || '',
   defaultTenant: process.env.DEFAULT_TENANT ?? 'default',
   defaultTenantName: process.env.DEFAULT_TENANT_NAME || 'My store',
 };

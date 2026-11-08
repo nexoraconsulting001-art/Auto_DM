@@ -11,6 +11,8 @@ import * as instagram from './instagram.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes, baseUrlFor, tenantBaseUrl } from './routes/admin.js';
 import { createTenantResolver, withTenant } from './tenancy.js';
+import { createPlatform, describePlatform } from './platform/index.js';
+import { log, reportError, requestIds } from './platform/log.js';
 import { apiRoutes, mediaRoutes, storeRoutes } from './routes/store.js';
 
 export function verifySignature(rawBody, header, secret) {
@@ -20,9 +22,12 @@ export function verifySignature(rawBody, header, secret) {
   return given.length === expected.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
 }
 
-/** Builds the web app. `db` comes from openDb(); `ig` can be swapped for a fake in tests. */
-export function createApp({ db, ig = instagram, config = defaultConfig }) {
-  const repos = createRepos(db);
+/**
+ * Builds the web app. `db` comes from openDb(); `platform` (storage, queue, analytics, cache, metrics,
+ * secrets) from createPlatform(); `ig` can be swapped for a fake in tests.
+ */
+export function createApp({ db, ig = instagram, config = defaultConfig, platform = createPlatform(config, { db }) }) {
+  const repos = createRepos(db, { storage: platform.storage });
   const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions });
   const tenants = createTenantResolver({ tenants: repos.tenants, platformDomain: config.platformDomain, defaultTenant: config.defaultTenant });
 
@@ -38,6 +43,8 @@ export function createApp({ db, ig = instagram, config = defaultConfig }) {
 
   app.set('trust proxy', 1); // exactly one proxy (Caddy, Codespaces or Render) terminates HTTPS in front of the app
   app.disable('x-powered-by');
+  app.use(requestIds());
+  app.use(platform.metrics.middleware());
   app.use((_req, res, next) => {
     res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'X-Frame-Options': 'SAMEORIGIN' });
     next();
@@ -46,7 +53,20 @@ export function createApp({ db, ig = instagram, config = defaultConfig }) {
   app.use(express.urlencoded({ extended: false, limit: '200kb' }));
   app.use('/static', express.static(path.join(config.rootDir, 'public'), { maxAge: '1h' }));
 
+  // Liveness: the process is up. Readiness: it can reach the database (load balancers use this).
   app.get(['/health', '/healthz'], (_req, res) => res.send('ok'));
+  app.get('/readyz', async (_req, res) => {
+    try {
+      await db.query('SELECT 1');
+      res.json({ ok: true, modules: describePlatform(platform) });
+    } catch {
+      res.status(503).json({ ok: false });
+    }
+  });
+  platform.metrics.gauge('queue_jobs', async () =>
+    Object.entries(await platform.queue.stats()).flatMap(([queue, counts]) =>
+      Object.entries(counts).map(([status, value]) => ({ labels: { queue, status }, value }))));
+  app.get('/metrics', platform.metrics.handler(config.metricsToken));
 
   // Meta webhook verification handshake
   app.get('/webhook', (req, res) => {
@@ -58,7 +78,7 @@ export function createApp({ db, ig = instagram, config = defaultConfig }) {
 
   app.post('/webhook', async (req, res) => {
     if (!verifySignature(req.rawBody, req.get('x-hub-signature-256'), config.appSecret)) {
-      console.warn('Rejected webhook with bad signature');
+      log.warn('webhook.bad_signature');
       return res.sendStatus(401);
     }
     // Acknowledge fast; Meta retries deliveries that are slow to get a 200.
@@ -68,7 +88,7 @@ export function createApp({ db, ig = instagram, config = defaultConfig }) {
     for (const entry of req.body?.entry || []) {
       const tenant = await tenantForIgAccount(entry.id);
       if (!tenant) {
-        console.warn(`Webhook for Instagram account ${entry.id} that no business owns; ignored`);
+        log.warn('webhook.unknown_account', { igAccount: String(entry.id) });
         unmapped = true;
         continue;
       }
@@ -80,10 +100,11 @@ export function createApp({ db, ig = instagram, config = defaultConfig }) {
           if (change.field !== 'comments') continue;
           try {
             const result = await handleComment(change.value, { repos, ig, ownIds, storeUrl, oneDmPerUser: config.oneDmPerUser });
-            console.log(`[${tenant.slug}] comment ${change.value?.id} on ${change.value?.media?.id}: ${result}`);
+            log.info('webhook.comment', { comment: change.value?.id, media: change.value?.media?.id, result });
+            platform.metrics.inc('webhook_comments_total', { result: result.split(':')[0] });
             if (result === 'skip:unmapped-reel') unmapped = true;
           } catch (err) {
-            console.error(`[${tenant.slug}] Failed to handle comment ${change.value?.id}: ${err.message}`);
+            reportError(err, { msg: 'webhook.comment_failed', comment: change.value?.id });
           }
         }
       });
@@ -127,7 +148,7 @@ export function createApp({ db, ig = instagram, config = defaultConfig }) {
   app.use('/', storeRoutes({ repos, ig, auth }));
 
   app.use((err, req, res, _next) => {
-    console.error(`${req.method} ${req.originalUrl} failed:`, err);
+    reportError(err, { msg: 'http.error', method: req.method, path: req.path });
     if (res.headersSent) return;
     if (req.path.startsWith('/api/') || req.get('accept')?.includes('application/json')) {
       return res.status(500).json({ error: 'Something went wrong on our side. Please try again.' });
@@ -141,11 +162,13 @@ export function createApp({ db, ig = instagram, config = defaultConfig }) {
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = defaultConfig;
   const db = await openDb({ url: config.databaseUrl, dataDir: config.dataDir });
-  const repos = createRepos(db);
+  const platform = createPlatform(config, { db });
+  const repos = createRepos(db, { storage: platform.storage });
   if (!config.databaseUrl) console.warn('DATABASE_URL is empty: using the built-in database, which is only for tests and quick local runs');
   const tenant = config.defaultTenant ? await repos.tenants.ensure({ slug: config.defaultTenant, name: config.defaultTenantName }) : null;
   const owner = tenant ? await withTenant(tenant, () => repos.users.ensureOwner({ phone: config.adminPhone, password: config.adminPassword })) : null;
-  createApp({ db, config }).listen(config.port, () => {
+  createApp({ db, config, platform }).listen(config.port, () => {
+    log.info('modules', describePlatform(platform));
     console.log(`auto-dm listening on :${config.port}${config.dryRun ? ' (DRY_RUN)' : ''}`);
     console.log(`Database: ${config.databaseUrl ? 'Postgres (DATABASE_URL)' : config.dataDir}`);
     if (tenant) console.log(`Default business: ${tenant.name} (${tenant.slug})`);

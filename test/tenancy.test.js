@@ -25,7 +25,7 @@ test('migrations run once and are safe to run again', async () => {
   const db = await openDb();
   assert.deepEqual(await runMigrations(db), []);
   const rows = await db.query('SELECT version FROM schema_migrations');
-  assert.deepEqual(rows.map((r) => r.version), ['001']);
+  assert.deepEqual(rows.map((r) => r.version), ['001', '002']);
 });
 
 test('one business cannot read, change or delete another business’s products', async () => {

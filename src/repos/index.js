@@ -10,16 +10,18 @@ import { statsRepo } from './stats.js';
 import { tenantsRepo } from './tenants.js';
 import { usersRepo } from './users.js';
 import { withTenant } from '../tenancy.js';
+import { createStorage } from '../platform/storage.js';
 
 /**
  * Every repo except `tenants` works on the current business only (see tenancy.js) and throws when
  * called outside withTenant(). `tenants` is the platform-level repo.
+ * `storage` holds uploaded files (in memory unless given, which suits tests).
  */
-export function createRepos(db) {
+export function createRepos(db, { storage = createStorage({ storageDriver: 'memory' }) } = {}) {
   return {
     activity: activityRepo(db),
     categories: categoriesRepo(db),
-    media: mediaRepo(db),
+    media: mediaRepo(db, { storage }),
     orders: ordersRepo(db),
     products: productsRepo(db),
     reels: reelsRepo(db),

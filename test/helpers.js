@@ -50,7 +50,7 @@ export async function startApp({ ig = fakeIg(), overrides = {} } = {}) {
   const app = createApp({
     db,
     ig,
-    config: { ...config, defaultTenant: 'default', platformDomain: 'bhava.test', adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dryRun: false, oneDmPerUser: false, ...overrides },
+    config: { ...config, storageDriver: 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dryRun: false, oneDmPerUser: false, ...overrides },
   });
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
