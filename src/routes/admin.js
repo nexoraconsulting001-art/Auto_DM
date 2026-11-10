@@ -5,9 +5,8 @@ import { ALLOWED_IMAGE_TYPES } from '../repos/media.js';
 import fs from 'node:fs';
 import { SEED_FILE, newestReels, seedDemo } from '../../scripts/seed.js';
 import crypto from 'node:crypto';
-import { SETTING_DEFAULTS } from '../repos/settings.js';
-import { currentTenant } from '../tenancy.js';
-import { forAccount } from '../instagram.js';
+import { createSetupChecks } from '../modules/admin-api/setup.js';
+import { baseUrlFor, tenantBaseUrl } from '../modules/admin-api/urls.js';
 import {
   activityPage, adminLayout, categoriesPage, categoryFormPage, categoryValues, customersPage, dashboardPage,
   orderDetailPage, ordersPage, productFormPage, productValues, productsPage, reelFormPage, reelValues, reelsPage, settingsPage,
@@ -25,18 +24,8 @@ const FLASH = {
   category_deleted: 'Category deleted. Its products are still in your catalog.',
 };
 
-/** Public address of the current business. PUBLIC_BASE_URL applies to the default business only. */
-export const baseUrlFor = (req, config) => {
-  const t = currentTenant();
-  if (config.publicBaseUrl && (!t?.slug || !config.defaultTenant || t.slug === config.defaultTenant)) return config.publicBaseUrl;
-  return `${req.protocol}://${req.get('x-forwarded-host') || req.get('host')}`;
-};
-
-/** Public address of a business when there is no request from its own site (e.g. in a webhook). */
-export const tenantBaseUrl = (tenant, config) => {
-  if (tenant.slug === config.defaultTenant && config.publicBaseUrl) return config.publicBaseUrl;
-  return config.platformDomain ? `https://${tenant.slug}.${config.platformDomain}` : config.publicBaseUrl;
-};
+// These moved to the admin-api module; src/server.js still imports them from here.
+export { baseUrlFor, tenantBaseUrl };
 
 const list = (v) => [].concat(v ?? []).filter((x) => x !== '');
 
@@ -51,44 +40,7 @@ export function adminRoutes({ repos, ig, auth, config }) {
   // Only the owner gets past this until staff permissions exist; everyone else is sent to their account page.
   r.use(auth.requireRole('owner'));
 
-  /** The Instagram client for this business's connected account, or null when it has none. */
-  async function igClient() {
-    const account = await repos.igAccounts.current();
-    return account ? forAccount(ig, account) : null;
-  }
-
-  // Whether each business's Instagram token works, cached so the dashboard stays fast.
-  const igChecks = new Map();
-  async function instagramConnected(client) {
-    if (!client) return false;
-    const business = currentTenant().id;
-    const hit = igChecks.get(business);
-    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.ok;
-    let ok = false;
-    try {
-      ok = Boolean((await client.getAccount())?.username);
-    } catch {
-      ok = false;
-    }
-    igChecks.set(business, { at: Date.now(), ok });
-    return ok;
-  }
-
-  async function setupChecklist(settings, kit, stats, reels, client) {
-    const comments = await repos.activity.count();
-    const storeChanged = settings.store_name !== SETTING_DEFAULTS.store_name || Boolean(kit.logoUrl);
-    return {
-      dismissed: settings.checklist_dismissed === '1',
-      steps: [
-        { title: 'Connect Instagram', text: 'Connect your Instagram account so comments can be answered with a DM.', done: await instagramConnected(client), href: '/admin/settings', action: 'Check connection' },
-        { title: 'Add your store details', text: 'Store name, logo, WhatsApp number and delivery fee.', done: storeChanged, href: '/admin/settings', action: 'Open settings' },
-        { title: 'Add products', text: 'Photos, price and MRP. Group them into categories for the shop.', done: stats.products > 0, href: '/admin/products/new', action: 'Add a product' },
-        { title: 'Set up your first reel store', text: 'Pick a reel, choose its products and the keyword people comment.', done: reels.length > 0, href: '/admin/reels', action: 'Choose a reel' },
-        { title: 'Receive a comment', text: 'Comment your keyword on the reel from another account. The DM shows up in DM activity.', done: comments > 0, href: '/admin/activity', action: 'See DM activity' },
-        { title: 'Get your first order', text: 'Share your store link. Orders land in Orders for you to confirm.', done: stats.orders > 0, href: '/', action: 'Open your store' },
-      ],
-    };
-  }
+  const { igClient, setupChecklist } = createSetupChecks({ repos, ig });
 
   const page = async (req, res, { title, active, body, error, status = 200 }) => {
     const stats = await repos.stats.dashboard();

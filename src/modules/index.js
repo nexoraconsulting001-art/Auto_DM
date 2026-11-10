@@ -1,3 +1,4 @@
+import { adminApi } from './admin-api/index.js';
 import { adminConsole } from './admin-console/index.js';
 import { apiAuth } from './api-auth/index.js';
 import { apiV1 } from './api-v1/index.js';
@@ -20,4 +21,4 @@ import { platformConsole } from './platform-console/index.js';
  *
  * ctx is { db, repos, ig, auth, config, platform, modules }.
  */
-export const MODULES = [brand, entitlements, igAccounts, apiAuth, platformConsole, adminConsole, apiV1];
+export const MODULES = [brand, entitlements, igAccounts, apiAuth, platformConsole, adminConsole, adminApi, apiV1];

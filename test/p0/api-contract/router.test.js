@@ -26,7 +26,8 @@ const product = {
 };
 
 async function appWith(api = () => ({}), overrides = {}) {
-  const app = await startApp({ modules: [...MODULES, { name: 'probe', api }], overrides });
+  // This file tests the router itself with probe handlers, so the real seller API (tested in test/p0/admin-api) stays out.
+  const app = await startApp({ modules: [...MODULES.filter((m) => m.name !== 'admin-api'), { name: 'probe', api }], overrides });
   const signIn = async (who) => (await (await fetch(`${app.base}/api/v1/auth/login`, json(who))).json()).token;
   return { ...app, signIn, owner: await signIn(OWNER) };
 }

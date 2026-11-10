@@ -135,8 +135,7 @@ test('the client works against the real server', async () => {
     const session = await client.auth.login(OWNER);
     token = session.token;
     assert.equal((await client.auth.me()).user.role, 'owner');
-    const notBuilt = await client.products.list({ limit: 5 }).catch((e) => e);
-    assert.equal(notBuilt.code, 'not_implemented');
+    assert.deepEqual(await client.products.list({ limit: 5 }), { items: [], nextCursor: null });
     assert.equal(await client.auth.logout(), null);
     assert.equal((await client.auth.me().catch((e) => e)).status, 401);
   } finally {
