@@ -7,18 +7,18 @@
  *   product_category one of the page's products is in the rule's product category (checked by the caller in SQL)
  */
 
-const WORD = /[\p{L}\p{N}_]/u;
+const WORD = /[\p{L}\p{M}\p{N}_]/u;
 
 /** The text people type, made comparable: lower case, accents kept, spaces squeezed. */
 const fold = (value) => String(value ?? '').normalize('NFC').toLocaleLowerCase('en-IN').replace(/\s+/g, ' ').trim();
 
 /** "#Diwali" and "diwali" are the same rule; anything that isn't a word character is dropped. */
-export const hashtagOf = (value) => fold(value).replace(/^#+/, '').replace(/[^\p{L}\p{N}_]/gu, '');
+export const hashtagOf = (value) => fold(value).replace(/^#+/, '').replace(/[^\p{L}\p{M}\p{N}_]/gu, '');
 
 /** Every hashtag in a caption, lower case and without the #. */
 export function hashtagsIn(caption) {
   const tags = new Set();
-  for (const match of fold(caption).matchAll(/#([\p{L}\p{N}_]{1,100})/gu)) tags.add(match[1]);
+  for (const match of fold(caption).matchAll(/#([\p{L}\p{M}\p{N}_]{1,100})/gu)) tags.add(match[1]);
   return tags;
 }
 

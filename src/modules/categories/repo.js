@@ -396,6 +396,22 @@ export function categorySequencesRepo(db) {
       return out;
     },
 
+    /**
+     * The creator page's search (8.14, K-60): this business's live reels whose caption or title holds every word, and the live
+     * reels of the products found. `terms` are already made literal for LIKE (likeText).
+     */
+    async searchLive(terms, { productIds = [], limit = 24 } = {}) {
+      if (!terms.length && !productIds.length) return [];
+      return db.query(
+        `SELECT ${PAGE_COLS} FROM reels r
+         WHERE r.tenant_id = $1 AND ${LIVE_PAGE} AND (
+           (cardinality($2::text[]) > 0 AND (SELECT bool_and(r.caption ILIKE '%' || term || '%' ESCAPE '\\' OR r.headline ILIKE '%' || term || '%' ESCAPE '\\') FROM unnest($2::text[]) term))
+           OR EXISTS (SELECT 1 FROM reel_products rp WHERE rp.tenant_id = r.tenant_id AND rp.reel_id = r.ig_media_id AND rp.product_id = ANY($3::int[])))
+         ORDER BY ${NEWEST_FIRST} LIMIT $4`,
+        [t0(), terms, productIds, Math.min(Math.max(limit, 1), 100)],
+      );
+    },
+
     // ---- rules --------------------------------------------------------------------------------------------------------
 
     async rules(categoryId) {

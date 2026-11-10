@@ -36,7 +36,7 @@ export function grantedChannels(channels, { phone, email }) {
   return orderedChannels(channels).filter((c) => (NEEDS[c] === 'phone' ? Boolean(phone) : Boolean(email)));
 }
 
-const oneLine = (value, max) => String(value ?? '').normalize('NFC').replace(/[\0-\x1f\x7f​-‏ -‮⁦-⁩﻿]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+const oneLine = (value, max) => String(value ?? '').normalize('NFC').replace(/[\0-\x1f\x7f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /**
  * A phone number in international format, "+<country><number>", or null. A ten-digit Indian mobile number, with or without a
