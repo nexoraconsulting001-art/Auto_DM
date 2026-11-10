@@ -1,0 +1,46 @@
+/* The connect screen. Phone first, tokens only. */
+.connect-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.connect-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.scope-list {
+  display: flex;
+  flex-direction: column;
+}
+.scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line-soft);
+}
+.scope:first-child {
+  border-top: 0;
+}
+.scope-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.scope-name {
+  font-weight: 600;
+}
+.scope-detail {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.connect-promise {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--ink-2);
+  font-size: var(--text-small);
+}
