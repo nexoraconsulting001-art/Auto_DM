@@ -18,3 +18,16 @@ export const paiseToRupees = (paise) => (paise === null || paise === undefined ?
 export function formatDateTime(value) {
   return new Date(value).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 }
+
+export function formatDate(value) {
+  return new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+export const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+
+/** A wa.me link to an Indian mobile number, for the seller to open in their own WhatsApp. */
+export function whatsAppLink(phone, text) {
+  const digits = String(phone ?? '').replace(/\D/g, '');
+  const number = digits.length === 10 ? `91${digits}` : digits;
+  return `https://wa.me/${number}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
+}

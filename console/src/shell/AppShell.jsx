@@ -1,9 +1,11 @@
 import { useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { NavLink } from 'react-router-dom';
 import { LogOut, Menu } from 'lucide-react';
-import { isAllowed } from '@contracts/access.js';
+import { isAllowed, staffWith } from '@contracts/access.js';
 import { Avatar, Sheet } from '../design/index.jsx';
 import { features } from '../features/index.js';
+import { api } from '../lib/api/index.js';
 import { useSession } from '../lib/session.jsx';
 
 const asset = (name) => `${import.meta.env.BASE_URL}${name}`;
@@ -28,11 +30,12 @@ function SideNav({ items, business, onSignOut }) {
       <img className="sidenav-logo" src={asset('logo-white.svg')} alt="Bhava" width="104" height="26" />
       <Workspace business={business} />
       <ul className="sidenav-list">
-        {items.map(({ to, label, end, Icon }) => (
+        {items.map(({ to, label, end, Icon, count }) => (
           <li key={to}>
             <NavLink className="sidenav-link" to={to} end={end}>
               <Icon size={20} strokeWidth={1.7} aria-hidden="true" />
               {label}
+              {count > 0 && <span className="nav-count">{count}</span>}
             </NavLink>
           </li>
         ))}
@@ -54,10 +57,11 @@ function TabBar({ items, onSignOut }) {
   return (
     <>
       <nav className="tabbar" aria-label="Main">
-        {tabs.map(({ to, label, end, Icon }) => (
-          <NavLink key={to} className="tabbar-link" to={to} end={end} aria-label={label}>
+        {tabs.map(({ to, label, end, Icon, count }) => (
+          <NavLink key={to} className="tabbar-link" to={to} end={end} aria-label={count > 0 ? `${label}, ${count} waiting` : label}>
             <Icon size={21} strokeWidth={1.7} aria-hidden="true" />
             <span className="tabbar-label">{label}</span>
+            {count > 0 && <span className="tabbar-dot" aria-hidden="true" />}
           </NavLink>
         ))}
         <button type="button" className="tabbar-link" aria-label="More" onClick={() => more.current?.showModal()}>
@@ -88,9 +92,11 @@ function TabBar({ items, onSignOut }) {
 
 export function AppShell({ children }) {
   const { session, signOut } = useSession();
+  // The menu's counts come from the dashboard numbers. Without them, or without access to them, there are simply no counts.
+  const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats.dashboard, enabled: isAllowed(session.user, staffWith('analytics')) });
   const items = features
     .filter((feature) => feature.nav && isAllowed(session.user, feature.access))
-    .map(({ nav }) => ({ to: nav.to, end: nav.to === '/', label: nav.label, Icon: nav.icon, primary: nav.primary }));
+    .map(({ nav }) => ({ to: nav.to, end: nav.to === '/', label: nav.label, Icon: nav.icon, primary: nav.primary, count: stats.data && nav.count ? nav.count(stats.data) : 0 }));
 
   return (
     <div className="shell">

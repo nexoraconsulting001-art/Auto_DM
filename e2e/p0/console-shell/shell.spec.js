@@ -2,10 +2,11 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { OWNER, startApp } from '../../../test/helpers.js';
+import { withConsoleApi } from '../../../test/p0/console-port/support/console-api.js';
 
 let app;
 test.beforeAll(async () => {
-  app = await startApp({ overrides: { adminUi: 'console' } });
+  app = await startApp({ overrides: { adminUi: 'console' }, modules: withConsoleApi() });
 });
 test.afterAll(() => app.close());
 
@@ -33,7 +34,7 @@ test('on a phone: a deep link survives signing in, reloading works, and signing 
     if (message.type() === 'error' && !/401|Unauthorized/.test(message.text())) problems.push(message.text());
   });
 
-  await page.goto(`${app.base}/admin/orders/12`);
+  await page.goto(`${app.base}/admin/no-such-page/12`);
   await expect(page.getByRole('heading', { name: 'Run your business from here' })).toBeVisible();
   await expect(page).toHaveTitle('Bhava for Business');
   await expect(page.getByRole('img', { name: 'Bhava' })).toBeVisible();
@@ -45,7 +46,7 @@ test('on a phone: a deep link survives signing in, reloading works, and signing 
   await signIn(page);
 
   await expect(page.getByRole('heading', { name: 'We couldn’t find that page' })).toBeVisible();
-  await expect(page).toHaveURL(/\/admin\/orders\/12$/);
+  await expect(page).toHaveURL(/\/admin\/no-such-page\/12$/);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'We couldn’t find that page' })).toBeVisible();
 

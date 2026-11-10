@@ -7,6 +7,7 @@ import { MIGRATIONS_DIR, runMigrations } from '../src/db/index.js';
 import { bindTenant, createRepos } from '../src/repos/index.js';
 import { NoTenantError, createTenantResolver } from '../src/tenancy.js';
 import { OWNER, REEL_ID, login, openTestDb, seedReel, setup, startApp } from './helpers.js';
+import { withConsoleApi } from './p0/console-port/support/console-api.js';
 
 const form = (o) => new URLSearchParams(o);
 
@@ -138,10 +139,9 @@ test('each site shows only its own business, and a login works only on its own s
 
     // The default store's owner session is not a session on Leaf and Clay's site.
     const { cookie } = await login(app.base);
-    assert.equal((await fetch(`${app.base}/admin`, { headers: { cookie }, redirect: 'manual' })).status, 200);
-    const there = await at('leaf.bhava.test', '/admin', { headers: { cookie } });
-    assert.equal(there.status, 302);
-    assert.match(there.headers.get('location'), /^\/login/);
+    assert.equal((await fetch(`${app.base}/api/v1/auth/me`, { headers: { cookie }, redirect: 'manual' })).status, 200);
+    const there = await at('leaf.bhava.test', '/api/v1/auth/me', { headers: { cookie } });
+    assert.equal(there.status, 401);
   } finally {
     app.close();
   }
@@ -216,7 +216,7 @@ test('bindTenant keeps repos on their own business', async () => {
 });
 
 test('R-01: every route, used by another business’s owner, finds nothing of business A', async () => {
-  const app = await startApp();
+  const app = await startApp({ modules: withConsoleApi() });
   try {
     // Business A (the default business) with one of everything, all marked so a leak is easy to spot.
     const a = app.repos;
@@ -248,9 +248,9 @@ test('R-01: every route, used by another business’s owner, finds nothing of bu
     const gets = [
       '/', '/shop', '/reels', '/about', '/checkout', '/account', `/c/${category.slug}`, `/p/${product.slug}`, `/r/${(await a.reels.get(REEL_ID)).slug}`,
       `/r/${(await a.reels.get(REEL_ID)).slug}/p/${product.slug}`, `/order/${order.public_token}`, `/media/${mediaId}`,
-      '/api/products', '/api/reels', '/admin', '/admin/products', `/admin/products/${product.id}`, '/admin/categories',
-      `/admin/categories/${category.id}`, '/admin/customers', '/admin/reels', `/admin/reels/${REEL_ID}`, '/admin/orders',
-      `/admin/orders/${order.id}`, '/admin/activity', '/admin/settings',
+      '/api/products', '/api/reels', '/api/v1/products', `/api/v1/products/${product.id}`, '/api/v1/categories',
+      `/api/v1/categories/${category.id}`, '/api/v1/customers', '/api/v1/reels', `/api/v1/reels/${REEL_ID}`, '/api/v1/orders',
+      `/api/v1/orders/${order.id}`, '/api/v1/activity', '/api/v1/settings', '/api/v1/settings/setup', '/api/v1/brand-kit', '/api/v1/stats/dashboard',
     ];
     for (const path of gets) {
       const res = await fetch(`${app.base}${path}`, { headers });
@@ -261,21 +261,22 @@ test('R-01: every route, used by another business’s owner, finds nothing of bu
     assert.equal((await fetch(`${app.base}/media/${mediaId}`, { headers })).status, 404);
     assert.equal((await fetch(`${app.base}/order/${order.public_token}`, { headers })).status, 404);
 
-    const posts = [
-      [`/admin/products/${product.id}`, { name: 'Hijacked', price: '1', active: 'on' }],
-      [`/admin/products/${product.id}/delete`, {}],
-      [`/admin/categories/${category.id}`, { name: 'Hijacked', visible: 'on' }],
-      [`/admin/categories/${category.id}/delete`, {}],
-      [`/admin/customers/${customer.id}/reset`, {}],
-      [`/admin/reels/${REEL_ID}`, { headline: 'Hijacked', keywords: 'LINK', productIds: String(own.id), active: 'on' }],
-      [`/admin/reels/${REEL_ID}/delete`, {}],
-      [`/admin/orders/${order.id}/status`, { status: 'cancelled' }],
-      [`/order/${order.public_token}/paid`, {}],
+    const changes = [
+      ['PATCH', `/api/v1/products/${product.id}`, { name: 'Hijacked', pricePaise: 100 }],
+      ['DELETE', `/api/v1/products/${product.id}`],
+      ['PATCH', `/api/v1/categories/${category.id}`, { name: 'Hijacked' }],
+      ['DELETE', `/api/v1/categories/${category.id}`],
+      ['POST', `/api/v1/customers/${customer.id}/reset-password`],
+      ['PUT', `/api/v1/reels/${REEL_ID}`, { headline: 'Hijacked', keywords: ['LINK'], productIds: [own.id], active: true }],
+      ['DELETE', `/api/v1/reels/${REEL_ID}`],
+      ['POST', `/api/v1/orders/${order.id}/status`, { status: 'cancelled' }],
     ];
-    for (const [path, fields] of posts) {
-      const res = await fetch(`${app.base}${path}`, { method: 'POST', headers, body: form({ ...fields, _csrf: csrf }), redirect: 'manual' });
-      assert.ok(res.status < 500, `POST ${path} failed with ${res.status}`);
+    for (const [method, path, body] of changes) {
+      const res = await fetch(`${app.base}${path}`, { method, headers: { ...headers, 'x-csrf-token': csrf, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), redirect: 'manual' });
+      assert.ok(res.status >= 400 && res.status < 500, `${method} ${path} answered ${res.status}`);
     }
+    const paid = await fetch(`${app.base}/order/${order.public_token}/paid`, { method: 'POST', headers, body: form({ _csrf: csrf }), redirect: 'manual' });
+    assert.ok(paid.status < 500, `POST paid failed with ${paid.status}`);
     const apiOrder = await fetch(`${app.base}/api/orders`, {
       method: 'POST',
       headers: { ...headers, 'content-type': 'application/json', 'x-csrf-token': csrf },

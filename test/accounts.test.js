@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { OWNER, login, seedReel, startApp } from './helpers.js';
+import { withConsoleApi } from './p0/console-port/support/console-api.js';
 
 const form = (o) => new URLSearchParams(o);
 const customer = { name: 'Asha K', phone: '9876543210', address: '12 MG Road', city: 'Pune', state: 'MH', pincode: '411001' };
@@ -17,9 +18,8 @@ test('shoppers sign up, log in, and are kept out of the admin panel', async () =
     assert.match(account, /Hi, Asha/);
     assert.match(account, /No orders yet/);
 
-    const admin = await fetch(`${app.base}/admin`, { headers: { cookie }, redirect: 'manual' });
-    assert.equal(admin.status, 302);
-    assert.equal(admin.headers.get('location'), '/account');
+    // The console's page is open to anyone; the seller API behind it is what keeps a shopper out.
+    assert.equal((await fetch(`${app.base}/api/v1/products`, { headers: { cookie } })).status, 403);
 
     const dup = await fetch(`${app.base}/signup`, { method: 'POST', body: form({ name: 'Other', phone: '9876543210', password: 'secret2' }) });
     assert.equal(dup.status, 400);
@@ -100,21 +100,22 @@ test('checkout needs a login; orders show on My account and the address is saved
 
 test('owner rights come only from the role command; signups are customers', async () => {
   const { changeRole } = await import('../scripts/role.js');
-  const app = await startApp();
+  const app = await startApp({ modules: withConsoleApi() });
+  const sellerApi = (cookie) => fetch(`${app.base}/api/v1/settings`, { headers: { cookie } });
   try {
     // A signup form can't ask for owner rights.
     const signup = await fetch(`${app.base}/signup`, { method: 'POST', body: form({ name: 'Meera', phone: '9988776655', password: 'secret1', role: 'owner' }), redirect: 'manual' });
     const cookie = signup.headers.get('set-cookie').split(';')[0];
     assert.equal((await app.repos.users.findByPhone('9988776655')).role, 'customer');
-    assert.equal((await fetch(`${app.base}/admin`, { headers: { cookie }, redirect: 'manual' })).headers.get('location'), '/account');
+    assert.equal((await sellerApi(cookie)).status, 403);
 
     assert.match(await changeRole(app.repos, { phone: '9988776655', role: 'owner', ownerPhone: OWNER.phone }), /is now an owner/);
-    assert.equal((await fetch(`${app.base}/admin`, { headers: { cookie }, redirect: 'manual' })).status, 200);
+    assert.equal((await sellerApi(cookie)).status, 200);
     // Owners other than the .env owner manage their own password.
     assert.match(await (await fetch(`${app.base}/account`, { headers: { cookie } })).text(), /Change password/);
 
     assert.match(await changeRole(app.repos, { phone: '9988776655', role: 'customer', ownerPhone: OWNER.phone }), /is now a customer/);
-    assert.equal((await fetch(`${app.base}/admin`, { headers: { cookie }, redirect: 'manual' })).headers.get('location'), '/account');
+    assert.equal((await sellerApi(cookie)).status, 403);
 
     await assert.rejects(changeRole(app.repos, { phone: OWNER.phone, role: 'customer', ownerPhone: OWNER.phone }), /ADMIN_PHONE/);
     await assert.rejects(changeRole(app.repos, { phone: '9000011111', role: 'owner' }), /sign up on the website first/);
@@ -125,7 +126,7 @@ test('owner rights come only from the role command; signups are customers', asyn
 });
 
 test('customers change their password; the owner can reset a forgotten one', async () => {
-  const app = await startApp();
+  const app = await startApp({ modules: withConsoleApi() });
   try {
     const shopper = await app.repos.users.create({ name: 'Ravi', phone: '9123456780', password: 'first1' });
     const s = await login(app.base, { phone: '9123456780', password: 'first1' });
@@ -135,9 +136,10 @@ test('customers change their password; the owner can reset a forgotten one', asy
     assert.equal(ok.status, 303);
     assert.ok(await app.repos.users.verify('9123456780', 'second2'));
 
-    const o = await login(app.base, { csrfPage: '/admin/customers' });
-    const reset = await (await fetch(`${app.base}/admin/customers/${shopper.id}/reset`, { method: 'POST', headers: { cookie: o.cookie }, body: form({ _csrf: o.csrf }) })).text();
-    const fresh = /New password for Ravi \(9123456780\): <code>([^<]+)<\/code>/.exec(reset)[1];
+    const o = await login(app.base);
+    const reset = await fetch(`${app.base}/api/v1/customers/${shopper.id}/reset-password`, { method: 'POST', headers: { cookie: o.cookie, 'x-csrf-token': o.csrf } });
+    assert.equal(reset.status, 200);
+    const fresh = (await reset.json()).temporaryPassword;
     assert.ok(await app.repos.users.verify('9123456780', fresh));
   } finally {
     app.close();
