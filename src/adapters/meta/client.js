@@ -1,5 +1,6 @@
 import { metaUrls } from './hosts.js';
 import { createMetaHttp } from './http.js';
+import { createInsightsReader } from './insights.js';
 
 export const DEFAULT_GRAPH_VERSION = 'v23.0';
 
@@ -32,6 +33,7 @@ export function wireMessage({ text, button, buttons = button ? [button] : [], qu
  * returns, { igUserId, token, loginKind? } for Instagram or { pageId, token } for a Facebook Page.
  *
  *   client.forAccount(account)     reads and setup, for any module
+ *   client.insightsFor(account, guard)  insights with the 4.3 rules on every call; see adapters/meta/insights.js
  *   client.sender(account)         the calls that message someone. Only src/instagram.js may call this, for
  *                                  compliance.send(); a test fails anything else that does.
  *
@@ -48,7 +50,11 @@ export function createMetaClient(config = {}, { env = process.env, onCall } = {}
     const facebook = Boolean(account.pageId) || account.loginKind === 'unified';
     return {
       owner: id(account.pageId || account.igUserId || 'me'),
-      graph: (method, pathname, options = {}) => call({ base: facebook ? urls.facebookGraph : urls.graph, version, method, pathname, token: account.token, ...options }),
+      graph: (method, pathname, options = {}) => call({
+        base: facebook ? urls.facebookGraph : urls.graph, version, method, pathname, token: account.token,
+        account: { channel: account.pageId ? 'facebook' : 'instagram', accountId: String(account.pageId || account.igUserId || '') },
+        ...options,
+      }),
     };
   }
 
@@ -69,7 +75,6 @@ export function createMetaClient(config = {}, { env = process.env, onCall } = {}
         getComment: (commentId) => read(account, id(commentId), { fields: COMMENT_FIELDS }),
         /** { name?, username? } of someone who has messaged the business. Either may be absent (PRD 4.10). */
         getPerson: (personId) => read(account, id(personId), { fields: 'name,username' }),
-        insights: (objectId, query) => read(account, `${id(objectId)}/insights`, query),
         subscriptions: () => read(account, `${owner}/subscribed_apps`),
         subscribe: async (fields) => (await graph('POST', `${owner}/subscribed_apps`, { query: { subscribed_fields: fields.join(',') } })).data,
         unsubscribe: async () => (await graph('DELETE', `${owner}/subscribed_apps`)).data,
@@ -79,6 +84,11 @@ export function createMetaClient(config = {}, { env = process.env, onCall } = {}
         /** Facebook Pages only (PRD 6.10): for suggesting a post's Instagram twin. */
         listPosts: ({ limit = 25, after } = {}) => read(account, `${owner}/posts`, { fields: 'id,message,created_time,permalink_url', ...page(limit, after) }),
       };
+    },
+
+    /** Analytics reads for one account. `guard` is compliance.insightsGuard(channel, accountId), and it is required. */
+    insightsFor(account, guard) {
+      return createInsightsReader(bind(account), guard);
     },
 
     sender(account) {

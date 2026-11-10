@@ -1,4 +1,5 @@
 import { tenantId } from '../tenancy.js';
+import { clickhouseRollups, pgRollups } from './analytics-rollups.js';
 
 /**
  * Analytics events: every number Bhava measures itself (DMs, taps, visits, orders) is written here,
@@ -9,6 +10,7 @@ import { tenantId } from '../tenancy.js';
  *   track(name, props)                         as the current business
  *   count(name, { since, until }) -> number    for the current business
  *   countByDay(name, { since, until }) -> [{ day: 'YYYY-MM-DD', n }]
+ *   rollups                                    the summarised stores: see analytics-rollups.js
  */
 export function createAnalytics(config = {}, { db } = {}) {
   const driver = config.analyticsDriver || 'pg';
@@ -28,6 +30,7 @@ function pgAnalytics(db) {
   if (!db) throw new Error('The pg analytics driver needs the database');
   return {
     driver: 'pg',
+    rollups: pgRollups(db),
     async track(name, props = {}) {
       await db.query('INSERT INTO events (tenant_id, name, props) VALUES ($1, $2, $3)', [tenantId(), checkName(name), JSON.stringify(props)]);
     },
@@ -87,6 +90,7 @@ function clickhouseAnalytics(config) {
 
   return {
     driver: 'clickhouse',
+    rollups: clickhouseRollups(run),
     async track(name, props = {}) {
       await ensureTable();
       const row = JSON.stringify({ tenant_id: tenantId(), name: checkName(name), props: JSON.stringify(props), at: chTime(new Date()) });

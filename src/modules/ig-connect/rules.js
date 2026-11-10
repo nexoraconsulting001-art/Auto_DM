@@ -21,6 +21,9 @@ export const WEBHOOK_FIELD_SCOPES = Object.freeze({
 });
 export const WEBHOOK_FIELDS = Object.freeze(Object.keys(WEBHOOK_FIELD_SCOPES));
 
+/** Read receipts, for the funnel's Seen step (PRD 7.15, to confirm). Not required to count as subscribed, and asked for only with READ_RECEIPTS=1. */
+export const READ_RECEIPTS_FIELD = 'messaging_seen';
+
 const REFRESH_MIN_AGE_MS = DAY;
 const REFRESH_WITHIN_MS = 30 * DAY;
 

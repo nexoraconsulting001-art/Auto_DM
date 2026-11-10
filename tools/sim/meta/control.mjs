@@ -8,8 +8,8 @@
  *   POST /tokens/expire        { token }
  *   POST /tokens/revoke        { token } or { igUserId }
  *   POST /oauth/next           { igUserId?, scopes?, deny? }: what the next consent screen does
- *   POST /media                { igUserId, id?, caption?, productType?, ... }
- *   POST /insights             { id, metrics: { reach: 10 } }; id is a media or account id
+ *   POST /media                { igUserId, id?, caption?, productType?, children?, ... }: children is a list of ids, for a carousel album
+ *   POST /insights             { id, metrics: { reach: 10 } }; id is a media or account id. More insights controls are in insights.mjs, and Conversions API's in conversions.mjs
  *   POST /usage                { igUserId, percent, regainMinutes? }; percent null goes back to counting
  *   POST /people               { igUserId, id, unavailable?, name?, username? }: name or username makes the profile readable
  *   POST /comments             { igUserId, mediaId, from: { id, username }, text, id?, parentId?, at? }
@@ -133,11 +133,13 @@ export function controlRoutes(on, ctx) {
     const id = body.id === undefined ? nextId(ctx) : requireId(body.id, 'id');
     if (ctx.s.media.has(id)) throw refuse(`Media ${id} already exists.`, 409);
     ctx.s.media.set(id, makeMedia(ctx, account, id, body));
+    for (const child of body.children ?? []) ctx.s.media.set(String(child), makeMedia(ctx, account, String(child), { productType: 'FEED', mediaType: 'IMAGE', parentId: id, at: body.at }));
     return { id };
   });
 
   on('POST', '/insights', ({ body }) => {
     ctx.s.insights.set(requireId(body.id, 'id'), { ...(ctx.s.insights.get(String(body.id)) ?? {}), ...body.metrics });
+    if (body.notEnoughViewers !== undefined) ctx.s.lowViewers[body.notEnoughViewers ? 'add' : 'delete'](String(body.id));
     return { ok: true };
   });
 

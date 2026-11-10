@@ -53,12 +53,15 @@ export const KillSwitchResult = z.object({ engaged: z.boolean(), affected: Count
 
 export const RawExportBody = z.object({
   reason: Reason,
-  tables: z.array(z.enum(['audit_log', 'compliance_events', 'events'])).min(1),
+  tables: z.array(z.enum(['audit_log', 'compliance_events', 'events', 'traffic_events'])).min(1),
   tenantIds: z.array(Id).min(1).max(1000),
   from: z.iso.date(),
   to: z.iso.date(),
 });
 export const RawExportResult = z.object({ rowCount: Count, expiresAt: Timestamp });
+
+/** The checks of PRD 7.7, as a business's owner sees them (5.9). Worst score first. */
+export const PlatformAccountHealth = z.object({ tenantId: Id, tenantName: z.string(), score: z.number().int().min(0).max(100).nullable(), band: z.enum(['good', 'watch', 'at_risk']).nullable(), deductions: z.array(z.object({ code: z.string(), points: z.number().int(), message: z.string(), fix: z.string() })), computedAt: Timestamp.nullable() });
 
 export const PlatformAlert = z.object({ id: z.string(), kind: z.string(), message: z.string(), tenantId: Id.nullable(), at: Timestamp });
 
@@ -78,6 +81,7 @@ export const platformRoutes = {
   'platform.approveRelease': { method: 'POST', path: '/kill-switch/release/approve', platformRoles: anyone, body: KillSwitchRelease, response: KillSwitchResult },
   'platform.unfreezeActivations': { method: 'POST', path: '/activations/unfreeze', platformRoles: superAdmin, body: KillSwitchRelease, status: 204, response: null },
   'platform.rawExport': { method: 'POST', path: '/raw-export', platformRoles: superAdmin, body: RawExportBody, status: 201, response: RawExportResult },
+  'platform.accountHealthList': { method: 'GET', path: '/account-health', platformRoles: anyone, query: ListQuery, response: page(PlatformAccountHealth) },
   'platform.alerts': { method: 'GET', path: '/alerts', platformRoles: anyone, query: ListQuery, response: page(PlatformAlert) },
 };
 

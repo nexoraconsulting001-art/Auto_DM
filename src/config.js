@@ -18,6 +18,10 @@ export const config = {
   fbGraphBaseUrl: process.env.FB_GRAPH_BASE_URL || '',
   fbDialogBaseUrl: process.env.FB_DIALOG_BASE_URL || '',
   metaTimeoutMs: Number(process.env.META_TIMEOUT_MS) || 10_000,
+  // GA4 Measurement Protocol, for the seller's own property (PRD 7.14). Empty is Google itself; tests and local runs point it at a simulator.
+  ga4BaseUrl: process.env.GA4_BASE_URL || '',
+  // Ask Meta for read receipts (messaging_seen), which the funnel's Seen step needs. Off until the live check confirms it for Instagram Login (PRD 7.15).
+  readReceipts: process.env.READ_RECEIPTS === '1',
   // The one address registered with Meta for login redirects and callbacks. Empty means PUBLIC_BASE_URL.
   metaCallbackBaseUrl: (process.env.META_CALLBACK_BASE_URL || process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, ''),
   // Which login connects Instagram: 'instagram' (Instagram Login) or 'unified' (Facebook Login for Business).

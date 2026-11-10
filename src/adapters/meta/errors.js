@@ -15,9 +15,11 @@ export class MetaHostBlockedError extends Error {
 const THROTTLE_CODES = new Set([4, 17, 32, 613]);
 const PERMISSION_CODES = new Set([3, 10, 200, 230]);
 
-/** What an HTTP status and Graph error code mean. */
-export function classifyGraphError({ status, code, subcode }) {
+/** What an HTTP status and Graph error code mean. The two message checks are the wording of insights errors PRD 7.3 and 4.3 row 20 rely on (to confirm). */
+export function classifyGraphError({ status, code, subcode, message = '' }) {
   if (status >= 500) return 'server_error';
+  if (code === 10 && /not enough viewers/i.test(message)) return 'not_enough_viewers';
+  if (code === 100 && /no longer available/i.test(message)) return 'insights_expired';
   if (code === 190) return 'token_invalid';
   if (code === 80002) return 'buc_throttled';
   if (THROTTLE_CODES.has(code) || status === 429) return 'throttled';

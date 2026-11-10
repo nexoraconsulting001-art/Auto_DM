@@ -35,7 +35,7 @@ export const FeedValue = z.object({
   created_time: z.number().optional(),
 });
 
-/** One item of entry.messaging: a DM, a story reply or mention (in message), or a button tap (postback). */
+/** One item of entry.messaging: a DM, a story reply or mention (in message), a button tap (postback), or a read receipt (read, to confirm for Instagram Login). */
 export const MessagingEvent = z.object({
   sender: z.object({ id: ObjectId }),
   recipient: z.object({ id: ObjectId }),
@@ -49,6 +49,7 @@ export const MessagingEvent = z.object({
     quick_reply: z.object({ payload: z.string() }).optional(),
   }).optional(),
   postback: z.object({ mid: z.string().optional(), title: z.string().optional(), payload: z.string() }).optional(),
+  read: z.object({ mid: z.string().optional(), watermark: z.number().optional() }).optional(),
 });
 
 export const OAuthCallbackQuery = z.object({ code: z.string().max(2000).optional(), state: z.string().max(200).optional(), error: z.string().max(200).optional() });

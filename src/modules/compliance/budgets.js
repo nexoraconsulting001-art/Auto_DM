@@ -93,14 +93,43 @@ export function createBudgets({ db, now, random, limits }) {
       return until;
     },
 
-    /** The only way slow mode starts (PRD 4.3). A second trigger extends it and does not restart the 48h restore. */
+    /**
+     * The only way slow mode starts (PRD 4.3). A second trigger extends it and does not restart the 48h restore. Each cause is kept, so one ending can't end another.
+     * A reach drop never takes over from a cause the owner can't override, and asking again for a cause already in force keeps the owner's override.
+     */
     async startSlowMode(channel, accountId, trigger, until) {
       const at = now();
       const [row] = await upsertState(channel, accountId,
         `slow_mode_started_at = CASE WHEN slow_mode_until IS NOT NULL AND slow_mode_until > $4::timestamptz THEN slow_mode_started_at ELSE $4::timestamptz END,
-         slow_mode_until = GREATEST(slow_mode_until, $5::timestamptz), slow_mode_trigger = $6, slow_mode_override_at = NULL`,
+         slow_mode_until = GREATEST(slow_mode_until, $5::timestamptz),
+         slow_mode_holds = slow_mode_holds || jsonb_build_object($6::text, GREATEST($5::timestamptz, (slow_mode_holds->>$6::text)::timestamptz)),
+         slow_mode_trigger = CASE WHEN $6::text = 'reach_drop' AND slow_mode_trigger IS NOT NULL AND slow_mode_trigger <> 'reach_drop' AND (slow_mode_holds->>slow_mode_trigger)::timestamptz > $4::timestamptz
+                                  THEN slow_mode_trigger ELSE $6::text END,
+         slow_mode_override_at = CASE WHEN (slow_mode_holds->>$6::text)::timestamptz > $4::timestamptz THEN slow_mode_override_at ELSE NULL END`,
         [at, until, trigger]);
       return row;
+    },
+
+    /** One cause has ended. Another still in force keeps slow mode on, until its own end; otherwise slow mode stops now and the 48h restore begins. False when there was nothing to end. */
+    async leaveSlowMode(channel, accountId, trigger) {
+      const at = now();
+      return db.tx(async (t) => {
+        const [row] = await t.query(
+          'SELECT slow_mode_until, slow_mode_holds, slow_mode_trigger FROM account_rate_state WHERE tenant_id = $1 AND channel = $2 AND account_id = $3 FOR UPDATE',
+          [tenantId(), channel, accountId],
+        );
+        if (!row?.slow_mode_until || +new Date(row.slow_mode_until) <= +at) return false;
+        if (!row.slow_mode_holds[trigger] && row.slow_mode_trigger !== trigger) return false;
+        const holds = Object.fromEntries(Object.entries(row.slow_mode_holds).filter(([name]) => name !== trigger));
+        const remaining = Object.entries(holds).filter(([, until]) => +new Date(until) > +at).sort(([, a], [, b]) => +new Date(a) - +new Date(b));
+        const [nextTrigger, nextUntil] = remaining.at(-1) ?? [row.slow_mode_trigger, at];
+        await t.query(
+          `UPDATE account_rate_state SET slow_mode_holds = $4::jsonb, slow_mode_until = $5::timestamptz, slow_mode_trigger = $6, updated_at = now()
+           WHERE tenant_id = $1 AND channel = $2 AND account_id = $3`,
+          [tenantId(), channel, accountId, JSON.stringify(holds), new Date(nextUntil), nextTrigger],
+        );
+        return true;
+      });
     },
 
     /** The owner's typed override. Only a reach drop can be overridden. False when nothing could be. */

@@ -4,13 +4,16 @@
  * at it. Control routes are listed in control.mjs, facebook.mjs and base.mjs.
  *
  * Enforced: token lifetimes and refresh rules, one private reply per comment, the 7-day and 24-hour windows, button
- * and text limits, per-account budgets, the BUC bucket, per-account isolation, and signed webhooks and callbacks.
+ * and text limits, per-account budgets, the BUC bucket, per-account isolation, signed webhooks and callbacks, what
+ * insights may be asked and for how long Meta keeps them (insights.mjs), and the Conversions API (conversions.mjs).
  */
 import { createSim } from '../base.mjs';
 import { controlRoutes } from './control.mjs';
+import { conversionControls, conversionRoutes } from './conversions.mjs';
 import { ERRORS, graphError, metaFaultBody } from './constants.mjs';
 import { facebookControls, facebookRoutes, withPages } from './facebook.mjs';
 import { graphRoutes } from './graph.mjs';
+import { insightControls } from './insights.mjs';
 import { oauthRoutes } from './oauth.mjs';
 import { freshState, graphHeaders } from './state.mjs';
 
@@ -34,10 +37,13 @@ export function createMeta(options = {}) {
     routes: (on) => {
       oauthRoutes(on, ctx);
       facebookRoutes(on, ctx);
+      conversionRoutes(on, ctx);
       graphRoutes(withPages(on, ctx), ctx);
     },
     controls: (on) => {
       controlRoutes(on, ctx);
+      insightControls(on, ctx);
+      conversionControls(on, ctx);
       facebookControls(on, ctx);
     },
   });

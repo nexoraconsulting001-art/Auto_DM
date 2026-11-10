@@ -8,6 +8,7 @@ import { createBudgets } from './budgets.js';
 import { budgetMultiplier, callAllowed, createGate, evaluate, evaluateCreation, expiryReason, finalMessage, triggerOf } from './gate.js';
 import { createInbound } from './inbound.js';
 import { complianceRepo } from './repo.js';
+import { createSlowMode } from './slow-mode.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -999,6 +1000,14 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
 
   const hasCapacity = async (channel, accountId, callClass) => callAllowed(await gate.rateState(channel, accountId), callClass, +now());
 
+  async function observeCall(channel, accountId, { kind, usage }) {
+    if (usage) await budgets.usage(channel, accountId, usage);
+    if (kind === 'buc_throttled') {
+      const until = await budgets.bucThrottled(channel, accountId, usage);
+      await budgets.startSlowMode(channel, accountId, 'buc_80002', new Date(+until + SLOW_MODE_AFTER_REGAIN_MS));
+    }
+  }
+
   return {
     send,
     enqueue,
@@ -1041,13 +1050,13 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
 
     /** Reading the rate state, for anything that calls Meta for reasons other than messaging (PRD 4.3). callClass is in gate.js. */
     callAllowed: hasCapacity,
-    observeCall: async (channel, accountId, { kind, usage }) => {
-      if (usage) await budgets.usage(channel, accountId, usage);
-      if (kind === 'buc_throttled') {
-        const until = await budgets.bucThrottled(channel, accountId, usage);
-        await budgets.startSlowMode(channel, accountId, 'buc_80002', new Date(+until + SLOW_MODE_AFTER_REGAIN_MS));
-      }
-    },
+    observeCall,
+    /** What meta.client.insightsFor(account, guard) takes: every insights call asks check(callClass) first and reports through observe. */
+    insightsGuard: (channel, accountId) => ({
+      check: (callClass) => hasCapacity(channel, accountId, callClass),
+      observe: (outcome) => observeCall(channel, accountId, outcome),
+    }),
+    slowMode: createSlowMode({ budgets, gate, now, limits }),
     startSlowMode: (channel, accountId, trigger, until) => budgets.startSlowMode(channel, accountId, trigger, until),
     overrideSlowMode: (channel, accountId) => budgets.overrideSlowMode(channel, accountId),
 

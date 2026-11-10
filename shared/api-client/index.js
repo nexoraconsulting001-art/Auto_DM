@@ -269,6 +269,126 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, onUnauthorized,
       list: (query) => get('/alerts', query),
       markRead: (alertId) => post(`/alerts/${id(alertId)}/read`),
     },
+    insights: {
+      status: () => get('/insights/status'),
+      /** @param query { range?: '7' | '28' | '90' | 'custom', from?, to? } */
+      account: (query) => get('/insights/account', query),
+      /** @param query { timeframe?: 'this_week' | 'this_month' } */
+      audience: (query) => get('/insights/audience', query),
+      /** @param query { kind?, includeDeleted?, cursor?, limit? } */
+      media: (query) => get('/insights/media', query),
+      mediaDetail: (mediaId) => get(`/insights/media/${id(mediaId)}`),
+      stories: (query) => get('/insights/stories', query),
+      /** @param query { kind?, cursor?, limit? } */
+      funnels: (query) => get('/insights/funnels', query),
+      funnel: (mediaId) => get(`/insights/funnels/${id(mediaId)}`),
+      /** @param query { rank?, kind?, linkMode?, days?, cursor?, limit? } */
+      top: (query) => get('/insights/top', query),
+      bestTime: () => get('/insights/best-time'),
+      /** Limited to once per 15 minutes. @returns { refreshed, message, lastUpdatedAt, nextRefreshAt } */
+      refresh: () => post('/insights/refresh'),
+    },
+    destinations: {
+      connections: () => get('/destinations/connections'),
+      /** @param body { enabled } @returns { enabled, snippet } */
+      setSiteTag: (body) => put('/destinations/site-tag', body),
+      reports: (query) => get('/destinations/reports', query),
+      /** @param file a CSV @param query { source?: 'amazon' | 'affiliate', network? } */
+      uploadReport: (file, query) => {
+        const form = new FormData();
+        form.append('file', file);
+        return request('POST', withQuery('/destinations/reports', query), { form });
+      },
+    },
+    reachGuard: {
+      status: () => get('/reach-guard'),
+      /** @param body { reachDropPercent?, mediaDropPercent?, clearPercent? } */
+      setThresholds: (body) => patch('/reach-guard/thresholds', body),
+      trips: (query) => get('/reach-guard/trips', query),
+    },
+    accountHealth: {
+      get: () => get('/account-health'),
+      history: (query) => get('/account-health/history', query),
+    },
+    traffic: {
+      /** @param query { range?, from?, to?, compare?: 'none' | 'previous', page? } */
+      summary: (query) => get('/traffic/summary', query),
+      sources: (query) => get('/traffic/sources', query),
+      trend: (query) => get('/traffic/trend', query),
+      heatmap: (query) => get('/traffic/heatmap', query),
+      pages: (query) => get('/traffic/pages', query),
+      breakdown: (query) => get('/traffic/breakdown', query),
+      realtime: () => get('/traffic/realtime'),
+    },
+    tags: {
+      get: () => get('/tags'),
+      /** @param body { meta?: { enabled?, pixelId?, capiToken? }, ga4?: { enabled?, measurementId?, apiSecret? } } */
+      update: (body) => patch('/tags', body),
+      health: () => get('/tags/health'),
+    },
+    explore: {
+      catalog: () => get('/explore/catalog'),
+      /** @param body { metrics, dimensions?, filters?, thresholds?, range?, from?, to?, compare?, sortBy?, sortDirection?, chart?, page?, limit? } */
+      query: (body) => post('/explore/query', body),
+    },
+    savedViews: {
+      list: (query) => get('/saved-views', query),
+      /** @param body { name, visibility?, definition } */
+      create: (body) => post('/saved-views', body),
+      get: (viewId) => get(`/saved-views/${id(viewId)}`),
+      update: (viewId, body) => patch(`/saved-views/${id(viewId)}`, body),
+      remove: (viewId) => del(`/saved-views/${id(viewId)}`),
+      pin: (viewId) => post(`/saved-views/${id(viewId)}/pin`),
+      unpin: (viewId) => del(`/saved-views/${id(viewId)}/pin`),
+    },
+    dashboard: {
+      cards: () => get('/dashboard/cards'),
+    },
+    funnels: {
+      list: (query) => get('/funnels', query),
+      /** @param body { name, steps, countBy?, windowMinutes? } */
+      create: (body) => post('/funnels', body),
+      get: (funnelId) => get(`/funnels/${id(funnelId)}`),
+      update: (funnelId, body) => patch(`/funnels/${id(funnelId)}`, body),
+      remove: (funnelId) => del(`/funnels/${id(funnelId)}`),
+      /** @param query { range?, from?, to?, breakdown?, compare? } */
+      results: (funnelId, query) => get(`/funnels/${id(funnelId)}/results`, query),
+    },
+    cohorts: {
+      /** @param query { kind?: 'visitors' | 'buyers', groupBy?, range?, from?, to? } */
+      get: (query) => get('/cohorts', query),
+    },
+    downloads: {
+      list: (query) => get('/downloads', query),
+      /** @param body { source, format?, query?, funnelId?, cohort?, from?, to? } @returns { id, status, fileUrl, ... } */
+      create: (body) => post('/downloads', body),
+      get: (downloadId) => get(`/downloads/${id(downloadId)}`),
+    },
+    reports: {
+      /** @param query { kind?, cursor?, limit? } */
+      list: (query) => get('/reports', query),
+      preferences: () => get('/reports/preferences'),
+      updatePreferences: (body) => patch('/reports/preferences', body),
+      /** @param body { token, report? } */
+      unsubscribe: (body) => post('/reports/unsubscribe', body),
+      get: (reportId) => get(`/reports/${id(reportId)}`),
+    },
+    scheduledReports: {
+      list: (query) => get('/scheduled-reports', query),
+      /** @param body { viewId, frequency?, hourOfDay?, weekday?, dayOfMonth?, format?, enabled? } */
+      create: (body) => post('/scheduled-reports', body),
+      update: (reportId, body) => patch(`/scheduled-reports/${id(reportId)}`, body),
+      remove: (reportId) => del(`/scheduled-reports/${id(reportId)}`),
+      /** @param body { email }: an outside address, owner only */
+      addRecipient: (reportId, body) => post(`/scheduled-reports/${id(reportId)}/recipients`, body),
+      removeRecipient: (recipientId) => del(`/scheduled-report-recipients/${id(recipientId)}`),
+    },
+    apiKeys: {
+      list: (query) => get('/api-keys', query),
+      /** @param body { name } @returns the key once, as key */
+      create: (body) => post('/api-keys', body),
+      revoke: (keyId) => del(`/api-keys/${id(keyId)}`),
+    },
   };
 }
 

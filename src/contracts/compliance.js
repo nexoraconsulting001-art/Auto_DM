@@ -65,6 +65,12 @@ export const COMPLIANCE_LIMITS = Object.freeze({
   testerCodeMs: 15 * MINUTE,
 });
 
+/** What can put an account in slow mode (PRD 4.3). The owner's override applies only while reach_drop is the cause. */
+export const SLOW_MODE_TRIGGERS = Object.freeze(['reach_drop', 'buc_80002', 'insights_denied']);
+
+/** Calls to Meta that aren't messages, highest priority first (PRD 4.3). callAllowed() decides whether one may run. */
+export const CALL_CLASSES = Object.freeze(['token_refresh', 'subscribed_apps', 'comment_timestamp', 'public_reply', 'story_insights', 'insights', 'media_list']);
+
 export const Channel = z.enum(['instagram', 'facebook']);
 export const SEND_KINDS = Object.freeze(['private_reply', 'dm', 'public_reply']);
 export const SEND_PURPOSES = Object.freeze(['trigger', 'link', 'followup', 'welcome', 'faq', 'optout_confirm', 'manual', 'test']);

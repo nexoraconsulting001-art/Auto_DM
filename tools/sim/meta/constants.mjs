@@ -32,6 +32,11 @@ export const LIMITS = Object.freeze({
   iceBreakersMax: 4,
   iceBreakerQuestionChars: 80,
   storyMs: DAY,
+  accountInsightsMs: 90 * DAY,
+  mediaInsightsMs: 730 * DAY,
+  insightsRangeMs: 30 * DAY,
+  insightsSettleMs: 48 * HOUR,
+  insightsDelayMs: 0,
   publicReplyChars: 2200,
   bucPerImpression: 4800,
   bucWindowMs: DAY,
@@ -67,7 +72,16 @@ export const WEBHOOK_FIELDS = Object.freeze({
   story_insights: SCOPES.insights,
 });
 
-export const INSIGHT_METRICS = Object.freeze(['reach', 'views', 'likes', 'comments', 'shares', 'saved', 'total_interactions', 'follows', 'profile_visits', 'profile_activity', 'replies', 'navigation', 'accounts_engaged', 'follower_count', 'website_clicks', 'ig_reels_avg_watch_time', 'ig_reels_video_view_total_time']);
+const MEDIA_BASE_METRICS = Object.freeze(['views', 'reach', 'likes', 'comments', 'shares', 'saved', 'total_interactions', 'reposts', 'follows', 'profile_visits', 'profile_activity']);
+
+/** What each kind of object can be asked for (PRD 7.1 to 7.3). impressions is on none of them: Meta retired it. */
+export const MEDIA_INSIGHT_METRICS = Object.freeze({
+  FEED: MEDIA_BASE_METRICS,
+  REELS: Object.freeze([...MEDIA_BASE_METRICS, 'ig_reels_avg_watch_time', 'ig_reels_video_view_total_time', 'reels_skip_rate', 'crossposted_views']),
+  STORY: Object.freeze(['views', 'reach', 'replies', 'shares', 'follows', 'profile_visits', 'total_interactions', 'reposts', 'link_clicks', 'profile_activity', 'navigation']),
+});
+export const ACCOUNT_INSIGHT_METRICS = Object.freeze(['views', 'reach', 'accounts_engaged', 'total_interactions', 'likes', 'comments', 'shares', 'saves', 'saved', 'replies', 'reposts', 'follows', 'profile_visits', 'profile_links_taps', 'follows_and_unfollows', 'follower_demographics', 'engaged_audience_demographics', 'online_followers', 'follower_count', 'website_clicks']);
+export const INSIGHT_METRICS = Object.freeze([...new Set([...MEDIA_BASE_METRICS, ...MEDIA_INSIGHT_METRICS.REELS, ...MEDIA_INSIGHT_METRICS.STORY, ...ACCOUNT_INSIGHT_METRICS])]);
 
 export const ERRORS = Object.freeze({
   TOKEN_MISSING: { code: 104, message: 'An access token is required to request this resource.' },
@@ -81,6 +95,9 @@ export const ERRORS = Object.freeze({
   OBJECT_NOT_FOUND: { code: 100, subcode: 33, type: 'GraphMethodException', message: 'Unsupported request. Object with this ID does not exist, cannot be loaded due to missing permissions, or does not support this operation.' },
   INVALID_PARAM: { code: 100, message: '(#100) Invalid parameter' },
   UNKNOWN_PATH: { code: 2500, type: 'IGApiException', message: 'Unknown path components' },
+  // Insights. Wording and codes are assumed (PRD 7.3, 4.3 row 20): the adapter reads them in one place.
+  NOT_ENOUGH_VIEWERS: { code: 10, message: '(#10) Not enough viewers for the media to show insights' },
+  INSIGHTS_EXPIRED: { code: 100, message: '(#100) Insights for this media are no longer available' },
   // Private replies: assumed for Instagram (PRD 4.4); these are the Messenger Platform's codes.
   ALREADY_REPLIED: { code: 10900, message: '(#10900) Activity already replied to' },
   REPLY_WINDOW_CLOSED: { code: 10901, message: '(#10901) Activity is too old to reply to' },

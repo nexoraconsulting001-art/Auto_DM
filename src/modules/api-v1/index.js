@@ -61,7 +61,7 @@ function serve(route, handler) {
   const receiveFile = route.upload && uploader(route.upload);
 
   async function run(req, res) {
-    if (!isAllowed(req.user ?? null, route.access)) throw new ApiError(req.user ? 'forbidden' : 'unauthorized');
+    if (!isAllowed(req.user ?? null, route.access)) throw new ApiError(req.user ? 'forbidden' : 'unauthorized', req.user ? route.access.denied : undefined);
     if (route.body && !req.is('application/json')) throw new ApiError('unsupported_media_type', 'Send this as JSON.');
 
     const params = route.params ? pathParams(route.params, req.params) : {};

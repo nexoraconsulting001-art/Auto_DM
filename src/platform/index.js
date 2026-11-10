@@ -1,5 +1,7 @@
 import { createAnalytics } from './analytics.js';
 import { createCache } from './cache.js';
+import { createConsent } from './consent.js';
+import { createGeo } from './geo.js';
 import { createMetrics } from './metrics.js';
 import { createQueue } from './queue.js';
 import { createSecrets } from './secrets.js';
@@ -23,6 +25,8 @@ export function createPlatform(config, { db }) {
     cache: createCache(config),
     metrics: createMetrics(),
     secrets: createSecrets(config),
+    consent: createConsent(),
+    geo: createGeo(config),
   };
 }
 

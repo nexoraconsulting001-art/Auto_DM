@@ -254,6 +254,7 @@ export function createGate({ db, repos, config, now, limits }) {
       slowModeUntil: row.slow_mode_until,
       slowModeTrigger: row.slow_mode_trigger,
       overrideAt: row.slow_mode_override_at,
+      slowModeHolds: row.slow_mode_holds ?? {},
     };
   }
 

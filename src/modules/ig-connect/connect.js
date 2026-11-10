@@ -7,7 +7,7 @@ import { withTenant } from '../../tenancy.js';
 import { DISCONNECTED_BY_OWNER } from '../ig-accounts/index.js';
 import { tenantBaseUrl } from '../admin-api/urls.js';
 import { messagePage } from './pages.js';
-import { SCOPES_TO_GO_LIVE, SCOPE_INSIGHTS, WEBHOOK_FIELD_SCOPES, nextRefreshAt } from './rules.js';
+import { SCOPES_TO_GO_LIVE, SCOPE_INSIGHTS, READ_RECEIPTS_FIELD, WEBHOOK_FIELD_SCOPES, nextRefreshAt } from './rules.js';
 
 const STATE_TTL_MS = 10 * 60_000;
 const DEFAULT_RETURN = '/admin/settings';
@@ -87,6 +87,7 @@ export function createConnect({ db, repos, meta, config, platform, gates }) {
     const detail = await repos.igAccounts.detail(igUserId);
     const account = await repos.igAccounts.get(igUserId);
     const fields = Object.entries(WEBHOOK_FIELD_SCOPES).filter(([, scope]) => detail?.scopes.includes(scope)).map(([field]) => field);
+    if (config.readReceipts && fields.includes('messages')) fields.push(READ_RECEIPTS_FIELD);
     if (!account?.token || !fields.length) return false;
     try {
       const answer = await meta.client.forAccount(subscriptionTarget(detail, account)).subscribe(fields);

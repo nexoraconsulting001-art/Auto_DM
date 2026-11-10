@@ -6,4 +6,4 @@ data/
 test-results/
 playwright-report/
 .stryker-tmp/
-reports/
+/reports/

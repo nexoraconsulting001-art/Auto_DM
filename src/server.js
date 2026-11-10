@@ -4,12 +4,14 @@ import { pathToFileURL } from 'node:url';
 import { config as defaultConfig } from './config.js';
 import { openRuntimeDb } from './db/index.js';
 import { createRepos } from './repos/index.js';
+import { createGoogleAdapters } from './adapters/google/index.js';
 import { createMetaAdapters, verifyHubSignature } from './adapters/meta/index.js';
 import { createAuth } from './auth.js';
 import { handleComment } from './handler.js';
 import { createInstagram } from './instagram.js';
 import { createCompliance } from './modules/compliance/index.js';
 import { MODULES } from './modules/index.js';
+import { createMetaCallObserver } from './modules/meta-calls.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes, baseUrlFor, buyerBaseUrl } from './routes/admin.js';
 import { ApiError, isApiV1Url } from './contracts/api/index.js';
@@ -26,13 +28,15 @@ export const verifySignature = verifyHubSignature;
  * secrets) from createPlatform(); `ig` can be swapped for a fake in tests. Features plug in through
  * `modules` (see src/modules/index.js).
  */
-export function createApp({ db, config = defaultConfig, ig = createInstagram(config), platform = createPlatform(config, { db }), modules = MODULES }) {
+export function createApp({ db, config = defaultConfig, modules = MODULES, metaCalls = createMetaCallObserver(modules), ig = createInstagram(config, { onCall: metaCalls.onCall }), platform = createPlatform(config, { db }) }) {
   const repos = createRepos(db, { storage: platform.storage, secrets: platform.secrets, modules });
   const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions, tenants: repos.tenants, cache: platform.cache });
   const tenants = createTenantResolver({ tenants: repos.tenants, platformDomain: config.platformDomain, defaultTenant: config.defaultTenant });
-  const meta = createMetaAdapters(config);
+  const meta = createMetaAdapters(config, { onCall: metaCalls.onCall });
+  const google = createGoogleAdapters(config);
   const compliance = createCompliance({ db, repos, ig, meta, config, platform });
-  const ctx = { db, repos, ig, meta, compliance, auth, config, platform, modules, tenantResolver: tenants };
+  const ctx = { db, repos, ig, meta, google, compliance, auth, config, platform, modules, tenantResolver: tenants };
+  metaCalls.bind(ctx);
 
   /** The business that owns an Instagram account: linked accounts first, then the default business. */
   async function tenantForIgAccount(igUserId) {

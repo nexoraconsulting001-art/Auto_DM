@@ -13,9 +13,15 @@ export const PERMISSIONS = Object.freeze(['catalog', 'orders', 'automations', 'a
 
 export const PUBLIC = Object.freeze({ public: true });
 export const SIGNED_IN = Object.freeze({ signedIn: true });
-export const OWNER_ONLY = Object.freeze({ roles: Object.freeze(['owner']) });
+/** `denied` is what a signed-in person who isn't the owner is told, instead of the general refusal. */
+export const OWNER_ONLY = Object.freeze({ roles: Object.freeze(['owner']), denied: 'Owner only.' });
 export const MANAGERS = Object.freeze({ roles: Object.freeze(['owner', 'manager']) });
 export const staffWith = (permission) => Object.freeze({ roles: SELLER_ROLES, permission });
+
+/**
+ * Who may see revenue and order counts in analytics (PRD 7.11). Staff need the orders permission: analytics alone isn't enough.
+ */
+export const canSeeRevenue = (user) => ['owner', 'manager'].includes(user?.role) || (user?.role === 'staff' && (user.permissions ?? []).includes('orders'));
 
 /**
  * True when `user` (null for nobody) passes `access`. Staff get a route only through its named permission,

@@ -10,14 +10,18 @@ import { customerRoutes } from './customers.js';
 import { domainRoutes } from './domains.js';
 import { facebookRoutes } from './facebook.js';
 import { inboxRoutes } from './inbox.js';
+import { insightRoutes } from './insights.js';
 import { instagramRoutes } from './instagram.js';
 import { linkRoutes } from './links.js';
 import { mediaRoutes } from './media.js';
 import { orderRoutes } from './orders.js';
 import { productRoutes } from './products.js';
+import { reachGuardRoutes } from './reach-guard.js';
 import { reelRoutes } from './reels.js';
+import { reportRoutes } from './reports.js';
 import { settingRoutes } from './settings.js';
 import { statRoutes } from './stats.js';
+import { trafficRoutes } from './traffic.js';
 
 /**
  * The seller API at /api/v1, as data. The router (src/modules/api-v1) is built from this table, the shared
@@ -58,6 +62,10 @@ export const routes = Object.freeze({
   ...facebookRoutes,
   ...domainRoutes,
   ...alertRoutes,
+  ...reportRoutes,
+  ...insightRoutes,
+  ...reachGuardRoutes,
+  ...trafficRoutes,
 });
 
 export const routeList = Object.freeze(Object.entries(routes).map(([id, route]) => Object.freeze({ id, ...route })));
@@ -77,6 +85,7 @@ export * from './domains.js';
 export * from './errors.js';
 export * from './facebook.js';
 export * from './inbox.js';
+export * from './insights.js';
 export * from './instagram.js';
 export * from './links.js';
 export * from './media.js';
@@ -84,6 +93,9 @@ export * from './orders.js';
 export * from './platform.js';
 export * from './provider.js';
 export * from './products.js';
+export * from './reach-guard.js';
 export * from './reels.js';
+export * from './reports.js';
 export * from './settings.js';
 export * from './stats.js';
+export * from './traffic.js';

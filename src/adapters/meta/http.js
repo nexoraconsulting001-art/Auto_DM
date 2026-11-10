@@ -33,14 +33,14 @@ function failure(base, status, parsed, usage) {
   const oauth = !graph && typeof parsed?.error_message === 'string' ? parsed : null;
   const code = graph?.code ?? oauth?.code;
   const subcode = graph?.error_subcode;
-  const kind = oauth ? 'oauth' : classifyGraphError({ status, code, subcode });
+  const kind = oauth ? 'oauth' : classifyGraphError({ status, code, subcode, message: graph?.message });
   const delivery = status === 429 || ((graph || oauth) && status < 500) ? 'none' : 'unknown';
   return new MetaApiError({ ...base, status, code, subcode, kind, delivery, usage, detail: graph?.message ?? oauth?.error_message, fbtraceId: graph?.fbtrace_id });
 }
 
 /**
  * Makes one call to Meta. Every call has a timeout, follows no redirect, and carries the token in a header. `onCall`,
- * if given, gets { method, pathname, status, code, subcode, usage, kind, ms } after every call, ids and numbers only.
+ * if given, gets { method, pathname, channel?, accountId?, status, code, subcode, usage, kind, ms } after every call, ids and numbers only.
  * Resolves to { data, status, usage }. Anything else is a MetaApiError: a 200 that is not a JSON object included,
  * because it proves nothing was accepted.
  */
@@ -53,10 +53,10 @@ export function createMetaHttp({ timeoutMs = DEFAULT_TIMEOUT_MS, onCall } = {}) 
     }
   }
 
-  return async function metaCall({ base: baseUrl, version, method, pathname, query = {}, body, form, token }) {
+  return async function metaCall({ base: baseUrl, version, method, pathname, query = {}, body, form, token, account }) {
     const url = new URL(`${baseUrl}/${version ? `${version}/` : ''}${pathname}`);
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
-    const base = { method, pathname };
+    const base = { method, pathname, ...account };
     const started = Date.now();
     const init = {
       method,

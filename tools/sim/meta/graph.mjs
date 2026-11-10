@@ -1,5 +1,6 @@
 /** The Graph API for Instagram Login: reads, subscribed_apps, comment replies, private replies and the Send API. */
-import { ERRORS, HOUR, INSIGHT_METRICS, SCOPES, SECOND, WEBHOOK_FIELDS, graphError, toSeconds } from './constants.mjs';
+import { ERRORS, HOUR, SCOPES, SECOND, WEBHOOK_FIELDS, graphError, toSeconds } from './constants.mjs';
+import { insightsRoute } from './insights.mjs';
 import { validateMessage } from './message.mjs';
 import { authenticate, chargeBuc, input, isOwnAccount, jsonParam, nextId, person, requireScopes, throttle } from './state.mjs';
 import { emit } from './webhooks.mjs';
@@ -18,7 +19,7 @@ const ACCOUNT_FIELDS = {
   profile_picture_url: (a) => a.profilePictureUrl,
   followers_count: (a) => a.followersCount,
   follows_count: (a) => a.followsCount,
-  media_count: (a, ctx) => [...ctx.s.media.values()].filter((m) => m.igUserId === a.igUserId).length,
+  media_count: (a, ctx) => [...ctx.s.media.values()].filter((m) => m.igUserId === a.igUserId && !m.parentId && !m.deleted).length,
   biography: (a) => a.biography,
   website: (a) => a.website,
 };
@@ -97,7 +98,7 @@ const newestFirst = (items) => [...items].reverse().sort((a, b) => b.at - a.at);
 
 function ownMedia(ctx, id, account) {
   const media = ctx.s.media.get(id);
-  if (!media || media.igUserId !== account.igUserId) throw notFound();
+  if (!media || media.igUserId !== account.igUserId || media.deleted) throw notFound();
   return media;
 }
 
@@ -173,7 +174,7 @@ export function graphRoutes(on, ctx) {
     const { account } = authenticate(ctx, req, [SCOPES.basic]);
     chargeBuc(ctx, account);
     requireOwnAccount(req.params.id, account);
-    const items = newestFirst([...ctx.s.media.values()].filter((m) => m.igUserId === account.igUserId && m.productType !== 'STORY'));
+    const items = newestFirst([...ctx.s.media.values()].filter((m) => m.igUserId === account.igUserId && m.productType !== 'STORY' && !m.parentId && !m.deleted));
     return paged(ctx, req, items, (m) => project(ctx, m, MEDIA_FIELDS, 'IGMedia', input(req).fields));
   });
 
@@ -182,8 +183,9 @@ export function graphRoutes(on, ctx) {
     const { account } = authenticate(ctx, req, [SCOPES.basic]);
     chargeBuc(ctx, account);
     requireOwnAccount(req.params.id, account);
+    if (!account.storiesEdge) throw graphError(ERRORS.UNKNOWN_PATH, `Unknown path components: ${req.path}`);
     const liveSince = ctx.clock.now() - ctx.s.limits.storyMs;
-    const items = newestFirst([...ctx.s.media.values()].filter((m) => m.igUserId === account.igUserId && m.productType === 'STORY' && m.at > liveSince));
+    const items = newestFirst([...ctx.s.media.values()].filter((m) => m.igUserId === account.igUserId && m.productType === 'STORY' && m.at > liveSince && !m.deleted));
     return paged(ctx, req, items, (m) => project(ctx, m, MEDIA_FIELDS, 'IGMedia', input(req).fields));
   });
 
@@ -280,18 +282,7 @@ export function graphRoutes(on, ctx) {
     return { success: true };
   });
 
-  on('GET', '/:id/insights', (req) => {
-    const { account } = authenticate(ctx, req, [SCOPES.insights]);
-    chargeBuc(ctx, account);
-    if (!isOwnAccount(req.params.id, account)) ownMedia(ctx, req.params.id, account);
-    const key = isOwnAccount(req.params.id, account) ? account.igUserId : req.params.id;
-    const metrics = String(input(req).metric ?? '').split(',').map((m) => m.trim()).filter(Boolean);
-    if (!metrics.length) throw invalid('Param metric is required');
-    for (const name of metrics) if (!INSIGHT_METRICS.includes(name)) throw invalid(`metric[0] must be one of the supported metrics, got ${name}`);
-    const period = input(req).period ?? 'lifetime';
-    const seeded = ctx.s.insights.get(key) ?? {};
-    return { data: metrics.map((name) => ({ name, period, values: [{ value: seeded[name] ?? 0 }], title: name, id: `${key}/insights/${name}/${period}` })) };
-  });
+  on('GET', '/:id/insights', insightsRoute(ctx));
 
   on('GET', '/:id', (req) => {
     const { token, account } = authenticate(ctx, req);
@@ -303,7 +294,7 @@ export function graphRoutes(on, ctx) {
       return project(ctx, account, ACCOUNT_FIELDS, 'IGUser', fields);
     }
     const media = ctx.s.media.get(id);
-    if (media?.igUserId === account.igUserId) {
+    if (media?.igUserId === account.igUserId && !media.deleted) {
       requireScopes(token, [SCOPES.basic]);
       return project(ctx, media, MEDIA_FIELDS, 'IGMedia', fields);
     }

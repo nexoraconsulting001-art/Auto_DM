@@ -59,9 +59,10 @@ function changeRow(accountId, field, value, shared) {
 function messagingRow(accountId, value, shared) {
   const parsed = MessagingEvent.safeParse(value);
   if (!parsed.success) return null;
-  const { message, postback, sender, timestamp } = parsed.data;
+  const { message, postback, read, sender, timestamp } = parsed.data;
   if (message) return { account_id: accountId, field: 'messages', status: 'stored', object_id: message.mid, payload: { event: value, ...shared } };
   if (postback) return { account_id: accountId, field: 'messaging_postbacks', status: 'stored', object_id: postback.mid ?? `${sender.id}:${timestamp}:${short(postback.payload)}`, payload: { event: value, ...shared } };
+  if (read) return { account_id: accountId, field: 'messaging_seen', status: 'stored', object_id: `${sender.id}:${read.mid ?? read.watermark ?? timestamp}`, payload: { event: value, ...shared } };
   return { ignored: true };
 }
 
@@ -104,7 +105,7 @@ function rowsOf(body, base) {
  * Webhook intake and the worker that handles what it stored (PRD 4.1, 4.4, 4.6, 4.8, 6.4). The compliance rules run here, and what is
  * left goes to the modules registered with compliance.onInbound(fn), which decide whether an automation answers it. fn gets:
  *
- *   { type: 'comment' | 'dm' | 'story_reply' | 'story_mention' | 'postback' | 'attachment' | 'post_mention', channel, accountId, receivedAt,
+ *   { type: 'comment' | 'dm' | 'story_reply' | 'story_mention' | 'postback' | 'attachment' | 'post_mention' | 'seen', channel, accountId, receivedAt,
  *     personId, subject, username?, text, mediaId?, mediaType?, commentId?, parentId?, expiresAt?, mid?, payload?, storyId?, mediaRef?,
  *     tooShort?, threadId?, threadPaused? }
  *
@@ -218,6 +219,7 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     const e = MessagingEvent.parse(row.payload.event);
     const person = { personId: e.sender.id, timestamp: e.timestamp };
     if (e.postback) return { ...base, ...person, type: 'postback', mid: e.postback.mid ?? row.object_id, text: e.postback.title ?? '', payload: e.postback.payload };
+    if (e.read) return { ...base, ...person, type: 'seen', mid: e.read.mid ?? '', watermark: e.read.watermark ?? null, text: '' };
     const m = e.message;
     if (!m) return null;
     if (m.is_echo) return { ...base, type: 'echo', recipientId: e.recipient.id, mid: m.mid, text: m.text ?? '' };
@@ -529,6 +531,7 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     if (ev.type === 'comment') await onComment(ev);
     else if (ev.type === 'echo') return onEcho(ev, row);
     else if (ev.type === 'post_mention') await runConsumers(ev);
+    else if (ev.type === 'seen') await runConsumers({ ...ev, subject: await log.subjectHash(ev.channel, ev.personId) });
     else await onPersonMessage(ev);
     return 'done';
   }

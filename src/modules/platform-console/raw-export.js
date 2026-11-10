@@ -5,7 +5,7 @@ import { ValidationError } from '../../util.js';
 const KEEP_DAYS = 7;
 const MAX_ROWS = 200_000;
 // The only tables a raw export can read, and which column holds each row's time.
-const TIME_COLUMN = Object.freeze({ audit_log: 'created_at', compliance_events: 'created_at', events: 'at' });
+const TIME_COLUMN = Object.freeze({ audit_log: 'created_at', compliance_events: 'created_at', events: 'at', traffic_events: 'at' });
 
 /**
  * A super admin's raw event export (PRD 2, 5.14). The file is written first; its record and the audit row of who, when, why and what land

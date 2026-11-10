@@ -41,6 +41,11 @@ export function freshState(options = {}) {
     comments: new Map(),
     people: new Map(),
     insights: new Map(),
+    insightDaily: new Map(),
+    demographics: new Map(),
+    lowViewers: new Set(),
+    pixels: new Map(),
+    capiEvents: [],
     iceBreakers: new Map(),
     pages: new Map(),
     pagePosts: new Map(),
@@ -78,6 +83,9 @@ export function makeAccount({ igUserId, appScopedId, username, name, accountType
     sendTimes: [],
     bucTimes: [],
     usage: null,
+    throttledUntil: 0,
+    storiesEdge: true,
+    readReceipts: true,
   };
 }
 
@@ -95,6 +103,8 @@ export function makeMedia(ctx, account, id, fields = {}) {
     thumbnailUrl: fields.thumbnailUrl ?? `https://media.invalid/${id}.jpg`,
     likeCount: fields.likeCount ?? 0,
     at: fields.at ?? ctx.clock.now(),
+    parentId: fields.parentId ?? null,
+    deleted: false,
   };
 }
 
@@ -187,6 +197,7 @@ function bucState(ctx, account) {
   const now = ctx.clock.now();
   const windowMs = ctx.s.limits.bucWindowMs;
   while (account.bucTimes.length && account.bucTimes[0] <= now - windowMs) account.bucTimes.shift();
+  if (account.throttledUntil > now) return { percent: 100, regainMinutes: Math.ceil((account.throttledUntil - now) / MINUTE) };
   const limit = ctx.s.limits.bucPerImpression * account.impressions;
   if (account.usage) return { percent: account.usage.percent, regainMinutes: account.usage.percent >= 100 ? account.usage.regainMinutes ?? 60 : 0 };
   const percent = Math.floor((account.bucTimes.length * 100) / limit);

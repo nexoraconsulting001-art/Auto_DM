@@ -13,9 +13,9 @@ export { MetaApiError as InstagramApiError };
  * Messages go through ctx.compliance.send(), the only caller of the send calls here. With dryRun, sends are logged
  * (ids only) and not made.
  */
-export function createInstagram(config = {}) {
+export function createInstagram(config = {}, { onCall } = {}) {
   const { dryRun = false } = config;
-  const meta = createMetaClient(config);
+  const meta = createMetaClient(config, { onCall });
   const dryRunResult = (kind, commentId) => {
     log.info('ig.dry_run', { kind, comment: commentId });
     return { dryRun: true };
