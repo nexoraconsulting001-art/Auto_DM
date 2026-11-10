@@ -9,7 +9,7 @@ const context = new AsyncLocalStorage();
 
 export class NoTenantError extends Error {
   constructor() {
-    super('No business selected: business data can only be used inside withTenant()');
+    super('tenant context missing: business data can only be used inside withTenant()');
   }
 }
 

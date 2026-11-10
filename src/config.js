@@ -31,7 +31,7 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL || '',
   dataDir: process.env.DATA_DIR || path.join(rootDir, 'data', 'pgdata'),
   // Businesses (tenants). Each business is found from the web address:
-  //   <slug>.PLATFORM_DOMAIN (e.g. mehtamart.bhavahq.com), or a custom domain added for it.
+  //   <slug>.PLATFORM_DOMAIN (e.g. mehtamart.shopsdomain.example), or a custom domain added for it.
   // DEFAULT_TENANT is the business served on any other address, and the one webhooks fall back to;
   // it is created on start if missing. Leave it empty once every business has its own address.
   platformDomain: (process.env.PLATFORM_DOMAIN || '').toLowerCase(),
