@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { REEL_ID, login, startApp } from './helpers.js';
+import { withConsoleApi } from './p0/console-port/support/console-api.js';
 
 async function catalog(repos) {
   const kitchen = await repos.categories.save(null, { name: 'Kitchen', visible: 'on', position: 1 });
@@ -78,43 +79,46 @@ test('/api/reels pages through live reels, newest first', async () => {
 });
 
 test('the setup checklist ticks steps off and can be hidden', async () => {
-  const app = await startApp();
+  const app = await startApp({ modules: withConsoleApi() });
   try {
-    const { cookie, csrf } = await login(app.base, { csrfPage: '/admin' });
-    let dash = await (await fetch(`${app.base}/admin`, { headers: { cookie } })).text();
-    assert.match(dash, /Set up your store/);
-    assert.match(dash, /1 of 6 done/); // Instagram connected (fake client)
+    const { cookie, csrf } = await login(app.base);
+    const checklist = async () => (await (await fetch(`${app.base}/api/v1/settings/setup`, { headers: { cookie } })).json()).checklist;
+    const done = (list) => list.steps.filter((step) => step.done).length;
+    let list = await checklist();
+    assert.equal(list.dismissed, false);
+    assert.equal(list.steps.length, 6);
+    assert.equal(done(list), 1); // Instagram connected (fake client)
     await app.repos.products.create({ name: 'Mug', price: '99', active: 'on' });
-    dash = await (await fetch(`${app.base}/admin`, { headers: { cookie } })).text();
-    assert.match(dash, /2 of 6 done/);
-    await fetch(`${app.base}/admin/checklist/dismiss`, { method: 'POST', headers: { cookie }, body: new URLSearchParams({ _csrf: csrf }) });
-    dash = await (await fetch(`${app.base}/admin`, { headers: { cookie } })).text();
-    assert.doesNotMatch(dash, /Set up your store/);
+    list = await checklist();
+    assert.equal(done(list), 2);
+    const hide = await fetch(`${app.base}/api/v1/settings`, { method: 'PATCH', headers: { cookie, 'x-csrf-token': csrf, 'content-type': 'application/json' }, body: JSON.stringify({ checklistDismissed: true }) });
+    assert.equal(hide.status, 200);
+    list = await checklist();
+    assert.equal(list.dismissed, true);
   } finally {
     app.close();
   }
 });
 
 test('admin categories and product category checkboxes', async () => {
-  const app = await startApp();
+  const app = await startApp({ modules: withConsoleApi() });
   try {
-    const { cookie, csrf } = await login(app.base, { csrfPage: '/admin/categories/new' });
-    const post = (path, body) => fetch(`${app.base}${path}`, { method: 'POST', headers: { cookie }, body: new URLSearchParams({ _csrf: csrf, ...body }), redirect: 'manual' });
-    const res = await post('/admin/categories', { name: 'Kitchen Creations', visible: 'on', position: '1' });
-    assert.equal(res.status, 303);
+    const { cookie, csrf } = await login(app.base);
+    const send = (method, path, body) => fetch(`${app.base}/api/v1${path}`, { method, headers: { cookie, 'x-csrf-token': csrf, 'content-type': 'application/json' }, body: JSON.stringify(body), redirect: 'manual' });
+    const res = await send('POST', '/categories', { name: 'Kitchen Creations', visible: true, position: 1 });
+    assert.equal(res.status, 201);
     const cat = await app.repos.categories.getBySlug('kitchen-creations');
     assert.ok(cat);
 
-    const body = new URLSearchParams({ _csrf: csrf, name: 'Pan', price: '99', active: 'on', categories_sent: '1', featured: 'on' });
-    body.append('categoryIds', String(cat.id));
-    const created = await fetch(`${app.base}/admin/products`, { method: 'POST', headers: { cookie }, body, redirect: 'manual' });
-    const id = /\/admin\/products\/(\d+)/.exec(created.headers.get('location'))[1];
+    const created = await send('POST', '/products', { name: 'Pan', pricePaise: 9900, active: true, featured: true, categoryIds: [cat.id] });
+    assert.equal(created.status, 201);
+    const { id } = await created.json();
     const product = await app.repos.products.get(id);
     assert.deepEqual(product.category_ids, [cat.id]);
     assert.equal(product.featured, true);
 
-    // Saving with no boxes ticked removes it from all categories.
-    await post(`/admin/products/${id}`, { name: 'Pan', price: '99', active: 'on', categories_sent: '1' });
+    // Saving with no categories picked removes it from all of them.
+    await send('PATCH', `/products/${id}`, { categoryIds: [] });
     assert.deepEqual((await app.repos.products.get(id)).category_ids, []);
   } finally {
     app.close();

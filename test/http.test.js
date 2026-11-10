@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { REEL_ID, login, seedReel, startApp } from './helpers.js';
+import { withConsoleApi } from './p0/console-port/support/console-api.js';
 
 const sign = (body, secret = 'secret') => 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');
 
@@ -64,21 +65,22 @@ test('there is no forwarding to another app and no /l/ redirect, even with the o
 });
 
 test('admin requires the owner login and a CSRF token', async () => {
-  const app = await startApp();
+  const app = await startApp({ modules: withConsoleApi() });
   try {
-    const anon = await fetch(`${app.base}/admin`, { redirect: 'manual' });
-    assert.equal(anon.status, 302);
-    assert.equal(anon.headers.get('location'), '/login?next=%2Fadmin');
+    const anon = await fetch(`${app.base}/api/v1/products`, { redirect: 'manual' });
+    assert.equal(anon.status, 401);
     const wrong = await fetch(`${app.base}/login`, { method: 'POST', body: new URLSearchParams({ phone: '9000000001', password: 'nope' }) });
     assert.equal(wrong.status, 401);
 
-    const { cookie, csrf, location } = await login(app.base, { csrfPage: '/admin/products/new' });
+    const { cookie, csrf, location } = await login(app.base);
     assert.equal(location, '/admin');
-    const form = { name: 'Kurta', price: '999', active: 'on' };
-    const noCsrf = await fetch(`${app.base}/admin/products`, { method: 'POST', headers: { cookie }, body: new URLSearchParams(form), redirect: 'manual' });
+    const body = JSON.stringify({ name: 'Kurta', pricePaise: 99900, active: true });
+    const headers = { cookie, 'content-type': 'application/json' };
+    const noCsrf = await fetch(`${app.base}/api/v1/products`, { method: 'POST', headers, body, redirect: 'manual' });
     assert.equal(noCsrf.status, 403);
-    const ok = await fetch(`${app.base}/admin/products`, { method: 'POST', headers: { cookie }, body: new URLSearchParams({ ...form, _csrf: csrf }), redirect: 'manual' });
-    assert.equal(ok.status, 303);
+    assert.equal((await app.repos.products.list()).length, 0);
+    const ok = await fetch(`${app.base}/api/v1/products`, { method: 'POST', headers: { ...headers, 'x-csrf-token': csrf }, body, redirect: 'manual' });
+    assert.equal(ok.status, 201);
     assert.equal((await app.repos.products.list())[0].name, 'Kurta');
   } finally {
     app.close();

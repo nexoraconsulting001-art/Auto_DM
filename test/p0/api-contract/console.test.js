@@ -134,11 +134,11 @@ test('an unbuilt console says so plainly, and is not mistaken for a working one'
   }
 });
 
-test('unless switched on, /admin stays the old pages', async () => {
-  const app = await startApp();
+test('with the switch left unset, /admin is the console too: the old pages are gone for good', async () => {
+  const app = await startApp({ overrides: { consoleDir: standInBuild() } });
   try {
     const { cookie } = await login(app.base, { phone: OWNER.phone, password: OWNER.password });
-    assert.match(await (await fetch(`${app.base}/admin`, { headers: { cookie } })).text(), /Dashboard/);
+    assert.equal(await (await fetch(`${app.base}/admin`, { headers: { cookie } })).text(), SHELL);
   } finally {
     app.close();
   }

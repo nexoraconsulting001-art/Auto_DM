@@ -53,20 +53,22 @@ test('the checklist has the six steps the dashboard shows, with what the old pag
   assert.deepEqual(checklist.steps.map((s) => s.title), ['Connect Instagram', 'Add your store details', 'Add products', 'Set up your first reel store', 'Receive a comment', 'Get your first order']);
 });
 
-test('the old server-rendered dashboard still shows the checklist and settings', async () => {
+test('the setup checklist and settings come from /api/v1, now the old dashboard is gone', async () => {
   const app = await startApp();
   try {
     const { cookie } = await login(app.base, { ...OWNER, csrfPage: '/admin' });
-    const dashboard = await (await fetch(`${app.base}/admin`, { headers: { cookie } })).text();
-    assert.match(dashboard, /Set up your store/);
-    assert.match(dashboard, /Connect Instagram/);
-    assert.equal((await fetch(`${app.base}/admin/settings`, { headers: { cookie } })).status, 200);
+    const setup = await fetch(`${app.base}/api/v1/settings/setup`, { headers: { cookie } });
+    assert.equal(setup.status, 200);
+    const { checklist } = await setup.json();
+    assert.equal(checklist.steps.length, 6);
+    assert.ok(checklist.steps.some((step) => step.key === 'instagram'));
+    assert.equal((await fetch(`${app.base}/api/v1/settings`, { headers: { cookie } })).status, 200);
   } finally {
     app.close();
   }
 });
 
-test('with admin-api on, the server-rendered pages keep working alongside it', withApp(async ({ base }) => {
+test('with admin-api on, the console still answers its own pages alongside it', withApp(async ({ base }) => {
   const { cookie } = await login(base, { ...OWNER, csrfPage: '/admin' });
   assert.equal((await fetch(`${base}/admin/reels`, { headers: { cookie } })).status, 200);
 }));

@@ -1,5 +1,6 @@
-import { forwardRef, useId } from 'react';
-import { X } from 'lucide-react';
+import { forwardRef, useId, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowLeft, ImageOff, Search, X } from 'lucide-react';
 
 /**
  * Base components of Neel and Haldi, mobile first. Tap targets are at least 44px. Build screens from these
@@ -146,10 +147,10 @@ export function Spinner({ label = 'Loading' }) {
 }
 
 /** A native modal dialog: use the ref's showModal() and close(). It traps focus and closes on Escape by itself. */
-export const Sheet = forwardRef(function Sheet({ title, children }, ref) {
+export const Sheet = forwardRef(function Sheet({ title, children, ...rest }, ref) {
   const close = (event) => event.currentTarget.closest('dialog').close();
   return (
-    <dialog ref={ref} className="sheet" aria-label={title}>
+    <dialog ref={ref} className="sheet" aria-label={title} {...rest}>
       <div className="sheet-head">
         <h2>{title}</h2>
         <IconButton label="Close" onClick={close}><X size={20} aria-hidden="true" /></IconButton>
@@ -158,3 +159,103 @@ export const Sheet = forwardRef(function Sheet({ title, children }, ref) {
     </dialog>
   );
 });
+
+/** Back to the list a page belongs to. */
+export function BackLink({ to, children }) {
+  return (
+    <Link className="back-link" to={to}>
+      <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
+      {children}
+    </Link>
+  );
+}
+
+/** A titled card: the building block of every screen and form. */
+export function Panel({ title, action, children, ...rest }) {
+  return (
+    <Card {...rest}>
+      {(title || action) && (
+        <div className="panel-head">
+          {title && <h2>{title}</h2>}
+          {action}
+        </div>
+      )}
+      {children}
+    </Card>
+  );
+}
+
+/** A square picture, or a quiet placeholder when there is none or it won't load. */
+export function Thumb({ src, alt = '', tall }) {
+  const [failedSrc, setFailedSrc] = useState(null);
+  const className = cx('thumb', tall && 'thumb-tall');
+  if (!src || failedSrc === src) {
+    return <span className={cx(className, 'thumb-empty')} aria-hidden="true"><ImageOff size={18} strokeWidth={1.6} /></span>;
+  }
+  return <img className={className} src={src} alt={alt} loading="lazy" onError={() => setFailedSrc(src)} />;
+}
+
+/** The same shape as EmptyState, for when the server let us down. "Try again" re-runs what failed. */
+export function ErrorState({ title = 'We couldn’t load this', error, onRetry }) {
+  return (
+    <div role="alert">
+      <EmptyState title={title} action={onRetry && <Button variant="soft" onClick={onRetry}>Try again</Button>}>
+        {error?.message || 'Check your connection and try again.'}
+      </EmptyState>
+    </div>
+  );
+}
+
+export function NotFoundState() {
+  return <EmptyState title="We couldn’t find that page">It may have moved or been removed. Use the menu to carry on.</EmptyState>;
+}
+
+/** Not there, or a part of the API this server doesn't have yet. */
+const isMissing = (error) => error?.status === 404 || error?.status === 501;
+
+/**
+ * The three states every screen has, in one place. `children` is called with the loaded data. Pass `detail`
+ * on a page about one thing, so a missing thing reads as a page that isn't there rather than a failure.
+ */
+export function Loadable({ query, label, errorTitle, detail, children }) {
+  if (query.isPending) return <Spinner label={label} />;
+  if (query.isError) {
+    if (detail && isMissing(query.error)) return <NotFoundState />;
+    return <ErrorState title={errorTitle} error={query.error} onRetry={() => query.refetch()} />;
+  }
+  return children(query.data);
+}
+
+export function SearchField({ label, ...rest }) {
+  return (
+    <label className="search">
+      <Search size={18} strokeWidth={1.8} aria-hidden="true" />
+      <span className="sr-only">{label}</span>
+      <input className="search-input" type="search" placeholder={label} {...rest} />
+    </label>
+  );
+}
+
+/** A row of filter chips that scrolls sideways on a phone instead of wrapping into a wall. */
+export function ChipRow({ label, children }) {
+  return <div className="chip-row" role="group" aria-label={label}>{children}</div>;
+}
+
+/** The end of a paged list. `query` is a usePagedList result. */
+export function LoadMore({ query }) {
+  if (!query.hasNextPage) return null;
+  return <Button variant="soft" block loading={query.isFetchingNextPage} onClick={() => query.fetchNextPage()}>Load more</Button>;
+}
+
+/** Progress as a ring: `done` of `total`, with `label` read out by a screen reader. */
+export function Ring({ done, total, label }) {
+  const circumference = 2 * Math.PI * 26;
+  const filled = total > 0 ? (done / total) * circumference : 0;
+  return (
+    <svg className="ring" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label={label}>
+      <circle className="ring-track" cx="32" cy="32" r="26" />
+      <circle className="ring-fill" cx="32" cy="32" r="26" strokeDasharray={`${filled} ${circumference}`} transform="rotate(-90 32 32)" />
+      <text className="ring-text" x="32" y="37" textAnchor="middle">{done}/{total}</text>
+    </svg>
+  );
+}

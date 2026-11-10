@@ -87,12 +87,13 @@ test('uploaded images go to storage, not the database, and stay with their busin
 });
 
 test('an image uploaded in the admin is served back from storage', async () => {
-  const app = await startApp();
+  const { withConsoleApi } = await import('./p0/console-port/support/console-api.js');
+  const app = await startApp({ modules: withConsoleApi() });
   try {
-    const { cookie, csrf } = await login(app.base, { csrfPage: '/admin/products/new' });
+    const { cookie, csrf } = await login(app.base);
     const fd = new FormData();
     fd.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }), 'a.png');
-    const res = await fetch(`${app.base}/admin/media`, { method: 'POST', headers: { cookie, 'x-csrf-token': csrf }, body: fd });
+    const res = await fetch(`${app.base}/api/v1/media`, { method: 'POST', headers: { cookie, 'x-csrf-token': csrf }, body: fd });
     assert.equal(res.status, 201);
     const { url } = await res.json();
     const img = await fetch(`${app.base}${url}`);

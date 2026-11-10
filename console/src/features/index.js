@@ -9,8 +9,9 @@
  *     routes: [{ path: 'products', element: <ProductsPage /> }, { path: 'products/:id', element: <ProductPage /> }],
  *   }
  *
- * `primary` puts the entry in the phone's tab bar (the first four); the rest go under More. Paths are relative
- * to /admin. Use React.lazy for pages so each feature loads only when opened.
+ * `primary` puts the entry in the phone's tab bar (the first four); the rest go under More. `count` is an optional
+ * (stats) => number shown beside the entry. Paths are relative to /admin. Use React.lazy for pages so each feature
+ * loads only when opened.
  */
 const found = import.meta.glob('./*/index.jsx', { eager: true });
 

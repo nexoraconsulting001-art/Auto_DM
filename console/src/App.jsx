@@ -1,12 +1,44 @@
+import { Component, Suspense } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom';
+import { Outlet, RouterProvider, createBrowserRouter, useLocation } from 'react-router-dom';
 import { SELLER_ROLES, isAllowed } from '@contracts/access.js';
 import { Button, EmptyState, Spinner } from './design/index.jsx';
+import { FeedbackProvider } from './components/feedback.jsx';
 import { features } from './features/index.js';
 import { queryClient } from './lib/api/index.js';
 import { SessionProvider, useSession } from './lib/session.jsx';
 import { AppShell } from './shell/AppShell.jsx';
 import { LoginPage } from './shell/LoginPage.jsx';
+
+/** A screen that can't render, or a page that won't download after a new deploy, costs that screen and not the whole console. */
+class ScreenBoundary extends Component {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <EmptyState title="This page didn’t load" action={<Button onClick={() => window.location.reload()}>Reload</Button>}>
+        Check your connection and reload the page.
+      </EmptyState>
+    );
+  }
+}
+
+/** Moving to another page starts a fresh boundary, so one broken screen doesn't follow the seller around. */
+function Screen() {
+  const { pathname } = useLocation();
+  return (
+    <ScreenBoundary key={pathname}>
+      <Suspense fallback={<Spinner label="Opening this page" />}>
+        <Outlet />
+      </Suspense>
+    </ScreenBoundary>
+  );
+}
 
 function CenteredPage({ children }) {
   return <div className="shell-centered">{children}</div>;
@@ -35,7 +67,7 @@ function SignedIn() {
       </CenteredPage>
     );
   }
-  return <AppShell><Outlet /></AppShell>;
+  return <AppShell><Screen /></AppShell>;
 }
 
 function Allowed({ access, children }) {
@@ -60,7 +92,9 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <SessionProvider>
-        <RouterProvider router={router} />
+        <FeedbackProvider>
+          <RouterProvider router={router} />
+        </FeedbackProvider>
       </SessionProvider>
     </QueryClientProvider>
   );

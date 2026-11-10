@@ -23,7 +23,7 @@ const SHELL_HEADERS = { 'Cache-Control': 'no-cache', 'Content-Security-Policy': 
  * The page itself holds no business data, so anyone may load it; the data comes from /api/v1, which checks
  * who is asking. Any path that isn't a file is a page of the app, so deep links and reloads work.
  *
- * ADMIN_UI=console switches it on. Until the React app has replaced them, /admin stays the old server-rendered pages.
+ * ADMIN_UI=console mounts it here; for any other value src/routes/admin.js mounts the same app, so /admin is the console either way.
  */
 export const adminConsole = {
   name: 'admin-console',

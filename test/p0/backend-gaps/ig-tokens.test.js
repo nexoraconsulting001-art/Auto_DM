@@ -200,10 +200,14 @@ test('with no token nothing is sent, and the activity log says why', async () =>
 
 test('the admin reads Instagram with the business\'s own account, and each business has its own status', async () => {
   const { login } = await import('../../helpers.js');
-  const app = await startApp();
+  const { withConsoleApi } = await import('../console-port/support/console-api.js');
+  const app = await startApp({ modules: withConsoleApi() });
+  const stepsDone = (setup) => setup.checklist.steps.filter((step) => step.done).length;
   try {
     const { cookie } = await login(app.base);
-    assert.match(await (await fetch(`${app.base}/admin`, { headers: { cookie } })).text(), /1 of 6 done/);
+    const own = await (await fetch(`${app.base}/api/v1/settings/setup`, { headers: { cookie } })).json();
+    assert.equal(stepsDone(own), 1);
+    assert.equal(own.instagram.connected, true);
     assert.deepEqual(app.ig.accounts, []);
 
     const other = await app.platform.tenants.create({ slug: 'leaf', name: 'Leaf' });
@@ -212,9 +216,9 @@ test('the admin reads Instagram with the business\'s own account, and each busin
     const host = { 'x-forwarded-host': 'leaf.bhava.test' };
     const res = await fetch(`${app.base}/login`, { method: 'POST', headers: host, body: new URLSearchParams({ phone: '9000000009', password: 'leaf-owner' }), redirect: 'manual' });
     const leafCookie = res.headers.get('set-cookie').split(';')[0];
-    const dash = await (await fetch(`${app.base}/admin`, { headers: { ...host, cookie: leafCookie } })).text();
-    assert.match(dash, /0 of 6 done/, 'another business is not connected just because the first one is');
-    assert.match(dash, /Instagram isn’t connected yet/);
+    const setup = await (await fetch(`${app.base}/api/v1/settings/setup`, { headers: { ...host, cookie: leafCookie } })).json();
+    assert.equal(stepsDone(setup), 0, 'another business is not connected just because the first one is');
+    assert.equal(setup.instagram.connected, false);
   } finally {
     app.close();
   }

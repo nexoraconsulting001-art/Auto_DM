@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { requirePlatformRole } from '../../../src/auth.js';
 import { MODULES } from '../../../src/modules/index.js';
 import { OWNER, login, setup, startApp } from '../../helpers.js';
+import { withConsoleApi } from '../console-port/support/console-api.js';
 import { at, dbAtMigration, json } from './support.js';
 
 const PLATFORM_HOST = 'admin.bhava.test';
@@ -54,17 +55,17 @@ test('the migration turns old admins into owners and keeps customers', async () 
 });
 
 test('staff are kept out of the admin panel until permissions exist, and cannot be reset from it', async () => {
-  const app = await startApp();
+  const app = await startApp({ modules: withConsoleApi() });
   try {
     const staff = await app.repos.users.create({ name: 'Staff', phone: '9000000003', password: 'secret1', role: 'staff' });
     const s = await login(app.base, { phone: '9000000003', password: 'secret1' });
-    const res = await fetch(`${app.base}/admin`, { headers: { cookie: s.cookie }, redirect: 'manual' });
-    assert.equal(res.status, 302);
-    assert.equal(res.headers.get('location'), '/account');
+    const res = await fetch(`${app.base}/api/v1/products`, { headers: { cookie: s.cookie }, redirect: 'manual' });
+    assert.equal(res.status, 403);
     assert.equal(s.location, '/account');
 
-    const o = await login(app.base, { csrfPage: '/admin/customers' });
-    await fetch(`${app.base}/admin/customers/${staff.id}/reset`, { method: 'POST', headers: { cookie: o.cookie }, body: new URLSearchParams({ _csrf: o.csrf }), redirect: 'manual' });
+    const o = await login(app.base);
+    const reset = await fetch(`${app.base}/api/v1/customers/${staff.id}/reset-password`, { method: 'POST', headers: { cookie: o.cookie, 'x-csrf-token': o.csrf }, redirect: 'manual' });
+    assert.notEqual(reset.status, 200);
     assert.ok(await app.repos.users.verify('9000000003', 'secret1'), 'password unchanged');
   } finally {
     app.close();
@@ -129,9 +130,8 @@ test('platform users can sign in only on the platform host', async () => {
     assert.equal((await fetch(`${app.base}/raw-export`, { redirect: 'manual' })).status, 404);
 
     const { cookie } = await signIn(app, ADMIN);
-    const onBusiness = await fetch(`${app.base}/admin`, { headers: { cookie }, redirect: 'manual' });
-    assert.equal(onBusiness.status, 302, 'a platform session means nothing on a business site');
-    assert.match(onBusiness.headers.get('location'), /^\/login/);
+    const onBusiness = await fetch(`${app.base}/api/v1/auth/me`, { headers: { cookie }, redirect: 'manual' });
+    assert.equal(onBusiness.status, 401, 'a platform session means nothing on a business site');
     assert.equal((await fetch(`${app.base}/raw-export`, { headers: { cookie }, redirect: 'manual' })).status, 404);
   } finally {
     app.close();

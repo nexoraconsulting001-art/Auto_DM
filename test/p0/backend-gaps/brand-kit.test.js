@@ -161,20 +161,21 @@ test('buyer pages never name the platform', async () => {
   }
 });
 
-test('the admin form still sets the logo and accent, now in the kit', async () => {
+test('the console still sets the logo and accent, now in the kit', async () => {
   const { login } = await import('../../helpers.js');
-  const app = await startApp();
+  const { withConsoleApi } = await import('../console-port/support/console-api.js');
+  const app = await startApp({ modules: withConsoleApi() });
   try {
-    const { cookie, csrf } = await login(app.base, { csrfPage: '/admin/settings' });
-    const res = await fetch(`${app.base}/admin/settings`, {
-      method: 'POST', headers: { cookie }, redirect: 'manual',
-      body: new URLSearchParams({ _csrf: csrf, store_name: 'Kesar', logo_url: 'https://cdn.example/k.png', accent_color: '#112233' }),
+    const { cookie, csrf } = await login(app.base);
+    const res = await fetch(`${app.base}/api/v1/brand-kit`, {
+      method: 'PATCH', headers: { cookie, 'x-csrf-token': csrf, 'content-type': 'application/json' }, redirect: 'manual',
+      body: JSON.stringify({ logoUrl: 'https://cdn.example/k.png', colors: { accent: '#112233' } }),
     });
-    assert.equal(res.status, 303);
+    assert.equal(res.status, 200);
     const kit = await app.repos.brandKit.get();
     assert.equal(kit.logoUrl, 'https://cdn.example/k.png');
     assert.equal(kit.colors.accent, '#112233');
-    assert.match(await (await fetch(`${app.base}/admin/settings`, { headers: { cookie } })).text(), /value="#112233"/);
+    assert.equal((await (await fetch(`${app.base}/api/v1/brand-kit`, { headers: { cookie } })).json()).colors.accent, '#112233');
   } finally {
     app.close();
   }
