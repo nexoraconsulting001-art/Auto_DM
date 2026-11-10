@@ -3,7 +3,8 @@
  *
  *   { "error": "A sentence to show a person", "code": "not_found", "fields": { "name": "Name is required" }, "requestId": "..." }
  *
- * `fields` appears only on validation failures and `requestId` whenever the request has one.
+ * `fields` appears only on validation failures and `requestId` whenever the request has one. `reason` appears when
+ * a compliance rule refused the request, and is its reason code (src/contracts/compliance.js).
  * Programs branch on `code`; people read `error`.
  */
 export const ERROR_STATUS = Object.freeze({
@@ -37,12 +38,13 @@ const DEFAULT_MESSAGE = {
 
 /** Throw from a route handler to answer with this error. `fields` maps field names to messages. */
 export class ApiError extends Error {
-  constructor(code, message = DEFAULT_MESSAGE[code], { fields } = {}) {
+  constructor(code, message = DEFAULT_MESSAGE[code], { fields, reason } = {}) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
     this.status = ERROR_STATUS[code];
     this.fields = fields;
+    this.reason = reason;
   }
 }
 

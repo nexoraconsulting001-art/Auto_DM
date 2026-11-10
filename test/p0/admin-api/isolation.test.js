@@ -2,9 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { routeList } from '../../../src/contracts/api/index.js';
-import { adminApi } from '../../../src/modules/admin-api/index.js';
 import { adminListsRepo } from '../../../src/modules/admin-api/repo.js';
-import { apiAuth } from '../../../src/modules/api-auth/index.js';
+import { MODULES } from '../../../src/modules/index.js';
 import { NoTenantError, withTenant } from '../../../src/tenancy.js';
 import { REEL_ID, openTestDb } from '../../helpers.js';
 import { capturingLogs, ok, placeOrder, refused, secondBusiness, withApp } from './support.js';
@@ -29,8 +28,8 @@ async function staffApp(role, permissions, run) {
   })();
 }
 
-test('every route in the contract is answered', () => {
-  const answered = new Set([...Object.keys(adminApi.api({ repos: {}, config: {}, ig: {} })), ...Object.keys(apiAuth.api({ repos: {}, auth: {} }))]);
+test('every route in the contract is answered, by exactly one module', () => {
+  const answered = MODULES.flatMap((module) => Object.keys(module.api?.({ repos: {}, config: {}, ig: {}, auth: {} }) ?? {}));
   assert.deepEqual([...answered].sort(), routeList.map((r) => r.id).sort());
 });
 

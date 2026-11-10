@@ -1,9 +1,9 @@
 /**
  * The Meta simulator's own controls, under /__sim. Tests use these to play the part of Instagram's users:
  *
- *   POST /app                  { id, secret, verifyToken, webhookUrl, deauthorizeUrl, deletionUrl, redirectUris, oauthShape, rotateOnRefresh, echoes }
+ *   POST /app                  { id, secret, verifyToken, webhookUrl, deauthorizeUrl, deletionUrl, redirectUris, oauthShape, rotateOnRefresh, echoes, accessLevel }
  *   POST /limits               any key of LIMITS, to shrink a budget
- *   POST /accounts             { igUserId, username, token?, scopes?, subscribedFields?, impressions?, ... }, returns its token
+ *   POST /accounts             { igUserId, username, token?, scopes?, subscribedFields?, impressions?, appRole?, ... }, returns its token
  *   POST /tokens               { igUserId, kind?, value?, scopes?, issuedAt?, ttlMs? }
  *   POST /tokens/expire        { token }
  *   POST /tokens/revoke        { token } or { igUserId }
@@ -11,9 +11,11 @@
  *   POST /media                { igUserId, id?, caption?, productType?, ... }
  *   POST /insights             { id, metrics: { reach: 10 } }; id is a media or account id
  *   POST /usage                { igUserId, percent, regainMinutes? }; percent null goes back to counting
- *   POST /people               { igUserId, id, unavailable }
+ *   POST /people               { igUserId, id, unavailable?, name?, username? }: name or username makes the profile readable
  *   POST /comments             { igUserId, mediaId, from: { id, username }, text, id?, parentId?, at? }
- *   POST /comments/delete      { id }
+ *   POST /comments/delete      { id, notify? }: notify also sends a webhook (verb "remove"); whether Meta does is to confirm
+ *   POST /comments/edit        { id, text, notify? }: the same, with verb "edited"
+ *   POST /owner-replies        { igUserId, to, text, at? }: the owner types in the Instagram app, which comes back as an echo
  *   POST /messages             { igUserId, from, text, at? }: a person DMs the business
  *   POST /postbacks            { igUserId, from, payload, title?, at? }: a person taps a button
  *   POST /story-replies        { igUserId, from, text, storyId?, url?, at? }
@@ -153,7 +155,8 @@ export function controlRoutes(on, ctx) {
 
   on('POST', '/people', ({ body }) => {
     const who = person(ctx, needAccount(body.igUserId).igUserId, requireId(body.id, 'id'));
-    who.unavailable = Boolean(body.unavailable);
+    if (body.unavailable !== undefined) who.unavailable = Boolean(body.unavailable);
+    if (body.name !== undefined || body.username !== undefined) who.profile = { id: String(body.id), name: body.name, username: body.username };
     return { ok: true };
   });
 
@@ -175,11 +178,35 @@ export function controlRoutes(on, ctx) {
     return { comment: { id, at }, delivery };
   });
 
-  on('POST', '/comments/delete', ({ body }) => {
+  const notifyComment = (comment, verb) => {
+    const media = ctx.s.media.get(comment.mediaId);
+    const value = { from: comment.from, media: { id: media.id, media_product_type: media.productType }, id: comment.id, ...(comment.parentId ? { parent_id: comment.parentId } : {}), text: comment.text, verb };
+    return emit(ctx, ctx.s.accounts.get(comment.igUserId), 'comments', { id: comment.igUserId, time: toSeconds(now()), changes: [{ field: 'comments', value }] });
+  };
+
+  on('POST', '/comments/delete', async ({ body }) => {
     const comment = ctx.s.comments.get(requireId(body.id, 'id'));
     if (!comment) throw refuse('No such comment.', 404);
     comment.deleted = true;
-    return { ok: true };
+    return { ok: true, ...(body.notify ? { delivery: await notifyComment(comment, 'remove') } : {}) };
+  });
+
+  on('POST', '/comments/edit', async ({ body }) => {
+    const comment = ctx.s.comments.get(requireId(body.id, 'id'));
+    if (!comment) throw refuse('No such comment.', 404);
+    if (typeof body.text !== 'string') throw refuse('text is required.');
+    comment.text = body.text;
+    return { ok: true, ...(body.notify ? { delivery: await notifyComment(comment, 'edited') } : {}) };
+  });
+
+  on('POST', '/owner-replies', async ({ body }) => {
+    const account = needAccount(body.igUserId);
+    if (typeof body.text !== 'string') throw refuse('text is required.');
+    const to = requireId(body.to, 'to');
+    const at = eventTime(body);
+    const mid = `m_owner_${nextId(ctx)}`;
+    const event = { sender: { id: account.igUserId }, recipient: { id: to }, timestamp: at, message: { mid, is_echo: true, text: body.text } };
+    return { mid, delivery: await emit(ctx, account, 'messages', { id: account.igUserId, time: at, messaging: [event] }, deliveryOptions(body)) };
   });
 
   on('POST', '/messages', async ({ body }) => {
@@ -252,7 +279,7 @@ export function controlRoutes(on, ctx) {
   on('GET', '/webhooks', () => ({ deliveries: ctx.s.deliveries.map(deliveryView), held: ctx.s.held }));
 
   on('GET', '/sent', ({ query }) => ({
-    sent: ctx.s.sent.filter((m) => (!query.igUserId || m.igUserId === query.igUserId) && (!query.recipientId || m.recipientId === query.recipientId) && (!query.commentId || m.commentId === query.commentId) && (!query.kind || m.kind === query.kind)),
+    sent: ctx.s.sent.filter((m) => (!query.igUserId || m.igUserId === query.igUserId) && (!query.pageId || m.pageId === query.pageId) && (!query.recipientId || m.recipientId === query.recipientId) && (!query.commentId || m.commentId === query.commentId) && (!query.kind || m.kind === query.kind)),
   }));
 
   on('POST', '/deauthorize', async ({ body }) => {

@@ -1,7 +1,10 @@
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { config as defaultConfig } from './config.js';
+import { createMetaAdapters } from './adapters/meta/index.js';
 import { openRuntimeDb } from './db/index.js';
+import { createInstagram } from './instagram.js';
+import { createCompliance } from './modules/compliance/index.js';
 import { MODULES } from './modules/index.js';
 import { createRepos } from './repos/index.js';
 import { backupStorage, runBackup } from './backup.js';
@@ -21,7 +24,7 @@ export async function housekeeping({ db, queue }) {
 }
 
 /** Registers every background job: the system's own, then each module's (see src/modules/index.js). */
-export function registerJobs({ db, platform, config, modules = MODULES }) {
+export function registerJobs({ db, platform, config, modules = MODULES, ig = createInstagram(config) }) {
   const { queue, metrics } = platform;
   queue.work(HOUSEKEEPING, () => housekeeping({ db, queue }));
 
@@ -37,7 +40,9 @@ export function registerJobs({ db, platform, config, modules = MODULES }) {
   }
 
   const repos = createRepos(db, { storage: platform.storage, secrets: platform.secrets, modules });
-  const moduleSchedules = modules.map((m) => m.jobs?.({ db, repos, platform, config })).filter((s) => typeof s === 'function');
+  const meta = createMetaAdapters(config);
+  const compliance = createCompliance({ db, repos, ig, meta, config, platform });
+  const moduleSchedules = modules.map((m) => m.jobs?.({ db, repos, platform, config, ig, meta, compliance })).filter((s) => typeof s === 'function');
 
   /** Called every minute by every worker. Each job still runs only once per interval. */
   return async function schedule() {

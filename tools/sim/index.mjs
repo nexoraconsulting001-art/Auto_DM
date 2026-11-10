@@ -68,10 +68,12 @@ async function main() {
     options: {
       meta: {
         app: {
+          id: env.IG_APP_ID || undefined,
           secret: env.APP_SECRET || undefined,
           verifyToken: env.VERIFY_TOKEN || undefined,
           webhookUrl: env.SIM_WEBHOOK_URL || `http://127.0.0.1:${env.PORT || 3000}/webhook`,
         },
+        facebookApp: { id: env.FB_APP_ID || undefined, secret: env.FB_APP_SECRET || undefined },
       },
     },
   });

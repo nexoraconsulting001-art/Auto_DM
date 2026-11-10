@@ -1,13 +1,14 @@
-import crypto from 'node:crypto';
 import path from 'node:path';
 import express from 'express';
 import { pathToFileURL } from 'node:url';
 import { config as defaultConfig } from './config.js';
 import { openRuntimeDb } from './db/index.js';
 import { createRepos } from './repos/index.js';
+import { createMetaAdapters, verifyHubSignature } from './adapters/meta/index.js';
 import { createAuth } from './auth.js';
 import { handleComment } from './handler.js';
-import { createInstagram, forAccount } from './instagram.js';
+import { createInstagram } from './instagram.js';
+import { createCompliance } from './modules/compliance/index.js';
 import { MODULES } from './modules/index.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes, baseUrlFor, tenantBaseUrl } from './routes/admin.js';
@@ -18,12 +19,7 @@ import { createPlatform, describePlatform } from './platform/index.js';
 import { log, reportError, requestIds } from './platform/log.js';
 import { apiRoutes, mediaRoutes, storeRoutes } from './routes/store.js';
 
-export function verifySignature(rawBody, header, secret) {
-  if (!secret || !header?.startsWith('sha256=')) return false;
-  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-  const given = header.slice('sha256='.length);
-  return given.length === expected.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
-}
+export const verifySignature = verifyHubSignature;
 
 /**
  * Builds the web app. `db` comes from openDb(); `platform` (storage, queue, analytics, cache, metrics,
@@ -34,7 +30,9 @@ export function createApp({ db, config = defaultConfig, ig = createInstagram(con
   const repos = createRepos(db, { storage: platform.storage, secrets: platform.secrets, modules });
   const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions, tenants: repos.tenants, cache: platform.cache });
   const tenants = createTenantResolver({ tenants: repos.tenants, platformDomain: config.platformDomain, defaultTenant: config.defaultTenant });
-  const ctx = { db, repos, ig, auth, config, platform, modules };
+  const meta = createMetaAdapters(config);
+  const compliance = createCompliance({ db, repos, ig, meta, config, platform });
+  const ctx = { db, repos, ig, meta, compliance, auth, config, platform, modules };
 
   /** The business that owns an Instagram account: linked accounts first, then the default business. */
   async function tenantForIgAccount(igUserId) {
@@ -73,6 +71,9 @@ export function createApp({ db, config = defaultConfig, ig = createInstagram(con
       Object.entries(counts).map(([status, value]) => ({ labels: { queue, status }, value }))));
   app.get('/metrics', platform.metrics.handler(config.metricsToken));
 
+  // Modules come first, so a module's POST /webhook replaces the routes below.
+  for (const module of modules) module.beforeTenant?.(app, ctx);
+
   // Meta webhook verification handshake
   app.get('/webhook', (req, res) => {
     if (req.query['hub.mode'] === 'subscribe' && config.verifyToken && req.query['hub.verify_token'] === config.verifyToken) {
@@ -104,7 +105,7 @@ export function createApp({ db, config = defaultConfig, ig = createInstagram(con
           try {
             // Every DM goes out with the token of the Instagram account the comment arrived on.
             const account = await repos.igAccounts.get(entry.id);
-            const client = account?.token ? forAccount(ig, account) : null;
+            const client = account?.token ? compliance.clientFor(account) : null;
             const result = await handleComment(change.value, { repos, ig: client, ownIds, storeUrl, oneDmPerUser: config.oneDmPerUser });
             log.info('webhook.comment', { comment: change.value?.id, media: change.value?.media?.id, result });
             platform.metrics.inc('webhook_comments_total', { result: result.split(':')[0] });
@@ -115,8 +116,6 @@ export function createApp({ db, config = defaultConfig, ig = createInstagram(con
       });
     }
   });
-
-  for (const module of modules) module.beforeTenant?.(app, ctx);
 
   // A bearer token names its own user and business, so it is checked before the web address is looked at.
   app.use(auth.bearer);

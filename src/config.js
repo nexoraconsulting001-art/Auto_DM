@@ -11,8 +11,22 @@ export const config = {
   appSecret: process.env.APP_SECRET || '',
   verifyToken: process.env.VERIFY_TOKEN || '',
   graphVersion: process.env.GRAPH_VERSION || 'v23.0',
-  // Empty is Instagram itself. Tests and local runs point this at a simulator.
+  // Empty is Instagram itself. Tests and local runs point this at a simulator, and the Meta addresses below follow it.
   graphBaseUrl: process.env.GRAPH_BASE_URL || '',
+  igDialogBaseUrl: process.env.IG_DIALOG_BASE_URL || '',
+  igApiBaseUrl: process.env.IG_API_BASE_URL || '',
+  fbGraphBaseUrl: process.env.FB_GRAPH_BASE_URL || '',
+  fbDialogBaseUrl: process.env.FB_DIALOG_BASE_URL || '',
+  metaTimeoutMs: Number(process.env.META_TIMEOUT_MS) || 10_000,
+  // The one address registered with Meta for login redirects and callbacks. Empty means PUBLIC_BASE_URL.
+  metaCallbackBaseUrl: (process.env.META_CALLBACK_BASE_URL || process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, ''),
+  // Which login connects Instagram: 'instagram' (Instagram Login) or 'unified' (Facebook Login for Business).
+  metaLogin: process.env.META_LOGIN || 'instagram',
+  igAppId: process.env.IG_APP_ID || '',
+  // Facebook Login is a separate Meta app. It is used for Facebook Pages, and for Instagram when META_LOGIN=unified.
+  fbAppId: process.env.FB_APP_ID || '',
+  fbAppSecret: process.env.FB_APP_SECRET || '',
+  facebookPages: process.env.FACEBOOK_PAGES === '1',
   dryRun: process.env.DRY_RUN === '1',
   oneDmPerUser: process.env.ONE_DM_PER_USER === '1',
   // Web

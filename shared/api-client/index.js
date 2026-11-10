@@ -12,12 +12,13 @@
  */
 export class ApiError extends Error {
   /** `status` is 0 when the server could not be reached; `code` is from the API's error format. */
-  constructor({ status, code, message, fields, requestId }) {
+  constructor({ status, code, message, fields, reason, requestId }) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.fields = fields ?? {};
+    this.reason = reason;
     this.requestId = requestId;
   }
 }
@@ -41,6 +42,7 @@ async function toError(response) {
     code: body?.code ?? 'internal',
     message: body?.error ?? SERVER_FAULT,
     fields: body?.fields,
+    reason: body?.reason,
     requestId: body?.requestId,
   });
 }
@@ -164,6 +166,108 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, onUnauthorized,
         form.append('file', file);
         return request('POST', '/media', { form });
       },
+    },
+    instagram: {
+      connection: () => get('/instagram/connection'),
+      /** @returns { authorizeUrl }: send the owner there */
+      connect: (body) => post('/instagram/connect', body),
+      disconnect: () => del('/instagram/connection'),
+      /** @param query { type?: 'all' | 'reel' | 'post' | 'story', cursor?, limit? } */
+      media: (query) => get('/instagram/media', query),
+    },
+    compliance: {
+      status: () => get('/compliance/status'),
+      /** @param body { pauseStore? } */
+      pause: (body) => post('/compliance/pause', body),
+      resume: () => post('/compliance/resume'),
+      settings: () => get('/compliance/settings'),
+      updateSettings: (body) => patch('/compliance/settings', body),
+      /** @param query { reason?, outcome?, automationId?, mediaId?, cursor?, limit? } */
+      activity: (query) => get('/compliance/activity', query),
+      /** @param query { commentId } */
+      whyNoDm: (query) => get('/compliance/why-no-dm', query),
+      heldJobs: (query) => get('/compliance/held-jobs', query),
+      /** @param body { automationId? }: every held job when it is left out */
+      discardHeld: (body) => post('/compliance/held-jobs/discard', body),
+      /** @param body { confirmation }: what the owner typed */
+      slowModeOverride: (body) => post('/compliance/slow-mode/override', body),
+      /** @param query { list: 'optout' | 'negative' | 'handoff' } */
+      words: (query) => get('/compliance/words', query),
+      addWord: (body) => post('/compliance/words', body),
+      removeWord: (wordId) => del(`/compliance/words/${id(wordId)}`),
+    },
+    automations: {
+      list: (query) => get('/automations', query),
+      create: (body) => post('/automations', body),
+      /** Checks a message as it is typed. */
+      preview: (body) => post('/automations/preview', body),
+      get: (automationId) => get(`/automations/${id(automationId)}`),
+      update: (automationId, body) => patch(`/automations/${id(automationId)}`, body),
+      remove: (automationId) => del(`/automations/${id(automationId)}`),
+      /** @param body { state } */
+      setState: (automationId, body) => post(`/automations/${id(automationId)}/state`, body),
+      /** @param body { variantId } */
+      pickWinner: (automationId, body) => post(`/automations/${id(automationId)}/winner`, body),
+      stats: (automationId) => get(`/automations/${id(automationId)}/stats`),
+      /** @param body { testerId, variantLabel? } */
+      sendTest: (automationId, body) => post(`/automations/${id(automationId)}/send-test`, body),
+    },
+    testers: {
+      list: (query) => get('/testers', query),
+      /** @returns { code, expiresAt }: the tester DMs the code to the business */
+      createCode: (body) => post('/testers/codes', body),
+      remove: (testerId) => del(`/testers/${id(testerId)}`),
+    },
+    iceBreakers: {
+      get: () => get('/ice-breakers'),
+      save: (body) => put('/ice-breakers', body),
+    },
+    inbox: {
+      /** @param query { status?, cursor?, limit? } */
+      threads: (query) => get('/inbox/threads', query),
+      thread: (threadId) => get(`/inbox/threads/${id(threadId)}`),
+      /** @param body { text } @returns { outcome, reason, automationPausedUntil } */
+      reply: (threadId, body) => post(`/inbox/threads/${id(threadId)}/reply`, body),
+      needsHuman: (query) => get('/inbox/needs-human', query),
+      resolve: (itemId) => post(`/inbox/needs-human/${id(itemId)}/resolve`),
+    },
+    links: {
+      /** @returns { finalUrl, linkType, allowed, reason, warnings }: the exact address the shopper will open */
+      preview: (body) => post('/links/preview', body),
+      check: (body) => post('/links/check', body),
+      /** @param query { automationId?, cursor?, limit? } */
+      taps: (query) => get('/links/taps', query),
+    },
+    measurementIds: {
+      /** @param query { mediaId?, cursor?, limit? } */
+      list: (query) => get('/measurement-ids', query),
+      create: (body) => post('/measurement-ids', body),
+      update: (measurementId, body) => patch(`/measurement-ids/${id(measurementId)}`, body),
+      remove: (measurementId) => del(`/measurement-ids/${id(measurementId)}`),
+    },
+    facebook: {
+      connection: () => get('/facebook/connection'),
+      connect: (body) => post('/facebook/connect', body),
+      disconnect: () => del('/facebook/connection'),
+      posts: (query) => get('/facebook/posts', query),
+      links: (query) => get('/facebook/links', query),
+      suggestions: () => get('/facebook/link-suggestions'),
+      /** @param body { igMediaId } */
+      saveLink: (postId, body) => put(`/facebook/links/${id(postId)}`, body),
+      removeLink: (postId) => del(`/facebook/links/${id(postId)}`),
+    },
+    domains: {
+      list: (query) => get('/domains', query),
+      /** @param body { domain } @returns the domain, with the DNS records to add */
+      add: (body) => post('/domains', body),
+      /** @param body { domain } */
+      setPrimary: (body) => put('/domains/primary', body),
+      check: (domain) => post(`/domains/${id(domain)}/check`),
+      remove: (domain) => del(`/domains/${id(domain)}`),
+    },
+    alerts: {
+      list: (query) => get('/alerts', query),
+      markRead: (alertId) => post(`/alerts/${id(alertId)}/read`),
     },
   };
 }

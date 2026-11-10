@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { reply, SimError } from '../base.mjs';
 import { isLoopbackUrl } from '../guard.mjs';
 import { ERRORS, SCOPES, graphError, toSeconds } from './constants.mjs';
+import { facebookExchange } from './facebook.mjs';
 import { input, issueToken, liveToken, requestToken } from './state.mjs';
 
 const KNOWN_SCOPES = new Set(Object.values(SCOPES));
@@ -51,6 +52,8 @@ export function oauthRoutes(on, ctx) {
   });
 
   on('POST', '/oauth/access_token', (req) => {
+    const facebook = facebookExchange(ctx, req);
+    if (facebook) return facebook;
     const { client_id: clientId, client_secret: clientSecret, grant_type: grantType, redirect_uri: redirectUri, code } = input(req);
     const { app } = ctx.s;
     if (clientId !== app.id) throw oauthError('Invalid platform app');

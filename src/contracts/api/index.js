@@ -1,9 +1,17 @@
 import { activityRoutes } from './activity.js';
+import { alertRoutes } from './alerts.js';
 import { auditRoutes } from './audit.js';
 import { authRoutes } from './auth.js';
+import { automationRoutes } from './automations.js';
 import { brandKitRoutes } from './brand-kit.js';
 import { categoryRoutes } from './categories.js';
+import { complianceRoutes } from './compliance.js';
 import { customerRoutes } from './customers.js';
+import { domainRoutes } from './domains.js';
+import { facebookRoutes } from './facebook.js';
+import { inboxRoutes } from './inbox.js';
+import { instagramRoutes } from './instagram.js';
+import { linkRoutes } from './links.js';
 import { mediaRoutes } from './media.js';
 import { orderRoutes } from './orders.js';
 import { productRoutes } from './products.js';
@@ -42,21 +50,39 @@ export const routes = Object.freeze({
   ...statRoutes,
   ...mediaRoutes,
   ...auditRoutes,
+  ...instagramRoutes,
+  ...complianceRoutes,
+  ...automationRoutes,
+  ...inboxRoutes,
+  ...linkRoutes,
+  ...facebookRoutes,
+  ...domainRoutes,
+  ...alertRoutes,
 });
 
 export const routeList = Object.freeze(Object.entries(routes).map(([id, route]) => Object.freeze({ id, ...route })));
 
 export * from './access.js';
 export * from './activity.js';
+export * from './alerts.js';
 export * from './audit.js';
 export * from './auth.js';
+export * from './automations.js';
 export * from './brand-kit.js';
 export * from './categories.js';
 export * from './common.js';
+export * from './compliance.js';
 export * from './customers.js';
+export * from './domains.js';
 export * from './errors.js';
+export * from './facebook.js';
+export * from './inbox.js';
+export * from './instagram.js';
+export * from './links.js';
 export * from './media.js';
 export * from './orders.js';
+export * from './platform.js';
+export * from './provider.js';
 export * from './products.js';
 export * from './reels.js';
 export * from './settings.js';

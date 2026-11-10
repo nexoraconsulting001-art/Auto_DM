@@ -28,8 +28,11 @@ export function freshState(options = {}) {
       oauthShape: 'documented',
       rotateOnRefresh: false,
       echoes: true,
+      // 'standard': only accounts with an app role work, as before App Review (PRD 4.15).
+      accessLevel: 'advanced',
       ...withoutUndefined(options.app),
     }),
+    facebookApp: checkAppConfig({ id: 'sim-fb-app', secret: 'sim-fb-app-secret', webhookUrl: '', redirectUris: [], ...withoutUndefined(options.facebookApp) }),
     limits: { ...LIMITS, ...withoutUndefined(options.limits) },
     accounts: new Map(),
     tokens: new Map(),
@@ -38,6 +41,11 @@ export function freshState(options = {}) {
     comments: new Map(),
     people: new Map(),
     insights: new Map(),
+    iceBreakers: new Map(),
+    pages: new Map(),
+    pagePosts: new Map(),
+    pageComments: new Map(),
+    nextFacebookLogin: null,
     sent: [],
     deliveries: [],
     held: [],
@@ -50,7 +58,7 @@ export function freshState(options = {}) {
 /** Numeric, like Instagram's own ids. */
 export const nextId = (ctx) => String(17_900_000_000_000_000n + BigInt(++ctx.s.seq));
 
-export function makeAccount({ igUserId, appScopedId, username, name, accountType, followersCount, followsCount, biography, website, profilePictureUrl, impressions, subscribedFields }) {
+export function makeAccount({ igUserId, appScopedId, username, name, accountType, followersCount, followsCount, biography, website, profilePictureUrl, impressions, subscribedFields, appRole }) {
   return {
     igUserId,
     // Instagram Login gives one person two ids: /me `id` and the code exchange's user_id are app-scoped; /me `user_id` is the id webhooks carry.
@@ -65,6 +73,7 @@ export function makeAccount({ igUserId, appScopedId, username, name, accountType
     profilePictureUrl: profilePictureUrl ?? '',
     impressions: impressions ?? 1,
     subscribedFields: new Set(subscribedFields ?? []),
+    appRole: Boolean(appRole),
     privateReplyTimes: [],
     sendTimes: [],
     bucTimes: [],
@@ -111,7 +120,7 @@ export function revokeAccountTokens(ctx, account) {
 /** What Meta knows about one person, per business account: a window with one business opens nothing with another. */
 export function person(ctx, igUserId, igsid) {
   const key = `${igUserId}:${igsid}`;
-  if (!ctx.s.people.has(key)) ctx.s.people.set(key, { lastUserMessageAt: null, unavailable: false });
+  if (!ctx.s.people.has(key)) ctx.s.people.set(key, { lastUserMessageAt: null, unavailable: false, profile: null });
   return ctx.s.people.get(key);
 }
 
@@ -158,7 +167,10 @@ export function authenticate(ctx, req, scopes = []) {
   if (!value) throw graphError(ERRORS.TOKEN_MISSING);
   const token = liveToken(ctx, value);
   const account = ctx.s.accounts.get(token.igUserId);
+  // A Facebook user token, or a Page with no Instagram account, reaches nothing here.
+  if (!account) throw graphError(ERRORS.OBJECT_NOT_FOUND);
   req.account = account;
+  if (ctx.s.app.accessLevel === 'standard' && !account.appRole) throw graphError(ERRORS.PERMISSION, '(#200) This account has no role on the app, and the app has only Standard Access.');
   requireScopes(token, scopes);
   return { token, account };
 }

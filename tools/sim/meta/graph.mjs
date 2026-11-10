@@ -50,6 +50,12 @@ const COMMENT_FIELDS = {
   hidden: () => false,
 };
 
+const PERSON_FIELDS = {
+  id: (p) => p.id,
+  name: (p) => p.name,
+  username: (p) => p.username,
+};
+
 /** `fields=a,b{c,d}` selects a and b. Graph always adds id, and refuses a field the node does not have. */
 function project(ctx, node, table, typeName, fields) {
   const names = fields ? String(fields).match(/[^,{\s]+(?:\{[^}]*\})?/g)?.map((part) => part.split('{')[0]) ?? [] : [];
@@ -167,8 +173,50 @@ export function graphRoutes(on, ctx) {
     const { account } = authenticate(ctx, req, [SCOPES.basic]);
     chargeBuc(ctx, account);
     requireOwnAccount(req.params.id, account);
-    const items = newestFirst([...ctx.s.media.values()].filter((m) => m.igUserId === account.igUserId));
+    const items = newestFirst([...ctx.s.media.values()].filter((m) => m.igUserId === account.igUserId && m.productType !== 'STORY'));
     return paged(ctx, req, items, (m) => project(ctx, m, MEDIA_FIELDS, 'IGMedia', input(req).fields));
+  });
+
+  // Whether this edge exists under Instagram Login is to confirm (PRD 6.8). Stories are live for 24 hours.
+  on('GET', '/:id/stories', (req) => {
+    const { account } = authenticate(ctx, req, [SCOPES.basic]);
+    chargeBuc(ctx, account);
+    requireOwnAccount(req.params.id, account);
+    const liveSince = ctx.clock.now() - ctx.s.limits.storyMs;
+    const items = newestFirst([...ctx.s.media.values()].filter((m) => m.igUserId === account.igUserId && m.productType === 'STORY' && m.at > liveSince));
+    return paged(ctx, req, items, (m) => project(ctx, m, MEDIA_FIELDS, 'IGMedia', input(req).fields));
+  });
+
+  on('GET', '/:id/messenger_profile', (req) => {
+    const { account } = authenticate(ctx, req, [SCOPES.messages]);
+    requireOwnAccount(req.params.id, account);
+    const iceBreakers = ctx.s.iceBreakers.get(account.igUserId);
+    return { data: iceBreakers ? [{ ice_breakers: iceBreakers }] : [] };
+  });
+
+  on('POST', '/:id/messenger_profile', (req) => {
+    const { account } = authenticate(ctx, req, [SCOPES.messages]);
+    requireOwnAccount(req.params.id, account);
+    const { platform, ice_breakers: list } = input(req);
+    const iceBreakers = jsonParam(list);
+    if (platform !== 'instagram') throw invalid('Param platform must be instagram');
+    if (!Array.isArray(iceBreakers) || !iceBreakers.length) throw invalid('Param ice_breakers must be a non-empty array');
+    for (const { call_to_actions: actions } of iceBreakers) {
+      if (!Array.isArray(actions) || actions.length < 1 || actions.length > ctx.s.limits.iceBreakersMax) throw invalid(`Param call_to_actions must hold 1 to ${ctx.s.limits.iceBreakersMax} questions`);
+      for (const action of actions) {
+        if (typeof action?.question !== 'string' || !action.question.trim() || [...action.question].length > ctx.s.limits.iceBreakerQuestionChars) throw invalid(`Param question must be 1 to ${ctx.s.limits.iceBreakerQuestionChars} characters`);
+        if (typeof action.payload !== 'string' || !action.payload) throw invalid('Param payload must be a non-empty string');
+      }
+    }
+    ctx.s.iceBreakers.set(account.igUserId, iceBreakers);
+    return { success: true };
+  });
+
+  on('DELETE', '/:id/messenger_profile', (req) => {
+    const { account } = authenticate(ctx, req, [SCOPES.messages]);
+    requireOwnAccount(req.params.id, account);
+    ctx.s.iceBreakers.delete(account.igUserId);
+    return { success: true };
   });
 
   on('GET', '/:id/comments', (req) => {
@@ -258,6 +306,11 @@ export function graphRoutes(on, ctx) {
     if (media?.igUserId === account.igUserId) {
       requireScopes(token, [SCOPES.basic]);
       return project(ctx, media, MEDIA_FIELDS, 'IGMedia', fields);
+    }
+    const who = ctx.s.people.get(`${account.igUserId}:${id}`);
+    if (who?.profile) {
+      requireScopes(token, [SCOPES.messages]);
+      return project(ctx, who.profile, PERSON_FIELDS, 'IGUser', fields);
     }
     requireScopes(token, [SCOPES.comments]);
     return project(ctx, ownComment(ctx, id, account), COMMENT_FIELDS, 'IGComment', fields);

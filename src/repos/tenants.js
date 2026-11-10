@@ -41,7 +41,7 @@ export function tenantsRepo(handle) {
     async getByDomain(host) {
       const [row] = await db.query(
         `SELECT t.id, t.slug, t.name, t.status, t.plan, t.created_at FROM tenant_domains d JOIN tenants t ON t.id = d.tenant_id
-         WHERE d.domain = $1`,
+         WHERE d.domain = $1 AND d.status = 'verified'`,
         [normalizeHost(host)],
       );
       return row || null;

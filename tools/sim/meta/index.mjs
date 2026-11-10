@@ -1,6 +1,7 @@
 /**
- * Instagram and Meta, as Graph API for Instagram Login. One server plays www.instagram.com, api.instagram.com and
- * graph.instagram.com; point GRAPH_BASE_URL at it. Control routes are listed in control.mjs and base.mjs.
+ * Instagram and Meta, as Graph API for Instagram Login, plus Facebook Login and Pages (facebook.mjs). One server plays
+ * www.instagram.com, api.instagram.com, graph.instagram.com, www.facebook.com and graph.facebook.com; point GRAPH_BASE_URL
+ * at it. Control routes are listed in control.mjs, facebook.mjs and base.mjs.
  *
  * Enforced: token lifetimes and refresh rules, one private reply per comment, the 7-day and 24-hour windows, button
  * and text limits, per-account budgets, the BUC bucket, per-account isolation, and signed webhooks and callbacks.
@@ -8,6 +9,7 @@
 import { createSim } from '../base.mjs';
 import { controlRoutes } from './control.mjs';
 import { ERRORS, graphError, metaFaultBody } from './constants.mjs';
+import { facebookControls, facebookRoutes, withPages } from './facebook.mjs';
 import { graphRoutes } from './graph.mjs';
 import { oauthRoutes } from './oauth.mjs';
 import { freshState, graphHeaders } from './state.mjs';
@@ -15,7 +17,7 @@ import { freshState, graphHeaders } from './state.mjs';
 export { DEFAULT_SCOPES, ERRORS, LIMITS, SCOPES } from './constants.mjs';
 export { hubSignature, signedRequest } from './webhooks.mjs';
 
-/** options: { app: { id, secret, verifyToken, webhookUrl, ... }, limits: { ...LIMITS } } */
+/** options: { app: { id, secret, verifyToken, webhookUrl, ... }, facebookApp: { id, secret, webhookUrl, ... }, limits: { ...LIMITS } } */
 export function createMeta(options = {}) {
   const ctx = { s: freshState(options), clock: null, sim: null };
   const sim = createSim({
@@ -31,9 +33,13 @@ export function createMeta(options = {}) {
     },
     routes: (on) => {
       oauthRoutes(on, ctx);
-      graphRoutes(on, ctx);
+      facebookRoutes(on, ctx);
+      graphRoutes(withPages(on, ctx), ctx);
     },
-    controls: (on) => controlRoutes(on, ctx),
+    controls: (on) => {
+      controlRoutes(on, ctx);
+      facebookControls(on, ctx);
+    },
   });
   ctx.clock = sim.clock;
   ctx.sim = sim;

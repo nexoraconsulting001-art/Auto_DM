@@ -25,6 +25,7 @@ export function sendApiError(err, req, res) {
     error: failure.message,
     code: failure.code,
     ...(failure.fields ? { fields: failure.fields } : {}),
+    ...(failure.reason ? { reason: failure.reason } : {}),
     ...(requestId ? { requestId } : {}),
   });
 }

@@ -33,7 +33,7 @@ function signedHeaders(raw, secret, signature) {
 async function attempt(ctx, record) {
   record.attempts++;
   try {
-    const { status } = await callApp(ctx, record.url, { method: 'POST', headers: signedHeaders(record.raw, ctx.s.app.secret, record.signature), body: record.raw });
+    const { status } = await callApp(ctx, record.url, { method: 'POST', headers: signedHeaders(record.raw, record.secret ?? ctx.s.app.secret, record.signature), body: record.raw });
     record.status = status;
     record.ok = status >= 200 && status < 300;
     record.error = null;
@@ -47,10 +47,9 @@ async function attempt(ctx, record) {
 const outcome = (record) => ({ id: record.id, delivered: record.ok, attempts: record.attempts, status: record.status, ...(record.error ? { reason: record.error } : {}) });
 
 /** One POST of `raw`, repeated `duplicates` times with the same bytes (Meta redelivers). */
-async function sendRaw(ctx, raw, body, { duplicates = 1, signature = 'good' } = {}) {
-  const url = ctx.s.app.webhookUrl;
+async function sendRaw(ctx, raw, body, { duplicates = 1, signature = 'good', secret, url = ctx.s.app.webhookUrl } = {}) {
   const firstAttemptAt = ctx.clock.now();
-  const record = { id: ++ctx.s.seq, url, firstAttemptAt, attempts: 0, body, raw, signature, status: null, ok: false, error: url ? null : 'no_webhook_url' };
+  const record = { id: ++ctx.s.seq, url, firstAttemptAt, attempts: 0, body, raw, signature, secret, status: null, ok: false, error: url ? null : 'no_webhook_url' };
   ctx.s.deliveries.push(record);
   if (!url) return outcome(record);
   for (let i = 0; i < Math.max(1, duplicates); i++) await attempt(ctx, record);
@@ -60,15 +59,16 @@ async function sendRaw(ctx, raw, body, { duplicates = 1, signature = 'good' } = 
 export const deliverPayload = (ctx, payload, options) => sendRaw(ctx, JSON.stringify(payload), payload, options);
 export const deliverRawBody = (ctx, raw, options) => sendRaw(ctx, raw, null, options);
 
-/** Sends one entry if the account subscribed to `field`; options.deliver === false records nothing, options.hold batches it. */
+/** Sends one entry if the account subscribed to `field`; options.deliver === false records nothing, options.hold batches it. A Page passes object, secret and url. */
 export async function emit(ctx, account, field, entry, options = {}) {
   if (options.deliver === false) return { delivered: false, reason: 'not_requested' };
   if (!account.subscribedFields.has(field)) return { delivered: false, reason: 'not_subscribed' };
+  if (ctx.s.app.accessLevel === 'standard' && options.object !== 'page' && !account.appRole) return { delivered: false, reason: 'standard_access' };
   if (options.hold) {
     ctx.s.held.push(entry);
     return { delivered: false, reason: 'held' };
   }
-  return deliverPayload(ctx, { object: 'instagram', entry: [entry] }, options);
+  return deliverPayload(ctx, { object: options.object ?? 'instagram', entry: [entry] }, options);
 }
 
 /** Delivers everything held so far in POSTs of at most `batchSize` entries. */

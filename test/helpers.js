@@ -31,6 +31,7 @@ export function fakeIg({ failButton = false } = {}) {
       await sendButton(account, ...a);
     },
     sendPrivateReply: record('text'),
+    sendMessage: record('message'),
     replyToComment: record('reply'),
     listMedia: async () => ({ data: [{ id: REEL_ID, caption: 'Brunch look', media_product_type: 'REELS' }] }),
     getMedia: async (_account, id) => ({ id, caption: 'Brunch look', permalink: 'https://instagram.com/reel/x' }),
