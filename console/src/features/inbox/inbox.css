@@ -1,0 +1,104 @@
+/* The owner inbox. Phone first, tokens only. */
+.thread-row-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.thread-row-when {
+  display: block;
+  color: var(--ink-3);
+  font-size: var(--text-caption);
+}
+.bubbles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bubble {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 85%;
+  align-self: flex-start;
+}
+.bubble-out {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+.bubble-text {
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-tile);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.bubble-out .bubble-text {
+  border-color: transparent;
+  background: var(--neel-tint);
+}
+.bubble-meta {
+  color: var(--ink-3);
+  font-size: var(--text-caption);
+}
+.bubble-kind {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.inbox-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.needs-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-top: 1px solid var(--line-soft);
+}
+.needs-item:first-child {
+  border-top: 0;
+}
+.needs-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.needs-item-who {
+  min-width: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.needs-item-text {
+  overflow-wrap: anywhere;
+}
+.needs-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.why-answer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.why-code {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--ink-3);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+}
