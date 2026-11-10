@@ -225,7 +225,7 @@ test('N-16: opening a page with ?preview=1 in a browser is not a visit', async (
 
 test('N-67: pixel on and no answer from the shopper: the browser asks nothing of Meta or Google', async ({ page }) => {
   await setUp();
-  await shop.patch('/tags', { meta: { enabled: true, pixelId: '123456789', capiToken: 'token-1234567890' }, ga4: { enabled: true, measurementId: 'G-SPEC1234', apiSecret: 'secret-1234567890' } }, 200);
+  await shop.patch('/tags', { meta: { enabled: true, pixelId: '123456789', capiToken: 'token-1234567890' }, ga4: { enabled: true, measurementId: 'G-SPEC1234', apiSecret: 'secret-1234567890' } }, 200); // secret-scan:allow (made-up fixture values)
   const path = await reelPath();
   const seen = requestsOf(page);
   await page.goto(`${world.base}${path}`);
@@ -238,7 +238,7 @@ test('N-70: with one business\'s pixel on, another\'s page has none of it', asyn
   await setUp();
   world.consent.grant();
   const other = await addP2Shop(world, { slug: 'other-shop' });
-  await other.patch('/tags', { meta: { enabled: true, pixelId: '987654321', capiToken: 'token-1234567890' } }, 200);
+  await other.patch('/tags', { meta: { enabled: true, pixelId: '987654321', capiToken: 'token-1234567890' } }, 200); // secret-scan:allow (made-up fixture values)
   const res = await page.goto(`${world.base}${await reelPath()}`);
   expect(res.headers()['content-security-policy'] ?? '').not.toMatch(/facebook|google/i);
   expect(await page.content()).not.toContain('987654321');

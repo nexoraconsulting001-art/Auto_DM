@@ -101,7 +101,7 @@ test('thresholds and tags the owner saves are accepted; a manager is told "Owner
   assert.equal(saved.thresholds.mediaDropPercent, 45);
 
   const tags = await owner.tags.get();
-  const update = tagsBody({ metaEnabled: true, pixelId: '123456789', capiToken: 'token-1234567890', ga4Enabled: true, measurementId: 'g-spec1234', apiSecret: 'secret-1234567890' }, tags);
+  const update = tagsBody({ metaEnabled: true, pixelId: '123456789', capiToken: 'token-1234567890', ga4Enabled: true, measurementId: 'g-spec1234', apiSecret: 'secret-1234567890' }, tags); // secret-scan:allow (made-up fixture values)
   const after = await owner.tags.update(update.body);
   assert.equal(after.meta.enabled, true);
   assert.equal(after.meta.capiTokenSet, true);

@@ -407,13 +407,13 @@ test('PRD 7.12: a funnel needs a name, 2 to 8 steps in the catalogue, a page for
 
 test('PRD 7.14: the tag form sends only what changed, and a token or secret only when one is typed', () => {
   const current = { available: true, consentReady: false, meta: { enabled: false, pixelId: '', capiTokenSet: false }, ga4: { enabled: false, measurementId: '', apiSecretSet: false } };
-  const first = tagsBody({ metaEnabled: true, pixelId: '123456789', capiToken: 'token-1234567890', ga4Enabled: false, measurementId: '', apiSecret: '' }, current);
-  assert.deepEqual(first.body, { meta: { enabled: true, pixelId: '123456789', capiToken: 'token-1234567890' } });
+  const first = tagsBody({ metaEnabled: true, pixelId: '123456789', capiToken: 'token-1234567890', ga4Enabled: false, measurementId: '', apiSecret: '' }, current); // secret-scan:allow (made-up fixture values)
+  assert.deepEqual(first.body, { meta: { enabled: true, pixelId: '123456789', capiToken: 'token-1234567890' } }); // secret-scan:allow (made-up fixture values)
   assert.equal(TagSettingsUpdate.safeParse(first.body).success, true);
   const saved = { ...current, meta: { enabled: true, pixelId: '123456789', capiTokenSet: true } };
   assert.deepEqual(tagsBody({ metaEnabled: true, pixelId: '123456789', capiToken: '', ga4Enabled: false, measurementId: '', apiSecret: '' }, saved).body, {}, 'nothing changed, nothing sent');
-  const ga4 = tagsBody({ metaEnabled: true, pixelId: '123456789', capiToken: '', ga4Enabled: true, measurementId: 'g-abcd1234', apiSecret: 'secret-1234567890' }, saved);
-  assert.deepEqual(ga4.body, { ga4: { enabled: true, measurementId: 'G-ABCD1234', apiSecret: 'secret-1234567890' } });
+  const ga4 = tagsBody({ metaEnabled: true, pixelId: '123456789', capiToken: '', ga4Enabled: true, measurementId: 'g-abcd1234', apiSecret: 'secret-1234567890' }, saved); // secret-scan:allow (made-up fixture values)
+  assert.deepEqual(ga4.body, { ga4: { enabled: true, measurementId: 'G-ABCD1234', apiSecret: 'secret-1234567890' } }); // secret-scan:allow (made-up fixture values)
   assert.equal(TagSettingsUpdate.safeParse(ga4.body).success, true);
   assert.equal(tagsBody({ metaEnabled: true, pixelId: '12ab', ga4Enabled: false }, current).errors.pixelId, 'Enter the Pixel ID: 5 to 20 digits');
   assert.equal(tagsBody({ metaEnabled: true, pixelId: '', ga4Enabled: false }, current).errors.pixelId, 'Enter the Pixel ID to turn this on');
