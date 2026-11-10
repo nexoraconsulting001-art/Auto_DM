@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { CommentValue, FeedValue, MessagingEvent, WebhookChange, WebhookEntry } from '../../contracts/api/provider.js';
 import { log as logger, reportError } from '../../platform/log.js';
 import { currentTenant, tenantId, withTenant } from '../../tenancy.js';
-import { reelStoreUrl, tenantBaseUrl } from '../admin-api/urls.js';
+import { buyerBaseUrl, reelStoreUrl } from '../admin-api/urls.js';
 import { matchesKeywords } from '../automations/match.js';
 import { hasNegativeIntent, isOptOut, isStart, isTooShort, wantsHuman } from './words.js';
 
@@ -400,7 +400,7 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     const account = await gate.findAccount({ channel: ev.channel, accountId: ev.accountId });
     if (!account?.token) await repos.activity?.log({ ...entry, result: 'skip:not-connected' });
 
-    const base = tenantBaseUrl(currentTenant(), config) || ev.requestBase;
+    const base = buyerBaseUrl(currentTenant(), config) || ev.requestBase;
     const url = reelStoreUrl(base, reel.slug);
     const text = String(reel.dm_message || LEGACY_DM_TEXT).replace(/\{username\}/g, ev.username).replace(/\{first_name\}/g, '').replace(/\{url\}/g, url);
     if (account?.token) await repos.activity?.claim(entry);
@@ -571,7 +571,8 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     );
     if (!claimed.length) return 0;
     const tenants = new Map((await db.platform.query(
-      'SELECT id, slug, name, status FROM tenants WHERE id IN (SELECT (jsonb_array_elements_text($1::jsonb))::integer)',
+      `SELECT id, slug, name, status, (SELECT p.domain FROM tenant_domains p WHERE p.tenant_id = tenants.id AND p.is_primary AND p.status = 'verified') AS primary_domain
+       FROM tenants WHERE id IN (SELECT (jsonb_array_elements_text($1::jsonb))::integer)`,
       [JSON.stringify([...new Set(claimed.map((r) => r.tenant_id))])],
     )).map((t) => [t.id, t]));
     const byTenant = new Map();

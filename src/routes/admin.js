@@ -2,7 +2,7 @@ import express from 'express';
 import { adminConsole } from '../modules/admin-console/index.js';
 
 // These moved to the admin-api module; src/server.js still imports them from here.
-export { baseUrlFor, tenantBaseUrl } from '../modules/admin-api/urls.js';
+export { baseUrlFor, buyerBaseUrl, tenantBaseUrl } from '../modules/admin-api/urls.js';
 
 /**
  * The server-rendered admin is gone: /admin is the seller console, whatever ADMIN_UI says. The console module

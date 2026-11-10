@@ -3,6 +3,9 @@ import { normalizeHost } from '../tenancy.js';
 import { hashSessionToken } from './sessions.js';
 
 const COLS = 'id, slug, name, status, plan, created_at';
+/** The verified primary domain goes with the business, because the links a DM carries are built on it. */
+const WITH_PRIMARY = `t.id, t.slug, t.name, t.status, t.plan, t.created_at,
+  (SELECT p.domain FROM tenant_domains p WHERE p.tenant_id = t.id AND p.is_primary AND p.status = 'verified') AS primary_domain`;
 
 /** Addresses Bhava keeps for itself; no business can take one. */
 export const RESERVED_SLUGS = new Set(['bhava', 'www', 'app', 'api', 'admin']);
@@ -31,16 +34,16 @@ export function tenantsRepo(handle) {
       return (await this.getBySlug(slug)) || this.create({ slug, name: name || slug });
     },
     async get(id) {
-      const [row] = await db.query(`SELECT ${COLS} FROM tenants WHERE id = $1`, [Number(id) || 0]);
+      const [row] = await db.query(`SELECT ${WITH_PRIMARY} FROM tenants t WHERE t.id = $1`, [Number(id) || 0]);
       return row || null;
     },
     async getBySlug(slug) {
-      const [row] = await db.query(`SELECT ${COLS} FROM tenants WHERE slug = $1`, [String(slug)]);
+      const [row] = await db.query(`SELECT ${WITH_PRIMARY} FROM tenants t WHERE t.slug = $1`, [String(slug)]);
       return row || null;
     },
     async getByDomain(host) {
       const [row] = await db.query(
-        `SELECT t.id, t.slug, t.name, t.status, t.plan, t.created_at FROM tenant_domains d JOIN tenants t ON t.id = d.tenant_id
+        `SELECT ${WITH_PRIMARY} FROM tenant_domains d JOIN tenants t ON t.id = d.tenant_id
          WHERE d.domain = $1 AND d.status = 'verified'`,
         [normalizeHost(host)],
       );
@@ -63,7 +66,7 @@ export function tenantsRepo(handle) {
     async findBearerSession(token) {
       if (!token || token.length > 100) return null;
       const [row] = await db.query(
-        `SELECT s.user_id, t.id, t.slug, t.name, t.status, t.plan, t.created_at FROM sessions s JOIN tenants t ON t.id = s.tenant_id
+        `SELECT s.user_id, ${WITH_PRIMARY} FROM sessions s JOIN tenants t ON t.id = s.tenant_id
          WHERE s.id = $1 AND s.kind = 'bearer' AND s.revoked_at IS NULL AND s.expires_at > now()`,
         [hashSessionToken(token)],
       );
@@ -74,7 +77,7 @@ export function tenantsRepo(handle) {
     /** The business that owns this Instagram account, or null. */
     async getByIgAccount(igUserId) {
       const [row] = await db.query(
-        `SELECT t.id, t.slug, t.name, t.status, t.plan, t.created_at FROM ig_accounts a JOIN tenants t ON t.id = a.tenant_id
+        `SELECT ${WITH_PRIMARY} FROM ig_accounts a JOIN tenants t ON t.id = a.tenant_id
          WHERE a.ig_user_id = $1`,
         [String(igUserId)],
       );

@@ -8,6 +8,7 @@ import { createCompliance } from './modules/compliance/index.js';
 import { MODULES } from './modules/index.js';
 import { createRepos } from './repos/index.js';
 import { backupStorage, runBackup } from './backup.js';
+import { sweepRawExports } from './modules/platform-console/raw-export.js';
 import { createPlatform, describePlatform } from './platform/index.js';
 import { log, reportError } from './platform/log.js';
 
@@ -15,18 +16,19 @@ export const HOUSEKEEPING = 'system.housekeeping';
 export const BACKUP = 'system.backup';
 const HOUR = 3_600_000;
 
-/** Removes data past its retention: finished jobs, dead sessions, compliance events over 13 months. */
-export async function housekeeping({ db, queue }) {
+/** Removes data past its retention: finished jobs, dead sessions, compliance events over 13 months, raw export files past 7 days. */
+export async function housekeeping({ db, queue, storage }) {
   await queue.cleanup(14);
   await db.query(`DELETE FROM sessions WHERE expires_at < now() OR revoked_at < now() - interval '7 days'`);
   await db.query(`DELETE FROM platform_sessions WHERE expires_at < now() OR revoked_at < now() - interval '7 days'`);
   await db.query(`DELETE FROM compliance_events WHERE created_at < now() - interval '395 days'`);
+  if (storage) await sweepRawExports({ db, storage });
 }
 
 /** Registers every background job: the system's own, then each module's (see src/modules/index.js). */
 export function registerJobs({ db, platform, config, modules = MODULES, ig = createInstagram(config) }) {
   const { queue, metrics } = platform;
-  queue.work(HOUSEKEEPING, () => housekeeping({ db, queue }));
+  queue.work(HOUSEKEEPING, () => housekeeping({ db, queue, storage: platform.storage }));
 
   const storage = backupStorage(config);
   if (storage) {

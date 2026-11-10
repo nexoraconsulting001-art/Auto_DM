@@ -11,7 +11,7 @@ import { createInstagram } from './instagram.js';
 import { createCompliance } from './modules/compliance/index.js';
 import { MODULES } from './modules/index.js';
 import { accountRoutes } from './routes/account.js';
-import { adminRoutes, baseUrlFor, tenantBaseUrl } from './routes/admin.js';
+import { adminRoutes, baseUrlFor, buyerBaseUrl } from './routes/admin.js';
 import { ApiError, isApiV1Url } from './contracts/api/index.js';
 import { sendApiError } from './modules/api-v1/respond.js';
 import { createTenantResolver, withTenant } from './tenancy.js';
@@ -32,7 +32,7 @@ export function createApp({ db, config = defaultConfig, ig = createInstagram(con
   const tenants = createTenantResolver({ tenants: repos.tenants, platformDomain: config.platformDomain, defaultTenant: config.defaultTenant });
   const meta = createMetaAdapters(config);
   const compliance = createCompliance({ db, repos, ig, meta, config, platform });
-  const ctx = { db, repos, ig, meta, compliance, auth, config, platform, modules };
+  const ctx = { db, repos, ig, meta, compliance, auth, config, platform, modules, tenantResolver: tenants };
 
   /** The business that owns an Instagram account: linked accounts first, then the default business. */
   async function tenantForIgAccount(igUserId) {
@@ -96,7 +96,7 @@ export function createApp({ db, config = defaultConfig, ig = createInstagram(con
         log.warn('webhook.unknown_account', { igAccount: String(entry.id) });
         continue;
       }
-      const base = tenantBaseUrl(tenant, config) || baseUrlFor(req, config);
+      const base = buyerBaseUrl(tenant, config) || baseUrlFor(req, config);
       const storeUrl = (slug) => `${base}/r/${encodeURIComponent(slug)}?src=dm`;
       const ownIds = new Set([entry.id].filter(Boolean).map(String));
       await withTenant(tenant, async () => {
