@@ -46,6 +46,7 @@ test('a comment on a mapped reel becomes one button DM from the account\'s own t
   });
   assert.equal(dm.commentId, 'c-1');
   assert.equal(dm.message.attachment.payload.template_type, 'button');
+  await until(async () => (await jobs())[0]?.status !== 'sending');
   assert.equal((await jobs())[0].status, 'sent');
   await until(async () => (await meta.get('/webhooks')).deliveries.some((d) => d.body?.entry?.[0]?.messaging?.[0]?.message?.is_echo));
   await pause(100);
