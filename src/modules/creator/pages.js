@@ -120,7 +120,7 @@ ${digits && shows('whatsapp') ? html`<a class="outline-btn" href="https://wa.me/
   function searchBox(slug, q = '') {
     return html`<form class="creator-search" method="get" action="/${slug}" role="search">
 <input type="search" name="q" value="${q}" maxlength="80" placeholder="Search reels and products" aria-label="Search reels and products">
-<button class="btn" type="submit">${icon('search', 18)}<span class="skip">Search</span></button></form>`;
+<button class="btn" type="submit" aria-label="Search">${icon('search', 18)}</button></form>`;
   }
 
   async function preview(target, fallbacks, base) {

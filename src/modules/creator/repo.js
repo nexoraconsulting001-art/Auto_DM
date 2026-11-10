@@ -9,13 +9,17 @@ import { tenantId } from '../../tenancy.js';
 export const CREATOR_SLUG = /^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/;
 const MEDIA_PATH = /^\/media\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
+/** Names the app serves that the shared list doesn't carry yet: the review sign-in, and this page's own tiles address. */
+const ALSO_TAKEN = Object.freeze(['review', '_tiles']);
+const taken = (slug) => isReservedPath(slug) || ALSO_TAKEN.includes(slug);
+
 const invalid = (field, message) => new ApiError('validation_failed', message, { fields: { [field]: message } });
 
 /** Why a name can't be the page's address, or '' when it can. */
 export function slugProblem(slug) {
   const value = String(slug ?? '').trim().toLowerCase();
   if (!CREATOR_SLUG.test(value)) return 'Use 2 to 40 lower-case letters, numbers and dashes';
-  if (isReservedPath(value)) return 'That name is taken by a page of the store';
+  if (taken(value)) return 'That name is taken by a page of the store';
   return '';
 }
 
@@ -32,7 +36,7 @@ export function creatorPagesRepo(db) {
     /** The page a shopper may open at /<slug>: saved under that name and switched on. */
     async getLive(slug) {
       const value = String(slug ?? '').toLowerCase();
-      if (!CREATOR_SLUG.test(value) || isReservedPath(value)) return null;
+      if (!CREATOR_SLUG.test(value) || taken(value)) return null;
       const [row] = await db.query('SELECT * FROM creator_pages WHERE tenant_id = $1 AND slug = $2 AND enabled', [t0(), value]);
       return row ?? null;
     },

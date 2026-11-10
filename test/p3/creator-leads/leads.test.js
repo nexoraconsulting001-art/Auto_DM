@@ -60,12 +60,13 @@ test('a phone number is stored in international format, an email is checked, and
   // A phone typed into a form whose wording has no phone channel is not kept.
   assert.equal(checkLead({ firstName: 'Asha', phone: '9876543210', email: 'a@b.in', consent: 'yes' }, ['email']).lead.phone, '');
 
-  const token = optOutToken('secret', 7, 42);
-  assert.equal(readOptOutToken('secret', 7, token), 42);
-  assert.equal(readOptOutToken('secret', 8, token), null, 'a link is for one business');
-  assert.equal(readOptOutToken('other', 7, token), null);
-  assert.equal(readOptOutToken('secret', 7, token.replace('42.', '43.')), null);
-  for (const bad of ['', '42', '42.', null, ['x'], `42.${'a'.repeat(31)}`]) assert.equal(readOptOutToken('secret', 7, bad), null);
+  const token = optOutToken('secret-one', 7, 42);
+  assert.equal(readOptOutToken('secret-one', 7, token), 42);
+  assert.equal(readOptOutToken('secret-one', 8, token), null, 'a link is for one business');
+  assert.equal(readOptOutToken('secret-two', 7, token), null);
+  assert.throws(() => optOutToken('', 7, 42), /session secret/, 'no link is made without a secret');
+  assert.equal(readOptOutToken('secret-one', 7, token.replace('42.', '43.')), null);
+  for (const bad of ['', '42', '42.', null, ['x'], `42.${'a'.repeat(31)}`]) assert.equal(readOptOutToken('secret-one', 7, bad), null);
   assert.equal(safeBack('/r/steel-bottle'), '/r/steel-bottle');
   assert.equal(safeBack('/priya/kitchen'), '/priya/kitchen');
   for (const bad of ['//evil.example', 'https://evil.example', '/r/../admin', '/a/b/c', 'javascript:alert(1)', ['/x']]) assert.equal(safeBack(bad), '', String(bad));

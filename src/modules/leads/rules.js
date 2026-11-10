@@ -105,7 +105,11 @@ export const cleanTag = (value, max = 200) => (typeof value === 'string' ? oneLi
 
 // ---- the shopper's own link to withdraw or delete (9.18) --------------------------------------------------------------
 
-const mac = (secret, tenant, leadId) => crypto.createHmac('sha256', String(secret)).update(`lead-opt-out:${tenant}:${leadId}`).digest('base64url').slice(0, 32);
+function key(secret) {
+  if (typeof secret !== 'string' || secret.length < 8) throw new Error('lead links need the session secret');
+  return secret;
+}
+const mac = (secret, tenant, leadId) => crypto.createHmac('sha256', key(secret)).update(`lead-opt-out:${tenant}:${leadId}`).digest('base64url').slice(0, 32);
 
 /** An opaque token for one lead of one business: its id and a keyed hash. It holds no contact detail. */
 export const optOutToken = (secret, tenant, leadId) => `${leadId}.${mac(secret, tenant, leadId)}`;
