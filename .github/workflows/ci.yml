@@ -18,7 +18,9 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npm test
+      - name: No secrets or server addresses in tracked files
+        run: npm run secret-scan
+      - run: npm run test:ci
 
   postgres:
     name: Tests (real Postgres)
@@ -41,10 +43,10 @@ jobs:
       - name: Install pg_dump and pg_restore 16
         run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: npm ci
-      - run: node --test --test-concurrency=1 test/*.test.js
+      - run: npm run test:ci
 
   production-profile:
-    name: Modules on production drivers
+    name: All tests on production drivers
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
@@ -98,7 +100,7 @@ jobs:
             const s3 = new S3Client({ region: 'us-east-1', endpoint: 'http://localhost:9000', forcePathStyle: true,
               credentials: { accessKeyId: 'minioci', secretAccessKey: 'minioci-secret' } });
             await s3.send(new CreateBucketCommand({ Bucket: 'bhava-ci' }));"
-      - run: node --test --test-concurrency=1 test/modules.test.js
+      - run: npm run test:ci
 
   docker:
     name: Docker image builds

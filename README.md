@@ -140,7 +140,7 @@ On Android this uses a Chrome intent link. On iPhone it uses `x-safari-https://`
 
 ## Hosting
 
-- **Oracle VM (Docker + Caddy):** see [DEPLOY.md](DEPLOY.md). `Dockerfile` and `deploy/compose.yaml` run the store on `127.0.0.1:8100` with its data in a Docker volume, at `https://mehtamart.140-238-251-141.sslip.io`. Health check: `/health`.
+- **Oracle VM (Docker + Caddy):** see [DEPLOY.md](DEPLOY.md). `Dockerfile` and `deploy/compose.yaml` run the store on `127.0.0.1:8100` with its data in a Docker volume, at `https://mehtamart.VM-IP-DASHED.sslip.io`. Health check: `/health`.
 - Any other Node host with HTTPS works too: Render, Railway, Fly.io. A `render.yaml` is included.
 - Use a hosted Postgres for `DATABASE_URL`, for example the free tier of [Neon](https://neon.tech) or [Supabase](https://supabase.com). On free Render the disk is wiped on every deploy, so the built-in database would lose its data. Uploaded photos are stored in the database too.
 - Set `PUBLIC_BASE_URL` to the hosted address, and update the webhook URL in Meta.

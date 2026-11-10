@@ -21,16 +21,16 @@ It's live on the Oracle VM.
 |---|---|
 | Repo | `Shashank-Codes-bit/Auto_DM` (public) |
 | Branch | `claude/affectionate-rubin-it8bkq`. All work is here, with no PR. |
-| Live store | https://mehtamart.140-238-251-141.sslip.io |
-| Admin | https://mehtamart.140-238-251-141.sslip.io/admin (log in on `/login` with `ADMIN_PHONE` / `ADMIN_PASSWORD`) |
+| Live store | https://mehtamart.VM-IP-DASHED.sslip.io |
+| Admin | https://mehtamart.VM-IP-DASHED.sslip.io/admin (log in on `/login` with `ADMIN_PHONE` / `ADMIN_PASSWORD`) |
 | Health check | `/health` returns `ok` |
 | Instagram business account | `@_shoppingforher_`, IG_USER_ID `17841465186333519` |
 | Test commenter | `_squenza` (an Instagram tester on the Meta app). Comments from the business account itself are skipped. |
-| Meta webhook | Callback `https://mehtamart.140-238-251-141.sslip.io/webhook`, verify token `shoppingforher-verify-2026`, field `comments` |
-| Server | Oracle VM `svc-agent`, 140.238.251.141, Arm64, 1 OCPU, 6 GB RAM, Ubuntu 24.04, shared with other sites |
+| Meta webhook | Callback `https://mehtamart.VM-IP-DASHED.sslip.io/webhook`, verify token in the server's `.env`, field `comments` |
+| Server | Oracle VM `svc-agent`, VM-IP, Arm64, 1 OCPU, 6 GB RAM, Ubuntu 24.04, shared with other sites |
 | App on the VM | `~/mehtamart`, Docker Compose project `mehtamart`, service `web`, `127.0.0.1:8100`, volume `mehtamart_data` mounted at `/data`, secrets in `~/mehtamart/deploy/.env` |
 | Front door | Caddy, site file `/etc/caddy/sites/mehtamart.caddy` (added with `add-site.sh`) |
-| Shared with the Auto DM plugin | Since 2026-10-15 the same Instagram account also runs the Plant Store demo (repo `Shashank-Codes-bit/Auto_DM_Plugin`, `~/plantstore-dm`, port 8110, https://plantstore.140-238-251-141.sslip.io). Comments on reels this store doesn't use are passed on there (`FORWARD_WEBHOOK_URL`), and `/l/<slug>` redirects there (`PLUGIN_URL`). Map each reel in one app only. See that repo's HANDOFF.md |
+| Shared with the Auto DM plugin | Since 2026-10-15 the same Instagram account also runs the Plant Store demo (repo `Shashank-Codes-bit/Auto_DM_Plugin`, `~/plantstore-dm`, port 8110, https://plantstore.VM-IP-DASHED.sslip.io). Comments on reels this store doesn't use are passed on there (`FORWARD_WEBHOOK_URL`), and `/l/<slug>` redirects there (`PLUGIN_URL`). Map each reel in one app only. See that repo's HANDOFF.md |
 | Old dev setup | GitHub Codespace on port 3000. It's no longer needed now that Meta points to the VM. |
 
 ## 3. How it works
@@ -137,11 +137,11 @@ Stack: Node 22 (ESM), Express 5, `pg`, `@electric-sql/pglite`, `multer`, `qrcode
 | `IG_ACCESS_TOKEN` | Long-lived Instagram token (expires after 60 days) |
 | `IG_USER_ID` | 17841465186333519 |
 | `APP_SECRET` | Instagram app secret, used to verify webhook signatures. If webhooks fail with "bad signature", try the other secret from App settings → Basic. |
-| `VERIFY_TOKEN` | Must match Meta's webhook settings (`shoppingforher-verify-2026`) |
+| `VERIFY_TOKEN` | Must match Meta's webhook settings |
 | `GRAPH_VERSION` | `v23.0` |
 | `DRY_RUN` | `1` = log DMs instead of sending them |
 | `ONE_DM_PER_USER` | `1` = one DM per person per reel |
-| `PUBLIC_BASE_URL` | `https://mehtamart.140-238-251-141.sslip.io` (the link used in DMs) |
+| `PUBLIC_BASE_URL` | `https://mehtamart.VM-IP-DASHED.sslip.io` (the link used in DMs) |
 | `ADMIN_PHONE`, `ADMIN_PASSWORD` | Owner login. The account is made admin on every start. |
 | `SESSION_SECRET` | Long random string (`openssl rand -hex 32`) |
 | `DATABASE_URL` | Empty = built-in database. `DATA_DIR=/data/pgdata` is set in `compose.yaml`. |
@@ -152,7 +152,7 @@ Stack: Node 22 (ESM), Express 5, `pg`, `@electric-sql/pglite`, `multer`, `qrcode
 
 **SSH** from Windows PowerShell:
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\oracle-svc-agent.key" ubuntu@140.238.251.141
+ssh -i "$env:USERPROFILE\.ssh\oracle-svc-agent.key" ubuntu@VM-IP
 ```
 Disconnect the Voltas VPN first. If it times out, the network is blocking port 22: use a phone hotspot or Oracle Cloud Shell.
 
@@ -186,7 +186,7 @@ docker compose stop web && docker compose run --rm web npm run role -- 98XXXXXXX
 - Never publish on `0.0.0.0` or open new ports.
 - **Never `docker compose down -v`** (it deletes the data) and never `docker system prune -a`.
 - Secrets live only in `.env` on the VM, never in git or chat.
-- Other sites on the VM: service bot `https://140-238-251-141.sslip.io` (port 8080) and alerts `https://alerts.140-238-251-141.sslip.io` (port 8000).
+- Other sites on the VM: service bot `https://VM-IP-DASHED.sslip.io` (port 8080) and alerts `https://alerts.VM-IP-DASHED.sslip.io` (port 8000).
 
 **Local development:** `npm install`, `cp .env.example .env`, `npm start` (port 3000), `npm test`.
 
@@ -213,7 +213,7 @@ docker compose stop web && docker compose run --rm web npm run role -- 98XXXXXXX
 - **Real payments:** Razorpay or Cashfree checkout, plus a payment webhook that marks orders as paid.
 - **Meta App Review** (Advanced Access) so everyone, not just Instagram testers, gets DMs.
 - **Token refresh:** the long-lived token expires after 60 days. Add automatic refresh (`GET /refresh_access_token`) or put a reminder in the calendar.
-- **Own domain** instead of sslip.io: add a DNS A record to 140.238.251.141, then run `add-site.sh ... --host`.
+- **Own domain** instead of sslip.io: add a DNS A record to VM-IP, then run `add-site.sh ... --host`.
 - **Password reset by SMS/OTP** instead of the owner resetting it.
 - **Admin role changes without downtime:** add an admin-only UI, or move to a hosted Postgres so the CLI can run alongside the app.
 - **Owner notification for new orders** (WhatsApp or email).
@@ -224,4 +224,4 @@ docker compose stop web && docker compose run --rm web npm run role -- 98XXXXXXX
 
 ## Start here (paste into a new chat)
 
-> I'm continuing a project. Repo `Shashank-Codes-bit/Auto_DM`, branch `claude/affectionate-rubin-it8bkq`. Read `HANDOFF.md`, `README.md` and `DEPLOY.md` first. It's an Instagram comment → DM → per-reel shoppable store, demoed as a full store for Mehta Mart, live on my Oracle VM at https://mehtamart.140-238-251-141.sslip.io (Docker, port 8100, Caddy in front, built-in PGlite database in a Docker volume). Develop on the same branch, run `npm test` before pushing, and never put secrets in git or chat. I update the VM with: `cd ~/mehtamart && git pull && cd deploy && docker compose up -d --build`. Next I want to: <your next task>.
+> I'm continuing a project. Repo `Shashank-Codes-bit/Auto_DM`, branch `claude/affectionate-rubin-it8bkq`. Read `HANDOFF.md`, `README.md` and `DEPLOY.md` first. It's an Instagram comment → DM → per-reel shoppable store, demoed as a full store for Mehta Mart, live on my Oracle VM at https://mehtamart.VM-IP-DASHED.sslip.io (Docker, port 8100, Caddy in front, built-in PGlite database in a Docker volume). Develop on the same branch, run `npm test` before pushing, and never put secrets in git or chat. I update the VM with: `cd ~/mehtamart && git pull && cd deploy && docker compose up -d --build`. Next I want to: <your next task>.

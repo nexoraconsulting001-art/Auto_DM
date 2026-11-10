@@ -3,6 +3,7 @@ import { openDb } from '../src/db/index.js';
 import { bindTenant, createRepos } from '../src/repos/index.js';
 import { createApp } from '../src/server.js';
 import { config } from '../src/config.js';
+import { createPlatform } from '../src/platform/index.js';
 
 export const REEL_ID = '18475694065114168';
 
@@ -61,14 +62,19 @@ export async function seedReel(repos, { n = 2, keywords = 'LINK', active = 'on',
 
 export const OWNER = { phone: '9000000001', password: 'owner-pass' };
 
+/** Every test app has its own database; on a shared Redis it needs its own cache keys too (login limits, for one). */
+function ownCacheKeys(cache) {
+  const prefix = `${crypto.randomUUID()}:`;
+  return { ...cache, get: (key) => cache.get(prefix + key), set: (key, ...rest) => cache.set(prefix + key, ...rest), del: (key) => cache.del(prefix + key) };
+}
+
 export async function startApp({ ig = fakeIg(), overrides = {} } = {}) {
   const { db, repos, platform, tenant } = await setup();
   await repos.users.ensureOwner(OWNER);
-  const app = createApp({
-    db,
-    ig,
-    config: { ...config, storageDriver: 'memory', queueDriver: 'pg', analyticsDriver: 'pg', cacheDriver: 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dryRun: false, oneDmPerUser: false, ...overrides },
-  });
+  // Drivers follow the environment, so the CI production profile runs the whole app on Redis, S3 and ClickHouse.
+  const appConfig = { ...config, storageDriver: process.env.STORAGE_DRIVER || 'memory', queueDriver: process.env.QUEUE_DRIVER || 'pg', analyticsDriver: process.env.ANALYTICS_DRIVER || 'pg', cacheDriver: process.env.CACHE_DRIVER || 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dryRun: false, oneDmPerUser: false, ...overrides };
+  const modules = createPlatform(appConfig, { db });
+  const app = createApp({ db, ig, config: appConfig, platform: { ...modules, cache: ownCacheKeys(modules.cache) } });
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
   return { db, repos, platform, tenant, ig, base, port: server.address().port, close: () => server.close() };

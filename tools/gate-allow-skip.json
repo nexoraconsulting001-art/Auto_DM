@@ -1,0 +1,9 @@
+{
+  "tests": [
+    {
+      "file": "test/worker.test.js",
+      "name": "R-03: a backup restores with no data mixed between businesses",
+      "reason": "Needs pg_dump and pg_restore, which embedded Postgres does not ship. Runs in CI on real Postgres."
+    }
+  ]
+}

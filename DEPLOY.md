@@ -6,7 +6,7 @@ This puts the store on the shared Oracle VM (`svc-agent`, Arm64, 6 GB RAM) behin
 |---|---|
 | App name | `mehtamart` |
 | Port | `127.0.0.1:8100` (record it in the port register) |
-| Address | https://mehtamart.140-238-251-141.sslip.io |
+| Address | https://mehtamart.VM-IP-DASHED.sslip.io |
 | Data | Docker volume `mehtamart_data`, mounted at `/data` (database and uploaded photos) |
 | Secrets | `deploy/.env` on the VM only |
 
@@ -17,7 +17,7 @@ The VM is shared: only touch the `mehtamart` project. Never stop or restart othe
 SSH in (disconnect the Voltas VPN first):
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\oracle-svc-agent.key" ubuntu@140.238.251.141
+ssh -i "$env:USERPROFILE\.ssh\oracle-svc-agent.key" ubuntu@VM-IP
 ```
 
 Then on the VM:
@@ -43,12 +43,12 @@ curl -s -o /dev/null -w "%{http_code}\n" 127.0.0.1:8100/health  # expect 200
 
 # 4. Put it on the internet through Caddy
 sudo bash ~/Service-Call-Bot/infra/oracle-vm/add-site.sh mehtamart proxy 8100
-#    → https://mehtamart.140-238-251-141.sslip.io  (the first visit fetches the certificate)
+#    → https://mehtamart.VM-IP-DASHED.sslip.io  (the first visit fetches the certificate)
 ```
 
 ## After it's up
 
-1. **Meta webhook:** in the Meta app, open Instagram → API setup with Instagram login → Configure webhooks. Set the Callback URL to `https://mehtamart.140-238-251-141.sslip.io/webhook` and the verify token to your `VERIFY_TOKEN`.
+1. **Meta webhook:** in the Meta app, open Instagram → API setup with Instagram login → Configure webhooks. Set the Callback URL to `https://mehtamart.VM-IP-DASHED.sslip.io/webhook` and the verify token to your `VERIFY_TOKEN`.
 2. **Log in:** open `/login` with `ADMIN_PHONE` and `ADMIN_PASSWORD`. You land in the admin panel.
 3. **Demo data:** Admin → Settings → **Load demo data**. This fills the categories and products and sets up your 3 newest reels.
 4. **Test:** comment `LINK` on a reel from your tester account. The DM's button should open the new address.
@@ -91,7 +91,7 @@ Restoring is the same with `tar xzf` into the volume while the app is stopped.
 
 - [ ] `docker compose ps` shows `web` running, with `restart: unless-stopped`.
 - [ ] `curl 127.0.0.1:8100/health` on the VM returns 200.
-- [ ] https://mehtamart.140-238-251-141.sslip.io opens with a valid certificate.
-- [ ] The other sites still work: https://140-238-251-141.sslip.io/health and https://alerts.140-238-251-141.sslip.io.
+- [ ] https://mehtamart.VM-IP-DASHED.sslip.io opens with a valid certificate.
+- [ ] The other sites still work: https://VM-IP-DASHED.sslip.io/health and https://alerts.VM-IP-DASHED.sslip.io.
 - [ ] `deploy/.env` is on the VM only: `git status` doesn't list it.
 - [ ] Port 8100 → `mehtamart` is recorded in the port register (DEPLOYMENT-GUIDE.md section 4 and `infra/oracle-vm/README.md`).

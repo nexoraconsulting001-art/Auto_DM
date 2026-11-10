@@ -37,7 +37,7 @@ docker compose exec -e OWNER_PASSWORD='choose-one' web npm run tenant -- owner b
 sudo bash ~/Service-Call-Bot/infra/oracle-vm/add-site.sh bhava-mehta proxy 8120
 ```
 
-The site is then at `https://bhava-mehta.140-238-251-141.sslip.io`. Log in on `/login`.
+The site is then at `https://bhava-mehta.VM-IP-DASHED.sslip.io`. Log in on `/login`.
 
 ## Update
 
