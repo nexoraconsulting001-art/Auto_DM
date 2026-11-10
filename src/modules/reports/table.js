@@ -1,5 +1,9 @@
 import { PassThrough } from 'node:stream';
-import ExcelJS from 'exceljs';
+import { createRequire } from 'node:module';
+
+// Loaded with require, not import: under the browser test runner's ESM loader, importing exceljs's CommonJS chain fails with
+// 'Unexpected module status 3' (Node 22), which stops every browser test that starts the server.
+const ExcelJS = createRequire(import.meta.url)('exceljs');
 
 /**
  * Summary files (7.9, 7.13). A table is { columns: [{ key, label }], rows: [{ [key]: string | number | null }] }: figures only, never a visitor or shopper.
