@@ -1,6 +1,7 @@
 // Shared by the creator-leads tests: the real app on a fresh database, a second business on its own host, landing pages to put
 // in categories, and requests with a real Host header.
 import '../../../tools/net-guard.mjs';
+import crypto from 'node:crypto';
 import http from 'node:http';
 import { bindTenant } from '../../../src/repos/index.js';
 import { OWNER, startApp } from '../../helpers.js';
@@ -107,3 +108,24 @@ export async function sequenceIds(business, categoryId) {
 
 /** The landing page slugs a buyer page links to, in the order they appear. */
 export const tileSlugs = (htmlText) => [...htmlText.matchAll(/class="reel-tile" href="\/r\/([a-z0-9-]+)/g)].map((m) => m[1]);
+
+let staffSerial = 0;
+/** Another person on the business's team, signed in: { id, token, api }. `role` staff takes `permissions`. */
+export async function addTeamMember(world, business = world, { role = 'staff', permissions = [] } = {}) {
+  const phone = `90000010${String(++staffSerial).padStart(2, '0')}`;
+  const password = `team-pass-${staffSerial}`;
+  const user = await business.repos.users.create({ name: 'Team member', phone, password, role });
+  if (permissions.length) await business.repos.users.setPermissions(user.id, permissions);
+  const token = await signIn(world.port, { phone, password }, business.host);
+  return { id: user.id, token, api: (path, options = {}) => api(world, path, { token, host: business.host, ...options }) };
+}
+
+/** An uploaded file's row, as if the business had uploaded a picture: its id. (Test repos have no file store.) */
+export async function addMedia(business) {
+  const id = crypto.randomUUID();
+  await business.db.platform.query('INSERT INTO media (id, tenant_id, mime, size, storage_key) VALUES ($1, $2, $3, $4, $5)', [id, business.tenant.id, 'image/png', 4, `t/${business.tenant.id}/media/${id}`]);
+  return id;
+}
+
+/** A browser's User-Agent, for pages that must count as a shopper's visit. */
+export const BROWSER = { 'user-agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36' };

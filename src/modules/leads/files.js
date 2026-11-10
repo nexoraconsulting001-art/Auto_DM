@@ -25,7 +25,7 @@ export const COLUMNS = Object.freeze([
   { key: 'source', label: 'Source' },
   { key: 'page', label: 'Page' },
   { key: 'campaign', label: 'Campaign' },
-  ...CHANNELS.map((channel) => ({ key: channel, label: CHANNEL_LABELS[channel] })),
+  ...CHANNELS.map((channel) => ({ key: `consent_${channel}`, label: CHANNEL_LABELS[channel] })),
   { key: 'withdrawn', label: 'Consent withdrawn' },
   { key: 'consentVersion', label: 'Consent wording version' },
   { key: 'consentedAt', label: 'Consented at' },
@@ -50,7 +50,7 @@ export function fileRow(row) {
     source: SOURCE_LABELS[row.source] ?? row.source,
     page: row.source_ref,
     campaign: row.utm_campaign,
-    ...Object.fromEntries(CHANNELS.map((channel) => [channel, cell(channel)])),
+    ...Object.fromEntries(CHANNELS.map((channel) => [`consent_${channel}`, cell(channel)])),
     withdrawn: !withdrawn.length ? 'No' : withdrawn.length === row.consents.length ? 'Yes, all' : 'Yes, some',
     consentVersion: row.consent_version,
     consentedAt: iso(row.consented_at),
@@ -82,6 +82,8 @@ export async function leadsXlsx(rows) {
     stream.on('error', reject);
   });
   const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ stream, useSharedStrings: true, useStyles: true });
+  workbook.creator = '';
+  workbook.lastModifiedBy = '';
   const sheet = workbook.addWorksheet('Leads');
   sheet.columns = COLUMNS.map((c) => ({ key: c.key, width: Math.min(40, Math.max(14, c.label.length + 2)) }));
   const header = sheet.addRow(COLUMNS.map((c) => c.label));
