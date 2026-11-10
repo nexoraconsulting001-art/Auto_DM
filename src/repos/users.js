@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
+import { PERMISSIONS, SELLER_ROLES } from '../contracts/api/access.js';
+import { reportError } from '../platform/log.js';
 import { ValidationError, normalizePhone } from '../util.js';
 import { tenantId } from '../tenancy.js';
 
@@ -23,10 +25,37 @@ export function validatePassword(password) {
   if (String(password ?? '').length < 6) throw new ValidationError('Use a password of at least 6 characters');
 }
 
-const PUBLIC = 'id, name, phone, email, role, address, created_at';
-export const BUSINESS_ROLES = ['owner', 'staff', 'customer'];
+const PUBLIC = 'id, name, phone, email, role, permissions, address, created_at';
+export const BUSINESS_ROLES = ['owner', 'manager', 'staff', 'customer'];
+const MAX_LINKED_BUSINESSES = 20;
 
 export function usersRepo(db) {
+  // Memberships are about one person across businesses, so these lookups can't be inside one business's fence.
+  const platform = db.platform ?? db;
+
+  /**
+   * Sign-in with a password proves this account is yours. The same phone on an account at another business proves
+   * nothing, because owners type in staff phone numbers unverified. So the two are linked only when this password
+   * also opens that account. With one-time codes (PRD 5.11) a verified phone will be the proof instead.
+   */
+  async function linkMyOtherBusinesses(me, password) {
+    const others = await platform.query(
+      `SELECT u.tenant_id, u.id, u.password_hash FROM users u
+       WHERE u.phone = $1 AND u.tenant_id <> $2 AND u.role = ANY($3)
+         AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.tenant_id = $2 AND m.user_id = $4 AND m.member_tenant_id = u.tenant_id)
+       LIMIT ${MAX_LINKED_BUSINESSES}`,
+      [me.phone, me.tenant_id, SELLER_ROLES, me.id],
+    );
+    for (const other of others) {
+      if (!(await checkPassword(password, other.password_hash))) continue;
+      await platform.query(
+        `INSERT INTO memberships (tenant_id, user_id, member_tenant_id, member_user_id) VALUES ($1, $2, $3, $4), ($3, $4, $1, $2)
+         ON CONFLICT DO NOTHING`,
+        [me.tenant_id, me.id, other.tenant_id, other.id],
+      );
+    }
+  }
+
   return {
     async get(id) {
       const [row] = await db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND id = $2`, [tenantId(), Number(id) || 0]);
@@ -61,6 +90,10 @@ export function usersRepo(db) {
       const [row] = await db.query('SELECT * FROM users WHERE tenant_id = $1 AND phone = $2', [tenantId(), p]);
       if (!row || !(await checkPassword(password, row.password_hash))) return null;
       delete row.password_hash;
+      if (SELLER_ROLES.includes(row.role)) {
+        // A sign-in must not fail because a business switcher couldn't be updated.
+        await linkMyOtherBusinesses(row, password).catch((err) => reportError(err, { msg: 'users.link_failed', userId: row.id }));
+      }
       return row;
     },
     async setPassword(id, password) {
@@ -76,13 +109,57 @@ export function usersRepo(db) {
     },
     /** Only the server command (scripts/role.js) and ensureOwner change roles; signup always makes customers. */
     async setRole(id, role) {
-      if (!BUSINESS_ROLES.includes(role)) throw new ValidationError('Role must be owner, staff or customer');
-      await db.query('UPDATE users SET role = $3 WHERE tenant_id = $1 AND id = $2', [tenantId(), Number(id), role]);
+      if (!BUSINESS_ROLES.includes(role)) throw new ValidationError('Role must be manager, owner, staff or customer');
+      await db.query(
+        `UPDATE users SET role = $3, permissions = CASE WHEN $3 = 'staff' THEN permissions ELSE '{}' END WHERE tenant_id = $1 AND id = $2`,
+        [tenantId(), Number(id), role],
+      );
       return this.get(id);
     },
-    /** The business's own people: owners and staff. */
+    /** What a staff member may use: replaces the whole list. Owners and managers don't need one. */
+    async setPermissions(id, permissions) {
+      const wanted = [...new Set(Array.isArray(permissions) ? permissions.map(String) : [])];
+      const unknown = wanted.find((p) => !PERMISSIONS.includes(p));
+      if (unknown) throw new ValidationError(`Unknown permission “${unknown}”`);
+      const [row] = await db.query(
+        `UPDATE users SET permissions = $3 WHERE tenant_id = $1 AND id = $2 AND role = 'staff' RETURNING ${PUBLIC}`,
+        [tenantId(), Number(id), wanted],
+      );
+      if (!row) throw new ValidationError('Only a staff member can be given permissions');
+      return row;
+    },
+    /** The seller's account at another business, or null when they aren't a member there. Read on every call, so a removal counts at once. */
+    async memberOf(user, otherTenantId) {
+      if (!SELLER_ROLES.includes(user.role)) return null;
+      const [row] = await platform.query(
+        `SELECT t.id, t.slug, t.name, t.status, t.plan, t.created_at, u.id AS member_user_id
+         FROM memberships m
+         JOIN users u ON u.tenant_id = m.member_tenant_id AND u.id = m.member_user_id
+         JOIN tenants t ON t.id = m.member_tenant_id
+         WHERE m.tenant_id = $1 AND m.user_id = $2 AND m.member_tenant_id = $3 AND u.role = ANY($4)`,
+        [tenantId(), Number(user.id), Number(otherTenantId), SELLER_ROLES],
+      );
+      if (!row) return null;
+      const { member_user_id: userId, ...tenant } = row;
+      return { tenant, userId };
+    },
+    /** Every business this seller can switch to, this one first, for the business switcher. Shoppers have none. */
+    async businesses(user) {
+      if (!SELLER_ROLES.includes(user.role)) return [];
+      return platform.query(
+        `SELECT t.id, t.slug, t.name, u.role, COALESCE(k.logo_url, '') AS logo_url, t.id = $1 AS current
+         FROM users u
+         JOIN tenants t ON t.id = u.tenant_id
+         LEFT JOIN brand_kits k ON k.tenant_id = t.id
+         WHERE u.role = ANY($3) AND ((u.tenant_id = $1 AND u.id = $2) OR EXISTS (
+           SELECT 1 FROM memberships m WHERE m.tenant_id = $1 AND m.user_id = $2 AND m.member_tenant_id = u.tenant_id AND m.member_user_id = u.id))
+         ORDER BY current DESC, t.name`,
+        [tenantId(), Number(user.id), SELLER_ROLES],
+      );
+    },
+    /** The business's own people: owners, managers and staff. */
     async listTeam() {
-      return db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND role IN ('owner', 'staff') ORDER BY created_at`, [tenantId()]);
+      return db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND role = ANY($2) ORDER BY created_at`, [tenantId(), SELLER_ROLES]);
     },
     async saveAddress(id, address) {
       await db.query('UPDATE users SET address = $3 WHERE tenant_id = $1 AND id = $2', [tenantId(), Number(id), JSON.stringify(address)]);

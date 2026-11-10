@@ -1,4 +1,5 @@
 import { activityRoutes } from './activity.js';
+import { auditRoutes } from './audit.js';
 import { authRoutes } from './auth.js';
 import { brandKitRoutes } from './brand-kit.js';
 import { categoryRoutes } from './categories.js';
@@ -40,12 +41,14 @@ export const routes = Object.freeze({
   ...activityRoutes,
   ...statRoutes,
   ...mediaRoutes,
+  ...auditRoutes,
 });
 
 export const routeList = Object.freeze(Object.entries(routes).map(([id, route]) => Object.freeze({ id, ...route })));
 
 export * from './access.js';
 export * from './activity.js';
+export * from './audit.js';
 export * from './auth.js';
 export * from './brand-kit.js';
 export * from './categories.js';

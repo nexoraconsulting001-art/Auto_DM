@@ -2,8 +2,10 @@ import { adminApi } from './admin-api/index.js';
 import { adminConsole } from './admin-console/index.js';
 import { apiAuth } from './api-auth/index.js';
 import { apiV1 } from './api-v1/index.js';
+import { audit } from './audit/index.js';
 import { brand } from './brand/index.js';
 import { entitlements } from './entitlements/index.js';
+import { gatewayKeys } from './gateway-keys/index.js';
 import { igAccounts } from './ig-accounts/index.js';
 import { platformConsole } from './platform-console/index.js';
 
@@ -21,4 +23,4 @@ import { platformConsole } from './platform-console/index.js';
  *
  * ctx is { db, repos, ig, auth, config, platform, modules }.
  */
-export const MODULES = [brand, entitlements, igAccounts, apiAuth, platformConsole, adminConsole, adminApi, apiV1];
+export const MODULES = [brand, entitlements, igAccounts, audit, gatewayKeys, apiAuth, platformConsole, adminConsole, adminApi, apiV1];

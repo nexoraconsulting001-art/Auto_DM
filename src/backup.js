@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { ensureAppRole, openDb } from './db/index.js';
 import { createStorage } from './platform/storage.js';
 
 /**
@@ -59,7 +60,8 @@ export async function runBackup({ databaseUrl, storage, now = new Date() }) {
   if (!databaseUrl) throw new Error('Backups need DATABASE_URL');
   const { file, done } = await tempFile();
   try {
-    await run('pg_dump', ['--format=custom', '--no-owner', '--no-privileges', `--file=${file}`], pgEnv(databaseUrl));
+    // Privileges stay in the dump: the app role's grants are what row-level security stands on.
+    await run('pg_dump', ['--format=custom', '--no-owner', `--file=${file}`], pgEnv(databaseUrl));
     const data = await fs.readFile(file);
     const key = dayKey(now);
     await storage.put(key, data, 'application/octet-stream');
@@ -79,7 +81,10 @@ export async function runRestore({ databaseUrl, storage, key }) {
   const { file, done } = await tempFile();
   try {
     await fs.writeFile(file, data);
-    await run('pg_restore', ['--clean', '--if-exists', '--no-owner', '--no-privileges', '--exit-on-error', '--single-transaction', `--dbname=${new URL(databaseUrl).pathname.slice(1)}`, file], pgEnv(databaseUrl));
+    // The dump grants to the app role, which may not exist yet on a new server.
+    const db = await openDb({ url: databaseUrl, migrate: false, poolSize: 1 });
+    await ensureAppRole(db).finally(() => db.close());
+    await run('pg_restore', ['--clean', '--if-exists', '--no-owner', '--exit-on-error', '--single-transaction', `--dbname=${new URL(databaseUrl).pathname.slice(1)}`, file], pgEnv(databaseUrl));
     return { key: latest, bytes: data.length };
   } finally {
     await done();

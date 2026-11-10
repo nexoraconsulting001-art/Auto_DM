@@ -35,8 +35,12 @@ export const CurrentSession = z.object({ user: SessionUser, business: SessionBus
 /** `token` and `expiresInDays` are present for transport "bearer". */
 export const LoginResult = CurrentSession.extend({ token: z.string().optional(), expiresInDays: z.number().int().optional() });
 
+/** A business this seller works at. Send its id as X-Tenant-Id to work in it; the logo is workspace identity only. */
+export const Membership = z.object({ id: Id, slug: z.string(), name: z.string(), role: z.enum(['owner', 'manager', 'staff']), logoUrl: z.string(), current: z.boolean() });
+
 export const authRoutes = {
   'auth.login': { method: 'POST', path: '/auth/login', access: PUBLIC, body: LoginBody, status: 201, response: LoginResult },
   'auth.me': { method: 'GET', path: '/auth/me', access: SIGNED_IN, response: CurrentSession },
   'auth.logout': { method: 'POST', path: '/auth/logout', access: SIGNED_IN, status: 204, response: null },
+  'auth.businesses': { method: 'GET', path: '/auth/businesses', access: SIGNED_IN, response: z.object({ businesses: z.array(Membership) }) },
 };

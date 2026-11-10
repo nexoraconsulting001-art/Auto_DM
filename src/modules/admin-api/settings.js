@@ -1,4 +1,5 @@
 import { SETTING_DEFAULTS } from '../../repos/settings.js';
+import { ValidationError } from '../../util.js';
 import { mapPage, pageOf } from './paging.js';
 import { storeBaseUrl } from './urls.js';
 
@@ -76,7 +77,12 @@ export function settingsApi({ repos, config }, setup) {
   return {
     'settings.get': async () => toSettings(await repos.settings.getAll()),
     'settings.update': ({ body }) => saveSettings(body),
-    'settings.updatePayment': ({ body }) => saveSettings(body),
+    'settings.updatePayment': async ({ body, user }) => {
+      const { razorpayKeyId: keyId, razorpayKeySecret: keySecret, ...payout } = body;
+      if (Boolean(keyId) !== Boolean(keySecret)) throw new ValidationError('Enter both the Razorpay key id and the key secret');
+      if (keyId) await repos.gatewayKeys.save('razorpay', { keyId, keySecret }, `user:${user.id}`);
+      return saveSettings(payout);
+    },
 
     'settings.setup': async ({ req }) => {
       const [settings, kit, stats, reels, client] = await Promise.all([

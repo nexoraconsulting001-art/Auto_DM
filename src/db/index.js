@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { log } from '../platform/log.js';
+import { currentTenant } from '../tenancy.js';
 
 export const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
 
@@ -8,16 +10,41 @@ export const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.u
 // never apply the same migration twice.
 const MIGRATION_LOCK = 4_242_001;
 
+/** The role business work runs as: not the owner of anything, no superuser, and unable to bypass row-level security. */
+export const APP_ROLE = 'bhava_app';
+
+// A role belongs to the whole server, so another database there may have made it first, even at this moment.
+// A login that is not a superuser has to be a member of the role to step down into it.
+const ENSURE_APP_ROLE = `DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${APP_ROLE}') THEN
+    BEGIN
+      CREATE ROLE ${APP_ROLE} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
+    END;
+  END IF;
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+    EXECUTE format('GRANT ${APP_ROLE} TO %I', current_user);
+  END IF;
+END $$`;
+
+/** Makes the app role on this server. Migrations do it, and so does a restore, which may be onto a new server. */
+export const ensureAppRole = (db) => db.exec(ENSURE_APP_ROLE);
+
 /**
  * Opens the database and applies any migrations not yet applied.
  * - `url` set: Postgres via `pg`. This is what QA and production use.
  * - `url` empty: embedded Postgres (PGlite) in `dataDir`, or in memory when `dataDir` is omitted.
  *   Only for tests and quick local runs: PGlite can be open in one process at a time, so it cannot
  *   serve a web server and a worker together.
- * Returns { query(sql, params) -> rows, exec(sql), tx(fn), close(), kind }. Inside tx, fn receives { query }.
+ * Returns { query(sql, params) -> rows, exec(sql), tx(fn), close(), kind, platform }. Inside tx, fn receives { query, exec }.
+ *
+ * Inside withTenant() every query and transaction runs as APP_ROLE with app.tenant_id set for that transaction, so
+ * row-level security holds it to the current business. `platform` is the same three calls without that fence, for
+ * the few things that are about no single business or look across them: routing, the job queue, the Platform Console.
  */
 export async function openDb({ url = '', dataDir, migrate = true, poolSize = 10 } = {}) {
-  const db = url ? await openPg(url, poolSize) : await openPglite(dataDir);
+  const db = fenced(url ? await openPg(url, poolSize) : await openPglite(dataDir));
   if (migrate) await runMigrations(db);
   return db;
 }
@@ -34,13 +61,15 @@ export async function openRuntimeDb(config, env = process.env) {
 }
 
 /** Applies migrations/NNN_name.sql in order, each in its own transaction. Returns the versions applied. */
-export async function runMigrations(db, dir = MIGRATIONS_DIR) {
+export async function runMigrations(handle, dir = MIGRATIONS_DIR) {
+  const db = handle.platform ?? handle;
   await db.tx(async (t) => {
     await t.query('SELECT pg_advisory_xact_lock($1)', [MIGRATION_LOCK]);
     await t.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
       version    text PRIMARY KEY,
       applied_at timestamptz NOT NULL DEFAULT now()
     )`);
+    await t.exec(ENSURE_APP_ROLE);
   });
   const files = fs.readdirSync(dir).filter((f) => /^\d{3}_[\w-]+\.sql$/.test(f)).sort();
   const applied = [];
@@ -60,19 +89,47 @@ export async function runMigrations(db, dir = MIGRATIONS_DIR) {
   return applied;
 }
 
+/** Wraps a driver so that work inside withTenant() can only touch the current business. */
+function fenced(driver) {
+  // withTenant() only accepts a positive integer, so the id is safe to write into the statement.
+  const fence = () => {
+    const tenant = currentTenant();
+    return tenant ? `SET LOCAL ROLE ${APP_ROLE}; SELECT set_config('app.tenant_id', '${Number(tenant.id)}', true)` : '';
+  };
+  return {
+    kind: driver.kind,
+    close: driver.close,
+    platform: { query: driver.query, exec: driver.exec, tx: (fn) => driver.tx(fn) },
+    query(sql, params = []) {
+      const start = fence();
+      return start ? driver.tx((t) => t.query(sql, params), start) : driver.query(sql, params);
+    },
+    exec(sql) {
+      const start = fence();
+      return start ? driver.tx((t) => t.exec(sql), start) : driver.exec(sql);
+    },
+    tx: (fn) => driver.tx(fn, fence()),
+  };
+}
+
 async function openPg(url, poolSize) {
   const { default: pg } = await import('pg');
   const ssl = /sslmode=disable|localhost|127\.0\.0\.1|@postgres[:/]/.test(url) ? false : { rejectUnauthorized: false };
   const pool = new pg.Pool({ connectionString: url, ssl, max: poolSize, allowExitOnIdle: true });
+  // Postgres restarting or killing a connection is an error event, which would end the process with no listener.
+  const connectionLost = (err) => log.warn('db.connection_lost', { code: err?.code });
+  pool.on('error', connectionLost);
   const query = async (sql, params = []) => (await pool.query(sql, params)).rows;
   return {
     kind: 'postgres',
     query,
     exec: (sql) => pool.query(sql),
-    async tx(fn) {
+    async tx(fn, start = '') {
       const client = await pool.connect();
+      client.on('error', connectionLost);
+      let dead = false;
       try {
-        await client.query('BEGIN');
+        await client.query(start ? `BEGIN; ${start}` : 'BEGIN');
         const result = await fn({
           query: async (sql, params = []) => (await client.query(sql, params)).rows,
           exec: (sql) => client.query(sql),
@@ -80,10 +137,14 @@ async function openPg(url, poolSize) {
         await client.query('COMMIT');
         return result;
       } catch (err) {
-        await client.query('ROLLBACK');
+        // A connection that can't even roll back is gone: it must not go back in the pool.
+        await client.query('ROLLBACK').catch(() => {
+          dead = true;
+        });
         throw err;
       } finally {
-        client.release();
+        client.removeListener('error', connectionLost);
+        client.release(dead);
       }
     },
     close: () => pool.end(),
@@ -99,7 +160,10 @@ async function openPglite(dataDir) {
     kind: 'pglite',
     query: wrap(pg),
     exec: (sql) => pg.exec(sql),
-    tx: (fn) => pg.transaction((t) => fn({ query: wrap(t), exec: (sql) => t.exec(sql) })),
+    tx: (fn, start = '') => pg.transaction(async (t) => {
+      if (start) await t.exec(start);
+      return fn({ query: wrap(t), exec: (sql) => t.exec(sql) });
+    }),
     close: () => pg.close(),
   };
 }

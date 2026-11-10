@@ -98,6 +98,8 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, onUnauthorized,
       /** @returns CurrentSession { user, business, csrf? } */
       me: () => get('/auth/me').then(rememberCsrf),
       logout: () => post('/auth/logout').finally(() => { csrf = ''; }),
+      /** @returns { businesses: [{ id, slug, name, role, logoUrl, current }] }: send an id as X-Tenant-Id to work in it */
+      businesses: () => get('/auth/businesses'),
     },
     products: {
       /** @param query { search?, status?, category?, cursor?, limit? } */
@@ -148,6 +150,9 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, onUnauthorized,
     },
     activity: {
       list: (query) => get('/activity', query),
+    },
+    audit: {
+      list: (query) => get('/audit-log', query),
     },
     stats: {
       dashboard: () => get('/stats/dashboard'),

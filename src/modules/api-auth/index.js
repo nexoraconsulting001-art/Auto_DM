@@ -15,7 +15,7 @@ export const apiAuth = {
       const business = currentTenant();
       const kit = await repos.brandKit.get();
       return {
-        user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
+        user: { id: user.id, name: user.name, phone: user.phone, role: user.role, permissions: user.permissions ?? [] },
         business: { id: business.id, slug: business.slug, name: business.name, plan: business.plan, logoUrl: kit.logoUrl },
       };
     }
@@ -40,6 +40,10 @@ export const apiAuth = {
         if (req.bearer) await repos.sessions.revoke(req.sessionToken);
         else await auth.logout(req, res);
       },
+
+      'auth.businesses': async ({ user }) => ({
+        businesses: (await repos.users.businesses(user)).map((b) => ({ id: b.id, slug: b.slug, name: b.name, role: b.role, logoUrl: b.logo_url, current: b.current })),
+      }),
     };
   },
 };

@@ -18,7 +18,7 @@ import { reportError } from './log.js';
  */
 export function createQueue(config = {}, { db } = {}) {
   const driver = config.queueDriver || 'pg';
-  if (driver === 'pg') return pgQueue(db, config);
+  if (driver === 'pg') return pgQueue(db?.platform ?? db, config); // the queue serves every business from one table
   if (driver === 'redis') return redisQueue(config);
   throw new Error(`Unknown QUEUE_DRIVER "${driver}" (use pg or redis)`);
 }

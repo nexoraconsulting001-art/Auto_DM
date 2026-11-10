@@ -86,7 +86,8 @@ export function reelsRepo(db) {
       if (!/^\d+$/.test(mediaId)) throw new ValidationError('Invalid Instagram post ID');
 
       const tid = tenantId();
-      const [owner] = await db.query('SELECT tenant_id FROM reels WHERE ig_media_id = $1', [mediaId]);
+      // Media ids are unique across Instagram, so this one check has to see every business's reels.
+      const [owner] = await (db.platform ?? db).query('SELECT tenant_id FROM reels WHERE ig_media_id = $1', [mediaId]);
       if (owner && owner.tenant_id !== tid) throw new ValidationError('This Instagram post belongs to another business');
       const [taken] = await db.query('SELECT 1 FROM reels WHERE tenant_id = $3 AND slug = $1 AND ig_media_id <> $2', [r.slug, mediaId, tid]);
       if (taken) throw new ValidationError(`The store link “${r.slug}” is already used by another reel`);

@@ -1,7 +1,7 @@
 // PRD 2: what a buyer sees carries the seller's brand, what a seller sees carries the platform's.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CUSTOMER, addBusiness, addOrder, addProduct, addReel, api, assertBuyerPageClean, connectInstagram, consoleUser, hit, linksIn, need, noPlatformName, onConsole, sendComment, setPlan, signIn, startWorld, waitFor } from './support.js';
+import { CUSTOMER, addBusiness, addOrder, addProduct, addReel, api, assertBuyerPageClean, connectInstagram, consoleUser, hit, linksIn, need, noPlatformName, onConsole, sendComment, signIn, startWorld, waitFor } from './support.js';
 import { buyerPaths, consolePaths, fakeMail, hooks, shopperPaths } from './surfaces.js';
 
 const IG_ACCOUNT = 'IG-KESAR';
@@ -118,32 +118,6 @@ test('U-07: the DM on the Free plan carries no platform text or link', async (t)
   assert.ok(dm.length > 0, 'the comment produced a DM');
   noPlatformName('The Free plan DM', dm);
   for (const link of linksIn(dm)) noPlatformName('A link in the DM', new URL(link).hostname);
-});
-
-async function creator(t) {
-  const app = await startWorld(t);
-  const priya = await addBusiness(app, { slug: 'priya', name: 'Priya Styles', plan: 'free' });
-  await addReel(priya, REEL);
-  return { app, priya, page: () => hit(app, buyerPaths.creatorPage('priya'), { host: priya.host }) };
-}
-
-const MARK = /Made with Bhava/i;
-
-test('U-07: a Free creator\'s page shows the made-with mark', async (t) => {
-  const { page } = await creator(t);
-  const res = need(await page(), 200, 'The creator page');
-  assert.match(res.text, MARK);
-});
-
-test('U-08: upgrading from Free to Tier 1 removes the mark at once, and no buyer surface shows the platform', async (t) => {
-  const { app, priya, page } = await creator(t);
-  assert.match(need(await page(), 200, 'The creator page on Free').text, MARK);
-  await setPlan(app, priya, 't1');
-  const after = need(await page(), 200, 'The creator page after upgrading');
-  assert.doesNotMatch(after.text, MARK);
-  noPlatformName('The creator page after upgrading', after.text);
-  noPlatformName('The creator page headers after upgrading', after.headers);
-  for (const pathname of ['/', '/shop']) await assertBuyerPageClean(app, priya, pathname);
 });
 
 test('U-09: B\'s owner sees none of the orders or customers a shopper has at A', async (t) => {

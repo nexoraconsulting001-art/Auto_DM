@@ -14,6 +14,7 @@ export const BrandKit = z.object({
   colors: Colors,
   headingFont: z.string(),
   bodyFont: z.string(),
+  publicReplyVariants: z.array(z.string()).default([]),
 });
 
 /** Fields left out stay as they are. In `colors`, an empty value returns that slot to the preset's colour. */
@@ -25,6 +26,7 @@ export const BrandKitUpdate = z.object({
   colors: z.record(text(40), HexOrEmpty),
   headingFont: text(80),
   bodyFont: text(80),
+  publicReplyVariants: z.array(text(150)).max(10, 'Use at most 10 replies'),
 }).partial();
 
 export const ThemePreset = z.object({ code: z.string(), name: z.string(), colors: Colors, headingFont: z.string(), bodyFont: z.string() });

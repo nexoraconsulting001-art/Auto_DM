@@ -3,6 +3,8 @@
 //   npm run role -- list                   # the business's owners and staff
 //   npm run role -- 9876543210 owner       # make a signed-up account an owner
 //   npm run role -- 9876543210 staff
+//   npm run role -- 9876543210 staff orders,catalog   # and what they may use
+//   npm run role -- 9876543210 manager
 //   npm run role -- 9876543210 customer    # back to a normal shopper
 import { pathToFileURL } from 'node:url';
 import { config } from '../src/config.js';
@@ -16,7 +18,7 @@ const withArticle = (role) => (role === 'owner' ? 'an owner' : `a ${role}`);
 
 /** Returns a one-line result message, or throws with a reason. */
 export async function changeRole(repos, { phone, role, ownerPhone = '' }) {
-  if (!BUSINESS_ROLES.includes(role)) throw new Error('The role must be "owner", "staff" or "customer".');
+  if (!BUSINESS_ROLES.includes(role)) throw new Error('The role must be "manager", "owner", "staff" or "customer".');
   const user = await repos.users.findByPhone(phone);
   if (!user) throw new Error(`No account with the number ${phone}. Ask them to sign up on the website first.`);
   if (role !== 'owner' && ownerPhone && user.phone === normalizePhone(ownerPhone)) {
@@ -28,9 +30,9 @@ export async function changeRole(repos, { phone, role, ownerPhone = '' }) {
 }
 
 async function main() {
-  const [first, role] = process.argv.slice(2);
+  const [first, role, permissions] = process.argv.slice(2);
   if (!first) {
-    console.log('Usage: npm run role -- list | npm run role -- <phone> owner|staff|customer');
+    console.log('Usage: npm run role -- list | npm run role -- <phone> owner|manager|staff|customer [permissions, comma separated]');
     process.exit(1);
   }
   const db = await openRuntimeDb(config);
@@ -46,6 +48,11 @@ async function main() {
         console.log(team.length ? team.map((u) => `${u.phone}  ${u.name}  (${u.role})`).join('\n') : 'No owners or staff yet.');
       } else {
         console.log(await changeRole(repos, { phone: first, role, ownerPhone: config.adminPhone }));
+        if (role === 'staff' && permissions !== undefined) {
+          const user = await repos.users.findByPhone(first);
+          await repos.users.setPermissions(user.id, permissions.split(',').filter(Boolean));
+          console.log(`They may use: ${permissions || 'nothing yet'}.`);
+        }
       }
     });
   } finally {

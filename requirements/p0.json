@@ -5,8 +5,6 @@
   { "id": "U-04", "title": "Platform admin access to a business is logged" },
   { "id": "U-05", "title": "Seller alert and report emails carry the platform brand" },
   { "id": "U-06", "title": "Default-gateway payment shows only the seller brand" },
-  { "id": "U-07", "title": "Free creator page has the made-with mark; the DM stays clean" },
-  { "id": "U-08", "title": "Upgrading from Free removes the mark at once" },
   { "id": "U-09", "title": "Shared shopper identity asks consent once per new business" },
   { "id": "U-10", "title": "No raw event export for owners or creators" },
   { "id": "U-11", "title": "Super admin raw export needs a reason and is logged" },

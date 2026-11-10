@@ -12,7 +12,8 @@ export const RESERVED_SLUGS = new Set(['bhava', 'www', 'app', 'api', 'admin']);
  * works without a current business, so only platform code (domain lookup, webhook routing,
  * onboarding, the Platform Console) uses it.
  */
-export function tenantsRepo(db) {
+export function tenantsRepo(handle) {
+  const db = handle.platform ?? handle; // about no single business, so never inside one's fence
   return {
     async create({ slug, name, plan = 'free' }) {
       const s = slugify(slug || name).slice(0, 40).replace(/-+$/, '');

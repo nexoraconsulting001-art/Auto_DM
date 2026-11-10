@@ -45,8 +45,13 @@ export const SettingsUpdate = z.object({
   checklistDismissed: z.boolean(),
 }).partial();
 
-/** Where shoppers' money goes, so it is the owner's alone. */
-export const PaymentSettingsUpdate = z.object({ upiId: text(120), upiPayee: text(120) }).partial();
+/** Where shoppers' money goes, so it is the owner's alone. The two Razorpay fields go together, and the secret never comes back. */
+export const PaymentSettingsUpdate = z.object({
+  upiId: text(120),
+  upiPayee: text(120),
+  razorpayKeyId: z.string().trim().regex(/^rzp_(?:test|live)_[A-Za-z0-9]{6,40}$/, 'Use the key id from your Razorpay dashboard'),
+  razorpayKeySecret: required(200, 'Enter the key secret'),
+}).partial();
 
 export const SetupStatus = z.object({
   storeUrl: z.string(),

@@ -10,7 +10,8 @@ export function accountRoutes({ repos, auth, config }) {
   const isEnvOwner = (user) => user.role === 'owner' && Boolean(config?.adminPhone) && user.phone === normalizePhone(config.adminPhone);
   const r = express.Router();
   const page = (res, view, status = 200) => res.status(status).type('html').send(String(view));
-  const home = (user) => (user.role === 'owner' ? '/admin' : '/account');
+  // Staff with no permissions yet have nothing to open in the console.
+  const home = (user) => (['owner', 'manager'].includes(user.role) || (user.role === 'staff' && user.permissions?.length) ? '/admin' : '/account');
 
   r.get('/login', async (req, res) => {
     if (req.user) return res.redirect(safeNext(req.query.next, home(req.user)));

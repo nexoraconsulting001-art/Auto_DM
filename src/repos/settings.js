@@ -29,14 +29,17 @@ export function settingsRepo(db) {
       for (const { key, value } of rows) if (key in out) out[key] = value;
       return out;
     },
+    /** Saves all of `values` or none of them, so a failure can't leave a new UPI id beside the old payee. */
     async update(values) {
-      for (const [key, value] of Object.entries(values)) {
-        if (!(key in SETTING_DEFAULTS)) continue;
-        await db.query(
-          'INSERT INTO settings (tenant_id, key, value) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value',
-          [tenantId(), key, String(value ?? '')],
-        );
-      }
+      await db.tx(async (t) => {
+        for (const [key, value] of Object.entries(values)) {
+          if (!(key in SETTING_DEFAULTS)) continue;
+          await t.query(
+            'INSERT INTO settings (tenant_id, key, value) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value',
+            [tenantId(), key, String(value ?? '')],
+          );
+        }
+      });
     },
   };
 }

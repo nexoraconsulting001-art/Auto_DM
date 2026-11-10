@@ -1,0 +1,4 @@
+[
+  { "id": "U-07", "title": "Free creator page has the made-with mark; the DM stays clean", "reason": "Needs the creator page. The test for the clean DM needs nothing later and stays in test/p0/spec-p0/white-label.test.js; the creator-page test is in test/later.", "phase": 7 },
+  { "id": "U-08", "title": "Upgrading from Free removes the mark at once", "reason": "Needs the creator page. The test is in test/later.", "phase": 7 }
+]

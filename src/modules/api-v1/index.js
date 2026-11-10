@@ -1,7 +1,8 @@
 import express from 'express';
 import multer from 'multer';
-import { ApiError, isAllowed, routeList } from '../../contracts/api/index.js';
+import { ApiError, IdText, isAllowed, routeList } from '../../contracts/api/index.js';
 import { log } from '../../platform/log.js';
+import { tenantId, withTenant } from '../../tenancy.js';
 
 /** What every module's api() says it answers, checked against the contract. */
 function collectHandlers(ctx) {
@@ -94,6 +95,32 @@ function serve(route, handler) {
 }
 
 /**
+ * X-Tenant-Id: a seller working in another of their businesses (PRD 5.2). It is checked against their membership on
+ * every call and refused the same way whether the business is someone else's or doesn't exist. After this the
+ * request is simply a request in that business, by that person's account there, with that account's permissions.
+ * Sign-out always ends the session in the business it belongs to.
+ */
+function switchBusiness({ repos }) {
+  return async (req, res, next) => {
+    const wanted = req.get('x-tenant-id');
+    if (wanted === undefined || !req.user || req.path.toLowerCase() === '/auth/logout' || wanted === String(tenantId())) return next();
+    const id = IdText.safeParse(wanted);
+    const member = id.success ? await repos.users.memberOf(req.user, id.data) : null;
+    if (!member) {
+      log.warn('api.forbidden', { route: 'x-tenant-id', userId: req.user.id, role: req.user.role, target: id.success ? id.data : undefined });
+      throw new ApiError('forbidden');
+    }
+    return withTenant(member.tenant, async () => {
+      const user = await repos.users.get(member.userId);
+      if (!user) throw new ApiError('forbidden');
+      req.user = user;
+      res.locals.user = user;
+      next();
+    });
+  };
+}
+
+/**
  * The seller API. Routes come from src/contracts/api; this router checks who is calling, validates the
  * input and the output, and answers errors in the one format. Modules supply the work:
  *
@@ -111,6 +138,7 @@ export const apiV1 = {
       res.set('Cache-Control', 'no-store');
       next();
     });
+    r.use(switchBusiness(ctx));
     for (const route of routeList) r[route.method.toLowerCase()](route.path, serve(route, handlers.get(route.id)));
     r.use((_req, _res, next) => next(new ApiError('not_found')));
     app.use('/api/v1', r);

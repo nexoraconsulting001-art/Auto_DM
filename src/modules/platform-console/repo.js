@@ -8,7 +8,8 @@ const PUBLIC = 'id, email, name, role, created_at';
 const cleanEmail = (email) => String(email ?? '').trim().toLowerCase();
 
 /** Bhava's own team. Platform-level like the tenants repo: there is no current business here, by design. */
-export function platformUsersRepo(db) {
+export function platformUsersRepo(handle) {
+  const db = handle.platform ?? handle;
   return {
     async create({ email, password, role, name = '' }) {
       const address = cleanEmail(email);

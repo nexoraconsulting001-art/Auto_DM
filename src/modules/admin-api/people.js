@@ -40,6 +40,8 @@ const toCustomer = (u) => ({
   createdAt: u.created_at,
 });
 
+const toAuditEntry = (row) => ({ id: String(row.id), actor: row.actor, action: row.action, target: row.target, details: row.details, createdAt: row.created_at });
+
 const toActivity = (a) => ({
   id: a.id,
   commentId: a.comment_id,
@@ -86,5 +88,7 @@ export function peopleApi({ repos }) {
     },
 
     'activity.list': async ({ query }) => mapPage(await repos.adminLists.activity(query), toActivity),
+
+    'audit.list': async ({ query }) => mapPage(await repos.audit.list(query), toAuditEntry),
   };
 }
