@@ -344,11 +344,14 @@ test('C-04: a 190 after the token was swapped retries once with the new token, f
   await enqueue(w, privateReply(w));
   const original = w.ig.sendMessage;
   w.ig.sendMessage = async (account, ...args) => {
-    const out = original(account, ...args);
-    await w.inBusiness(() => w.platform.igAccounts.setToken(w.igUserId, 'token-2'));
-    await w.inTenant('UPDATE ig_accounts SET token_version = token_version + 1 WHERE tenant_id = $1', [w.tenant.id]);
-    w.ig.sendMessage = original;
-    return out;
+    try {
+      return await original(account, ...args);
+    } finally {
+      // The token is swapped while the call is in flight, so the 190 comes back after the swap.
+      await w.inBusiness(() => w.platform.igAccounts.setToken(w.igUserId, 'token-2'));
+      await w.inTenant('UPDATE ig_accounts SET token_version = token_version + 1 WHERE tenant_id = $1', [w.tenant.id]);
+      w.ig.sendMessage = original;
+    }
   };
   await w.turn();
   assert.deepEqual(w.ig.calls.map((c) => c.token), ['token-1', 'token-2']);
