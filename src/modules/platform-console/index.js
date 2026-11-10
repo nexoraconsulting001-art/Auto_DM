@@ -1,10 +1,15 @@
 import express from 'express';
 import { createPlatformAuth, requirePlatformRole, sameOriginOnly } from '../../auth.js';
+import { reportError } from '../../platform/log.js';
 import { normalizeHost } from '../../tenancy.js';
+import { registerBusinessRoutes } from './businesses.js';
+import { platformHostOf } from './host.js';
+import { sweepRawExports } from './raw-export.js';
 import { platformUsersRepo } from './repo.js';
 
-/** The platform host: PLATFORM_HOST, or admin.<PLATFORM_DOMAIN> ("admin" is a reserved business slug). */
-export const platformHostOf = (config) => normalizeHost(config.platformHost || (config.platformDomain ? `admin.${config.platformDomain}` : ''));
+export { platformHostOf };
+
+const HOUR = 3_600_000;
 
 const describe = (user) => ({ id: user.id, email: user.email, name: user.name, role: user.role });
 
@@ -47,5 +52,16 @@ export const platformConsole = {
     r.use((_req, res) => res.status(404).type('text').send('Not found.'));
 
     app.use((req, res, next) => (normalizeHost(req.hostname) === host ? r(req, res, next) : next()));
+  },
+
+  platformRoutes: registerBusinessRoutes,
+
+  jobs({ db, platform }) {
+    let nextSweep = 0;
+    return async function schedule() {
+      if (Date.now() < nextSweep) return;
+      nextSweep = Date.now() + HOUR;
+      await sweepRawExports({ db, storage: platform.storage }).catch((err) => reportError(err, { msg: 'raw_export.sweep_failed' }));
+    };
   },
 };
