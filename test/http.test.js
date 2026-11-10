@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import http from 'node:http';
 import { REEL_ID, login, seedReel, startApp } from './helpers.js';
 
 const sign = (body, secret = 'secret') => 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');
@@ -9,7 +8,7 @@ const sign = (body, secret = 'secret') => 'sha256=' + crypto.createHmac('sha256'
 // The webhook answers 200 before it does the work, so tests wait for the outcome. A fixed sleep loses this race on a busy machine.
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(check, ms = 5000) {
-  for (const end = Date.now() + ms; !check() && Date.now() < end; ) await pause(20);
+  for (const end = Date.now() + ms; !(await check()) && Date.now() < end; ) await pause(20);
 }
 
 test('webhook verification and signature checks', async () => {
@@ -39,37 +38,28 @@ test('a signed comment webhook sends the store link', async () => {
   }
 });
 
-test('comments on reels this store doesn’t use are passed on unchanged; /l/<slug> redirects to the plugin', async () => {
-  const received = [];
-  const receiver = http.createServer((req, res) => {
-    let body = '';
-    req.on('data', (c) => (body += c));
-    req.on('end', () => {
-      received.push({ body, sig: req.headers['x-hub-signature-256'] });
-      res.end('ok');
-    });
-  }).listen(0);
-  const forwardWebhookUrl = `http://127.0.0.1:${receiver.address().port}/webhook`;
-  const app = await startApp({ overrides: { forwardWebhookUrl, pluginUrl: 'https://plugin.test' } });
+test('there is no forwarding to another app and no /l/ redirect, even with the old settings present', async () => {
+  const app = await startApp({ overrides: { forwardWebhookUrl: 'http://127.0.0.1:9/webhook', pluginUrl: 'https://plugin.test' } });
+  const realFetch = globalThis.fetch;
+  const outgoing = [];
+  globalThis.fetch = (url, init) => {
+    if (!String(url).startsWith(app.base)) outgoing.push(String(url));
+    return realFetch(url, init);
+  };
   try {
     await seedReel(app.repos);
-    const comment = (id, media) => JSON.stringify({ entry: [{ id: 'ME', changes: [{ field: 'comments', value: { id, text: 'LINK', media: { id: media }, from: { id: 'u1', username: 'bob' } } }] }] });
-    const send = (body) => fetch(`${app.base}/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(body) }, body });
-
-    await send(comment('c1', REEL_ID)); // our reel: DM here, nothing passed on
-    const other = comment('c2', '999');
-    await send(other); // not our reel: passed on byte for byte with Meta's signature
-    await waitFor(() => received.length > 0 && app.ig.calls.length > 0);
-    await pause(200); // room for anything that should not have been passed on to arrive
-    assert.equal(app.ig.calls.filter((c) => c[0] === 'button').length, 1);
-    assert.deepEqual(received, [{ body: other, sig: sign(other) }]);
+    const body = JSON.stringify({ entry: [{ id: 'ME', changes: [{ field: 'comments', value: { id: 'c2', text: 'LINK', media: { id: '999' }, from: { id: 'u1', username: 'bob' } } }] }] });
+    await fetch(`${app.base}/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(body) }, body });
+    await waitFor(async () => (await app.repos.activity.count()) > 0);
+    await pause(100); // room for a forward, if there were one
+    assert.equal(await app.repos.activity.count(), 1);
+    assert.deepEqual(outgoing, []);
 
     const res = await fetch(`${app.base}/l/winter-bulbs?src=dm`, { redirect: 'manual' });
-    assert.equal(res.status, 302);
-    assert.equal(res.headers.get('location'), 'https://plugin.test/r/winter-bulbs?src=dm');
+    assert.equal(res.status, 404);
   } finally {
+    globalThis.fetch = realFetch;
     app.close();
-    receiver.close();
   }
 });
 

@@ -24,6 +24,7 @@ export function validatePassword(password) {
 }
 
 const PUBLIC = 'id, name, phone, email, role, address, created_at';
+export const BUSINESS_ROLES = ['owner', 'staff', 'customer'];
 
 export function usersRepo(db) {
   return {
@@ -49,7 +50,7 @@ export function usersRepo(db) {
       if (exists) throw new ValidationError('An account with this number already exists. Log in instead.');
       const [row] = await db.query(
         `INSERT INTO users (tenant_id, name, phone, email, password_hash, role) VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${PUBLIC}`,
-        [tenantId(), n.slice(0, 80), p, e.slice(0, 120), await hashPassword(password), role === 'admin' ? 'admin' : 'customer'],
+        [tenantId(), n.slice(0, 80), p, e.slice(0, 120), await hashPassword(password), BUSINESS_ROLES.includes(role) ? role : 'customer'],
       );
       return row;
     },
@@ -75,18 +76,19 @@ export function usersRepo(db) {
     },
     /** Only the server command (scripts/role.js) and ensureOwner change roles; signup always makes customers. */
     async setRole(id, role) {
-      if (!['admin', 'customer'].includes(role)) throw new ValidationError('Role must be admin or customer');
+      if (!BUSINESS_ROLES.includes(role)) throw new ValidationError('Role must be owner, staff or customer');
       await db.query('UPDATE users SET role = $3 WHERE tenant_id = $1 AND id = $2', [tenantId(), Number(id), role]);
       return this.get(id);
     },
-    async listAdmins() {
-      return db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND role = 'admin' ORDER BY created_at`, [tenantId()]);
+    /** The business's own people: owners and staff. */
+    async listTeam() {
+      return db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND role IN ('owner', 'staff') ORDER BY created_at`, [tenantId()]);
     },
     async saveAddress(id, address) {
       await db.query('UPDATE users SET address = $3 WHERE tenant_id = $1 AND id = $2', [tenantId(), Number(id), JSON.stringify(address)]);
     },
     /**
-     * Makes sure the owner account from .env exists and has the admin role.
+     * Makes sure the owner account from .env exists and has the owner role.
      * An existing account with that phone is promoted; its password is reset to the .env one.
      */
     async ensureOwner({ phone, password, name = 'Store owner' }) {
@@ -94,10 +96,10 @@ export function usersRepo(db) {
       if (!p || !password) return null;
       const [row] = await db.query('SELECT id FROM users WHERE tenant_id = $1 AND phone = $2', [tenantId(), p]);
       if (row) {
-        await db.query("UPDATE users SET role = 'admin', password_hash = $3 WHERE tenant_id = $1 AND id = $2", [tenantId(), row.id, await hashPassword(password)]);
+        await db.query("UPDATE users SET role = 'owner', password_hash = $3 WHERE tenant_id = $1 AND id = $2", [tenantId(), row.id, await hashPassword(password)]);
         return this.get(row.id);
       }
-      return this.create({ name, phone: p, password, role: 'admin' });
+      return this.create({ name, phone: p, password, role: 'owner' });
     },
     async listCustomers({ search = '' } = {}) {
       return db.query(
@@ -106,7 +108,7 @@ export function usersRepo(db) {
            (SELECT coalesce(sum(total_paise), 0)::bigint FROM orders o WHERE o.tenant_id = u.tenant_id AND o.user_id = u.id AND o.status <> 'cancelled') AS spent
          FROM users u
          WHERE u.tenant_id = $2 AND ($1 = '' OR u.name ILIKE '%' || $1 || '%' OR u.phone LIKE '%' || $1 || '%')
-         ORDER BY u.role = 'admin' DESC, u.created_at DESC LIMIT 500`,
+         ORDER BY u.role = 'owner' DESC, u.created_at DESC LIMIT 500`,
         [search.trim(), tenantId()],
       );
     },

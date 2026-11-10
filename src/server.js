@@ -3,11 +3,12 @@ import path from 'node:path';
 import express from 'express';
 import { pathToFileURL } from 'node:url';
 import { config as defaultConfig } from './config.js';
-import { openDb } from './db/index.js';
+import { openRuntimeDb } from './db/index.js';
 import { createRepos } from './repos/index.js';
 import { createAuth } from './auth.js';
 import { handleComment } from './handler.js';
-import * as instagram from './instagram.js';
+import { createInstagram, forAccount } from './instagram.js';
+import { MODULES } from './modules/index.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes, baseUrlFor, tenantBaseUrl } from './routes/admin.js';
 import { createTenantResolver, withTenant } from './tenancy.js';
@@ -24,12 +25,14 @@ export function verifySignature(rawBody, header, secret) {
 
 /**
  * Builds the web app. `db` comes from openDb(); `platform` (storage, queue, analytics, cache, metrics,
- * secrets) from createPlatform(); `ig` can be swapped for a fake in tests.
+ * secrets) from createPlatform(); `ig` can be swapped for a fake in tests. Features plug in through
+ * `modules` (see src/modules/index.js).
  */
-export function createApp({ db, ig = instagram, config = defaultConfig, platform = createPlatform(config, { db }) }) {
-  const repos = createRepos(db, { storage: platform.storage });
-  const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions, cache: platform.cache });
+export function createApp({ db, config = defaultConfig, ig = createInstagram(config), platform = createPlatform(config, { db }), modules = MODULES }) {
+  const repos = createRepos(db, { storage: platform.storage, secrets: platform.secrets, modules });
+  const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions, tenants: repos.tenants, cache: platform.cache });
   const tenants = createTenantResolver({ tenants: repos.tenants, platformDomain: config.platformDomain, defaultTenant: config.defaultTenant });
+  const ctx = { db, repos, ig, auth, config, platform, modules };
 
   /** The business that owns an Instagram account: linked accounts first, then the default business. */
   async function tenantForIgAccount(igUserId) {
@@ -41,7 +44,7 @@ export function createApp({ db, ig = instagram, config = defaultConfig, platform
   }
   const app = express();
 
-  app.set('trust proxy', 1); // exactly one proxy (Caddy, Codespaces or Render) terminates HTTPS in front of the app
+  app.set('trust proxy', 1); // exactly one proxy (Caddy) terminates HTTPS in front of the app
   app.disable('x-powered-by');
   app.use(requestIds());
   app.use(platform.metrics.middleware());
@@ -84,55 +87,41 @@ export function createApp({ db, ig = instagram, config = defaultConfig, platform
     // Acknowledge fast; Meta retries deliveries that are slow to get a 200.
     res.sendStatus(200);
 
-    let unmapped = false;
     for (const entry of req.body?.entry || []) {
       const tenant = await tenantForIgAccount(entry.id);
       if (!tenant) {
         log.warn('webhook.unknown_account', { igAccount: String(entry.id) });
-        unmapped = true;
         continue;
       }
       const base = tenantBaseUrl(tenant, config) || baseUrlFor(req, config);
       const storeUrl = (slug) => `${base}/r/${encodeURIComponent(slug)}?src=dm`;
-      const ownIds = new Set([entry.id, config.igUserId].filter(Boolean).map(String));
+      const ownIds = new Set([entry.id].filter(Boolean).map(String));
       await withTenant(tenant, async () => {
         for (const change of entry.changes || []) {
           if (change.field !== 'comments') continue;
           try {
-            const result = await handleComment(change.value, { repos, ig, ownIds, storeUrl, oneDmPerUser: config.oneDmPerUser });
+            // Every DM goes out with the token of the Instagram account the comment arrived on.
+            const account = await repos.igAccounts.get(entry.id);
+            const client = account?.token ? forAccount(ig, account) : null;
+            const result = await handleComment(change.value, { repos, ig: client, ownIds, storeUrl, oneDmPerUser: config.oneDmPerUser });
             log.info('webhook.comment', { comment: change.value?.id, media: change.value?.media?.id, result });
             platform.metrics.inc('webhook_comments_total', { result: result.split(':')[0] });
-            if (result === 'skip:unmapped-reel') unmapped = true;
           } catch (err) {
             reportError(err, { msg: 'webhook.comment_failed', comment: change.value?.id });
           }
         }
       });
     }
-    // Reels this store doesn't use may belong to another app on the same Instagram account. It gets the
-    // delivery byte for byte, with Meta's signature, and checks it with the same app secret.
-    if (unmapped && config.forwardWebhookUrl) {
-      fetch(config.forwardWebhookUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-hub-signature-256': req.get('x-hub-signature-256') },
-        body: req.rawBody,
-        signal: AbortSignal.timeout(5000),
-      })
-        .then((r) => console.log(`Passed comment on to ${config.forwardWebhookUrl}: ${r.status}`))
-        .catch((err) => console.error(`Couldn't pass comment on to ${config.forwardWebhookUrl}: ${err.message}`));
-    }
   });
 
-  // DM links from the app that shares this Instagram account (see FORWARD_WEBHOOK_URL) point here.
-  if (config.pluginUrl) {
-    app.get('/l/:slug', (req, res) => {
-      const qs = new URLSearchParams(req.query).toString();
-      res.redirect(302, `${config.pluginUrl}/r/${encodeURIComponent(req.params.slug)}${qs ? `?${qs}` : ''}`);
-    });
-  }
+  for (const module of modules) module.beforeTenant?.(app, ctx);
 
-  // Everything below belongs to one business, found from the web address.
+  // A bearer token names its own user and business, so it is checked before the web address is looked at.
+  app.use(auth.bearer);
+
+  // Everything below belongs to one business: the bearer token's, or the one found from the web address.
   app.use(async (req, res, next) => {
+    if (req.bearer) return next();
     // req.hostname honours X-Forwarded-Host only from the trusted proxy in front (Caddy).
     const tenant = await tenants.resolve(req.hostname);
     if (!tenant) return res.status(404).type('text').send('There is no store at this address.');
@@ -140,8 +129,9 @@ export function createApp({ db, ig = instagram, config = defaultConfig, platform
   });
 
   app.use('/media', mediaRoutes({ repos }));
-  // Everything below knows who is logged in, and logged-in POSTs need the session's CSRF token.
+  // Everything below knows who is logged in, and POSTs from a cookie session need its CSRF token.
   app.use(auth.load, auth.checkCsrf);
+  for (const module of modules) module.routes?.(app, ctx);
   app.use('/', accountRoutes({ repos, auth, config }));
   app.use('/admin', adminRoutes({ repos, ig, auth, config }));
   app.use('/api', apiRoutes({ repos }));
@@ -159,22 +149,22 @@ export function createApp({ db, ig = instagram, config = defaultConfig, platform
   return app;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const config = defaultConfig;
-  const db = await openDb({ url: config.databaseUrl, dataDir: config.dataDir });
+async function main(config = defaultConfig) {
+  const db = await openRuntimeDb(config);
   const platform = createPlatform(config, { db });
-  const repos = createRepos(db, { storage: platform.storage });
-  if (!config.databaseUrl) console.warn('DATABASE_URL is empty: using the built-in database, which is only for tests and quick local runs');
+  const repos = createRepos(db, { storage: platform.storage, secrets: platform.secrets });
   const tenant = config.defaultTenant ? await repos.tenants.ensure({ slug: config.defaultTenant, name: config.defaultTenantName }) : null;
   const owner = tenant ? await withTenant(tenant, () => repos.users.ensureOwner({ phone: config.adminPhone, password: config.adminPassword })) : null;
   const server = createApp({ db, config, platform }).listen(config.port, () => {
-    log.info('modules', describePlatform(platform));
-    console.log(`auto-dm listening on :${config.port}${config.dryRun ? ' (DRY_RUN)' : ''}`);
-    console.log(`Database: ${config.databaseUrl ? 'Postgres (DATABASE_URL)' : config.dataDir}`);
-    if (tenant) console.log(`Default business: ${tenant.name} (${tenant.slug})`);
-    if (owner) console.log(`Store owner: log in on /login with ${owner.phone} and ADMIN_PASSWORD`);
-    else console.log('No store owner yet: set ADMIN_PHONE and ADMIN_PASSWORD in .env to use /admin');
-    if (!process.env.SESSION_SECRET) console.log('Tip: set SESSION_SECRET in .env so logins survive restarts');
+    log.info('server.started', {
+      port: config.port,
+      dryRun: config.dryRun,
+      database: db.kind,
+      modules: describePlatform(platform),
+      defaultBusiness: tenant?.slug ?? null,
+      ownerFromEnv: Boolean(owner),
+      sessionSecretSet: Boolean(process.env.SESSION_SECRET),
+    });
   });
   // On a deploy, finish the requests in progress before stopping.
   const stop = () => server.close(async () => {
@@ -184,4 +174,11 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   });
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    reportError(err, { msg: 'server.failed_to_start' });
+    process.exit(1);
+  });
 }

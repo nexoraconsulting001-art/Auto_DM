@@ -22,6 +22,17 @@ export async function openDb({ url = '', dataDir, migrate = true, poolSize = 10 
   return db;
 }
 
+/**
+ * Opens the database for a running process (web, worker, server commands). Postgres is the only runtime
+ * database: without DATABASE_URL this refuses, unless NODE_ENV=test or ALLOW_PGLITE=1.
+ */
+export async function openRuntimeDb(config, env = process.env) {
+  if (!config.databaseUrl && env.NODE_ENV !== 'test' && env.ALLOW_PGLITE !== '1') {
+    throw new Error('DATABASE_URL is required: Postgres is the only runtime database. For a quick local run on the built-in database, set ALLOW_PGLITE=1.');
+  }
+  return openDb({ url: config.databaseUrl, dataDir: config.dataDir });
+}
+
 /** Applies migrations/NNN_name.sql in order, each in its own transaction. Returns the versions applied. */
 export async function runMigrations(db, dir = MIGRATIONS_DIR) {
   await db.tx(async (t) => {

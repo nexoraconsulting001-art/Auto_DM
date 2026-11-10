@@ -11,6 +11,7 @@
     "start": "node src/server.js",
     "worker": "node src/worker.js",
     "tenant": "node scripts/tenant.js",
+    "platform-user": "node scripts/platform-user.js",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/restore.js",
     "seed": "node scripts/seed.js",

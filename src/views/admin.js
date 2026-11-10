@@ -504,7 +504,7 @@ export function settingsPage({ settings: s, connection, csrf }) {
       <label>Accent colour<input type="color" name="accent_color" value="${s.accent_color}"></label>
       <label>Logo link <span class="hint">Optional, square image</span><input type="url" name="logo_url" value="${s.logo_url}"></label>
     </div>
-    <label>Instagram handle<input name="instagram_handle" value="${s.instagram_handle}" placeholder="_shoppingforher_"></label>
+    <label>Instagram handle<input name="instagram_handle" value="${s.instagram_handle}" placeholder="yourshop"></label>
   </section>
   <section class="panel">
     <h2>Home and About pages</h2>
@@ -644,12 +644,12 @@ ${customers.length ? html`
 <div class="table-wrap"><table>
   <thead><tr><th>Customer</th><th>Mobile</th><th class="num">Orders</th><th class="num">Spent</th><th>Joined</th><th></th></tr></thead>
   <tbody>${customers.map((u) => html`<tr>
-    <td>${u.name}${u.role === 'admin' ? html` <span class="chip chip-new">Admin</span>` : ''}${u.email ? html`<small>${u.email}</small>` : ''}</td>
+    <td>${u.name}${u.role === 'owner' ? html` <span class="chip chip-new">Owner</span>` : ''}${u.email ? html`<small>${u.email}</small>` : ''}</td>
     <td><a href="https://wa.me/91${u.phone}">${u.phone}</a></td>
     <td class="num">${u.order_count ? html`<a href="/admin/orders?search=${u.phone}">${u.order_count}</a>` : 0}</td>
     <td class="num">${formatMoney(Number(u.spent))}</td>
     <td>${new Date(u.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-    <td>${u.role === 'admin' ? '' : html`<form method="post" action="/admin/customers/${u.id}/reset" data-confirm="Set a new password for ${u.name}?">${csrfField(csrf)}<button class="btn" type="submit">Reset password</button></form>`}</td>
+    <td>${u.role !== 'customer' ? '' : html`<form method="post" action="/admin/customers/${u.id}/reset" data-confirm="Set a new password for ${u.name}?">${csrfField(csrf)}<button class="btn" type="submit">Reset password</button></form>`}</td>
   </tr>`)}</tbody>
 </table></div>` : html`<p class="empty">${search ? 'No customers match.' : 'No customer accounts yet. Shoppers can sign up, or add a password when they check out.'}</p>`}`;
 }

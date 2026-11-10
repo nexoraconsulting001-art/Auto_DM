@@ -78,7 +78,7 @@ test('/api/reels pages through live reels, newest first', async () => {
 });
 
 test('the setup checklist ticks steps off and can be hidden', async () => {
-  const app = await startApp({ overrides: { accessToken: 'token' } });
+  const app = await startApp();
   try {
     const { cookie, csrf } = await login(app.base, { csrfPage: '/admin' });
     let dash = await (await fetch(`${app.base}/admin`, { headers: { cookie } })).text();

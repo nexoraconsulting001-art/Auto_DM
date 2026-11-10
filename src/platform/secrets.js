@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 /**
  * Encrypts tokens and keys before they are stored (Instagram tokens, gateway, Shiprocket and Shopify
  * keys). AES-256-GCM with DATA_KEY: 32 random bytes, base64. Generate one with
- *   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+ *   node -p "require('crypto').randomBytes(32).toString('base64')"
  * To rotate, move the old key to DATA_KEY_OLD and set a new DATA_KEY; old values still decrypt and
  * are re-encrypted with the new key when next saved.
  *

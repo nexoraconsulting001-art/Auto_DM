@@ -11,14 +11,17 @@ import { tenantsRepo } from './tenants.js';
 import { usersRepo } from './users.js';
 import { withTenant } from '../tenancy.js';
 import { createStorage } from '../platform/storage.js';
+import { createSecrets } from '../platform/secrets.js';
+import { MODULES } from '../modules/index.js';
 
 /**
- * Every repo except `tenants` works on the current business only (see tenancy.js) and throws when
- * called outside withTenant(). `tenants` is the platform-level repo.
- * `storage` holds uploaded files (in memory unless given, which suits tests).
+ * Every repo except `tenants` and `platformUsers` works on the current business only (see tenancy.js)
+ * and throws when called outside withTenant(). Those two are the platform-level repos.
+ * `storage` holds uploaded files (in memory unless given, which suits tests); `secrets` encrypts tokens.
+ * Each entry in src/modules/index.js can add repos.
  */
-export function createRepos(db, { storage = createStorage({ storageDriver: 'memory' }) } = {}) {
-  return {
+export function createRepos(db, { storage = createStorage({ storageDriver: 'memory' }), secrets = createSecrets({}), modules = MODULES } = {}) {
+  const repos = {
     activity: activityRepo(db),
     categories: categoriesRepo(db),
     media: mediaRepo(db, { storage }),
@@ -31,6 +34,13 @@ export function createRepos(db, { storage = createStorage({ storageDriver: 'memo
     tenants: tenantsRepo(db),
     users: usersRepo(db),
   };
+  for (const module of modules) {
+    for (const [name, repo] of Object.entries(module.repos?.(db, { storage, secrets }) ?? {})) {
+      if (repos[name]) throw new Error(`Two modules both define the repo "${name}"`);
+      repos[name] = repo;
+    }
+  }
+  return repos;
 }
 
 /**

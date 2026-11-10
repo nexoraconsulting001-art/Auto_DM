@@ -1,7 +1,6 @@
 node_modules/
 .env
 data/
-deploy/.env
 .gate/
 test-results/
 playwright-report/

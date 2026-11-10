@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { runMigrations } from '../src/db/index.js';
+import fs from 'node:fs';
+import { MIGRATIONS_DIR, runMigrations } from '../src/db/index.js';
 import { bindTenant, createRepos } from '../src/repos/index.js';
 import { NoTenantError, createTenantResolver } from '../src/tenancy.js';
 import { OWNER, REEL_ID, login, openTestDb, seedReel, setup, startApp } from './helpers.js';
@@ -25,7 +26,9 @@ test('migrations run once and are safe to run again', async () => {
   const db = await openTestDb();
   assert.deepEqual(await runMigrations(db), []);
   const rows = await db.query('SELECT version FROM schema_migrations');
-  assert.deepEqual(rows.map((r) => r.version), ['001', '002']);
+  const expected = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).map((f) => f.slice(0, 3)).sort();
+  assert.deepEqual(rows.map((r) => r.version).sort(), expected);
+  assert.ok(expected.includes('001') && expected.includes('002'));
 });
 
 test('one business cannot read, change or delete another business’s products', async () => {
@@ -150,6 +153,7 @@ test('webhooks are handled as the business that owns the Instagram account', asy
     const other = await app.platform.tenants.create({ slug: 'leaf', name: 'Leaf and Clay' });
     await app.platform.tenants.linkIgAccount(other.id, 'IG-LEAF', 'leafandclay');
     const b = bindTenant(app.platform, other);
+    await b.igAccounts.setToken('IG-LEAF', 'leaf-token');
     await seedReel(b);
     const body = JSON.stringify({ entry: [{ id: 'IG-LEAF', changes: [{ field: 'comments', value: { id: 'c9', text: 'LINK', media: { id: REEL_ID }, from: { id: 'u1', username: 'bob' } } }] }] });
     const sig = `sha256=${crypto.createHmac('sha256', 'secret').update(body).digest('hex')}`;

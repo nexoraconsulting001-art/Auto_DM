@@ -35,11 +35,11 @@ test('shoppers sign up, log in, and are kept out of the admin panel', async () =
   }
 });
 
-test('the owner from .env is an admin, and logins are rate limited', async () => {
+test('the owner from .env is an owner, and logins are rate limited', async () => {
   const app = await startApp();
   try {
     const owner = await app.repos.users.findByPhone(OWNER.phone);
-    assert.equal(owner.role, 'admin');
+    assert.equal(owner.role, 'owner');
     // Running ensureOwner again (every start) keeps one account.
     await app.repos.users.ensureOwner(OWNER);
     assert.equal((await app.repos.users.listCustomers()).length, 1);
@@ -98,27 +98,27 @@ test('checkout needs a login; orders show on My account and the address is saved
   }
 });
 
-test('admin rights come only from the role command; signups are customers', async () => {
+test('owner rights come only from the role command; signups are customers', async () => {
   const { changeRole } = await import('../scripts/role.js');
   const app = await startApp();
   try {
-    // A signup form can't ask for admin.
-    const signup = await fetch(`${app.base}/signup`, { method: 'POST', body: form({ name: 'Meera', phone: '9988776655', password: 'secret1', role: 'admin' }), redirect: 'manual' });
+    // A signup form can't ask for owner rights.
+    const signup = await fetch(`${app.base}/signup`, { method: 'POST', body: form({ name: 'Meera', phone: '9988776655', password: 'secret1', role: 'owner' }), redirect: 'manual' });
     const cookie = signup.headers.get('set-cookie').split(';')[0];
     assert.equal((await app.repos.users.findByPhone('9988776655')).role, 'customer');
     assert.equal((await fetch(`${app.base}/admin`, { headers: { cookie }, redirect: 'manual' })).headers.get('location'), '/account');
 
-    assert.match(await changeRole(app.repos, { phone: '9988776655', role: 'admin', ownerPhone: OWNER.phone }), /is now an admin/);
+    assert.match(await changeRole(app.repos, { phone: '9988776655', role: 'owner', ownerPhone: OWNER.phone }), /is now an owner/);
     assert.equal((await fetch(`${app.base}/admin`, { headers: { cookie }, redirect: 'manual' })).status, 200);
-    // Admins other than the .env owner manage their own password.
+    // Owners other than the .env owner manage their own password.
     assert.match(await (await fetch(`${app.base}/account`, { headers: { cookie } })).text(), /Change password/);
 
     assert.match(await changeRole(app.repos, { phone: '9988776655', role: 'customer', ownerPhone: OWNER.phone }), /is now a customer/);
     assert.equal((await fetch(`${app.base}/admin`, { headers: { cookie }, redirect: 'manual' })).headers.get('location'), '/account');
 
     await assert.rejects(changeRole(app.repos, { phone: OWNER.phone, role: 'customer', ownerPhone: OWNER.phone }), /ADMIN_PHONE/);
-    await assert.rejects(changeRole(app.repos, { phone: '9000011111', role: 'admin' }), /sign up on the website first/);
-    await assert.rejects(changeRole(app.repos, { phone: '9988776655', role: 'boss' }), /admin" or "customer/);
+    await assert.rejects(changeRole(app.repos, { phone: '9000011111', role: 'owner' }), /sign up on the website first/);
+    await assert.rejects(changeRole(app.repos, { phone: '9988776655', role: 'boss' }), /"owner", "staff" or "customer"/);
   } finally {
     app.close();
   }

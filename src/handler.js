@@ -1,3 +1,5 @@
+import { log } from './platform/log.js';
+
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export function matchesKeyword(text, keyword) {
@@ -14,7 +16,7 @@ export const fill = (template, vars) =>
  * Handles one `comments` webhook change. Returns a short status string (useful for logs/tests).
  * deps: {
  *   repos: { reels, activity },
- *   ig: { sendPrivateReply, sendPrivateReplyButton, replyToComment },
+ *   ig: { sendPrivateReply, sendPrivateReplyButton, replyToComment } | null,  // bound to this account; null when not connected
  *   ownIds: Set<string>,            // the business account's own IDs; its comments never get a DM
  *   storeUrl: (slug) => string,     // public link to a reel's store page
  *   oneDmPerUser?: boolean,
@@ -40,6 +42,7 @@ export async function handleComment(value, { repos, ig, ownIds, storeUrl, oneDmP
   if (!matchesKeyword(text, reel.keywords)) return skip('skip:no-keyword');
   if (oneDmPerUser && (await repos.activity.hasSentToUser(userId, mediaId))) return skip('skip:already-sent-to-user');
   // Meta can deliver the same comment more than once; only the first delivery sends a DM.
+  if (!ig) return skip('skip:not-connected');
   if (!(await repos.activity.claim(entry))) return 'skip:duplicate-comment';
 
   const url = storeUrl(reel.slug);
@@ -52,7 +55,7 @@ export async function handleComment(value, { repos, ig, ownIds, storeUrl, oneDmP
       await ig.sendPrivateReplyButton(commentId, message, url, reel.button_text || 'Shop now');
     } catch (err) {
       // Instagram allows one private reply per comment, so only fall back if the button was rejected.
-      console.error(`Button DM failed for comment ${commentId}, sending plain text instead: ${err.message}`);
+      log.warn('dm.button_rejected', { comment: commentId, status: err.status, code: err.code });
       await ig.sendPrivateReply(commentId, message.includes(url) ? message : `${message}\n${url}`);
     }
   } catch (err) {
@@ -60,14 +63,14 @@ export async function handleComment(value, { repos, ig, ownIds, storeUrl, oneDmP
     throw err;
   }
   await repos.activity.finish(commentId, 'sent');
-  console.log(`DM sent to @${username} for reel ${mediaId} -> ${url}`);
+  log.info('dm.sent', { comment: commentId, media: mediaId });
 
   if (reel.public_reply) {
     try {
       await ig.replyToComment(commentId, fill(reel.public_reply, vars));
     } catch (err) {
       // DM already went out; a failed public reply should not cause a retry.
-      console.error(`Public reply failed for comment ${commentId}: ${err.message}`);
+      log.warn('dm.public_reply_failed', { comment: commentId, status: err.status, code: err.code });
     }
   }
   return 'sent';

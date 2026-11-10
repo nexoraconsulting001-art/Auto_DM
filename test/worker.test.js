@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { backupStorage, pgEnv, runBackup, runRestore } from '../src/backup.js';
-import { openDb, runMigrations } from '../src/db/index.js';
+import { MIGRATIONS_DIR, openDb, runMigrations } from '../src/db/index.js';
 import { createPlatform } from '../src/platform/index.js';
 import { createQueue } from '../src/platform/queue.js';
 import { bindTenant, createRepos } from '../src/repos/index.js';
@@ -74,7 +74,8 @@ test('migrations are safe when several processes start at once', { skip: !proces
   const db = await openTestDb();
   await db.exec('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
   const results = await Promise.all([runMigrations(db), runMigrations(db), runMigrations(db)]);
-  assert.equal(results.flat().length, 2, 'each migration applied exactly once');
+  const files = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'));
+  assert.equal(results.flat().length, files.length, 'each migration applied exactly once');
 });
 
 test('R-03: a backup restores with no data mixed between businesses', { skip: !(process.env.TEST_DATABASE_URL && hasPgTools()) && 'needs real Postgres and pg_dump' }, async () => {

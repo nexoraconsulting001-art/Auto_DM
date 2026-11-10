@@ -2,6 +2,8 @@ import express from 'express';
 import QRCode from 'qrcode';
 import { PRICE_BANDS, ValidationError } from '../util.js';
 import { SORTS } from '../repos/products.js';
+import { buyerSettings } from '../modules/brand/index.js';
+import { log } from '../platform/log.js';
 import {
   HOME_PAGE_SIZE, aboutPage, checkoutPage, homePage, notFoundPage, orderPage, productForClient, productPage,
   reelForClient, reelStorePage, reelsFeedPage, shopPage,
@@ -16,15 +18,16 @@ function mediaRefresher({ repos, ig }) {
     if (!ig?.getMedia || refreshing.has(reel.ig_media_id)) return;
     if (Date.now() - new Date(reel.media_checked_at).getTime() < MEDIA_REFRESH_MS) return;
     refreshing.add(reel.ig_media_id);
-    ig.getMedia(reel.ig_media_id)
+    repos.igAccounts.current()
+      .then((account) => (account ? ig.getMedia(account, reel.ig_media_id) : null))
       .then((m) =>
-        repos.reels.updateMediaInfo(reel.ig_media_id, {
+        m && repos.reels.updateMediaInfo(reel.ig_media_id, {
           thumbnail_url: m.thumbnail_url || m.media_url,
           permalink: m.permalink,
           video_url: m.media_type === 'VIDEO' ? m.media_url : '',
         }),
       )
-      .catch((err) => console.error(`Couldn't refresh reel ${reel.ig_media_id} media: ${err.message}`))
+      .catch((err) => log.warn('reel.media_refresh_failed', { media: reel.ig_media_id, status: err.status, code: err.code }))
       .finally(() => refreshing.delete(reel.ig_media_id));
   };
 }
@@ -34,11 +37,11 @@ export function storeRoutes({ repos, ig, auth }) {
   const r = express.Router();
   const page = (res, view, status = 200) => res.status(status).type('html').send(String(view));
   const notFound = async (req, res, message) =>
-    page(res, notFoundPage({ settings: await repos.settings.getAll(), user: req.user, message }), 404);
+    page(res, notFoundPage({ settings: await buyerSettings(repos), user: req.user, message }), 404);
 
   r.get('/', async (req, res) => {
     const [settings, categories, feed, featured] = await Promise.all([
-      repos.settings.getAll(), repos.categories.list({ visibleOnly: true }), repos.reels.feed({ limit: 10 }), repos.products.featured(8),
+      buyerSettings(repos), repos.categories.list({ visibleOnly: true }), repos.reels.feed({ limit: 10 }), repos.products.featured(8),
     ]);
     // No featured products yet: show the biggest discounts instead.
     const deals = featured.length >= 4 ? featured : (await repos.products.listActive({ sort: 'discount', limit: 8 })).products;
@@ -52,7 +55,7 @@ export function storeRoutes({ repos, ig, auth }) {
     const sort = SORTS[req.query.sort] ? req.query.sort : 'popular';
     const shown = Math.min(Math.max(Number(req.query.show) || HOME_PAGE_SIZE, HOME_PAGE_SIZE), 480);
     const [settings, categories, { products, total }] = await Promise.all([
-      repos.settings.getAll(),
+      buyerSettings(repos),
       repos.categories.list({ visibleOnly: true }),
       repos.products.listActive({ search: q, category: category?.slug || '', band: price, sort, limit: shown }),
     ]);
@@ -75,13 +78,13 @@ export function storeRoutes({ repos, ig, auth }) {
     const product = await repos.products.getActiveBySlug(req.params.productSlug);
     if (!product) return notFound(req, res, 'This product isn’t available.');
     const [settings, categories, related] = await Promise.all([
-      repos.settings.getAll(), repos.products.categoriesOf(product.id), repos.products.related(product, 4),
+      buyerSettings(repos), repos.products.categoriesOf(product.id), repos.products.related(product, 4),
     ]);
     page(res, productPage({ settings, user: req.user, reel: null, product, categories: categories.filter((c) => c.visible), related }));
   });
 
   r.get('/reels', async (req, res) => {
-    const [settings, feed] = await Promise.all([repos.settings.getAll(), repos.reels.feed({ limit: 8 })]);
+    const [settings, feed] = await Promise.all([buyerSettings(repos), repos.reels.feed({ limit: 8 })]);
     feed.reels.forEach(refreshMedia);
     page(res, reelsFeedPage({ settings, user: req.user, feed }));
   });
@@ -90,9 +93,9 @@ export function storeRoutes({ repos, ig, auth }) {
     const reel = await repos.reels.getStore(req.params.slug);
     if (!reel || !reel.active) return notFound(req, res, 'This reel’s store isn’t open right now.');
     // Admin previews (?preview=1) and the owner's own visits don't count.
-    if (!req.query.preview && req.user?.role !== 'admin') await repos.reels.recordVisit(reel.ig_media_id, req.query.src || '');
+    if (!req.query.preview && !['owner', 'staff'].includes(req.user?.role)) await repos.reels.recordVisit(reel.ig_media_id, req.query.src || '');
     refreshMedia(reel);
-    const [settings, feed] = await Promise.all([repos.settings.getAll(), repos.reels.feed({ limit: 7 })]);
+    const [settings, feed] = await Promise.all([buyerSettings(repos), repos.reels.feed({ limit: 7 })]);
     const moreReels = feed.reels.filter((x) => x.ig_media_id !== reel.ig_media_id).slice(0, 6);
     page(res, reelStorePage({ settings, user: req.user, reel, moreReels }));
   });
@@ -103,21 +106,21 @@ export function storeRoutes({ repos, ig, auth }) {
     if (!product) return notFound(req, res, 'This product isn’t available.');
     // "You may also like" stays inside the reel: the other pieces from the same video.
     const related = reel.products.filter((p) => p.id !== product.id).slice(0, 4);
-    page(res, productPage({ settings: await repos.settings.getAll(), user: req.user, reel, product, categories: [], related }));
+    page(res, productPage({ settings: await buyerSettings(repos), user: req.user, reel, product, categories: [], related }));
   });
 
-  r.get('/about', async (req, res) => page(res, aboutPage({ settings: await repos.settings.getAll(), user: req.user })));
+  r.get('/about', async (req, res) => page(res, aboutPage({ settings: await buyerSettings(repos), user: req.user })));
 
   // Browsing is open to everyone; placing an order needs an account.
   r.get('/checkout', auth.requireUser, async (req, res) => {
     res.set('Cache-Control', 'no-store');
-    page(res, checkoutPage({ settings: await repos.settings.getAll(), user: req.user, csrf: req.csrf }));
+    page(res, checkoutPage({ settings: await buyerSettings(repos), user: req.user, csrf: req.csrf }));
   });
 
   r.get('/order/:token', async (req, res) => {
     const order = await repos.orders.getByToken(req.params.token);
     if (!order) return notFound(req, res, 'We couldn’t find that order.');
-    const settings = await repos.settings.getAll();
+    const settings = await buyerSettings(repos);
     let qrSvg = '';
     let upiLink = '';
     if (order.status === 'awaiting_payment') {

@@ -8,11 +8,11 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const config = {
   rootDir,
   // Instagram / Meta
-  accessToken: process.env.IG_ACCESS_TOKEN || '',
-  igUserId: process.env.IG_USER_ID || '',
   appSecret: process.env.APP_SECRET || '',
   verifyToken: process.env.VERIFY_TOKEN || '',
   graphVersion: process.env.GRAPH_VERSION || 'v23.0',
+  // Empty is Instagram itself. Tests and local runs point this at a simulator.
+  graphBaseUrl: process.env.GRAPH_BASE_URL || '',
   dryRun: process.env.DRY_RUN === '1',
   oneDmPerUser: process.env.ONE_DM_PER_USER === '1',
   // Web
@@ -23,13 +23,8 @@ export const config = {
   adminPassword: process.env.ADMIN_PASSWORD || '',
   // Without SESSION_SECRET, everyone is logged out when the server restarts.
   sessionSecret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
-  // Sharing the Instagram account with another app (e.g. the Auto DM plugin for another brand):
-  // comments on reels this store doesn't use are passed on, unchanged, to FORWARD_WEBHOOK_URL,
-  // and /l/<slug> links in that app's DMs are redirected to PLUGIN_URL/r/<slug>.
-  forwardWebhookUrl: process.env.FORWARD_WEBHOOK_URL || '',
-  pluginUrl: (process.env.PLUGIN_URL || '').replace(/\/+$/, ''),
-  // Database: Postgres connection string. Empty uses the built-in database in data/pgdata, which is only
-  // for tests and quick local runs (one process at a time).
+  // Database: Postgres connection string, required at runtime. Empty works only with NODE_ENV=test or
+  // ALLOW_PGLITE=1, for quick local runs on the built-in database in data/pgdata (one process at a time).
   databaseUrl: process.env.DATABASE_URL || '',
   dataDir: process.env.DATA_DIR || path.join(rootDir, 'data', 'pgdata'),
   // Businesses (tenants). Each business is found from the web address:
@@ -37,6 +32,8 @@ export const config = {
   // DEFAULT_TENANT is the business served on any other address, and the one webhooks fall back to;
   // it is created on start if missing. Leave it empty once every business has its own address.
   platformDomain: (process.env.PLATFORM_DOMAIN || '').toLowerCase(),
+  // Where Bhava's own team signs in. Empty means admin.PLATFORM_DOMAIN.
+  platformHost: (process.env.PLATFORM_HOST || '').toLowerCase(),
   // Switchable modules (see src/platform/index.js). QA defaults shown; production changes these only.
   storageDriver: process.env.STORAGE_DRIVER || 'local',
   storageDir: process.env.STORAGE_DIR || path.join(rootDir, 'data', 'files'),

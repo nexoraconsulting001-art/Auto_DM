@@ -1,17 +1,18 @@
 // Fills the store with demo data: products from seed/mehtamart.json and a store for each of your
 // 3 newest reels. Safe to run more than once.
 //
-//   npm run seed                               # finds your 3 newest reels via the Instagram API
+//   npm run seed                               # finds your 3 newest reels with the business's Instagram token
 //   npm run seed -- <newest> <second> <third>  # or give the reel IDs yourself
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { config } from '../src/config.js';
-import { openDb } from '../src/db/index.js';
+import { openRuntimeDb } from '../src/db/index.js';
 import { createRepos } from '../src/repos/index.js';
 import { withTenant } from '../src/tenancy.js';
 import { SETTING_DEFAULTS } from '../src/repos/settings.js';
-import * as instagram from '../src/instagram.js';
+import { createSecrets } from '../src/platform/secrets.js';
+import { createInstagram, forAccount } from '../src/instagram.js';
 
 export const SEED_FILE = path.join(config.rootDir, 'seed', 'mehtamart.json');
 
@@ -34,6 +35,12 @@ export async function seedDemo({ repos }, data, reels) {
     if (key in SETTING_DEFAULTS && current[key] === SETTING_DEFAULTS[key]) updates[key] = value;
   }
   await repos.settings.update(updates);
+
+  // The logo and accent colour live in the brand kit; keep them if the owner has set their own.
+  const kit = await repos.brandKit.get();
+  if (!kit.logoUrl && data.store.logo_url) {
+    await repos.brandKit.save({ logoUrl: data.store.logo_url, ...(data.store.accent_color ? { colors: { accent: data.store.accent_color } } : {}) });
+  }
 
   const summary = {
     settings: Object.keys(updates),
@@ -133,26 +140,29 @@ export async function newestReels(ig, count) {
     .map((m) => reelInfo(m));
 }
 
+async function findReels(repos, data, ids) {
+  const account = await repos.igAccounts.current();
+  const instagram = account ? forAccount(createInstagram(config), account) : null;
+  if (ids.length) {
+    const reels = [];
+    for (const id of ids) reels.push(instagram ? await instagram.getMedia(id).catch(() => ({ id })) : { id });
+    return reels.map((m, i) => reelInfo(m, ids[i]));
+  }
+  if (!instagram) throw new Error('This business has no Instagram token yet. Add one (npm run tenant -- ig-token), or pass 3 reel IDs: npm run seed -- <id1> <id2> <id3>');
+  const reels = await newestReels(instagram, data.reels.length);
+  if (reels.length < data.reels.length) {
+    throw new Error(`Found only ${reels.length} reel(s) on the account. Post ${data.reels.length} reels, or pass reel IDs: npm run seed -- <id1> <id2> <id3>`);
+  }
+  return reels;
+}
+
 async function main() {
   const data = JSON.parse(fs.readFileSync(SEED_FILE, 'utf8'));
   const ids = process.argv.slice(2).filter((a) => /^\d+$/.test(a));
-  let reels;
-  if (ids.length) {
-    reels = [];
-    for (const id of ids) reels.push(await instagram.getMedia(id).catch(() => ({ id })));
-    reels = reels.map((m, i) => reelInfo(m, ids[i]));
-  } else {
-    if (!config.accessToken) throw new Error('IG_ACCESS_TOKEN is missing in .env. Add it, or pass 3 reel IDs: npm run seed -- <id1> <id2> <id3>');
-    reels = await newestReels(instagram, data.reels.length);
-    if (reels.length < data.reels.length) {
-      throw new Error(`Found only ${reels.length} reel(s) on the account. Post ${data.reels.length} reels, or pass reel IDs: npm run seed -- <id1> <id2> <id3>`);
-    }
-  }
-
-  const db = await openDb({ url: config.databaseUrl, dataDir: config.dataDir });
-  const repos = createRepos(db);
+  const db = await openRuntimeDb(config);
+  const repos = createRepos(db, { secrets: createSecrets(config) });
   const tenant = await repos.tenants.ensure({ slug: config.defaultTenant || 'default', name: config.defaultTenantName });
-  const summary = await withTenant(tenant, () => seedDemo({ repos }, data, reels));
+  const summary = await withTenant(tenant, async () => seedDemo({ repos }, data, await findReels(repos, data, ids)));
   await db.close();
 
   const base = config.publicBaseUrl || `http://localhost:${config.port}`;

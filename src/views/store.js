@@ -3,9 +3,7 @@ import { ORDER_STATUSES } from '../repos/orders.js';
 import { SORTS } from '../repos/products.js';
 import { asset } from './assets.js';
 import { html, jsonScript, raw } from './html.js';
-
-const FONTS =
-  'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Figtree:wght@400;500;600;700;800&display=swap';
+import { brandCss, brandFontsHref } from '../modules/brand/theme.js';
 
 export const HOME_PAGE_SIZE = 24;
 
@@ -37,10 +35,12 @@ const igLink = (h) => `https://instagram.com/${String(h).replace(/^@/, '')}`;
 
 /**
  * Page shell. nav: 'home' | 'shop' | 'reels' | 'account' | null. owner: the logged-in admin's
- * "Edit this page" target ({ href, label }) — the owner bar only renders for admins.
+ * "Edit this page" target ({ href, label }) — the owner bar only renders for owners. settings.brand is the
+ * business's brand kit, which sets the colours, fonts, logo and favicon.
  */
 export function storeLayout({ settings, user, title, body, pageData = {}, nav = null, edit = null, tabs = true, bodyClass = '', escape = false }) {
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'owner';
+  const kit = settings.brand;
   const data = {
     shippingFee: Number(settings.shipping_fee_paise) || 0,
     freeShippingAbove: Number(settings.free_shipping_above_paise) || 0,
@@ -52,14 +52,15 @@ export function storeLayout({ settings, user, title, body, pageData = {}, nav = 
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<link rel="icon" href="data:,">
+<link rel="icon" href="${kit.faviconUrl || 'data:,'}">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${title ? `${title} | ${settings.store_name}` : settings.store_name}</title>
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="${kit.colors.ground}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="${FONTS}">
+<link rel="stylesheet" href="${brandFontsHref(kit)}">
 <link rel="stylesheet" href="${asset('store.css')}">
+<style>${raw(brandCss(kit))}</style>
 </head>
 <body class="${[bodyClass, tabs ? '' : 'no-tabs'].filter(Boolean).join(' ')}">
 ${ICONS}
@@ -70,7 +71,7 @@ ${isAdmin ? html`<div class="owner-bar" role="navigation" aria-label="Owner tool
 </div>` : ''}
 ${bodyClass.includes('reels-body') ? '' : html`<header class="topbar">
   <div class="topbar-inner">
-    <a class="brand" href="/">${settings.logo_url ? html`<img src="${settings.logo_url}" alt="">` : ''}<span>${settings.store_name}</span></a>
+    <a class="brand" href="/">${kit.logoUrl ? html`<img src="${kit.logoUrl}" alt="">` : ''}<span>${settings.store_name}</span></a>
     <nav class="desk-nav" aria-label="Store"><a href="/shop" ${current('shop')}>Shop</a><a href="/reels" ${current('reels')}>Reels</a><a href="/about" ${current('about')}>About</a></nav>
     <form class="desk-search" action="/shop" role="search">${icon('search')}<input name="q" placeholder="Search products" aria-label="Search products"></form>
     <a class="ico hide-desk" href="/shop#search" aria-label="Search">${icon('search')}</a>
@@ -180,7 +181,7 @@ function trustStrip(settings) {
 // ---------------------------------------------------------------- home
 export function homePage({ settings, user, categories, reels, deals }) {
   const top = deals[0];
-  const admin = user?.role === 'admin';
+  const admin = user?.role === 'owner';
   const body = html`
 <section class="hero">
   <div class="hero-copy">
@@ -228,7 +229,7 @@ ${settings.support_whatsapp ? html`<section class="bulk">
 
 // ---------------------------------------------------------------- shop & category
 export function shopPage({ settings, user, categories, category, products, total, filters, shown }) {
-  const admin = user?.role === 'admin';
+  const admin = user?.role === 'owner';
   const base = category ? `/c/${category.slug}` : '/shop';
   const qs = (over) => {
     const p = new URLSearchParams();
@@ -290,7 +291,7 @@ ${products.length ? html`<ul class="grid">${products.map((p) => productCard(p, {
 
 // ---------------------------------------------------------------- product
 export function productPage({ settings, user, product: p, reel, categories, related }) {
-  const admin = user?.role === 'admin';
+  const admin = user?.role === 'owner';
   const off = discountPercent(p.price_paise, p.mrp_paise);
   const free = Number(settings.free_shipping_above_paise) || 0;
   const body = html`
@@ -337,7 +338,7 @@ ${p.stock === 0 ? '' : html`<div class="buybar"><div class="price"><b>${formatMo
 
 // ---------------------------------------------------------------- reel store (DM landing)
 export function reelStorePage({ settings, user, reel, moreReels }) {
-  const admin = user?.role === 'admin';
+  const admin = user?.role === 'owner';
   const products = reel.products;
   const total = products.reduce((s, p) => s + p.price_paise, 0);
   const body = html`
@@ -376,7 +377,7 @@ export const reelForClient = (r) => ({
 });
 
 export function reelsFeedPage({ settings, user, feed }) {
-  const admin = user?.role === 'admin';
+  const admin = user?.role === 'owner';
   const body = html`
 <div class="feed-top"><a class="round" href="/" aria-label="Back to the store">${icon('back')}</a><h1>Reels</h1>${admin ? html`<a class="btn btn-gold" href="/admin/reels" style="min-height:36px">Manage reels</a>` : html`<span style="width:46px"></span>`}</div>
 <div class="feed" data-feed aria-label="Reels">
@@ -398,7 +399,7 @@ export function reelsFeedPage({ settings, user, feed }) {
 
 // ---------------------------------------------------------------- about
 export function aboutPage({ settings, user }) {
-  const admin = user?.role === 'admin';
+  const admin = user?.role === 'owner';
   const body = html`
 <section class="about">
   <h1>About ${settings.store_name}</h1>
@@ -533,7 +534,7 @@ export function accountPage({ settings, user, isEnvOwner = false, csrf, orders, 
     <form method="post" action="/logout"><input type="hidden" name="_csrf" value="${csrf}"><button class="btn btn-line" type="submit">Log out</button></form>
   </div>
   ${flash ? html`<p class="form-ok" role="status">${flash}</p>` : ''}
-  ${user.role === 'admin' ? html`<div class="panel"><h2>You're a store admin</h2><p style="margin:0">Manage products, reels and orders in the admin panel.</p><a class="btn btn-gold" href="/admin">Open admin</a></div>` : ''}
+  ${user.role === 'owner' ? html`<div class="panel"><h2>You're the store owner</h2><p style="margin:0">Manage products, reels and orders in the admin panel.</p><a class="btn btn-gold" href="/admin">Open admin</a></div>` : ''}
   <div class="panel">
     <h2>Your orders</h2>
     ${orders.length ? orders.map((o) => html`<a class="order-row" href="/order/${o.public_token}">

@@ -12,10 +12,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
 ENV NODE_ENV=production
-# Used only when DATABASE_URL is empty (quick single-process runs).
-ENV DATA_DIR=/data/pgdata
 ENV STORAGE_DIR=/data/files
 # The app runs as a non-root user; named volumes take their owner from this folder.
-RUN mkdir -p /data/files /data/pgdata && chown -R node:node /data
+RUN mkdir -p /data/files && chown -R node:node /data
 USER node
 CMD ["node", "src/server.js"]

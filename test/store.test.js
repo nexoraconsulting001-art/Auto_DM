@@ -29,7 +29,7 @@ test('order totals come from the database, not the browser', async () => {
   assert.equal(order.total_paise, 44900);
   assert.equal(order.phone, '9876543210');
   assert.equal(order.reel_id, REEL_ID);
-  assert.match(order.order_number, /^SFH-\d+$/);
+  assert.match(order.order_number, /^MS-\d+$/);
 });
 
 test('stock is reserved on order and restored on cancel', async () => {

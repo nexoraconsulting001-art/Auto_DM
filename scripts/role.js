@@ -1,40 +1,39 @@
-// Gives or removes admin rights. Run it on the server; nothing on the website can make someone an admin.
+// Changes someone's role in a business. Run it on the server; nothing on the website can do this.
 //
-//   npm run role -- list                   # who is an admin
-//   npm run role -- 9876543210 admin       # make a signed-up account an admin
+//   npm run role -- list                   # the business's owners and staff
+//   npm run role -- 9876543210 owner       # make a signed-up account an owner
+//   npm run role -- 9876543210 staff
 //   npm run role -- 9876543210 customer    # back to a normal shopper
-//
-// With the built-in database, stop the app first (only one process can open it):
-//   docker compose stop web && docker compose run --rm web npm run role -- 9876543210 admin && docker compose start web
 import { pathToFileURL } from 'node:url';
 import { config } from '../src/config.js';
-import { openDb } from '../src/db/index.js';
+import { openRuntimeDb } from '../src/db/index.js';
 import { createRepos } from '../src/repos/index.js';
 import { withTenant } from '../src/tenancy.js';
 import { normalizePhone } from '../src/util.js';
+import { BUSINESS_ROLES } from '../src/repos/users.js';
+
+const withArticle = (role) => (role === 'owner' ? 'an owner' : `a ${role}`);
 
 /** Returns a one-line result message, or throws with a reason. */
 export async function changeRole(repos, { phone, role, ownerPhone = '' }) {
-  if (!['admin', 'customer'].includes(role)) throw new Error('The role must be "admin" or "customer".');
+  if (!BUSINESS_ROLES.includes(role)) throw new Error('The role must be "owner", "staff" or "customer".');
   const user = await repos.users.findByPhone(phone);
   if (!user) throw new Error(`No account with the number ${phone}. Ask them to sign up on the website first.`);
-  if (role === 'customer' && ownerPhone && user.phone === normalizePhone(ownerPhone)) {
-    throw new Error('That is the owner from ADMIN_PHONE in .env. It is made admin again on every start; change .env instead.');
+  if (role !== 'owner' && ownerPhone && user.phone === normalizePhone(ownerPhone)) {
+    throw new Error('That is the owner from ADMIN_PHONE in .env. It is made owner again on every start; change .env instead.');
   }
-  if (user.role === role) return `${user.name} (${user.phone}) is already ${role === 'admin' ? 'an admin' : 'a customer'}.`;
+  if (user.role === role) return `${user.name} (${user.phone}) is already ${withArticle(role)}.`;
   await repos.users.setRole(user.id, role);
-  return role === 'admin'
-    ? `${user.name} (${user.phone}) is now an admin. They log in on /login with their own password.`
-    : `${user.name} (${user.phone}) is now a customer.`;
+  return `${user.name} (${user.phone}) is now ${withArticle(role)}.`;
 }
 
 async function main() {
   const [first, role] = process.argv.slice(2);
   if (!first) {
-    console.log('Usage: npm run role -- list | npm run role -- <phone> admin | npm run role -- <phone> customer');
+    console.log('Usage: npm run role -- list | npm run role -- <phone> owner|staff|customer');
     process.exit(1);
   }
-  const db = await openDb({ url: config.databaseUrl, dataDir: config.dataDir });
+  const db = await openRuntimeDb(config);
   const repos = createRepos(db);
   try {
     // Which business: TENANT=<slug>, or the default business.
@@ -43,8 +42,8 @@ async function main() {
     if (!tenant) throw new Error(`No business called "${slug}". Run with TENANT=<business slug>.`);
     await withTenant(tenant, async () => {
       if (first === 'list') {
-        const admins = await repos.users.listAdmins();
-        console.log(admins.length ? admins.map((u) => `${u.phone}  ${u.name}`).join('\n') : 'No admins yet.');
+        const team = await repos.users.listTeam();
+        console.log(team.length ? team.map((u) => `${u.phone}  ${u.name}  (${u.role})`).join('\n') : 'No owners or staff yet.');
       } else {
         console.log(await changeRole(repos, { phone: first, role, ownerPhone: config.adminPhone }));
       }

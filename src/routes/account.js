@@ -1,36 +1,24 @@
 import express from 'express';
-import { safeNext } from '../auth.js';
+import { safeNext, sameOriginOnly as sameSite } from '../auth.js';
+import { buyerSettings } from '../modules/brand/index.js';
 import { ValidationError, normalizePhone } from '../util.js';
 import { accountPage, loginPage, signupPage } from '../views/store.js';
 
 /** Login, signup and "My account" for everyone. The owner uses the same login and lands in /admin. */
 export function accountRoutes({ repos, auth, config }) {
   // The .env owner's password comes from ADMIN_PASSWORD and is reset on every start.
-  const isEnvOwner = (user) => user.role === 'admin' && Boolean(config?.adminPhone) && user.phone === normalizePhone(config.adminPhone);
+  const isEnvOwner = (user) => user.role === 'owner' && Boolean(config?.adminPhone) && user.phone === normalizePhone(config.adminPhone);
   const r = express.Router();
   const page = (res, view, status = 200) => res.status(status).type('html').send(String(view));
-  const home = (user) => (user.role === 'admin' ? '/admin' : '/account');
-
-  // Login and signup forms have no session yet, so instead of a CSRF token they must come from this site.
-  const sameSite = (req, res, next) => {
-    const origin = req.get('origin') || req.get('referer') || '';
-    if (origin) {
-      try {
-        if (new URL(origin).host !== req.get('host')) return res.status(403).send('Please log in from this website.');
-      } catch {
-        return res.status(403).send('Please log in from this website.');
-      }
-    }
-    next();
-  };
+  const home = (user) => (user.role === 'owner' ? '/admin' : '/account');
 
   r.get('/login', async (req, res) => {
     if (req.user) return res.redirect(safeNext(req.query.next, home(req.user)));
-    page(res, loginPage({ settings: await repos.settings.getAll(), next: safeNext(req.query.next, '/') }));
+    page(res, loginPage({ settings: await buyerSettings(repos), next: safeNext(req.query.next, '/') }));
   });
 
   r.post('/login', sameSite, async (req, res) => {
-    const settings = await repos.settings.getAll();
+    const settings = await buyerSettings(repos);
     const next = safeNext(req.body.next, '');
     const phone = String(req.body.phone || '').slice(0, 20);
     if (await auth.tooManyAttempts(req)) {
@@ -47,11 +35,11 @@ export function accountRoutes({ repos, auth, config }) {
 
   r.get('/signup', async (req, res) => {
     if (req.user) return res.redirect(home(req.user));
-    page(res, signupPage({ settings: await repos.settings.getAll(), next: safeNext(req.query.next, '/') }));
+    page(res, signupPage({ settings: await buyerSettings(repos), next: safeNext(req.query.next, '/') }));
   });
 
   r.post('/signup', sameSite, async (req, res) => {
-    const settings = await repos.settings.getAll();
+    const settings = await buyerSettings(repos);
     const next = safeNext(req.body.next, '/');
     const values = { name: String(req.body.name || '').slice(0, 80), phone: String(req.body.phone || '').slice(0, 20) };
     if (await auth.tooManyAttempts(req)) {
@@ -76,7 +64,7 @@ export function accountRoutes({ repos, auth, config }) {
   r.get('/account', auth.requireUser, async (req, res) => {
     res.set('Cache-Control', 'no-store');
     page(res, accountPage({
-      settings: await repos.settings.getAll(),
+      settings: await buyerSettings(repos),
       user: req.user,
       isEnvOwner: isEnvOwner(req.user),
       csrf: req.csrf,
@@ -87,7 +75,7 @@ export function accountRoutes({ repos, auth, config }) {
 
   r.post('/account/password', auth.requireUser, async (req, res) => {
     const renderError = async (message) => {
-      const settings = await repos.settings.getAll();
+      const settings = await buyerSettings(repos);
       const orders = await repos.orders.listForUser(req.user.id);
       const view = String(accountPage({ settings, user: req.user, isEnvOwner: isEnvOwner(req.user), csrf: req.csrf, orders }));
       // Show the problem above the password form without a separate page.

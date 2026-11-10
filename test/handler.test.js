@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleComment, matchesKeyword } from '../src/handler.js';
+import { forAccount } from '../src/instagram.js';
 import { REEL_ID, fakeIg, seedReel, setup } from './helpers.js';
 
 const comment = (id, text, user = 'u1', media = REEL_ID) => ({ id, text, media: { id: media }, from: { id: user, username: 'asha' } });
@@ -10,7 +11,7 @@ async function ctx(opts = {}) {
   const { repos } = await setup();
   await seedReel(repos, opts);
   const ig = fakeIg(opts);
-  return { repos, ig, deps: { repos, ig, ownIds: new Set(['ME']), storeUrl, oneDmPerUser: opts.oneDmPerUser } };
+  return { repos, ig, deps: { repos, ig: forAccount(ig, { igUserId: 'ME', token: 't' }), ownIds: new Set(['ME']), storeUrl, oneDmPerUser: opts.oneDmPerUser } };
 }
 
 test('a keyword comment gets a DM with a button to the reel store, and is logged', async () => {

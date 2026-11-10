@@ -1,7 +1,11 @@
 import { ValidationError, slugify } from '../util.js';
 import { normalizeHost } from '../tenancy.js';
+import { hashSessionToken } from './sessions.js';
 
 const COLS = 'id, slug, name, status, plan, created_at';
+
+/** Addresses Bhava keeps for itself; no business can take one. */
+export const RESERVED_SLUGS = new Set(['bhava', 'www', 'app', 'api', 'admin']);
 
 /**
  * Platform-level repo: businesses, their domains and Instagram accounts. It is the only repo that
@@ -15,6 +19,7 @@ export function tenantsRepo(db) {
       const n = String(name ?? '').trim();
       if (!n) throw new ValidationError('Business name is required');
       if (!s) throw new ValidationError('Add a business name with letters or numbers');
+      if (RESERVED_SLUGS.has(s)) throw new ValidationError(`The address name “${s}” is reserved. Choose another one.`);
       const [taken] = await db.query('SELECT 1 FROM tenants WHERE slug = $1', [s]);
       if (taken) throw new ValidationError(`The address name “${s}” is already used by another business`);
       const [row] = await db.query(`INSERT INTO tenants (slug, name, plan) VALUES ($1, $2, $3) RETURNING ${COLS}`, [s, n.slice(0, 80), plan]);
@@ -52,6 +57,18 @@ export function tenantsRepo(db) {
       );
       if (row.tenant_id !== Number(tenantId)) throw new ValidationError(`${domain} already belongs to another business`);
       return domain;
+    },
+    /** A live bearer session's business and user id, or null. Runs before any business is known, so it lives here. */
+    async findBearerSession(token) {
+      if (!token || token.length > 100) return null;
+      const [row] = await db.query(
+        `SELECT s.user_id, t.id, t.slug, t.name, t.status, t.plan, t.created_at FROM sessions s JOIN tenants t ON t.id = s.tenant_id
+         WHERE s.id = $1 AND s.kind = 'bearer' AND s.revoked_at IS NULL AND s.expires_at > now()`,
+        [hashSessionToken(token)],
+      );
+      if (!row) return null;
+      const { user_id: userId, ...tenant } = row;
+      return { tenant, userId };
     },
     /** The business that owns this Instagram account, or null. */
     async getByIgAccount(igUserId) {

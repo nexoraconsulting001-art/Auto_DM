@@ -7,6 +7,7 @@ import { SEED_FILE, newestReels, seedDemo } from '../../scripts/seed.js';
 import crypto from 'node:crypto';
 import { SETTING_DEFAULTS } from '../repos/settings.js';
 import { currentTenant } from '../tenancy.js';
+import { forAccount } from '../instagram.js';
 import {
   activityPage, adminLayout, categoriesPage, categoryFormPage, categoryValues, customersPage, dashboardPage,
   orderDetailPage, ordersPage, productFormPage, productValues, productsPage, reelFormPage, reelValues, reelsPage, settingsPage,
@@ -19,7 +20,7 @@ const FLASH = {
   reel_saved: 'Reel store saved. Comments with its keyword now get a DM with the store link.',
   reel_removed: 'Reel store removed.',
   status: 'Order updated.',
-  demo: 'Demo data loaded: Mehta Mart categories and products, plus 3 reel stores. Open “View store” to see them.',
+  demo: 'Demo data loaded: categories and products, plus 3 reel stores. Open “View store” to see them.',
   category_saved: 'Category saved.',
   category_deleted: 'Category deleted. Its products are still in your catalog.',
 };
@@ -47,31 +48,39 @@ export function adminRoutes({ repos, ig, auth, config }) {
     fileFilter: (_req, file, cb) => cb(null, ALLOWED_IMAGE_TYPES.includes(file.mimetype)),
   });
 
-  // Only the store owner (role "admin") gets past this; shoppers are sent to their account page.
-  r.use(auth.requireAdmin);
+  // Only the owner gets past this until staff permissions exist; everyone else is sent to their account page.
+  r.use(auth.requireRole('owner'));
 
-  // Whether the Instagram token works, cached so the dashboard stays fast.
-  let igCheck = { at: 0, ok: false };
-  async function instagramConnected() {
-    if (!config.accessToken) return false;
-    if (Date.now() - igCheck.at < 10 * 60_000) return igCheck.ok;
+  /** The Instagram client for this business's connected account, or null when it has none. */
+  async function igClient() {
+    const account = await repos.igAccounts.current();
+    return account ? forAccount(ig, account) : null;
+  }
+
+  // Whether each business's Instagram token works, cached so the dashboard stays fast.
+  const igChecks = new Map();
+  async function instagramConnected(client) {
+    if (!client) return false;
+    const business = currentTenant().id;
+    const hit = igChecks.get(business);
+    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.ok;
     let ok = false;
     try {
-      ok = Boolean((await ig.getAccount())?.username);
+      ok = Boolean((await client.getAccount())?.username);
     } catch {
       ok = false;
     }
-    igCheck = { at: Date.now(), ok };
+    igChecks.set(business, { at: Date.now(), ok });
     return ok;
   }
 
-  async function setupChecklist(settings, stats, reels) {
+  async function setupChecklist(settings, kit, stats, reels, client) {
     const comments = await repos.activity.count();
-    const storeChanged = settings.store_name !== SETTING_DEFAULTS.store_name || Boolean(settings.logo_url);
+    const storeChanged = settings.store_name !== SETTING_DEFAULTS.store_name || Boolean(kit.logoUrl);
     return {
       dismissed: settings.checklist_dismissed === '1',
       steps: [
-        { title: 'Connect Instagram', text: 'Add your Instagram token to .env so comments can be answered with a DM.', done: await instagramConnected(), href: '/admin/settings', action: 'Check connection' },
+        { title: 'Connect Instagram', text: 'Connect your Instagram account so comments can be answered with a DM.', done: await instagramConnected(client), href: '/admin/settings', action: 'Check connection' },
         { title: 'Add your store details', text: 'Store name, logo, WhatsApp number and delivery fee.', done: storeChanged, href: '/admin/settings', action: 'Open settings' },
         { title: 'Add products', text: 'Photos, price and MRP. Group them into categories for the shop.', done: stats.products > 0, href: '/admin/products/new', action: 'Add a product' },
         { title: 'Set up your first reel store', text: 'Pick a reel, choose its products and the keyword people comment.', done: reels.length > 0, href: '/admin/reels', action: 'Choose a reel' },
@@ -92,12 +101,12 @@ export function adminRoutes({ repos, ig, auth, config }) {
 
   // ---- dashboard ----
   r.get('/', async (req, res) => {
-    const [stats, reels, orders, activity, settings] = await Promise.all([
-      repos.stats.dashboard(), repos.reels.list(), repos.orders.list(), repos.activity.list({ limit: 8 }), repos.settings.getAll(),
+    const [stats, reels, orders, activity, settings, kit, client] = await Promise.all([
+      repos.stats.dashboard(), repos.reels.list(), repos.orders.list(), repos.activity.list({ limit: 8 }), repos.settings.getAll(), repos.brandKit.get(), igClient(),
     ]);
-    const checklist = await setupChecklist(settings, stats, reels);
+    const checklist = await setupChecklist(settings, kit, stats, reels, client);
     const warnings = [];
-    if (!config.accessToken) warnings.push('IG_ACCESS_TOKEN is missing in .env, so DMs can’t be sent.');
+    if (!client) warnings.push('Instagram isn’t connected yet, so DMs can’t be sent.');
     if (config.dryRun) warnings.push('Test mode is on (DRY_RUN=1): DMs are logged, not sent.');
     if (!config.publicBaseUrl) warnings.push(`PUBLIC_BASE_URL isn’t set. DM links will use ${baseUrlFor(req, config)} — set it in .env to be sure.`);
     await page(req, res, { title: 'Dashboard', active: 'dashboard', body: dashboardPage({ stats, reels, orders: orders.slice(0, 6), activity, warnings, checklist, csrf: req.csrf }) });
@@ -240,7 +249,7 @@ export function adminRoutes({ repos, ig, auth, config }) {
   // Forgot-password flow without SMS: the owner sets a fresh password and sends it on WhatsApp.
   r.post('/customers/:id/reset', async (req, res) => {
     const user = await repos.users.get(req.params.id);
-    if (!user || user.role === 'admin') return res.redirect(303, '/admin/customers');
+    if (!user || user.role !== 'customer') return res.redirect(303, '/admin/customers');
     const password = crypto.randomBytes(6).toString('base64url').replace(/[-_]/g, 'x').slice(0, 8);
     await repos.users.setPassword(user.id, password);
     res.set('Cache-Control', 'no-store');
@@ -251,8 +260,10 @@ export function adminRoutes({ repos, ig, auth, config }) {
   r.get('/reels', async (req, res) => {
     let posts = [];
     let postsError = '';
+    const client = await igClient();
     try {
-      posts = (await ig.listMedia(50)).data || [];
+      if (client) posts = (await client.listMedia(50)).data || [];
+      else postsError = 'Connect your Instagram account to see your reels here.';
     } catch (err) {
       postsError = err.message;
     }
@@ -265,7 +276,7 @@ export function adminRoutes({ repos, ig, auth, config }) {
     const reel = await repos.reels.get(mediaId);
     let post = null;
     try {
-      post = await ig.getMedia(mediaId);
+      post = (await (await igClient())?.getMedia(mediaId)) ?? null;
     } catch {
       // Instagram unreachable or post deleted: edit with what we have stored.
     }
@@ -334,7 +345,8 @@ export function adminRoutes({ repos, ig, auth, config }) {
 
   // ---- settings ----
   async function settingsView(req, res, { error, status } = {}) {
-    const settings = await repos.settings.getAll();
+    const [saved, kit, client] = await Promise.all([repos.settings.getAll(), repos.brandKit.get(), igClient()]);
+    const settings = { ...saved, accent_color: kit.colors.accent, logo_url: kit.logoUrl };
     const connection = {
       baseUrl: baseUrlFor(req, config),
       baseUrlFromEnv: Boolean(config.publicBaseUrl),
@@ -343,8 +355,8 @@ export function adminRoutes({ repos, ig, auth, config }) {
       database: config.databaseUrl ? 'Postgres (DATABASE_URL)' : 'Built-in database in data/pgdata',
     };
     try {
-      connection.account = config.accessToken ? await ig.getAccount() : null;
-      if (!config.accessToken) connection.error = 'IG_ACCESS_TOKEN is missing in .env';
+      connection.account = client ? await client.getAccount() : null;
+      if (!client) connection.error = 'Instagram isn’t connected yet';
     } catch (err) {
       connection.error = err.message;
     }
@@ -357,10 +369,13 @@ export function adminRoutes({ repos, ig, auth, config }) {
     try {
       const b = req.body;
       if (!String(b.store_name || '').trim()) throw new ValidationError('Store name is required');
-      const accent = /^#[0-9a-f]{6}$/i.test(b.accent_color || '') ? b.accent_color : '#B8336A';
       if (b.logo_url && !/^https?:\/\//i.test(b.logo_url)) throw new ValidationError('Logo link must start with http:// or https://');
+      await repos.brandKit.save({
+        logoUrl: b.logo_url ?? '',
+        ...(/^#[0-9a-f]{6}$/i.test(b.accent_color || '') ? { colors: { accent: b.accent_color } } : {}),
+      });
       await repos.settings.update({
-        store_name: b.store_name.trim(), tagline: b.tagline?.trim(), accent_color: accent, logo_url: b.logo_url?.trim(),
+        store_name: b.store_name.trim(), tagline: b.tagline?.trim(),
         instagram_handle: String(b.instagram_handle || '').trim().replace(/^@/, ''),
         shipping_fee_paise: parseRupees(b.shipping_fee, 'Delivery fee') ?? 0,
         free_shipping_above_paise: parseRupees(b.free_shipping_above, 'Free delivery amount') ?? 0,
@@ -382,7 +397,9 @@ export function adminRoutes({ repos, ig, auth, config }) {
   r.post('/demo-data', async (req, res) => {
     try {
       const data = JSON.parse(fs.readFileSync(SEED_FILE, 'utf8'));
-      const reels = await newestReels(ig, data.reels.length);
+      const client = await igClient();
+      if (!client) throw new ValidationError('Connect your Instagram account first: demo data goes on your newest reels.');
+      const reels = await newestReels(client, data.reels.length);
       if (reels.length < data.reels.length) {
         throw new ValidationError(`Found only ${reels.length} reel(s) on your Instagram account. Demo data needs ${data.reels.length}.`);
       }

@@ -1,5 +1,6 @@
 import os from 'node:os';
 import { withTenant } from '../tenancy.js';
+import { reportError } from './log.js';
 
 /**
  * Background jobs. One interface, two drivers (QUEUE_DRIVER):
@@ -109,7 +110,7 @@ function pgQueue(db, config) {
           try {
             ran = await this.drain(queue, handler, { limit: concurrency });
           } catch (err) {
-            console.error(`queue ${queue}: ${err.message}`);
+            reportError(err, { msg: 'queue.poll_failed', queue });
           }
           if (!ran && !closed) await new Promise((r) => setTimeout(r, pollMs));
         }
@@ -196,10 +197,10 @@ function redisQueue(config) {
           const job = { id: String(bjob.id), queue, tenantId: bjob.data.tenantId, payload: bjob.data.payload, attempt: bjob.attemptsMade + 1 };
           return runHandler(handler, job);
         }, { connection: connection(), concurrency, maxStalledCount: 1 });
-        worker.on('error', (err) => console.error(`queue ${queue}: ${err.message}`));
+        worker.on('error', (err) => reportError(err, { msg: 'queue.worker_error', queue }));
         workers.push(worker);
       })();
-      start.catch((err) => console.error(`queue ${queue} failed to start: ${err.message}`));
+      start.catch((err) => reportError(err, { msg: 'queue.failed_to_start', queue }));
     },
     async every(queue, intervalMs, payload = {}) {
       const slot = Math.floor(Date.now() / intervalMs);

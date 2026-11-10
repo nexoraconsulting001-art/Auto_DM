@@ -5,12 +5,13 @@ import { currentTenant } from '../tenancy.js';
 /**
  * Structured logs: one JSON line per entry with the time, level, message, business and request id,
  * so production log tools can search and alert on them. LOG_FORMAT=pretty prints readable lines.
- * Never pass message text, usernames or other personal data as fields (PRD 11, Privacy).
+ * Never pass message text, usernames or other personal data as fields (PRD 11, Privacy); fields with such names are dropped.
  *
  *   log.info('webhook.received', { entries: 2 })    log.warn(...)    log.error(..., { err })
  *   reportError(err, fields)    logs it and passes it to every reporter added with onError()
  */
 const requestContext = new AsyncLocalStorage();
+const PRIVATE_FIELD = /^(user_?name|text|message|phone|email|password|token|access_?token|authorization)$/i;
 const reporters = [];
 let format = process.env.LOG_FORMAT || 'json';
 let sink = (line, level) => (level === 'error' ? process.stderr : process.stdout).write(`${line}\n`);
@@ -22,7 +23,8 @@ export const setLogSink = (fn) => (sink = fn);
 export const withRequestId = (id, fn) => requestContext.run({ requestId: id }, fn);
 export const currentRequestId = () => requestContext.getStore()?.requestId ?? null;
 
-function write(level, msg, fields = {}) {
+function write(level, msg, given = {}) {
+  const fields = Object.fromEntries(Object.entries(given).filter(([key]) => !PRIVATE_FIELD.test(key)));
   const tenant = currentTenant();
   const entry = {
     time: new Date().toISOString(),

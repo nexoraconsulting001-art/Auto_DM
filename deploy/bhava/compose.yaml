@@ -36,11 +36,11 @@ services:
     command: ["node", "src/server.js"]
     environment:
       <<: *app-env
-      PORT: "8120"
-    ports: ["127.0.0.1:8120:8120"]     # localhost only; Caddy is the way in
+      PORT: "8140"
+    ports: ["127.0.0.1:8140:8140"]     # localhost only; Caddy is the way in
     mem_limit: 512m
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8120/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8140/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5

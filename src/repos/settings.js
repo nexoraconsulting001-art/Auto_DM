@@ -1,15 +1,13 @@
 import { tenantId } from '../tenancy.js';
 
 export const SETTING_DEFAULTS = {
-  store_name: 'Shopping For Her',
+  store_name: 'My store',
   tagline: 'Everything from our reels, in one place.',
-  accent_color: '#B8336A',
-  logo_url: '',
   instagram_handle: '',
   shipping_fee_paise: '4900',
   free_shipping_above_paise: '99900',
   upi_id: 'demo@upi',
-  upi_payee: 'Shopping For Her',
+  upi_payee: '',
   support_whatsapp: '',
   support_email: '',
   hero_kicker: '',
