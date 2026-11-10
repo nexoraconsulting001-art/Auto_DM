@@ -123,10 +123,19 @@ export function createAutomationEngine({ db, repos, compliance, meta, config = {
 
   // ---- Comments (PRD 6.1, 6.2) ----
 
+  /** A comment on a Facebook post linked to an Instagram reel with a comment automation. Mirrors what the facebook module takes on, so no false 'unmapped' is logged. */
+  async function answeredByTwin(event) {
+    if (event.channel !== 'facebook' || !config.facebookPages || !repos.fbLinks) return false;
+    const twin = await repos.fbLinks.twinAt(event.mediaId, new Date(event.receivedAt));
+    if (!twin) return false;
+    return (await repos.automations.forMedia('instagram', twin))?.triggerType === 'comment';
+  }
+
   async function onComment(event) {
     const automation = await repos.automations.forMedia(event.channel, event.mediaId);
     if (!automation || automation.triggerType !== 'comment') {
       if (await repos.reels?.getActiveByMediaId(event.mediaId)) return false; // a Phase 0 reel: compliance answers it
+      if (await answeredByTwin(event)) return false; // linked to its Instagram twin: the facebook module answers it
       await skip(event, 'unmapped');
       return true;
     }

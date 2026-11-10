@@ -254,6 +254,7 @@ test('FB-01: a keyword comment on the linked post gets one Messenger private rep
   assert.equal(job.media_id, postId);
   assert.equal(job.status, 'sent');
   assert.equal((await shop.events(`channel = 'facebook' AND decision = 'sent'`)).length, 1);
+  assert.deepEqual(await shop.events(`channel = 'facebook' AND reason = 'unmapped'`), [], 'No false unmapped row before the answer');
   assert.deepEqual(await shop.dms(), [], 'Nothing went out on Instagram');
 });
 

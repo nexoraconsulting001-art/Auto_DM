@@ -29,7 +29,8 @@ export function registerIntake(app, { config, compliance }) {
     const signature = req.get('x-hub-signature-256');
     // No signature at all can't be Meta. It goes on to whatever else answers this path, which ends in the same 401.
     if (signature === undefined) return next();
-    const secrets = [config.appSecret, config.fbAppSecret].filter(Boolean);
+    // A Page delivery comes from the Facebook app, so once that app is set up, the Instagram app's secret can't sign for a Page.
+    const secrets = req.body?.object === 'page' && config.fbAppSecret ? [config.fbAppSecret] : [config.appSecret, config.fbAppSecret].filter(Boolean);
     if (!secrets.some((secret) => verifyHubSignature(req.rawBody, signature, secret))) {
       log.warn('webhook.bad_signature', { reason: 'webhook.bad_signature' });
       return res.sendStatus(401);
