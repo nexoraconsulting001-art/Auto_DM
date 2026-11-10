@@ -147,6 +147,9 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
 
   app.use((err, req, res, _next) => {
     if (isApiV1Url(req.originalUrl)) return sendApiError(err, req, res);
+    // A body that isn't JSON or is too big is the sender's fault. The parser's error quotes the body, so it isn't logged.
+    const refused = { 'entity.parse.failed': 400, 'entity.too.large': 413 }[err.type];
+    if (refused && !res.headersSent) return res.status(refused).json({ error: 'That request could not be read.' });
     reportError(err, { msg: 'http.error', method: req.method, path: req.path });
     if (res.headersSent) return;
     if (req.path.startsWith('/api/') || req.get('accept')?.includes('application/json')) {

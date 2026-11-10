@@ -55,8 +55,8 @@ export function analyticsApi(ctx) {
 
     'cohorts.get': ({ query }) => on().cohorts.get(query),
 
-    'insights.funnels': ({ query }) => on().contentFunnels.list(query),
-    'insights.funnel': ({ params }) => on().contentFunnels.one(params.id),
+    'insights.funnels': ({ query, user }) => on().contentFunnels.list(query, user),
+    'insights.funnel': ({ params, user }) => on().contentFunnels.one(params.id, user),
 
     'destinations.connections': () => on().destinations.connections(),
     'destinations.setSiteTag': ({ body, req }) => on().destinations.setSiteTag(body, req.hostname),

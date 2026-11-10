@@ -41,7 +41,7 @@ test('N-01: 28 days load from the cache, with one figure per day, and opening th
   for (const route of ['/insights/status', '/insights/audience', '/insights/media', '/insights/stories', '/insights/top', '/insights/best-time', '/reach-guard', '/account-health']) {
     await shop.get(route, undefined, route);
   }
-  assert.deepEqual((await world.meta.calls({})).map((c) => c.path), [], 'No screen calls Meta');
+  assert.deepEqual((await shop.metaCalls('*')).map((c) => c.path), [], 'No screen calls Meta');
 });
 
 test('N-01: exactly the last 2 days are flagged "may still change"', async () => {
@@ -297,7 +297,7 @@ test('N-04: a 180-day range: days past Meta\'s 90 come from stored rows, and no 
   assert.equal(res.days.length, 180);
   assert.equal(res.days.find((d) => d.day === dayAgo(91)).value, 910);
   assert.equal(res.days.find((d) => d.day === dayAgo(120)).value, 1200);
-  assert.deepEqual((await world.meta.calls({})).map((c) => c.path), [], 'Stored days never call Meta');
+  assert.deepEqual((await shop.metaCalls('*')).map((c) => c.path), [], 'Stored days never call Meta');
 });
 
 test('N-04: days before the account was connected show Not collected, not No data and not 0', async () => {

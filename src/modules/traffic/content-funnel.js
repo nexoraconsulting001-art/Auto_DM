@@ -1,3 +1,4 @@
+import { canSeeRevenue } from '../../contracts/api/index.js';
 import { ANALYTICS_LIMITS as L, FIGURE_TEXT, FUNNEL_MEASUREMENT, FUNNEL_STAGES } from '../../contracts/analytics.js';
 import { tenantId } from '../../tenancy.js';
 import { pageOfFetched, readCursor } from '../admin-api/paging.js';
@@ -192,7 +193,7 @@ export function createContentFunnels(ctx, sync) {
 
   const originRow = (origin, count, amountPaise, source) => ({ origin, count, amountPaise, source });
 
-  function buildSteps({ rows, figures, link, connected, canSeeSales, readReceipts }) {
+  function buildSteps({ rows, figures, link, connected, canSeeSales, canSeeMoney, readReceipts }) {
     const stageRows = (stage) => rows.filter((r) => r.stage === stage);
     const total = (stage) => stageRows(stage).reduce((sum, r) => sum + r.n, 0);
     const counted = (stage) => ({ stage, count: total(stage), amountPaise: null, source: 'bhava', state: 'ok', reason: null, origins: stageRows(stage).map((r) => originRow(r.origin, r.n, 0, r.source_label)) });
@@ -220,6 +221,7 @@ export function createContentFunnels(ctx, sync) {
     }
 
     function salesStep() {
+      if (!canSeeMoney) return notAvailable('sales', FIGURE_TEXT.ownerOnly);
       const own = stageRows('sales').filter((r) => r.origin === 'bhava_store');
       const ownOrigins = canSeeSales ? own.map((r) => originRow('bhava_store', r.n, r.amount, 'bhava')) : [];
       const destination = figures.filter((f) => ['shopify', 'amazon', 'affiliate', 'discount_code'].includes(f.source));
@@ -254,7 +256,7 @@ export function createContentFunnels(ctx, sync) {
     });
   }
 
-  async function funnel(mediaId, { canSeeSales }) {
+  async function funnel(mediaId, { canSeeSales, canSeeMoney }) {
     const tid = tenantId();
     const rows = (await db.query(
       `SELECT stage, origin, source_label, count(*) FILTER (WHERE voided_at IS NULL)::int AS n, COALESCE(sum(amount_paise) FILTER (WHERE voided_at IS NULL), 0)::bigint AS amount, max(occurred_at) AS last_at
@@ -269,7 +271,7 @@ export function createContentFunnels(ctx, sync) {
     if (!rows.length && !figures.length && !link) return null;
     const connected = new Set((await db.query('SELECT source FROM destination_connections WHERE tenant_id = $1 AND enabled', [tid])).map((r) => r.source));
     const [media] = await db.query('SELECT kind, latest, latest_at FROM insight_media WHERE tenant_id = $1 AND media_id = $2 ORDER BY id DESC LIMIT 1', [tid, mediaId]);
-    const steps = buildSteps({ rows, figures, link, connected, canSeeSales, readReceipts: Boolean(config.readReceipts) });
+    const steps = buildSteps({ rows, figures, link, connected, canSeeSales, canSeeMoney, readReceipts: Boolean(config.readReceipts) });
     const lastAt = [...rows.map((r) => r.last_at), ...figures.map((f) => f.last_at)].filter(Boolean).map((at) => +new Date(at));
     return {
       mediaId,
@@ -288,12 +290,12 @@ export function createContentFunnels(ctx, sync) {
     return row?.channel ?? 'instagram';
   }
 
-  async function one(mediaId) {
+  async function one(mediaId, user) {
     await sync.run();
-    return funnel(mediaId, { canSeeSales: await repos.entitlements.can('funnel.sales') });
+    return funnel(mediaId, { canSeeSales: await repos.entitlements.can('funnel.sales'), canSeeMoney: canSeeRevenue(user) });
   }
 
-  async function list({ cursor, limit, kind }) {
+  async function list({ cursor, limit, kind }, user) {
     await sync.run();
     const canSeeSales = await repos.entitlements.can('funnel.sales');
     const tid = tenantId();
@@ -306,7 +308,7 @@ export function createContentFunnels(ctx, sync) {
     const page = pageOfFetched(rows, limit, (row) => [row.media_id]);
     const items = [];
     for (const { media_id: mediaId } of page.items) {
-      const item = await funnel(mediaId, { canSeeSales });
+      const item = await funnel(mediaId, { canSeeSales, canSeeMoney: canSeeRevenue(user) });
       if (item && (kind === 'all' || item.kind === kind)) items.push(item);
     }
     return { items, nextCursor: page.nextCursor };

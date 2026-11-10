@@ -208,6 +208,7 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
     ga4BaseUrl: google.url,
     metaCallbackBaseUrl: base,
     metaTimeoutMs: 1500,
+    insightsBackfillPerRun: 2, // the Meta data these tests set up is at most 4 days old, and reading 33 days takes the worker about 25 seconds on PGlite
     metaLogin: 'instagram',
     facebookPages: true,
     readReceipts: true,
@@ -320,13 +321,15 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
       const byTable = new Map();
       for (const c of columns) byTable.set(c.table_name, [...(byTable.get(c.table_name) ?? []), c]);
       for (const [table, list] of byTable) {
-        const stamps = list.filter((c) => c.data_type !== 'date').map((c) => `"${c.column_name}" = "${c.column_name}" - interval '${interval}'`);
+        const stampColumns = list.filter((c) => c.data_type !== 'date').map((c) => c.column_name);
+        const stamps = stampColumns.map((c) => `"${c}" = "${c}" - interval '${interval}' - interval '100000 days'`);
         const dates = days ? list.filter((c) => c.data_type === 'date').map((c) => c.column_name) : [];
         if (INSERT_ONLY.has(table)) await t.exec(`ALTER TABLE "${table}" DISABLE TRIGGER USER`);
-        // Two steps, so a day column in a unique key can't collide with the row a day ahead of it.
+        // Two steps, so a day or hour column in a unique key can't collide with the row ahead of it.
         const first = [...stamps, ...dates.map((c) => `"${c}" = "${c}" - ${days + 100000}`)];
         if (first.length) await t.exec(`UPDATE "${table}" SET ${first.join(', ')}`);
-        if (dates.length) await t.exec(`UPDATE "${table}" SET ${dates.map((c) => `"${c}" = "${c}" + 100000`).join(', ')}`);
+        const back = [...stampColumns.map((c) => `"${c}" = "${c}" + interval '100000 days'`), ...dates.map((c) => `"${c}" = "${c}" + 100000`)];
+        if (back.length) await t.exec(`UPDATE "${table}" SET ${back.join(', ')}`);
         if (INSERT_ONLY.has(table)) await t.exec(`ALTER TABLE "${table}" ENABLE TRIGGER USER`);
       }
     });
@@ -487,13 +490,26 @@ export async function addP2Shop(world, { timeZone = 'UTC', followers = 5000, sco
     /** Makes every poll of this business due now, and runs the worker until it has been through them. */
     async poll({ jobs, rounds = 4 } = {}) {
       await shop.settle({ ms: 3000, roundMs: 300 });
+      // One worker run covers every business that is due, so earlier tests' backfills wait, and this poll is about this business.
+      await world.rawDb.platform.query(`UPDATE insight_polls SET next_due_at = now() + interval '1 hour' WHERE tenant_id <> $1 AND stopped_at IS NULL AND next_due_at <= now() + interval '1 minute'`, [id]);
+      let known = (await shop.polls()).length;
       for (let i = 0; i < rounds; i++) {
         const due = await sql(
-          `UPDATE insight_polls SET next_due_at = now() - interval '1 second', lease_until = NULL, locked_by = NULL WHERE tenant_id = $1 AND stopped_at IS NULL ${jobs ? 'AND job = ANY($2)' : ''} RETURNING id`,
+          `UPDATE insight_polls SET next_due_at = now() - interval '1 second', lease_until = NULL, locked_by = NULL WHERE tenant_id = $1 AND stopped_at IS NULL ${jobs ? 'AND job = ANY($2)' : ''} RETURNING id, now() AS at`,
           jobs ? [id, jobs] : [id],
         );
         if (!due.length && i > 0) break;
         await shop.settle({ ms: 5000, roundMs: 300 });
+        const stopAt = RealDate.now() + 45_000;
+        while (RealDate.now() < stopAt && due.length) {
+          const [{ n }] = await sql(`SELECT count(*)::int AS n FROM insight_polls WHERE id = ANY($1) AND stopped_at IS NULL AND coalesce(last_finished_at, '-infinity') < $2 AND (next_due_at <= now() OR lease_until > now())`, [due.map((p) => p.id), due[0].at]);
+          if (!n) break;
+          await world.tick();
+          await pause(100);
+        }
+        const count = (await shop.polls()).length;
+        if (due.length && (jobs || count === known)) break; // named jobs have run, or nothing new appeared for another round to read
+        known = count;
       }
     },
 

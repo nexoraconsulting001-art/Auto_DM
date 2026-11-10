@@ -187,7 +187,7 @@ export function createInsightsPoller(ctx) {
   async function accountDaily({ poll, account, reader }) {
     const at = now();
     const today = dayOf(at);
-    const { days, more } = accountDaysToFetch(today, await repos.insights.storedDays(account.id, addDays(today, -L.accountRetentionDays)));
+    const { days, more } = accountDaysToFetch(today, await repos.insights.storedDays(account.id, addDays(today, -L.accountRetentionDays)), config?.insightsBackfillPerRun);
     for (const day of days) {
       await repos.insights.replaceDay(account.id, day, await reader.accountDay(day), at);
       await writeRollup('meta_account_daily', accountRollupRows(account.account_id, await repos.insights.dayFigures(account.id, [day])));

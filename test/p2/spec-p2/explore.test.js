@@ -277,7 +277,7 @@ async function revenueView(shop, manager, visibility = 'team') {
 }
 
 async function seeded(shop) {
-  await shop.seedSessions([{ count: 30, source: 'bio_link', orders: 1, revenue_paise: 100000 }]);
+  await shop.seedSessions([{ count: 29, source: 'bio_link' }, { count: 1, source: 'bio_link', orders: 1, revenue_paise: 100000 }]);
   await settled(shop);
 }
 
