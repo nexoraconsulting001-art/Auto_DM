@@ -212,7 +212,22 @@ function hostnameOf(hostHeader) {
   }
 }
 
+const isStream = (body) => body !== null && typeof body === 'object' && typeof body[Symbol.asyncIterator] === 'function' && !Buffer.isBuffer(body);
+
+/** A body that is an async iterable of chunks is streamed with no content-length, so a client can't size it up front. */
+function stream(rs, { status, body, headers = {} }) {
+  rs.writeHead(status, headers);
+  (async () => {
+    for await (const chunk of body) {
+      if (rs.destroyed) return;
+      if (!rs.write(chunk)) await new Promise((resolve) => { rs.once('drain', resolve); rs.once('close', resolve); });
+    }
+    rs.end();
+  })().catch(() => rs.destroy());
+}
+
 function write(rs, { status, body, headers = {} }) {
+  if (isStream(body)) return stream(rs, { status, body, headers });
   const isJson = body !== undefined && body !== null && typeof body !== 'string' && !Buffer.isBuffer(body);
   const payload = body === undefined || body === null ? '' : isJson ? JSON.stringify(body) : body;
   rs.writeHead(status, {
@@ -225,9 +240,11 @@ function write(rs, { status, body, headers = {} }) {
 
 /**
  * `spec`: { name, routes(on), controls?(on), reset?(), rewritePath?(path), errorBody?({ kind, status, fault, req }),
- * decorate?(req, fault), notFound?(req) }. Handlers get { method, path, rawPath, params, query, body, headers }
+ * decorate?(req, fault), notFound?(req), anyHost? }. Handlers get { method, path, rawPath, params, query, body, headers }
  * and return a value (200 JSON) or reply(status, body, headers), or throw SimError. A handler that does not
- * await is atomic, so two racing requests cannot both pass a check.
+ * await is atomic, so two racing requests cannot both pass a check. notFound may be async. A reply body that is an
+ * async iterable is streamed with no content-length. anyHost lets the service routes (never /__sim) answer requests
+ * that name another site in Host, which is how tools/sim/sites serves many fixture websites from one loopback port.
  */
 export function createSim(spec) {
   const clock = createClock();
@@ -257,8 +274,8 @@ export function createSim(spec) {
   }
 
   const runService = (req) =>
-    run(routes, req, spec.notFound && ((r) => {
-      const out = spec.notFound(r);
+    run(routes, req, spec.notFound && (async (r) => {
+      const out = await spec.notFound(r);
       return out instanceof Reply ? out : reply(404, out);
     }));
 
@@ -290,7 +307,7 @@ export function createSim(spec) {
   function finish(rs, call, out, req, fault) {
     write(rs, { ...out, headers: { ...spec.decorate?.(req, fault), ...out.headers } });
     call.status = out.status;
-    call.response = out.body ?? null;
+    call.response = isStream(out.body) ? '[stream]' : Buffer.isBuffer(out.body) && out.body.length > 4096 ? `[${out.body.length} bytes]` : out.body ?? null;
   }
 
   function hold(rs, fault) {
@@ -338,12 +355,13 @@ export function createSim(spec) {
   async function onRequest(rq, rs) {
     try {
       // A browser page cannot reach the control surface by rebinding a public name to loopback.
-      if (!isLoopbackHost(hostnameOf(rq.headers.host))) return write(rs, { status: 403, body: { error: 'Simulators answer on loopback only.' } });
       const url = new URL(rq.url, 'http://sim.localhost');
+      const isControl = url.pathname === CONTROL_PREFIX || url.pathname.startsWith(`${CONTROL_PREFIX}/`);
+      if ((isControl || !spec.anyHost) && !isLoopbackHost(hostnameOf(rq.headers.host))) return write(rs, { status: 403, body: { error: 'Simulators answer on loopback only.' } });
       const { body, bodyError } = await parseBody(await readBody(rq), rq.headers['content-type']);
       const base = { method: rq.method, rawPath: url.pathname, query: Object.fromEntries(url.searchParams), body, headers: rq.headers, params: {} };
 
-      if (url.pathname === CONTROL_PREFIX || url.pathname.startsWith(`${CONTROL_PREFIX}/`)) {
+      if (isControl) {
         if (bodyError || (body !== undefined && !isObject(body))) return write(rs, { status: 400, body: { error: 'The control body must be a JSON object.' } });
         const out = await run(controls, { ...base, path: url.pathname.slice(CONTROL_PREFIX.length) || '/', body: body ?? {} });
         return write(rs, out);

@@ -15,6 +15,9 @@
  *   await meta.fault({ kind: 'rate_limit', code: 613, match: { path: '/v23.0/1/messages' } });
  *
  * Simulators refuse to run when NODE_ENV=production; see guard.mjs for the matching check on service URLs.
+ *
+ * tools/sim/sites (outside websites for imports and theme reads, hostile ones included) is not in SERVICES: safeFetch never
+ * connects to loopback, so a test starts it in process and hands its transport() to the fetcher (see sites/index.mjs).
  */
 import { pathToFileURL } from 'node:url';
 import { assertSimulatorsAllowed } from './guard.mjs';

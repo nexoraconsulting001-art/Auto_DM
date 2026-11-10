@@ -64,7 +64,10 @@ export const TRAFFIC_SCRIPT = `(function () {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
     if (url.host !== location.host) {
       var chat = /(^|\\.)wa\\.me$|(^|\\.)whatsapp\\.com$/i.test(url.hostname);
-      send(chat ? 'whatsapp_tap' : 'outbound_tap', { outboundHost: url.hostname.slice(0, 253) });
+      var out = { outboundHost: url.hostname.slice(0, 253) };
+      var product = Number(el.getAttribute('data-product'));
+      if (product > 0 && product < 2147483648) out.productId = product;
+      send(chat ? 'whatsapp_tap' : 'outbound_tap', out);
       return;
     }
     var m = /\\/p\\/([^\\/?#]+)/.exec(url.pathname);

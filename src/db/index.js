@@ -112,10 +112,32 @@ function fenced(driver) {
   };
 }
 
+/**
+ * bigint (int8) as PGlite gives it: a number when it fits exactly, a BigInt when it doesn't. pg's own default is a string, so
+ * money in bigint paise (Phase 3) and every count(*) would be a number on one driver and text on the other.
+ */
+export const parseInt8 = (text) => {
+  const n = Number(text);
+  return Number.isSafeInteger(n) ? n : BigInt(text);
+};
+
+function pgTypes(pg) {
+  const INT8 = 20;
+  const INT8_ARRAY = 1016;
+  const int8Array = pg.types.getTypeParser(INT8_ARRAY, 'text');
+  return {
+    getTypeParser(oid, format) {
+      if (format !== 'binary' && oid === INT8) return parseInt8;
+      if (format !== 'binary' && oid === INT8_ARRAY) return (text) => int8Array(text)?.map((v) => (v === null ? null : parseInt8(v)));
+      return pg.types.getTypeParser(oid, format);
+    },
+  };
+}
+
 async function openPg(url, poolSize) {
   const { default: pg } = await import('pg');
   const ssl = /sslmode=disable|localhost|127\.0\.0\.1|@postgres[:/]/.test(url) ? false : { rejectUnauthorized: false };
-  const pool = new pg.Pool({ connectionString: url, ssl, max: poolSize, allowExitOnIdle: true });
+  const pool = new pg.Pool({ connectionString: url, ssl, max: poolSize, allowExitOnIdle: true, types: pgTypes(pg) });
   // Postgres restarting or killing a connection is an error event, which would end the process with no listener.
   const connectionLost = (err) => log.warn('db.connection_lost', { code: err?.code });
   pool.on('error', connectionLost);

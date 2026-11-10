@@ -104,19 +104,133 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, onUnauthorized,
       businesses: () => get('/auth/businesses'),
     },
     products: {
-      /** @param query { search?, status?, category?, cursor?, limit? } */
+      /** @param query { search?, status?: 'all' | 'active' | 'archived' | 'featured' | 'attention' | 'sold_out' | 'price_changed', category?, source?, cursor?, limit? } */
       list: (query) => get('/products', query),
       create: (body) => post('/products', body),
       get: (productId) => get(`/products/${id(productId)}`),
       update: (productId, body) => patch(`/products/${id(productId)}`, body),
       remove: (productId) => del(`/products/${id(productId)}`),
+      /** Re-checks an imported product's page now, in the background. */
+      recheck: (productId) => post(`/products/${id(productId)}/recheck`),
+    },
+    catalogSettings: {
+      get: () => get('/catalog/settings'),
+      /** @param body { recheckHours? } */
+      update: (body) => patch('/catalog/settings', body),
     },
     categories: {
       list: (query) => get('/categories', query),
       create: (body) => post('/categories', body),
+      /** @param body { ids }: every category, in the order wanted */
+      reorder: (body) => put('/categories/order', body),
       get: (categoryId) => get(`/categories/${id(categoryId)}`),
       update: (categoryId, body) => patch(`/categories/${id(categoryId)}`, body),
       remove: (categoryId) => del(`/categories/${id(categoryId)}`),
+      /** @returns { categoryId, items }: pinned first, then the rest */
+      reels: (categoryId) => get(`/categories/${id(categoryId)}/reels`),
+      /** @param body { pinned, order }: the whole order at once */
+      setReels: (categoryId, body) => put(`/categories/${id(categoryId)}/reels`, body),
+      /** @param body { pageId, at?: 'top' | 'bottom' } */
+      addReel: (categoryId, body) => post(`/categories/${id(categoryId)}/reels`, body),
+      /** @param body { pageId } */
+      removeReel: (categoryId, body) => post(`/categories/${id(categoryId)}/reels/remove`, body),
+      pin: (categoryId, body) => post(`/categories/${id(categoryId)}/reels/pin`, body),
+      unpin: (categoryId, body) => post(`/categories/${id(categoryId)}/reels/unpin`, body),
+      /** @param body { pageId, startsAt, endsAt }: both null clears the window */
+      schedule: (categoryId, body) => put(`/categories/${id(categoryId)}/reels/schedule`, body),
+      rules: (categoryId) => get(`/categories/${id(categoryId)}/rules`),
+      /** @param body { match: 'caption_keyword' | 'hashtag' | 'product_category', value?, productCategoryId?, joinAt?, active? } */
+      addRule: (categoryId, body) => post(`/categories/${id(categoryId)}/rules`, body),
+    },
+    categoryRules: {
+      update: (ruleId, body) => patch(`/category-rules/${id(ruleId)}`, body),
+      remove: (ruleId) => del(`/category-rules/${id(ruleId)}`),
+      /** "Apply to existing reels" @returns { added } */
+      apply: (ruleId) => post(`/category-rules/${id(ruleId)}/apply`),
+    },
+    imports: {
+      /** @param body { url } @returns { status: 'draft' | 'existing' | 'refused' | 'failed', draft, productId, reason, message } */
+      link: (body) => post('/imports/link', body),
+      /** @param body { urls }: up to 25 @returns the job */
+      bulk: (body) => post('/imports/bulk', body),
+      /** @param file a CSV File or Blob @returns the job */
+      csv: (file) => {
+        const form = new FormData();
+        form.append('file', file);
+        return request('POST', '/imports/csv', { form });
+      },
+      /** @param body { storeUrl } @returns the job */
+      shopify: (body) => post('/imports/shopify', body),
+      list: (query) => get('/imports', query),
+      adapters: () => get('/import-adapters'),
+      get: (jobId) => get(`/imports/${id(jobId)}`),
+      /** @param query { status?, cursor?, limit? } */
+      items: (jobId, query) => get(`/imports/${id(jobId)}/items`, query),
+    },
+    importItems: {
+      /** @param body the product as the owner corrected it @returns { productId } */
+      save: (itemId, body) => post(`/import-items/${id(itemId)}/save`, body),
+    },
+    pages: {
+      /** @param query { kind?, status?, search?, cursor?, limit? } */
+      list: (query) => get('/pages', query),
+      /** @param body { channel?, kind, mediaId, productIds, slug?, headline?, ... } */
+      create: (body) => post('/pages', body),
+      /** The account's reels, posts and stories to make a page for. @param query { kind?, cursor?, limit? } */
+      media: (query) => get('/page-media', query),
+      get: (pageId) => get(`/pages/${id(pageId)}`),
+      update: (pageId, body) => patch(`/pages/${id(pageId)}`, body),
+      remove: (pageId) => del(`/pages/${id(pageId)}`),
+    },
+    pageSettings: {
+      get: () => get('/page-settings'),
+      /** @param body { whatsappOrder?, whatsappTemplate?, landingNoindex?, moreReels? } */
+      update: (body) => patch('/page-settings', body),
+    },
+    pageBlocks: {
+      /** @param query { surface?: 'landing' | 'creator' | 'store_home' } */
+      get: (query) => get('/page-blocks', query),
+      /** @param body { surface, blocks: [{ block, visible?, settings? }] } */
+      save: (body) => put('/page-blocks', body),
+    },
+    themes: {
+      presets: () => get('/theme/presets'),
+      get: () => get('/theme'),
+      /** @param body { preset, tuneAccent? } */
+      choose: (body) => put('/theme', body),
+      /** @param body { sealText?, tickerItems? } */
+      updateText: (body) => patch('/theme', body),
+      /** @param body { website } */
+      readSite: (body) => post('/theme/site-reads', body),
+      siteReads: (query) => get('/theme/site-reads', query),
+      applySiteRead: (readId) => post(`/theme/site-reads/${id(readId)}/apply`),
+    },
+    creator: {
+      get: () => get('/creator-page'),
+      update: (body) => patch('/creator-page', body),
+      /** @param query { slug } @returns { slug, available, message } */
+      checkSlug: (query) => get('/creator-page/slug', query),
+    },
+    leads: {
+      /** @param query { source?, consent?: 'all' | 'active' | 'withdrawn', cursor?, limit? } */
+      list: (query) => get('/leads', query),
+      get: (leadId) => get(`/leads/${id(leadId)}`),
+      remove: (leadId) => del(`/leads/${id(leadId)}`),
+      /** @param body { channels? }: all channels when none are named */
+      revokeConsent: (leadId, body) => post(`/leads/${id(leadId)}/revoke-consent`, body),
+    },
+    leadForms: {
+      get: () => get('/lead-forms'),
+      /** @param body { surface, enabled?, offerLine? } */
+      update: (body) => patch('/lead-forms', body),
+      /** @param body { channels } @returns the forms with the new consent version */
+      setConsent: (body) => put('/lead-forms/consent', body),
+    },
+    leadDownloads: {
+      list: (query) => get('/lead-downloads', query),
+      /** @param body { format?: 'csv' | 'xlsx' } */
+      create: (body) => post('/lead-downloads', body),
+      get: (downloadId) => get(`/lead-downloads/${id(downloadId)}`),
     },
     reels: {
       list: (query) => get('/reels', query),

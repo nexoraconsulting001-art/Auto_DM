@@ -6,21 +6,26 @@ import { automationRoutes } from './automations.js';
 import { brandKitRoutes } from './brand-kit.js';
 import { categoryRoutes } from './categories.js';
 import { complianceRoutes } from './compliance.js';
+import { creatorRoutes } from './creator.js';
 import { customerRoutes } from './customers.js';
 import { domainRoutes } from './domains.js';
 import { facebookRoutes } from './facebook.js';
+import { importRoutes } from './imports.js';
 import { inboxRoutes } from './inbox.js';
 import { insightRoutes } from './insights.js';
 import { instagramRoutes } from './instagram.js';
+import { leadRoutes } from './leads.js';
 import { linkRoutes } from './links.js';
 import { mediaRoutes } from './media.js';
 import { orderRoutes } from './orders.js';
+import { pageRoutes } from './pages.js';
 import { productRoutes } from './products.js';
 import { reachGuardRoutes } from './reach-guard.js';
 import { reelRoutes } from './reels.js';
 import { reportRoutes } from './reports.js';
 import { settingRoutes } from './settings.js';
 import { statRoutes } from './stats.js';
+import { themeRoutes } from './themes.js';
 import { trafficRoutes } from './traffic.js';
 
 /**
@@ -66,6 +71,12 @@ export const routes = Object.freeze({
   ...insightRoutes,
   ...reachGuardRoutes,
   ...trafficRoutes,
+  // Phase 3
+  ...importRoutes,
+  ...pageRoutes,
+  ...themeRoutes,
+  ...creatorRoutes,
+  ...leadRoutes,
 });
 
 export const routeList = Object.freeze(Object.entries(routes).map(([id, route]) => Object.freeze({ id, ...route })));
@@ -80,16 +91,20 @@ export * from './brand-kit.js';
 export * from './categories.js';
 export * from './common.js';
 export * from './compliance.js';
+export * from './creator.js';
 export * from './customers.js';
 export * from './domains.js';
 export * from './errors.js';
 export * from './facebook.js';
+export * from './imports.js';
 export * from './inbox.js';
 export * from './insights.js';
 export * from './instagram.js';
+export * from './leads.js';
 export * from './links.js';
 export * from './media.js';
 export * from './orders.js';
+export * from './pages.js';
 export * from './platform.js';
 export * from './provider.js';
 export * from './products.js';
@@ -98,4 +113,5 @@ export * from './reels.js';
 export * from './reports.js';
 export * from './settings.js';
 export * from './stats.js';
+export * from './themes.js';
 export * from './traffic.js';

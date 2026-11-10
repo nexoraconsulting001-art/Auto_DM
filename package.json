@@ -28,6 +28,7 @@
     "gate": "node tools/gate.mjs",
     "ledger": "node tools/ledger.mjs",
     "secret-scan": "node tools/secret-scan.mjs",
+    "policy-check": "node tools/policy-check.mjs",
     "ci:wait": "node tools/ci-wait.mjs"
   },
   "dependencies": {
@@ -42,6 +43,7 @@
     "pdfkit": "^0.20.2",
     "pg": "^8.23.1",
     "qrcode": "^1.5.4",
+    "sharp": "0.35.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {

@@ -154,6 +154,8 @@ export function pageMiddleware(ctx, ingest, tags) {
       if (typeof body !== 'string' || !/text\/html/i.test(res.get('content-type') ?? '')) return send(body);
       res.set('Content-Security-Policy', contentSecurityPolicy(state));
       if (res.statusCode !== 200) return send(body);
+      // A page that knows better than its address says what it is (Phase 3: the creator page at /<slug>; sendBuyerPage in src/views/buyer).
+      if (res.locals.page?.kind) Object.assign(page, { kind: res.locals.page.kind, ref: String(res.locals.page.ref ?? '') });
       if (excluded) {
         ingest.preview(excluded, page.kind).catch((err) => reportError(err, { msg: 'traffic.preview_failed' }));
         return send(body);

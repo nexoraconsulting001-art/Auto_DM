@@ -70,6 +70,9 @@ export const config = {
   redisUrl: process.env.REDIS_URL || '',
   clickhouseUrl: process.env.CLICKHOUSE_URL || '',
   clickhouseDb: process.env.CLICKHOUSE_DB || 'bhava',
+  // safeFetch (PRD 8.2): the gap between two requests to one outside host, across every business and process. Tests pass a
+  // safeFetchTransport ({ lookup, dial } from tools/sim/sites) in config, never through the environment; it is refused in production.
+  fetchHostGapMs: Number(process.env.FETCH_HOST_GAP_MS) || 1000,
   // Nightly database backup, stored off the server. Empty BACKUP_STORAGE_DRIVER turns backups off.
   backupStorageDriver: process.env.BACKUP_STORAGE_DRIVER || '',
   backupStorageDir: process.env.BACKUP_STORAGE_DIR || '',
