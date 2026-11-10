@@ -5,7 +5,7 @@ import { SingleImage } from '../../components/images.jsx';
 import { Banner, Button, ErrorState, FieldGroup, Loadable, PageHeader, Panel, SelectField, Spinner } from '../../design/index.jsx';
 import { SESSION_KEY, api } from '../../lib/api/index.js';
 import { useForm } from '../../lib/forms.js';
-import { fetchAll, useRefresh } from '../../lib/query.js';
+import { useRefresh } from '../../lib/query.js';
 import { COLOR_SLOTS, FONT_CHOICES, MIN_CONTRAST, applyPreset, contrastRatio, formToKit, isHex, kitToForm } from './options.js';
 
 /** The seller's look, on a miniature of the seller's own page. The console around it stays Bhava's. */

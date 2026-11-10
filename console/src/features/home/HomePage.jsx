@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import { MANAGERS, staffWith } from '@contracts/access.js';
 import { useFeedback } from '../../components/feedback.jsx';
-import { Badge, Banner, Button, Card, EmptyState, ListCard, ListRow, Loadable, PageHeader, Panel, Ring, Thumb } from '../../design/index.jsx';
+import { Badge, Banner, Button, Card, EmptyState, ListRow, Loadable, PageHeader, Panel, Ring, Thumb } from '../../design/index.jsx';
 import { api } from '../../lib/api/index.js';
 import { formatPaise, plural } from '../../lib/format.js';
 import { useAllowed, useRefresh } from '../../lib/query.js';

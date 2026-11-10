@@ -257,8 +257,8 @@ test('an order is found, opened and moved along; cancelling restocks and can\'t 
   await expect(page.getByRole('alert')).toContainText('can’t be reopened');
   saved = await app.repos.orders.get(order.id);
   expect(saved.status).toBe('cancelled');
-  // The failure the form shows is the only error; the browser logging a failed request is not a fault in the page.
-  expect(problems.filter((line) => !/400/.test(line))).toEqual([]);
+  // The refusal the form shows is the only error. The API may answer 400 or 409; the browser logs either, and neither is a fault in the page.
+  expect(problems.filter((line) => !/status of 40[09]/.test(line))).toEqual([]);
 });
 
 test('R-01: another business\'s order, product, category and reel are simply not found', async ({ page }) => {
