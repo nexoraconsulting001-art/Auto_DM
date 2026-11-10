@@ -20,6 +20,8 @@ jobs:
       - run: npm ci
       - name: No secrets or server addresses in tracked files
         run: npm run secret-scan
+      - name: The seller console builds
+        run: npm run build:console
       - run: npm run test:ci
 
   postgres:

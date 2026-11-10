@@ -1,4 +1,6 @@
+import { adminConsole } from './admin-console/index.js';
 import { apiAuth } from './api-auth/index.js';
+import { apiV1 } from './api-v1/index.js';
 import { brand } from './brand/index.js';
 import { entitlements } from './entitlements/index.js';
 import { igAccounts } from './ig-accounts/index.js';
@@ -13,8 +15,9 @@ import { platformConsole } from './platform-console/index.js';
  *   beforeTenant(app, ctx)                Routes with no business yet: provider webhooks and callbacks, the platform host.
  *   routes(app, ctx)                      Routes inside one business, after sign-in and CSRF, before the store's 404.
  *   platformRoutes(router, ctx)           Platform Console routes; guard them with requirePlatformRole from src/auth.js.
+ *   api(ctx)                              -> { 'products.list': handler }. Answers routes of the /api/v1 contract (src/contracts/api).
  *   jobs({ db, repos, platform, config }) Calls platform.queue.work(...). May return an async schedule(), run every minute.
  *
  * ctx is { db, repos, ig, auth, config, platform, modules }.
  */
-export const MODULES = [brand, entitlements, igAccounts, apiAuth, platformConsole];
+export const MODULES = [brand, entitlements, igAccounts, apiAuth, platformConsole, adminConsole, apiV1];

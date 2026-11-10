@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { ApiError, isApiV1Url } from './contracts/api/index.js';
+import { sendApiError } from './modules/api-v1/respond.js';
 import { withTenant } from './tenancy.js';
 
 const COOKIE = 'sid';
@@ -73,7 +75,7 @@ function loginLimiter(cache, prefix) {
  */
 export function createAuth({ secret, users, sessions, tenants, cache }) {
   const limiter = loginLimiter(cache, 'login-attempts');
-  const notLoggedIn = (res) => res.status(401).json({ error: 'Please log in again.' });
+  const notLoggedIn = (res) => res.status(401).json({ error: 'Please log in again.', code: 'unauthorized' });
 
   return {
     ...limiter,
@@ -110,8 +112,9 @@ export function createAuth({ secret, users, sessions, tenants, cache }) {
     checkCsrf(req, res, next) {
       if (req.method === 'GET' || req.method === 'HEAD' || !req.user || req.bearer) return next();
       const sent = req.get('x-csrf-token') || req.body?._csrf || '';
-      if (!safeEqual(sent, req.csrf)) return res.status(403).send('This form expired. Go back, refresh the page and try again.');
-      next();
+      if (safeEqual(sent, req.csrf)) return next();
+      if (isApiV1Url(req.originalUrl)) return sendApiError(new ApiError('forbidden', 'This session expired. Refresh and try again.'), req, res);
+      res.status(403).send('This form expired. Go back, refresh the page and try again.');
     },
 
     async login(req, res, user) {
@@ -124,6 +127,7 @@ export function createAuth({ secret, users, sessions, tenants, cache }) {
         path: '/',
         maxAge: SESSION_DAYS * 86_400_000,
       });
+      return hmac(secret, `csrf:${token}`);
     },
 
     async logout(req, res) {

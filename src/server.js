@@ -11,6 +11,8 @@ import { createInstagram, forAccount } from './instagram.js';
 import { MODULES } from './modules/index.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes, baseUrlFor, tenantBaseUrl } from './routes/admin.js';
+import { ApiError, isApiV1Url } from './contracts/api/index.js';
+import { sendApiError } from './modules/api-v1/respond.js';
 import { createTenantResolver, withTenant } from './tenancy.js';
 import { createPlatform, describePlatform } from './platform/index.js';
 import { log, reportError, requestIds } from './platform/log.js';
@@ -124,7 +126,10 @@ export function createApp({ db, config = defaultConfig, ig = createInstagram(con
     if (req.bearer) return next();
     // req.hostname honours X-Forwarded-Host only from the trusted proxy in front (Caddy).
     const tenant = await tenants.resolve(req.hostname);
-    if (!tenant) return res.status(404).type('text').send('There is no store at this address.');
+    if (!tenant) {
+      if (isApiV1Url(req.originalUrl)) return sendApiError(new ApiError('not_found', 'There is no store at this address.'), req, res);
+      return res.status(404).type('text').send('There is no store at this address.');
+    }
     withTenant(tenant, next);
   });
 
@@ -133,11 +138,12 @@ export function createApp({ db, config = defaultConfig, ig = createInstagram(con
   app.use(auth.load, auth.checkCsrf);
   for (const module of modules) module.routes?.(app, ctx);
   app.use('/', accountRoutes({ repos, auth, config }));
-  app.use('/admin', adminRoutes({ repos, ig, auth, config }));
+  if (config.adminUi !== 'console') app.use('/admin', adminRoutes({ repos, ig, auth, config }));
   app.use('/api', apiRoutes({ repos }));
   app.use('/', storeRoutes({ repos, ig, auth }));
 
   app.use((err, req, res, _next) => {
+    if (isApiV1Url(req.originalUrl)) return sendApiError(err, req, res);
     reportError(err, { msg: 'http.error', method: req.method, path: req.path });
     if (res.headersSent) return;
     if (req.path.startsWith('/api/') || req.get('accept')?.includes('application/json')) {

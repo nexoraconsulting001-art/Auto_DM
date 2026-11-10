@@ -1,48 +1,45 @@
-import express from 'express';
+import { ApiError } from '../../contracts/api/index.js';
 import { currentTenant } from '../../tenancy.js';
 
 const SESSION_DAYS = 30;
 
-const describe = (user) => {
-  const t = currentTenant();
-  return {
-    user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
-    business: { id: t.id, slug: t.slug, name: t.name, plan: t.plan },
-  };
-};
-
 /**
- * Bearer sessions for the API and the mobile app. Logging in happens on the business's own address, which
- * is how the business is known at that moment; after that the token alone says who and which business.
+ * Signing in to the API. Logging in happens on the business's own address, which is how the business is
+ * known at that moment. The mobile app gets a bearer token, and after that the token alone says who and
+ * which business. The web console gets the usual httpOnly cookie session and a CSRF token.
  */
 export const apiAuth = {
   name: 'api-auth',
-  routes(app, { repos, auth }) {
-    const r = express.Router();
+  api({ repos, auth }) {
+    async function describe(user) {
+      const business = currentTenant();
+      const kit = await repos.brandKit.get();
+      return {
+        user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
+        business: { id: business.id, slug: business.slug, name: business.name, plan: business.plan, logoUrl: kit.logoUrl },
+      };
+    }
 
-    r.post('/login', async (req, res) => {
-      if (await auth.tooManyAttempts(req)) return res.status(429).json({ error: 'Too many tries. Wait 15 minutes and try again.' });
-      const user = await repos.users.verify(String(req.body?.phone ?? '').slice(0, 20), req.body?.password);
-      if (!user) {
-        await auth.recordFailure(req);
-        return res.status(401).json({ error: 'That mobile number and password don’t match.' });
-      }
-      await auth.clearFailures(req);
-      const token = await repos.sessions.create(user.id, SESSION_DAYS, 'bearer');
-      res.status(201).json({ token, expiresInDays: SESSION_DAYS, ...describe(user) });
-    });
+    return {
+      'auth.login': async ({ body, req, res }) => {
+        if (await auth.tooManyAttempts(req)) throw new ApiError('rate_limited', 'Too many tries. Wait 15 minutes and try again.');
+        const user = await repos.users.verify(body.phone, body.password);
+        if (!user) {
+          await auth.recordFailure(req);
+          throw new ApiError('unauthorized', 'That mobile number and password don’t match.');
+        }
+        if (body.transport === 'cookie') return { ...(await describe(user)), csrf: await auth.login(req, res, user) };
+        await auth.clearFailures(req);
+        const token = await repos.sessions.create(user.id, SESSION_DAYS, 'bearer');
+        return { token, expiresInDays: SESSION_DAYS, ...(await describe(user)) };
+      },
 
-    r.get('/me', (req, res) => {
-      if (!req.user) return res.status(401).json({ error: 'Please log in again.' });
-      res.json(describe(req.user));
-    });
+      'auth.me': async ({ user, req }) => ({ ...(await describe(user)), ...(req.csrf ? { csrf: req.csrf } : {}) }),
 
-    r.post('/logout', async (req, res) => {
-      if (!req.bearer) return res.status(401).json({ error: 'Please log in again.' });
-      await repos.sessions.revoke(req.sessionToken);
-      res.sendStatus(204);
-    });
-
-    app.use('/api/v1/auth', r);
+      'auth.logout': async ({ req, res }) => {
+        if (req.bearer) await repos.sessions.revoke(req.sessionToken);
+        else await auth.logout(req, res);
+      },
+    };
   },
 };

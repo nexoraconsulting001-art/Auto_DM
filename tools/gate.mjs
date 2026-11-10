@@ -237,6 +237,10 @@ async function main() {
     delete summary.migrations.version;
     say(`gate p${n}: ${summary.postgres.version}; ${summary.migrations.applied} migrations applied from empty`);
 
+    say(`gate p${n}: building the seller console`);
+    const consoleBuild = await run(process.execPath, [path.join(repoRoot, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', path.join(repoRoot, 'console')], env);
+    if (consoleBuild.code !== 0) problems.push(`The seller console did not build (exit ${consoleBuild.code})`);
+
     const phases = range(n);
     const globs = nodeTestGlobs(repoRoot, phases);
     const ndjson = path.join(scratch, 'node-results.ndjson');

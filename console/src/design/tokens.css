@@ -1,0 +1,66 @@
+/* Neel and Haldi: Bhava's design system for everything sellers use. Screens use these names, never raw values. */
+:root {
+  --ground: #f6f5f1;
+  --surface: #ffffff;
+  --surface-sunken: #f3f2f7;
+  --ink: #16152b;
+  --ink-2: #4b4a63;
+  --ink-3: #6a6985;
+  --line: #e7e5ee;
+  --line-soft: #f0eff4;
+  --dots: #d8d5e6;
+
+  --neel: #3b2fc9;
+  --neel-deep: #2c2399;
+  --neel-tint: #eceafd;
+  --neel-line: #d3cef8;
+  --neel-on-ink: #8c83f0;
+
+  --haldi: #f5b83d;
+  --haldi-tint: #fff3d6;
+  --haldi-text: #7a5200;
+
+  --good-text: #17694a;
+  --good-tint: #e3f5ec;
+  --bad-text: #b4432c;
+  --bad-tint: #fde8e6;
+
+  --ink-raised: #22213b;
+  --ink-line: #34335a;
+  --on-ink: #ffffff;
+  --on-ink-2: #c9c7dd;
+  --on-ink-icon: #e4e2f2;
+
+  --font-display: 'Unbounded Variable', Unbounded, system-ui, sans-serif;
+  --font-body: 'Figtree Variable', Figtree, system-ui, sans-serif;
+
+  --text-caption: 12px;
+  --text-meta: 13px;
+  --text-small: 14px;
+  --text-body: 15px;
+  --text-title: 17px;
+  --text-page: 26px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-small: 10px;
+  --radius-tile: 14px;
+  --radius-field: 16px;
+  --radius-card: 24px;
+  --radius-pill: 999px;
+
+  --tap: 44px;
+  --tap-large: 52px;
+
+  --shadow-nav: 0 16px 30px -14px rgba(22, 21, 43, 0.7);
+  --shadow-ink: 0 20px 40px -24px rgba(22, 21, 43, 0.65);
+
+  --gutter: 20px;
+  --tabbar-space: 108px;
+}

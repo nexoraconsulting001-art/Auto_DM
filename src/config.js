@@ -18,6 +18,9 @@ export const config = {
   // Web
   port: Number(process.env.PORT) || 3000,
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, ''),
+  // What /admin serves: 'console' is the React app (build it with npm run build:console); anything else, the old server-rendered pages.
+  adminUi: process.env.ADMIN_UI || 'legacy',
+  consoleDir: process.env.CONSOLE_DIR || path.join(rootDir, 'console', 'dist'),
   // Store owner: logs in on /login with this phone + password and gets the admin role.
   adminPhone: process.env.ADMIN_PHONE || '',
   adminPassword: process.env.ADMIN_PASSWORD || '',

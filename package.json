@@ -7,8 +7,14 @@
   "engines": {
     "node": ">=20"
   },
+  "workspaces": [
+    "console",
+    "shared/*"
+  ],
   "scripts": {
     "start": "node src/server.js",
+    "build:console": "npm run build --workspace console",
+    "dev:console": "npm run dev --workspace console",
     "worker": "node src/worker.js",
     "tenant": "node scripts/tenant.js",
     "platform-user": "node scripts/platform-user.js",
