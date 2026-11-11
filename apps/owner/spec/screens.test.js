@@ -93,15 +93,22 @@ test('P-67: the signed-in app is Bhava\'s, and the business logo shows only as t
   await openApp(fakeApi(), { signedIn: true });
   expect(await screen.findByTestId('tab-home')).toBeTruthy();
   const withLogo = (node) => JSON.stringify(node.props?.source ?? '').includes(WORKSPACE_LOGO);
+  // Every node that shows the logo sits inside a workspace badge. (Not only the switcher's:
+  // the shell also shows the badge, marked workspace-badge, in the header of screens off the tab bar.)
+  const inABadge = (node) => {
+    for (let at = node; at; at = at.parent) if (['open-switcher', 'workspace-badge'].includes(at.props?.testID)) return true;
+    return false;
+  };
   const badge = await screen.findByTestId('open-switcher');
-  const inBadge = badge.queryAll(withLogo);
-  expect(inBadge.length).toBeGreaterThanOrEqual(1);
-  expect(screen.root.queryAll(withLogo).length).toBe(inBadge.length);
+  expect(badge.queryAll(withLogo).length).toBeGreaterThanOrEqual(1);
+  const shown = screen.root.queryAll(withLogo);
+  expect(shown.length).toBeGreaterThanOrEqual(1);
+  for (const node of shown) expect(inABadge(node)).toBe(true);
   await openMore();
-  // Screens behind the visible one stay mounted, each with its own header: count every badge, shown or not.
+  // Screens behind the visible one stay mounted, each with its own header: every logo, shown or not, is in a badge.
   const badges = screen.queryAllByTestId('open-switcher', { includeHiddenElements: true }).flatMap((b) => b.queryAll(withLogo));
   expect(badges.length).toBeGreaterThanOrEqual(1);
-  expect(screen.root.queryAll(withLogo).length).toBe(badges.length);
+  for (const node of screen.root.queryAll(withLogo)) expect(inABadge(node)).toBe(true);
 });
 
 test('P-69: a Free plan creator signs in to the same app and gets the creator\'s screens', async () => {

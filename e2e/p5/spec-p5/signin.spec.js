@@ -25,6 +25,16 @@ test.afterAll(async () => {
 });
 
 const appUrl = (path) => `http://${APP_HOST}:${world.port}${path}`;
+/**
+ * A GET on the sign-in host with the browser's own cookies for it. Chromium sends *.localhost to loopback itself, but
+ * page.request runs in node, whose lookup of app.bhava.localhost fails on Windows: so it goes to 127.0.0.1 and names the host.
+ */
+async function getAsBrowser(page, path) {
+  const cookies = await page.context().cookies(appUrl(path));
+  return page.request.get(`http://127.0.0.1:${world.port}${path}`, {
+    headers: { host: `${APP_HOST}:${world.port}`, cookie: cookies.map((c) => `${c.name}=${c.value}`).join('; ') },
+  });
+}
 const line = (product, qty = 1) => ({ productId: product.id, variantId: null, qty });
 
 /** Signs in on the web sign-in page with a WhatsApp code, as a seller would. */
@@ -63,7 +73,7 @@ test('P-11: the web sign-in page offers Google and a WhatsApp code, with no pass
 test('F-117: a WhatsApp code from Bhava\'s number signs the owner in to the console of their business', async ({ page }) => {
   const shop = await addSeller(world, { name: 'Gulmohar Goods' });
   await signInOnTheWeb(page, ownerPhone(shop));
-  const me = await page.request.get(appUrl('/api/v1/auth/me'));
+  const me = await getAsBrowser(page, '/api/v1/auth/me');
   expect(me.status()).toBe(200);
   const body = await me.json();
   expect(body.business.id).toBe(shop.tenantId);
@@ -77,11 +87,11 @@ test('F-47: someone removed from the team while the console is open is signed ou
   const shop = await addSeller(world, { name: `Kadam Crafts ${unique()}` });
   const staff = await addMember(shop, { role: 'staff', permissions: ['orders'] });
   await signInOnTheWeb(page, staff.phone);
-  expect((await page.request.get(appUrl('/api/v1/orders'))).status()).toBe(200);
+  expect((await getAsBrowser(page, '/api/v1/orders')).status()).toBe(200);
 
   const owner = await ownerApp(world, shop);
   expect((await owner.send('DELETE', `/team/${staff.userId}`)).status).toBe(204);
-  await expect.poll(async () => (await page.request.get(appUrl('/api/v1/orders'))).status(), { timeout: 60_000, intervals: [500] }).toBe(401);
+  await expect.poll(async () => (await getAsBrowser(page, '/api/v1/orders')).status(), { timeout: 60_000, intervals: [500] }).toBe(401);
   await page.reload();
   await expect(page.getByText(/sign in|log in/i).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('body')).not.toContainText(/Kadam Crafts/);

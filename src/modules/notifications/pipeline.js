@@ -158,7 +158,13 @@ export function createPipeline({ platformDb, push, providers, config, clock, dev
     if (!ready[channel]()) return insert({ status: 'dropped', reason: 'not_configured' });
     const reachable = channel === 'push' ? contact.devices > 0 : channel === 'email' ? Boolean(contact.email) : Boolean(contact.phone);
     if (!reachable) return insert({ status: 'dropped', reason: 'no_address' });
-    const at = deliverAt(ev.kind, channel, prefs, now);
+    // The collapse hold runs from when the event happened, not from when this worker got to it: a worker that is behind
+    // never adds its lag to the hold.
+    const happened = ev.created_at ? new Date(ev.created_at) : now;
+    const holds = channel === 'push' && spec.collapse && !spec.critical;
+    let at = deliverAt(ev.kind, channel, prefs, holds && happened < now ? happened : now);
+    // A hold that is already over goes now, unless quiet hours have begun since.
+    if (at && at < now) at = quietUntil(prefs.quietHours, now) ?? now;
     if (!at) return null;
     if (channel !== 'push' || !spec.collapse || spec.critical) return insert({ at });
 
@@ -219,7 +225,7 @@ export function createPipeline({ platformDb, push, providers, config, clock, dev
     const now = clock();
     return platformDb.tx(async (t) => {
       const events = await t.query(
-        `SELECT e.id, e.tenant_id, e.kind, e.event_key, e.audience, e.channels, e.data, e.link, tn.name AS business
+        `SELECT e.id, e.tenant_id, e.kind, e.event_key, e.audience, e.channels, e.data, e.link, e.created_at, tn.name AS business
          FROM notification_events e JOIN tenants tn ON tn.id = e.tenant_id
          WHERE e.fanned_out_at IS NULL ORDER BY e.id LIMIT $1 FOR UPDATE OF e SKIP LOCKED`,
         [limit],
@@ -292,10 +298,10 @@ export function createPipeline({ platformDb, push, providers, config, clock, dev
     const [tenant] = await platformDb.query('SELECT id, slug, name FROM tenants WHERE id = $1', [row.tenant_id]);
     if (!full || !tenant) return finish('failed', 'gone');
     const logo = await logoFor(tenant);
-    const html = markWorkspaceBadge(full.body, logo);
+    const { html } = reportMessage(full, { business: tenant.name, logo, base: tenantBaseUrl(tenant, config ?? {}) || '' });
     if (sellerEmailProblem({ from: sender.from, html }, { platformFrom: sender.from })) return finish('failed', 'content');
     try {
-      await sender.send({ to: row.to_address, subject: full.subject, html, text: textOf(html), idempotencyKey: `report-delivery-${row.tenant_id}-${row.id}` });
+      await sender.send({ to: row.to_address, subject: full.subject, html, text: textOf(html), idempotencyKey: `report-delivery-${row.tenant_id}-${row.id}`, retries: 0 });
       return finish('sent');
     } catch (err) {
       if (!(err instanceof ProviderError)) throw err;
@@ -412,6 +418,20 @@ export function createPipeline({ platformDb, push, providers, config, clock, dev
     return { status: 'dropped', reason: notConfigured ? 'not_configured' : 'no_address' };
   }
 
+  /**
+   * A report email as the reports module wrote it. A body that is already an HTML email is sent as written (its logo
+   * marked as the workspace badge); a plain-text body is put in Bhava's report layout, so it still leaves Bhava-branded.
+   */
+  function reportMessage(report, { business, logo, base, link = '/' }) {
+    const body = String(report.body ?? '');
+    if (/<html[\s>]/i.test(body)) {
+      const html = markWorkspaceBadge(body, logo);
+      return { subject: report.subject, html, text: textOf(html) };
+    }
+    const framed = sellerEmail({ layout: 'report', words: { title: report.subject, body }, business, logoUrl: logo, base, link });
+    return { subject: report.subject, html: framed.html, text: framed.text };
+  }
+
   async function sendEmail(row, ev, user) {
     const sender = providers?.email?.platform;
     if (!sender?.configured) return { status: 'dropped', reason: 'not_configured' };
@@ -425,8 +445,7 @@ export function createPipeline({ platformDb, push, providers, config, clock, dev
       // The report itself, as the reports module wrote it for this person.
       const [report] = await platformDb.query('SELECT subject, body FROM report_deliveries WHERE tenant_id = $1 AND id = $2', [ev.tenant_id, reportId]);
       if (!report) return { status: 'dropped', reason: 'no_address' };
-      const html = markWorkspaceBadge(report.body, logo);
-      message = { subject: report.subject, html, text: textOf(html) };
+      message = reportMessage(report, { business: ev.business, logo, base: tenantBaseUrl(tenant, config ?? {}) || '', link: ev.link });
     } else {
       message = sellerEmail({ layout: NOTIFY_EVENTS[ev.kind].email, words: wordingFor(ev.kind, { values: valuesOf(ev) }), business: ev.business, logoUrl: logo, base: tenantBaseUrl(tenant, config ?? {}) || '', link: ev.link });
     }
@@ -437,7 +456,7 @@ export function createPipeline({ platformDb, push, providers, config, clock, dev
     }
     row.calledProvider = true;
     try {
-      const { messageId } = await sender.send({ to, subject: message.subject, html: message.html, text: message.text, idempotencyKey: `notify-${ev.tenant_id}-${row.id}` });
+      const { messageId } = await sender.send({ to, subject: message.subject, html: message.html, text: message.text, idempotencyKey: `notify-${ev.tenant_id}-${row.id}`, retries: 0 });
       return { status: 'sent', ref: String(messageId ?? '').slice(0, 200) };
     } catch (err) {
       if (!(err instanceof ProviderError)) throw err;

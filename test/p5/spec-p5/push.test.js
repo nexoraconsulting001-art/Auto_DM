@@ -179,17 +179,6 @@ test('P-23: FCM calling a token invalid deletes it; throttling, a 500, a hang an
   }
 });
 
-test('P-23: when Bhava\'s own push credentials are refused, no seller\'s device token is deleted', async () => {
-  const shop = await addSeller(world);
-  const owner = await ownerWithPush(shop, 'android');
-  await world.push.post('/credentials/rotate', {});
-  const key = `spec-rotated-${unique()}`;
-  await world.notify().emit({ event: 'token.invalid', tenantId: shop.tenantId, key, data: { account: 'Instagram' } });
-  await world.waitFor(async () => (await deliveries(shop, `e.event_key = $2 AND d.channel = 'push'`, [key]))[0]?.attempt >= 1, 15_000);
-  const [device] = await world.sql('SELECT deleted_at FROM push_devices WHERE device_id = $1', [owner.s.device.id]);
-  assert.equal(device.deleted_at, null, 'Bhava\'s own credentials being refused deleted a seller\'s device token');
-});
-
 test('P-23: push tokens are kept encrypted, one device moves with its token, and junk is refused', async () => {
   const shop = await addSeller(world);
   const s = await ownerApp(world, shop);
@@ -229,4 +218,16 @@ test('P-13: a push for one business carries that business\'s id, and one device 
   assert.equal(String(push.data.tenantId), String(b.tenantId), 'The push does not name the business it is about');
   assert.equal(push.data.link, '/orders/4242');
   assert.doesNotMatch(pushText(push), /Orchid Oils/, 'A push about B names A');
+});
+
+// Last in this file: rotating the simulator's credentials cannot be undone, so every push after it would be refused.
+test('P-23: when Bhava\'s own push credentials are refused, no seller\'s device token is deleted', async () => {
+  const shop = await addSeller(world);
+  const owner = await ownerWithPush(shop, 'android');
+  await world.push.post('/credentials/rotate', {});
+  const key = `spec-rotated-${unique()}`;
+  await world.notify().emit({ event: 'token.invalid', tenantId: shop.tenantId, key, data: { account: 'Instagram' } });
+  await world.waitFor(async () => (await deliveries(shop, `e.event_key = $2 AND d.channel = 'push'`, [key]))[0]?.attempt >= 1, 15_000);
+  const [device] = await world.sql('SELECT deleted_at FROM push_devices WHERE device_id = $1', [owner.s.device.id]);
+  assert.equal(device.deleted_at, null, 'Bhava\'s own credentials being refused deleted a seller\'s device token');
 });

@@ -16,7 +16,15 @@ export async function businessOf({ repos, config }) {
   const name = storeName && storeName !== 'My store' ? storeName : String(tenant?.name ?? '').trim();
   const base = tenant ? String(buyerBaseUrl(tenant, config) ?? '').replace(/\/+$/, '') : '';
   const primary = kit?.colors?.primary;
-  return { name, base, color: HEX.test(String(primary ?? '')) ? primary : '#16152B' };
+  return { name, base, color: HEX.test(String(primary ?? '')) ? primary : '#16152B', logo: logoOf(kit?.logoUrl, base) };
+}
+
+/** The business's logo as an address an email can show: https, or its own uploaded file on its own buyer address. */
+function logoOf(url, base) {
+  if (typeof url !== 'string' || !url) return '';
+  if (/^https:\/\/[^\s"'<>()]+$/i.test(url)) return url;
+  if (/^\/media\/[\w-]+$/.test(url) && /^https?:\/\/[^\s"'<>()]+$/i.test(base)) return `${base}${url}`;
+  return '';
 }
 
 /** The first word of a person's name, for "Hi Asha", or a friendly word when there is none. */

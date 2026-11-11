@@ -40,9 +40,9 @@ function platformSender(config, send) {
   return {
     configured,
     from,
-    async send({ to, subject, html, text, headers = {}, idempotencyKey }) {
+    async send({ to, subject, html, text, headers = {}, idempotencyKey, retries }) {
       if (!configured) throw notConfigured();
-      return send({ from, fromName: config.platformEmailFromName || 'Bhava', to, subject, html, text, headers, idempotencyKey });
+      return send({ from, fromName: config.platformEmailFromName || 'Bhava', to, subject, html, text, headers, idempotencyKey, retries });
     },
   };
 }
@@ -74,12 +74,13 @@ export function createEmail(config = {}, { env = process.env } = {}) {
 
   const adapter = {
     driver,
-    async send({ from, fromName = '', replyTo = '', to, subject, html, text, headers = {}, idempotencyKey }) {
+    /** `retries` (default 2 with an idempotency key, else 0): quick retries inside this call. A caller with its own retry schedule passes 0. */
+    async send({ from, fromName = '', replyTo = '', to, subject, html, text, headers = {}, idempotencyKey, retries }) {
       if (!from || !to || !subject) throw new Error('An email needs from, to and subject');
       const { body } = await request('POST', '/messages', {
         headers: { authorization: `Bearer ${config.emailApiKey ?? ''}`, ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}) },
         json: { from: fromName ? `${fromName} <${from}>` : from, reply_to: replyTo || undefined, to: [to], subject, html, text, headers },
-        retries: idempotencyKey ? 2 : 0,
+        retries: idempotencyKey ? (Number.isInteger(retries) && retries >= 0 ? Math.min(retries, 2) : 2) : 0,
       });
       return { messageId: String(body?.id ?? '') };
     },

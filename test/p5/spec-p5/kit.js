@@ -177,13 +177,32 @@ export async function openP5World({ overrides = {}, worker = true } = {}) {
      */
     async shift(ms, tables = P5_CLOCK_TABLES) {
       const interval = `${Math.round(ms)} milliseconds`;
+      // Time moves for what has happened. An order's notification is written by the order event bus a moment after the
+      // order itself, so before notification time moves, let what is in flight reach the outbox (a few seconds at most).
+      if ([...tables].some((table) => NOTIFY_TABLES.includes(table))) {
+        const end = Date.now() + 8000;
+        while (Date.now() < end) {
+          const [{ n }] = await world.rawDb.platform.query(
+            `SELECT (SELECT count(*) FROM order_events WHERE fanned_out_at IS NULL)
+                  + (SELECT count(*) FROM order_event_deliveries WHERE status = 'pending' AND next_attempt_at <= now() AND attempts = 0)
+                  + (SELECT count(*) FROM notification_events WHERE fanned_out_at IS NULL) AS n`,
+          );
+          if (!Number(n)) break;
+          await pause(100);
+        }
+      }
       await world.rawDb.platform.tx(async (t) => {
         const columns = await t.query(
           `SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public' AND data_type = 'timestamp with time zone' AND table_name = ANY($1)`,
           [[...tables]],
         );
         const byTable = new Map();
-        for (const { table_name: table, column_name: column } of columns) byTable.set(table, [...(byTable.get(table) ?? []), column]);
+        // A worker's lease (locked_until) is its own bookkeeping, checked against the value it wrote: moving it while a
+        // send is in flight would make the worker lose its own row. Only the business clock moves.
+        for (const { table_name: table, column_name: column } of columns) {
+          if (column === 'locked_until') continue;
+          byTable.set(table, [...(byTable.get(table) ?? []), column]);
+        }
         for (const [table, list] of byTable) {
           await t.exec(`ALTER TABLE "${table}" DISABLE TRIGGER USER`);
           await t.exec(`UPDATE "${table}" SET ${list.map((c) => `"${c}" = "${c}" - interval '${interval}'`).join(', ')}`);
@@ -383,11 +402,21 @@ export async function registerPush(s, { platform = s.device?.platform ?? 'androi
 }
 
 /** A notification's deliveries for this business, newest first, with their event's kind. */
-export const deliveries = (shop, where = 'true', params = []) => shop.sql(
+export const deliveries = async (shop, where = 'true', params = []) => {
+  // A send in flight holds a lease until its outcome is written: wait (a few seconds at most) so a row is read as the
+  // worker left it, not halfway through a try the provider has already answered.
+  const end = Date.now() + 8000;
+  while (Date.now() < end) {
+    const [{ n }] = await shop.sql('SELECT count(*)::int AS n FROM notification_deliveries WHERE tenant_id = $1 AND locked_until > now()', [shop.tenantId]);
+    if (!n) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return shop.sql(
   `SELECT d.*, e.kind, e.event_key, e.created_at AS event_at, e.data AS event_data, e.link AS event_link FROM notification_deliveries d
    JOIN notification_events e ON e.tenant_id = d.tenant_id AND e.id = d.event_id WHERE d.tenant_id = $1 AND (${where}) ORDER BY d.id DESC`,
   [shop.tenantId, ...params],
-);
+  );
+};
 export const events = (shop, where = 'true', params = []) => shop.sql(`SELECT * FROM notification_events WHERE tenant_id = $1 AND (${where}) ORDER BY id`, [shop.tenantId, ...params]);
 
 /** Every word a person could read in a push the simulator received. */

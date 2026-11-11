@@ -57,6 +57,11 @@ export function deletionService(ctx) {
           target: `user:${account.user_id}`,
           dedupeKey: `account-deletion:${requestId}`,
         });
+        // The person is told too, on the security channels (email, WhatsApp, in-app), in every business they work at.
+        await ctx.notify?.emit({
+          event: 'account.deletion_requested', tenantId: account.tenant_id, audience: { userId: Number(account.user_id) },
+          key: `account-deletion:${requestId}`, data: { days: DELETION_GRACE_DAYS },
+        });
       });
     }
     await db().tx(async (t) => {
