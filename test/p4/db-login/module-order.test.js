@@ -13,6 +13,7 @@ const ORDER = [
   'ig-accounts',
   'audit',
   'alerts',
+  'notifications',
   'gateway-keys',
   'accounts',
   'team',

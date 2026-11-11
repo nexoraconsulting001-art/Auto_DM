@@ -1,4 +1,4 @@
-import { DEFAULT_TIMEOUT_MS, createHttp, hmac, providerUrl, sameBytes } from '../http.js';
+import { DEFAULT_TIMEOUT_MS, ProviderError, createHttp, hmac, providerUrl, sameBytes } from '../http.js';
 
 /**
  * WhatsApp Business (Cloud API), on each business's own account and number (PRD 9.3, 9.16). There is no SMS.
@@ -16,6 +16,16 @@ import { DEFAULT_TIMEOUT_MS, createHttp, hmac, providerUrl, sameBytes } from '..
  *
  * A send whose answer was lost is ProviderError with delivery 'unknown': it is never sent again on a guess. Every call has a
  * 10 s timeout. WHATSAPP_BASE_URL points at tools/sim/whatsapp, refused when NODE_ENV=production.
+ *
+ * platform: Bhava's own number, for messages to SELLERS only (PRD 5.13): login codes and alerts, in Bhava's name, from
+ * PLATFORM_WHATSAPP_PHONE_ID with PLATFORM_WHATSAPP_TOKEN. Nothing calls it except the notifications service
+ * (src/modules/notifications, ctx.notify), and it never carries a message to a shopper. A test keeps it so.
+ *
+ *   platform.configured                                         false until both settings are there
+ *   platform.templateName(name)                                 the name in Bhava's account (PLATFORM_WHATSAPP_TEMPLATES renames)
+ *   platform.send({ to, template, language?, params?, code? })  -> { messageId }
+ *       params are the body's values in order. code, for an authentication template, also fills its copy-code button.
+ *       Not configured: ProviderError kind 'rejected', code 'not_configured', delivery 'none'.
  *
  * verifyWebhook(rawBody, signatureHeader, appSecret): X-Hub-Signature-256 as "sha256=<hex>" over the exact bytes. Never throws.
  * parseStatuses(body) -> [{ messageId, status: 'sent' | 'delivered' | 'read' | 'failed', at, errorCode, phoneNumberId, costCategory }]
@@ -83,5 +93,32 @@ export function createWhatsApp(config = {}, { env = process.env } = {}) {
     verifyWebhook,
     parseStatuses,
     parseInbound,
+    platform: platformSender(config, request),
+  };
+}
+
+function platformSender(config, request) {
+  const phoneNumberId = String(config.platformWhatsappPhoneId ?? '');
+  const accessToken = String(config.platformWhatsappToken ?? '');
+  const renamed = config.platformWhatsappTemplates ?? {};
+  const configured = Boolean(phoneNumberId && accessToken);
+  const templateName = (name) => (typeof renamed[name] === 'string' && renamed[name] ? renamed[name] : name);
+  return {
+    configured,
+    templateName,
+    async send({ to, template, language = config.platformWhatsappLanguage || 'en', params = [], code = '' }) {
+      if (!configured) throw new ProviderError({ provider: 'whatsapp', kind: 'rejected', code: 'not_configured', delivery: 'none' });
+      if (!/^[1-9][0-9]{7,14}$/.test(String(to))) throw new Error('WhatsApp needs the number in international format, digits only');
+      const text = (value) => ({ type: 'text', text: String(value) });
+      const components = [];
+      if (params.length) components.push({ type: 'body', parameters: params.map(text) });
+      if (code) components.push({ type: 'button', sub_type: 'url', index: '0', parameters: [text(code)] });
+      // No retry: a message that may have gone out is not repeated.
+      const { body } = await request('POST', `/${encodeURIComponent(phoneNumberId)}/messages`, {
+        headers: { authorization: `Bearer ${accessToken}` },
+        json: { messaging_product: 'whatsapp', to: String(to), type: 'template', template: { name: templateName(template), language: { code: language }, components } },
+      });
+      return { messageId: body?.messages?.[0]?.id ?? '' };
+    },
   };
 }

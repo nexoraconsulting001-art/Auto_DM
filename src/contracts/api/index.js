@@ -19,6 +19,7 @@ import { instagramRoutes } from './instagram.js';
 import { leadRoutes } from './leads.js';
 import { linkRoutes } from './links.js';
 import { mediaRoutes } from './media.js';
+import { notificationRoutes, pushRoutes } from './notifications.js';
 import { orderRoutes } from './orders.js';
 import { pageRoutes } from './pages.js';
 import { paymentRoutes, refundRoutes } from './payments.js';
@@ -130,6 +131,8 @@ export const routes = Object.freeze({
   // Phase 5 (auth.* additions are in authRoutes above)
   ...teamRoutes,
   ...appRoutes,
+  ...notificationRoutes,
+  ...pushRoutes,
 });
 
 export const routeList = Object.freeze(Object.entries(routes).map(([id, route]) => Object.freeze({ id, ...assertRouteFields(id, route) })));
@@ -163,6 +166,7 @@ export * from './instagram.js';
 export * from './leads.js';
 export * from './links.js';
 export * from './media.js';
+export * from './notifications.js';
 export * from './orders.js';
 export * from './pages.js';
 export * from './payments.js';

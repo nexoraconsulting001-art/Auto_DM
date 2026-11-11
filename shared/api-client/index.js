@@ -153,6 +153,22 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, getTenantId, ap
       /** @param query { app?: 'owner' | 'shopper', platform: 'android' | 'ios', tenantId? } */
       requirements: (query) => get('/app/requirements', query),
     },
+    // What Bhava tells this seller (5.13, 10.5): the in-app list, the choices per kind and channel, and this device's push token.
+    notifications: {
+      /** @param query { unread?: '1', cursor?, limit? } @returns { items, nextCursor, unread } */
+      list: (query) => get('/notifications', query),
+      /** @param body { ids: number[] } | { all: true } */
+      markRead: (body) => post('/notifications/read', body),
+      /** @returns { quietHours, events, kinds, available } */
+      prefs: () => get('/notifications/prefs'),
+      /** @param body { quietHours?: { enabled?, from?, to?, timezone? }, events?: { [kind]: { push?, email?, whatsapp? } } } */
+      savePrefs: (body) => put('/notifications/prefs', body),
+    },
+    push: {
+      /** @param body { deviceId, platform: 'android' | 'ios', token, appVersion? } */
+      register: (body) => post('/push/devices', body),
+      unregister: (deviceId) => del(`/push/devices/${id(deviceId)}`),
+    },
     products: {
       /** @param query { search?, status?: 'all' | 'active' | 'archived' | 'featured' | 'attention' | 'sold_out' | 'price_changed', category?, source?, cursor?, limit? } */
       list: (query) => get('/products', query),

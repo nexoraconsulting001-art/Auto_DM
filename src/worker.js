@@ -10,6 +10,7 @@ import { createCompliance } from './modules/compliance/index.js';
 import { MODULES } from './modules/index.js';
 import { createMetaCallObserver } from './modules/meta-calls.js';
 import { ORDER_EVENTS_QUEUE, wireOrderEvents } from './modules/orders/events.js';
+import { createNotify } from './modules/notifications/index.js';
 import { createShopperMessages } from './modules/shopper-messages/index.js';
 import { createRepos } from './repos/index.js';
 import { backupStorage, runBackup } from './backup.js';
@@ -55,7 +56,8 @@ export function registerJobs({ db, platform, config, modules = MODULES, metaCall
   const compliance = createCompliance({ db, repos, ig, meta, config, platform });
   const providers = createStoreAdapters(config);
   const shopperMessages = createShopperMessages({ db, platform, providers, config });
-  const jobContext = { db, repos, platform, config, ig, meta, google, providers, compliance, shopperMessages, modules };
+  const notify = createNotify({ db, providers, config });
+  const jobContext = { db, repos, platform, config, ig, meta, google, providers, compliance, shopperMessages, notify, modules };
   metaCalls.bind(jobContext);
   // The order event bus: listeners register in each module's setup, and this worker is what delivers.
   const orderEvents = wireOrderEvents(jobContext);

@@ -30,6 +30,7 @@ import { invoices } from './invoices/index.js';
 import { leads } from './leads/index.js';
 import { links } from './links/index.js';
 import { loyalty } from './loyalty/index.js';
+import { notifications } from './notifications/index.js';
 import { orderAlerts } from './order-alerts/index.js';
 import { orders } from './orders/index.js';
 import { pages } from './pages/index.js';
@@ -63,12 +64,16 @@ import { wishlist } from './wishlist/index.js';
  *   platformRoutes(router, ctx)           Platform Console routes; guard them with requirePlatformRole from src/auth.js.
  *   api(ctx)                              -> { 'products.list': handler }. Answers routes of the /api/v1 contract (src/contracts/api).
  *   takesOver(ctx)                        -> { id: handler } for ids admin-api answers (Phase 0): replaces its handler there.
- *   jobs({ db, repos, platform, config, ig, meta, google, compliance, modules }) Calls platform.queue.work(...). May return an async schedule(), run every minute.
+ *   jobs({ db, repos, platform, config, ig, meta, google, providers, compliance, shopperMessages, notify, modules }) Calls platform.queue.work(...). May return an async schedule(), run every minute.
  *   onMetaCall(call, ctx)                 Told about every call to Meta, ids and numbers only. See meta-calls.js.
  *
- * ctx is { db, repos, ig, meta, google, apple, providers, compliance, shopperMessages, orderEvents, auth, config, platform, modules }. meta is src/adapters/meta; google is
+ * ctx is { db, repos, ig, meta, google, apple, providers, compliance, shopperMessages, notify, orderEvents, auth, config, platform, modules }. meta is src/adapters/meta; google is
  * src/adapters/google (ga4, and signIn for sellers); apple is src/adapters/apple (signIn); providers is src/adapters/store.js (razorpay, shiprocket, shopify, whatsapp, email). compliance is the only path to Meta for a message, and
- * shopperMessages the only path to WhatsApp or email for one to a shopper. orderEvents is the order event bus (src/modules/orders/events.js).
+ * shopperMessages the only path to WhatsApp or email for one to a shopper. notify is the only path to a seller (PRD 5.13, 10.5): owner push,
+ * Bhava's own WhatsApp number and Bhava's own email sender, and the in-app list. notify.emit({ event, tenantId, key, data }, t) writes an outbox
+ * row, inside your transaction when you pass it; notify.sendCode({ to, code, purpose }) sends a seller's login code; notify.prefs and
+ * notify.deliveries are the preferences and the delivery log (src/modules/notifications, src/contracts/notifications.js).
+ * orderEvents is the order event bus (src/modules/orders/events.js).
  * platform.fetcher is safeFetch and platform.images is sharp (src/platform).
  *
  * Phase 3's buyer pages (catalog to leads) come after traffic, so traffic's page middleware counts them, and before admin-api,
@@ -81,9 +86,12 @@ import { wishlist } from './wishlist/index.js';
  * Phase 5's seller accounts (PRD 5.11, 10.2, 10.3, 10.6) sit just before api-auth, which still answers the Phase 0 auth routes:
  * accounts (sign-in without passwords, tokens, devices, re-auth, deletion, the review login, minimum versions), team and demo-tenant.
  * Their browser routes (AUTH_PATHS) mount in beforeTenant, on the host that belongs to no business.
+ *
+ * notifications (PRD 5.13, 10.5) comes right after alerts, which it drains: it answers notifications.* and push.*, and listens to the
+ * order event bus for new orders.
  */
 export const MODULES = [
-  brand, entitlements, igAccounts, audit, alerts, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, igConnect, compliance, automations, links, facebook, domains,
+  brand, entitlements, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, igConnect, compliance, automations, links, facebook, domains,
   insights, reachGuard, traffic, reports,
   catalog, imports, categories, pages, themes, creator, leads,
   shoppers, consent, cart, coupons, inventory, loyalty, checkout, orders, payments, refunds, shipping, invoices, returns, reviews, wishlist,

@@ -13,10 +13,11 @@ import { createWhatsApp } from './whatsapp/index.js';
  *               own, by Partner OAuth); forMode(mode) picks, and config.paymentMode is the default
  *   shiprocket  rates, AWB, labels, pickup and tracking, on the managed account or the seller's own
  *   shopify     Admin API per connected shop
- *   whatsapp    templates, account details and webhook parsing. Its sendTemplate is the gate's alone
- *   email       its send is the gate's alone
+ *   whatsapp    templates, account details and webhook parsing. Its sendTemplate is the gate's alone. whatsapp.platform is
+ *               Bhava's own number, for sellers: the notifications service's alone
+ *   email       its send is the gate's alone. email.platform is Bhava's own sender, for sellers: the notifications service's alone
  *
- * A message to a shopper goes through ctx.shopperMessages and nowhere else.
+ * A message to a shopper goes through ctx.shopperMessages and nowhere else; one to a seller through ctx.notify and nowhere else.
  */
 export function createStoreAdapters(config = {}, options = {}) {
   return {

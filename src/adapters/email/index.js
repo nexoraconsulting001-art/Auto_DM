@@ -18,9 +18,34 @@ import { isSimulatorUrl, refuseSimulatorUrl } from '../../../tools/sim/guard.mjs
  *         (comma-separated origins) or a simulator; a simulator is refused when NODE_ENV=production.
  *
  * A send whose answer was lost has delivery 'unknown' and is repeated only with the same idempotency key.
+ *
+ * platform: Bhava's own sender, for email to SELLERS only (PRD 5.13): alerts, reports, security notices, in Bhava's name,
+ * from PLATFORM_EMAIL_FROM over the same driver. Nothing calls it except the notifications service
+ * (src/modules/notifications, ctx.notify), and it never carries a message to a shopper. A test keeps it so.
+ *
+ *   platform.configured     false with EMAIL_DRIVER=none or no PLATFORM_EMAIL_FROM
+ *   platform.from           the address every seller email is from
+ *   platform.send({ to, subject, html, text, headers?, idempotencyKey }) -> { messageId }
+ *       Not configured: ProviderError kind 'rejected', code 'not_configured', delivery 'none'.
  */
 
 export const neutralFrom = (config, local = 'orders') => (config.emailNeutralDomain ? `${local}@${config.emailNeutralDomain}` : '');
+
+const notConfigured = () => new ProviderError({ provider: 'email', kind: 'rejected', code: 'not_configured', delivery: 'none' });
+
+/** Bhava's sender, over whatever send() the driver has. */
+function platformSender(config, send) {
+  const from = String(config.platformEmailFrom ?? '').trim().toLowerCase();
+  const configured = Boolean(send && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(from));
+  return {
+    configured,
+    from,
+    async send({ to, subject, html, text, headers = {}, idempotencyKey }) {
+      if (!configured) throw notConfigured();
+      return send({ from, fromName: config.platformEmailFromName || 'Bhava', to, subject, html, text, headers, idempotencyKey });
+    },
+  };
+}
 
 export function createEmail(config = {}, { env = process.env } = {}) {
   const driver = config.emailDriver || 'none';
@@ -28,8 +53,9 @@ export function createEmail(config = {}, { env = process.env } = {}) {
     return {
       driver,
       async send() {
-        throw new ProviderError({ provider: 'email', kind: 'rejected', code: 'not_configured', delivery: 'none' });
+        throw notConfigured();
       },
+      platform: platformSender(config, null),
     };
   }
   if (driver !== 'http') throw new Error(`Unknown EMAIL_DRIVER "${driver}" (use none or http)`);
@@ -46,7 +72,7 @@ export function createEmail(config = {}, { env = process.env } = {}) {
   if (!raw || (!isSimulatorUrl(raw) && !allowed.includes(origin))) throw new ProviderHostBlockedError('EMAIL_BASE_URL');
   const request = createHttp({ provider: 'email', baseUrl: raw, timeoutMs: config.providerTimeoutMs || DEFAULT_TIMEOUT_MS, codeOf: (body) => body?.error?.code ?? body?.code ?? '' });
 
-  return {
+  const adapter = {
     driver,
     async send({ from, fromName = '', replyTo = '', to, subject, html, text, headers = {}, idempotencyKey }) {
       if (!from || !to || !subject) throw new Error('An email needs from, to and subject');
@@ -58,4 +84,5 @@ export function createEmail(config = {}, { env = process.env } = {}) {
       return { messageId: String(body?.id ?? '') };
     },
   };
+  return { ...adapter, platform: platformSender(config, adapter.send) };
 }

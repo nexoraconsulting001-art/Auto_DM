@@ -12,6 +12,8 @@ function passwordLoginFrom(env) {
 }
 const list = (value) => String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
 const positive = (value, fallback) => (Number(value) > 0 ? Number(value) : fallback);
+/** "a=b,c=d" as { a: 'b', c: 'd' }. */
+const pairs = (value) => Object.fromEntries(list(value).map((item) => item.split('=').map((part) => part.trim())).filter(([key, to]) => key && to));
 
 export const config = {
   rootDir,
@@ -149,6 +151,31 @@ export const config = {
   emailApiKey: process.env.EMAIL_API_KEY || '',
   // The neutral sending domain for a business with no verified domain of its own. Never one with the platform's name in it.
   emailNeutralDomain: (process.env.EMAIL_NEUTRAL_DOMAIN || '').toLowerCase(),
+  // Messages to sellers (PRD 5.13), which come from Bhava itself and never reach a shopper. Each channel with nothing set
+  // reports not_configured and the others still deliver.
+  // WhatsApp: Bhava's own verified number (login codes, alerts). PLATFORM_WHATSAPP_TEMPLATES renames templates, as
+  // "login_code=bhava_code_v2,bhava_order_new=order_new_v3", when the approved names differ from the contract's.
+  platformWhatsappPhoneId: process.env.PLATFORM_WHATSAPP_PHONE_ID || '',
+  platformWhatsappToken: process.env.PLATFORM_WHATSAPP_TOKEN || '',
+  platformWhatsappTemplates: pairs(process.env.PLATFORM_WHATSAPP_TEMPLATES),
+  platformWhatsappLanguage: process.env.PLATFORM_WHATSAPP_LANGUAGE || 'en',
+  // Email: Bhava's sender, over EMAIL_DRIVER above.
+  platformEmailFrom: (process.env.PLATFORM_EMAIL_FROM || '').toLowerCase(),
+  platformEmailFromName: process.env.PLATFORM_EMAIL_FROM_NAME || 'Bhava',
+  // Push to the owner app (PRD 10.5, src/adapters/push): none (nothing is sent), fcm, apns, or fcm,apns. One FCM project
+  // and one APNs key serve every business. The base URLs point at tools/sim/push and are refused in production.
+  pushDriver: process.env.PUSH_DRIVER || 'none',
+  fcmProjectId: process.env.FCM_PROJECT_ID || '',
+  fcmServiceAccount: process.env.FCM_SERVICE_ACCOUNT || '',
+  fcmBaseUrl: process.env.FCM_BASE_URL || '',
+  apnsKeyId: process.env.APNS_KEY_ID || '',
+  apnsTeamId: process.env.APNS_TEAM_ID || '',
+  apnsKey: process.env.APNS_KEY || '',
+  apnsTopic: process.env.APNS_TOPIC || '',
+  apnsBaseUrl: process.env.APNS_BASE_URL || '',
+  apnsEnv: process.env.APNS_ENV === 'sandbox' ? 'sandbox' : 'production',
+  // How often the worker hands notifications out and sends what is due.
+  notifyPollMs: Number(process.env.NOTIFY_POLL_MS) || 5000,
   // Google sign-in for shoppers (PRD 9.3).
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',

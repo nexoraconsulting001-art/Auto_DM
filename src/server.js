@@ -17,6 +17,7 @@ import { apiRouterFor } from './modules/api-v1/index.js';
 import { MODULES } from './modules/index.js';
 import { createMetaCallObserver } from './modules/meta-calls.js';
 import { wireOrderEvents } from './modules/orders/events.js';
+import { createNotify } from './modules/notifications/index.js';
 import { createShopperMessages } from './modules/shopper-messages/index.js';
 import { adminRoutes, baseUrlFor, buyerBaseUrl } from './routes/admin.js';
 import { ApiError, isApiV1Url } from './contracts/api/index.js';
@@ -56,7 +57,9 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
   const compliance = createCompliance({ db, repos, ig, meta, config, platform });
   const providers = createStoreAdapters(config);
   const shopperMessages = createShopperMessages({ db, platform, providers, config });
-  const ctx = { db, repos, ig, meta, google, apple, providers, compliance, shopperMessages, auth, config, platform, modules, tenantResolver: tenants };
+  // Everything a seller is told goes through notify; everything a shopper is told goes through shopperMessages.
+  const notify = createNotify({ db, providers, config });
+  const ctx = { db, repos, ig, meta, google, apple, providers, compliance, shopperMessages, notify, auth, config, platform, modules, tenantResolver: tenants };
   metaCalls.bind(ctx);
   // The order event bus, then each module's own start-up: its listeners on the bus, the consent provider.
   wireOrderEvents(ctx);
