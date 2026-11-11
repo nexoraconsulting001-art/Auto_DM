@@ -11,11 +11,11 @@ import { EMPTY_CATEGORY, categoryToForm, formToCategory, nextPosition } from './
 function ProductsInCategory({ category }) {
   const products = useQuery({ queryKey: ['products', 'in-category', category.id], queryFn: () => api.products.list({ category: category.id, limit: 30 }) });
   return (
-    <Panel title="Products in this category" action={<Link className="panel-link" to={`/products?category=${category.id}`}>Manage</Link>}>
+    <Panel title="Products in this category" action={<Link className="panel-link" to={`/catalog?category=${category.id}`}>Manage</Link>}>
       <Loadable query={products} label="Loading its products" errorTitle="We couldn’t load its products">
         {({ items }) => (items.length ? (
           <div className="row-list">
-            {items.map((product) => <ListRow key={product.id} as={Link} to={`/products/${product.id}`} leading={<Thumb src={product.images[0]} />} title={product.name} />)}
+            {items.map((product) => <ListRow key={product.id} as={Link} to={`/catalog/${product.id}`} leading={<Thumb src={product.images[0]} />} title={product.name} />)}
           </div>
         ) : <EmptyState title="No products yet">Pick this category on a product’s page to add it here.</EmptyState>)}
       </Loadable>
@@ -73,6 +73,11 @@ function CategoryEditor({ category, position }) {
           <Button as={Link} variant="outline" size="large" block to="/categories">Cancel</Button>
         </div>
       </form>
+      {category && (
+        <Panel title="Reels in this category" action={<Link className="panel-link" to={`/categories/${category.id}/reels`}>Reel order</Link>}>
+          <p className="muted">{category.reelCount ? `${category.reelCount} in this category.` : "None yet."} Their order is the same on the category page, the Reels tab, landing pages and your creator page.</p>
+        </Panel>
+      )}
       {category && <ProductsInCategory category={category} />}
       {category && <Button variant="danger" onClick={remove}>Delete category</Button>}
     </>
