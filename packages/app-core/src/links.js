@@ -57,3 +57,24 @@ export function matchPath(path, screens) {
   }
   return best ? { name: best.name, params: best.params } : null;
 }
+
+/**
+ * Links that open the app from outside: the one it was opened with, and any that arrive while it runs. `linking` is
+ * react-native's Linking; each URL goes to `router.openUrl`, which ignores anything not in the app's own scheme.
+ * The URL the app was opened with is handled once, however often this is set up again (after a switch of business).
+ * Returns the way to stop.
+ */
+const launchHandled = new WeakSet();
+
+export function watchLinks({ linking, router }) {
+  if (!linking || !router) return () => {};
+  const handle = (url) => {
+    if (typeof url === 'string' && url) router.openUrl(url);
+  };
+  if (!launchHandled.has(linking)) {
+    launchHandled.add(linking);
+    Promise.resolve(linking.getInitialURL?.()).then(handle).catch(() => {});
+  }
+  const subscription = linking.addEventListener?.('url', (event) => handle(event?.url));
+  return () => subscription?.remove?.();
+}

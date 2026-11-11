@@ -8,6 +8,8 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
 const DEVICE_ID = /^[A-Za-z0-9_-]{16,64}$/;
+/** Everything about a sign-in. Signing out deletes each of these. */
+export const SESSION_KEYS = Object.freeze(['refresh', 'device_secret', 'lock', 'lock_offered', 'tenant', 'snapshot']);
 const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
 /** `prefix` keeps two apps, or two builds of one, apart: 'bhava.owner' for the owner app. */
@@ -29,6 +31,16 @@ export function createSecureStore({ prefix, secureStore = SecureStore, crypto = 
     /** Whether the app asks for fingerprint, face or the device passcode before releasing the refresh token. */
     isLockEnabled: async () => (await read('lock')) === '1',
     setLockEnabled: (on) => write('lock', on ? '1' : null),
+    /** Whether fingerprint or face unlock was offered since this sign-in, so the offer is made once and not on every launch. */
+    wasLockOffered: async () => (await read('lock_offered')) === '1',
+    setLockOffered: () => write('lock_offered', '1'),
+
+    /** The language the person chose in the app, or null for the phone's own. Kept across sign-outs: it is not about anyone. */
+    getLocale: async () => {
+      const value = await read('locale');
+      return /^[a-z]{2}$/.test(value ?? '') ? value : null;
+    },
+    setLocale: (locale) => write('locale', /^[a-z]{2}$/.test(locale ?? '') ? locale : null),
 
     /** The business last worked in, so a restart opens the same one. */
     getTenantId: async () => {
@@ -57,9 +69,13 @@ export function createSecureStore({ prefix, secureStore = SecureStore, crypto = 
       return id;
     },
 
-    /** Signing out forgets the session and the lock, and keeps the device id. */
+    /**
+     * Signing out, a revoked device and a revoked family all end here: the refresh token, the device's unlock secret,
+     * the lock, the business and what was known about it leave SecureStore. The device id stays: it names this phone in
+     * Settings > Devices and is no secret.
+     */
     async clearSession() {
-      await Promise.all(['refresh', 'device_secret', 'lock', 'tenant', 'snapshot'].map((name) => write(name, null)));
+      await Promise.all(SESSION_KEYS.map((name) => write(name, null)));
     },
   };
 }

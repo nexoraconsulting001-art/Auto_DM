@@ -39,16 +39,24 @@ export function OfflineBanner({ offline }) {
   return <Banner testID="offline-banner" tone="warn">{t('offline.banner')}</Banner>;
 }
 
-export function LockScreen({ appName, onUnlock, onSignInInstead, failed = false, busy = false }) {
+/** The words for a kind of unlock ('face', 'fingerprint' or anything else), to fill {method} in a line. */
+export const methodLabel = (t, kind) => t(kind === 'face' ? 'lock.method.face' : kind === 'fingerprint' ? 'lock.method.fingerprint' : 'lock.method.any');
+
+/**
+ * The lock at launch: fingerprint or face (the system offers the passcode when they fail), and the way out to a full
+ * sign-in. `kind` ('face' or 'fingerprint') names the button when it is known. `mark` is the app's own icon.
+ */
+export function LockScreen({ appName, onUnlock, onSignInInstead, failed = false, busy = false, kind = null, mark = null }) {
   const { t } = useStrings();
   return (
     <Screen testID="lock-screen">
+      {mark}
       <EmptyState
         title={t('lock.title', { app: appName })}
         action={
           <>
-            <Button testID="lock-unlock" label={t('lock.action')} onPress={onUnlock} busy={busy} />
-            <Button testID="lock-sign-in" label={t('lock.signInInstead')} onPress={onSignInInstead} kind="quiet" />
+            <Button testID="lock-unlock" label={kind ? t('lock.unlockWith', { method: methodLabel(t, kind) }) : t('lock.action')} onPress={onUnlock} busy={busy} />
+            <Button testID="lock-sign-in" label={t('lock.signInInstead')} onPress={onSignInInstead} kind={failed ? 'secondary' : 'quiet'} />
           </>
         }
       >
@@ -56,4 +64,15 @@ export function LockScreen({ appName, onUnlock, onSignInInstead, failed = false,
       </EmptyState>
     </Screen>
   );
+}
+
+/**
+ * What a failed call means to the person, as a string key: no connection, no access, gone, or anything else. The
+ * error's own message is never shown: it may carry what the server said about someone else's record.
+ */
+export function errorKey(error) {
+  if (error?.status === 0 || error?.code === 'network' || error?.code === 'offline') return 'error.network';
+  if (error?.status === 403) return 'error.forbidden';
+  if (error?.status === 404) return 'error.notFound';
+  return 'error.body';
 }
