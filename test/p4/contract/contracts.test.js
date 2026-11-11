@@ -108,7 +108,7 @@ test('a Phase 4 route not built yet answers 501, and the Phase 0 store still ans
   try {
     const { token } = await (await fetch(`${app.base}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(OWNER) })).json();
     const headers = { authorization: `Bearer ${token}` };
-    for (const route of ['/coupons', '/payment-settings', '/shipping-settings', '/inventory', '/returns', '/reviews', '/loyalty/settings', '/alert-settings', '/shopify', '/shoppers', '/privacy', '/settlements', '/order-downloads']) {
+    for (const route of ['/coupons', '/shipping-settings', '/inventory', '/returns', '/reviews', '/loyalty/settings', '/alert-settings', '/shopify', '/shoppers', '/privacy', '/order-downloads']) {
       const res = await fetch(`${app.base}/api/v1${route}`, { headers });
       assert.equal(res.status, 501, route);
       assert.equal((await res.json()).code, 'not_implemented', route);
