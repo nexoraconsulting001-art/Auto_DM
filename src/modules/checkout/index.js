@@ -1,29 +1,31 @@
 import { legacyCheckoutPages, legacyOrderApi } from './legacy.js';
+import { checkoutPages } from './pages.js';
+import { checkoutRoutes } from './routes.js';
 
 /**
- * PRD 9.5. This folder is the checkout track's. Until it is built, the Phase 0 checkout answers (legacy.js, moved from
- * src/routes/store.js): signed-in shoppers only, manual UPI, orders of flow 'manual'.
+ * PRD 9.5: checkout and order creation, for a business with the Phase 4 store (`store.checkout`). A business without it
+ * keeps the Phase 0 checkout (legacy.js): signed-in shoppers only, manual UPI, orders of flow 'manual'.
  *
- * Buyer routes to build (src/contracts/store-routes.js): GET /checkout, POST /api/store/checkout/quote,
- * POST /api/store/checkout and GET /order/:token. Bodies are CheckoutQuote, CheckoutPlace, Quote and PlacedOrder there.
+ *   GET  /checkout                   the page (pages.js): guest by default, the default address chosen for a signed-in shopper
+ *   POST /api/store/checkout/quote   every amount, worked out by the server (quote.js)
+ *   POST /api/store/checkout         places the order (place.js)
+ *   GET  /order/:token               the order's own page: paying, waiting, confirmed, failed, cancelled
  *
- * Placing an order is one transaction (db.tx inside the business):
- *   1. Price every line from the catalog, locking the product rows. No amount comes from the client (S-05).
- *   2. The same idempotency key again answers with the order it already made (orders_idempotency_idx, S-15).
- *   3. inventory.reserve, coupons.redeem and loyalty.redeem, each re-checked here and each able to refuse (S-16, S-47, S-88).
- *   4. Take the order number (tenants.next_order_number), insert the order with flow 'checkout' and its lines. The database
- *      checks the totals against the lines and each other when the transaction commits.
- *   5. Cash on delivery, once the phone is verified: changeOrder(t, id, { payment: 'cod_due', fulfilment: 'new' }).
- *      Prepaid and part-advance stay pending and unpaid until the payments module hears from the gateway (S-68).
- *   6. platform.consent.record(..., t) for the choices made on the page (S-59).
- * The database writes order.created in the same transaction; after commit call ctx.orderEvents.kick().
- * orders.visitor_id is visitorIdFrom(req) (src/platform/visitor.js): traffic ties the visit to the order from the event.
- * The limit on attempts is platform.rateLimit with STORE_LIMITS.orderAttempts, which holds across instances (S-18).
- * Money rules are orderTotal, taxInside and splitGst in src/contracts/orders.js.
+ * Placing an order is one transaction: every line priced from the catalog with the product rows locked (pricing.js, S-05),
+ * the same idempotency key answered with the order it made (S-15), stock held (src/modules/inventory/stock.js, S-16), the
+ * coupon counted (src/modules/coupons/rules.js, S-47), the order number taken, the lines written so the database's own
+ * check that they add up holds, and cash on delivery confirmed through the state machine with its stock taken at once.
+ * After commit the event bus is kicked and, for an online payment, ctx.payments.start makes the gateway order.
+ *
+ * What other tracks provide, read when present: ctx.payments.start(orderId, { baseUrl }) for the gateway order,
+ * ctx.shoppers.otps.codVerified({ phone, checkoutKey }) for the cash-on-delivery code, ctx.shoppers.addresses.create to
+ * save an address, ctx.shipping.serviceable(pincode), and ctx.loyalty.preview / redeem for points.
  */
 export const checkout = {
   name: 'checkout',
   routes(app, ctx) {
+    app.use(checkoutRoutes(ctx));
+    app.use(checkoutPages(ctx));
     app.use('/api', legacyOrderApi(ctx));
     app.use('/', legacyCheckoutPages(ctx));
   },
