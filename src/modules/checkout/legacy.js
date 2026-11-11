@@ -6,14 +6,19 @@ import { reportError } from '../../platform/log.js';
 import { visitorIdFrom } from '../../platform/visitor.js';
 import { ValidationError } from '../../util.js';
 import { checkoutPage, notFoundPage, orderPage } from '../../views/store.js';
+import { storeOn } from '../storefront/http.js';
 
 /**
  * The Phase 0 checkout, moved here from src/routes/store.js so the checkout track owns it and replaces it (PRD 9.5, 9.6):
  * signed-in shoppers only, one address, a manual UPI QR and "I've paid". Each order it places is flow 'manual'.
  * Two things changed in the move: the limit on order attempts is counted in the database, so it holds across instances
  * (S-18), and the traffic visit is tied to the order by the order event instead of by wrapping this route.
+ *
+ * A business with the Phase 4 store has no manual UPI flow (9.6): placing a manual order and "I've paid" answer as not found
+ * there. Its older manual orders keep their page.
  */
 const page = (res, view, status = 200) => res.status(status).type('html').send(String(view));
+const notForStore = (repos) => async (req, res, next) => ((await storeOn(repos)) ? next('router') : next());
 
 export function legacyCheckoutPages({ repos, auth }) {
   const r = express.Router();
@@ -47,7 +52,7 @@ export function legacyCheckoutPages({ repos, auth }) {
     page(res, orderPage({ settings, user: req.user, csrf: req.csrf, order, qrSvg, upiLink }));
   });
 
-  r.post('/order/:token/paid', async (req, res) => {
+  r.post('/order/:token/paid', notForStore(repos), async (req, res) => {
     await repos.orders.markPaymentSubmitted(req.params.token);
     res.redirect(303, `/order/${encodeURIComponent(req.params.token)}`);
   });
@@ -66,7 +71,7 @@ export function legacyOrderApi({ repos, platform, orderEvents }) {
     next();
   };
 
-  r.post('/orders', limit, async (req, res, next) => {
+  r.post('/orders', notForStore(repos), limit, async (req, res, next) => {
     try {
       if (!req.user) return res.status(401).json({ error: 'Please log in to place your order.', login: '/login?next=/checkout' });
       const { items, customer, reelSlug, source } = req.body || {};
