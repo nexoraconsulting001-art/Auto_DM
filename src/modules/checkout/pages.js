@@ -4,7 +4,7 @@ import { INDIAN_STATES, canCancelBeforeShipment } from '../../contracts/orders.j
 import { STORE_ROUTES } from '../../contracts/store-routes.js';
 import { tenantId } from '../../tenancy.js';
 import { html, raw } from '../../views/html.js';
-import { section } from '../../views/buyer/index.js';
+import { safeHref, section } from '../../views/buyer/index.js';
 import { shopperFrom, storeOn } from '../storefront/http.js';
 import { CHECKOUT_SCRIPT, policyLinks, sendStoreNotFound, sendStorePage } from '../storefront/shell.js';
 import { CHECKOUT_JS } from './assets.js';
@@ -132,7 +132,7 @@ function orderMain({ order, items, state, canCancel }) {
   return ({ theme }) => html`<div data-order-page data-token="${order.public_token}" data-number="${order.order_number}">
 ${section({ theme, id: 'order-h', kicker: `Order ${order.order_number}`, title: state.title, body: html`<p>${state.body}</p>
 ${state.pay ? html`<button class="btn wide" type="button" data-pay>Pay now</button><p class="error" data-pay-error hidden></p>` : ''}
-<div class="panel"><ul class="lines">${items.map((i) => html`<li class="line">${i.image ? html`<img src="${i.image}" alt="" width="64" height="76">` : html`<span class="ph"></span>`}<div><b>${i.name}</b><div class="muted small">${[i.option_value, `Qty ${i.qty}`].filter(Boolean).join(' · ')}</div></div><b>${formatRupees(Number(i.price_paise) * i.qty)}</b></li>`)}</ul></div>
+<div class="panel"><ul class="lines">${items.map((i) => html`<li class="line">${safeHref(i.image) ? html`<img src="${safeHref(i.image)}" alt="" width="64" height="76">` : html`<span class="ph"></span>`}<div><b>${i.name}</b><div class="muted small">${[i.option_value, `Qty ${i.qty}`].filter(Boolean).join(' · ')}</div></div><b>${formatRupees(Number(i.price_paise) * i.qty)}</b></li>`)}</ul></div>
 <div class="panel"><div class="totals">
 ${row('Items', order.subtotal_paise)}${row('Discount', -Number(order.discount_paise), Number(order.discount_paise) > 0)}${row('Points', -Number(order.loyalty_paise), Number(order.loyalty_paise) > 0)}
 <span>Delivery</span><span>${Number(order.shipping_paise) ? formatRupees(Number(order.shipping_paise)) : 'Free'}</span>
