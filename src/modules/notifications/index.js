@@ -1,13 +1,20 @@
 import { isCode, toE164 } from '../../contracts/accounts.js';
+import { SELLER_ROLES } from '../../contracts/api/access.js';
+import { ApiError } from '../../contracts/api/errors.js';
 import {
-  CODE_PURPOSES, CODE_REASONS, CODE_TEMPLATE, NOTIFY_AUDIENCES, NOTIFY_CHANNELS, NOTIFY_EVENTS, NOTIFY_RULES, NOTIFY_SOURCES, NO_WHATSAPP_CODES,
-  dataProblem, isLinkPath, isReservedKind, isTimezone, linkFor, prefProblem, resolvePrefs,
+  CODE_PURPOSES, CODE_REASONS, CODE_TEMPLATE, NOTIFY_CHANNELS, NOTIFY_EVENTS, NOTIFY_KINDS, NOTIFY_RULES, NOTIFY_SOURCES, NO_WHATSAPP_CODES,
+  dataProblem, isTimezone, prefProblem, resolvePrefs,
 } from '../../contracts/notifications.js';
 import { ProviderError } from '../../adapters/http.js';
 import { createPush } from '../../adapters/push/index.js';
-import { log } from '../../platform/log.js';
+import { log, reportError } from '../../platform/log.js';
+import { createSecrets } from '../../platform/secrets.js';
 import { currentTenant, tenantId, withTenant } from '../../tenancy.js';
-import { notBuilt } from '../not-built.js';
+import { createDevices } from './devices.js';
+import { checkEvent, writeEvent } from './outbox.js';
+import { NOTIFY_QUEUE, createPipeline } from './pipeline.js';
+
+export { NOTIFY_QUEUE } from './pipeline.js';
 
 /**
  * Notifications to sellers (PRD 5.13) and owner push (10.5): the one service that turns an event into deliveries on
@@ -30,67 +37,32 @@ import { notBuilt } from '../not-built.js';
  *
  * Nothing outside this folder calls any of those three senders. A test keeps it so.
  *
- * ctx.notify, as it is now (the contract step built these; their shapes are fixed):
+ * ctx.notify:
  *
  *   emit({ event, tenantId, audience?, key, data?, link?, channels? }, t?) -> event id, or null for a repeat
  *       Writes the outbox row and nothing else, so it is cheap and safe anywhere. Pass the open transaction as `t` and
- *       the notification commits or rolls back with the change it is about. `event` is a kind in NOTIFY_EVENTS;
- *       `tenantId` must be the current business when there is one; `key` says what happened (`order:12`): the same
- *       (business, kind, key) inside ten minutes is one event; `data` is ids and numbers only (dataProblem), and is
- *       what the wording and the link are filled from; `link` overrides the kind's path; `channels` narrows the kind's
- *       channels (a report delivery is for one). Throws on a kind, audience, key, data or link that breaks the rules:
- *       those are bugs in the caller, not events to drop quietly.
+ *       the notification commits or rolls back with the change it is about. The same (business, kind, key) inside ten
+ *       minutes is one event. `data` is ids and numbers only. Throws on anything that breaks the rules (outbox.js).
  *   sendCode({ to, code, purpose }) -> { outcome: 'sent' | 'failed', reason, retryable }
  *       A seller's login code, from Bhava's own WhatsApp number, by the `login_code` template. Never SMS, never email.
- *       Never throws for a provider's refusal, never logs or returns the number or the code. Reasons: CODE_REASONS.
- *   prefs.get({ userId }) -> { quietHours, events: { [kind]: { push, email, whatsapp, inapp } } }   every default filled in
- *   prefs.save({ userId }, { quietHours?, events? }) -> the same, after saving. Throws PrefsError for a choice that
- *       cannot be made (in-app off, a security notice changed, WhatsApp for a kind with no template).
- *   deliveries.list({ userId?, eventId?, cursor?, limit? }) -> { items, nextCursor }   the delivery log, newest first
+ *   prefs.get({ userId }), prefs.save({ userId }, { quietHours?, events? })   inside withTenant; PrefsError for a choice
+ *       that cannot be made
+ *   deliveries.list({ userId?, eventId?, cursor?, limit? })   the delivery log, newest first
+ *   inbox.list({ userId, cursor?, limit?, unread? }), inbox.markRead({ userId }, { ids } | { all: true })   the in-app list
+ *   devices.register({ personId, deviceId, platform, token, appVersion }), devices.forget({ personId, deviceId?, reason })
+ *       push_devices. The accounts track may call forget() on sign-out, device revocation and account deletion; without
+ *       that call a device whose sign-in was revoked still gets nothing, because every push checks it (devices.js).
  *   channels() -> { push: { android, ios }, email, whatsapp, inapp }   which senders are set up
+ *   dispatch({ limit? })   one pass: take the two sources (alerts, report deliveries), hand new events out (recipients,
+ *                          preferences, quiet hours, the collapse hold), then send what is due (pipeline.js)
+ *   drain()                passes until nothing is new and nothing is due (tests, and the worker's job)
+ *   kick(), settle()       a drain soon in this process; wait for it and drain (tests)
+ *   start({ everyMs })     the worker's poll (config.notifyPollMs); returns stop(). jobs() starts it and registers the
+ *                          queue job NOTIFY_QUEUE as the safety net under it
+ *   bind(ctx)              the module's setup gives it the repos (the brand kit, for the workspace badge)
+ *   close()                stops the poll and closes the push connection
  *
- * What the track adds here, shaped like the order event bus (src/modules/orders/events.js):
- *
- *   dispatch({ limit? })   one pass: hand new events out (recipients, preferences, quiet hours, the collapse hold), take
- *                          the two sources, then send what is due. drain() runs it until nothing is due; start({ everyMs })
- *                          is the worker's poll (config.notifyPollMs), and jobs() registers both.
- *   The in-app list, push.register and push.unregister behind their routes, and the email layouts.
- *
- * Rules the tests will hold this folder to (the numbers are NOTIFY_RULES):
- *
- * Handing out. Through db.platform, one transaction per batch, `FOR UPDATE SKIP LOCKED` on events with fanned_out_at
- * empty. Recipients are the business's accounts in the event's audience with removed_at empty. For each, and each
- * channel the kind (or the event's `channels`) names: no row when resolvePrefs says off, except that a channel with no
- * sender, or a person with no device, phone or address, gets a row `dropped` with the reason, so the log says why
- * nothing came. next_attempt_at is deliverAt(). The in-app delivery writes the `notifications` row in the same
- * transaction and is `sent` at once. Rows are unique on (event, user, channel): insert with ON CONFLICT DO NOTHING.
- *
- * Sending. Claim due rows with a lease (locked_until), count the try before sending (attempt + 1, which the database
- * stops at 3), look the account up again and drop the row if it was removed. A retryable failure goes back to queued at
- * nextAttemptAt(); the third, or one that another try cannot change, is `failed` with the provider's kind as reason.
- * not_configured is `dropped`, never retried, and never stops another channel. A WhatsApp send whose answer was lost
- * is `failed` with unknown_delivery and not sent again.
- *
- * Push. The title and body come from wordingFor() and nothing else; data is exactly { tenantId, kind, link, eventId,
- * count }; pushProblem() runs on the finished push and a refusal is `failed`, reason `content`, nothing sent. One
- * delivery per person covers all their devices (push_devices by users.person_id, deleted_at empty): sent if any device
- * took it. A device the provider calls unregistered or invalid_token is deleted then and there (deleted_at, the reason,
- * token_enc wiped), and is not a failed try if another device took the push. Collapsing is in the contract's header:
- * hold, join, one push with the wording for many, the same collapseKey when a late one arrives.
- *
- * Email. Bhava's layout for the kind, from providers.email.platform, checked with sellerEmailProblem(): Bhava's name and
- * sender, the business's logo only as the workspace badge. The delivery id is the idempotency key.
- *
- * Sources. alerts with audience owner and notified_at empty: a kind in NOTIFY_SOURCES.alerts becomes an event with key
- * `alert:<id>`, any other is only stamped. report_deliveries still queued with notified_at empty and a user: an event for
- * that one person on that one channel, key `report_delivery:<id>`, and the row's own status follows the delivery's. A
- * report row for an outside address is not a notification: send it by the platform email sender as the row says and
- * mark the row. Order events are already wired below.
- *
- * Devices. push.register stores the token encrypted (platform.secrets) with tokenHash() as its hash, for the signed-in
- * person and the device id of their session; a token or a device seen before replaces its old row. Signing out,
- * revoking a device and deleting an account delete its row.
- *
+ * dispatch runs outside withTenant: it works across businesses on db.platform, as the order event bus does.
  * Logs hold ids, kinds and reasons only: no number, address, token or word of a message.
  */
 export class PrefsError extends Error {
@@ -103,43 +75,22 @@ export class PrefsError extends Error {
 
 const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 const result = (outcome, reason, retryable = false) => ({ outcome, reason, retryable });
+/** Claimed per pass: few enough that the last of them is tried well inside its lease even when a provider hangs. */
+const SEND_BATCH = 8;
 
-function checkEvent({ event, tenantId: forTenant, audience, key, data = {}, link, channels }) {
-  const spec = NOTIFY_EVENTS[event];
-  if (!spec) throw new Error(isReservedKind(event) ? `"${event}" is kept for a later phase: add its row to NOTIFY_EVENTS first` : `"${event}" is not a notification kind (src/contracts/notifications.js)`);
-  if (!Number.isInteger(forTenant) || forTenant <= 0) throw new Error('emit() names the business: tenantId');
-  const current = currentTenant()?.id;
-  if (current && current !== forTenant) throw new Error('emit() can only notify the current business');
-  const to = audience ?? spec.audience;
-  const one = typeof to === 'object' && to !== null && Object.keys(to).length === 1 && Number.isInteger(to.userId) && to.userId > 0;
-  if (!one && !NOTIFY_AUDIENCES.includes(to)) throw new Error(`An audience is one of ${NOTIFY_AUDIENCES.join(', ')}, or { userId }`);
-  if (typeof key !== 'string' || !key || key.length > 120) throw new Error('emit() needs a key that says what happened, such as "order:12"');
-  const problem = dataProblem(data);
-  if (problem) throw new Error(`Notification data is ids and numbers only: ${problem}`);
-  const path = link ?? linkFor(event, data);
-  if (!isLinkPath(path)) throw new Error('A notification link is a path, such as /orders/12');
-  if (channels !== undefined && (!Array.isArray(channels) || !channels.length || !channels.every((c) => NOTIFY_CHANNELS.includes(c)))) throw new Error(`channels is a list from ${NOTIFY_CHANNELS.join(', ')}`);
-  return { kind: event, forTenant, audience: to, key, data, path, channels: channels ?? null };
-}
+export function createNotify({ db, providers, config = {}, push = createPush(config), secrets, now = () => new Date() }) {
+  const platformDb = db?.platform ?? db;
+  const bound = { repos: null };
+  const devices = createDevices({ platformDb, secrets: secrets ?? createSecrets({ dataKey: config.dataKey, dataKeyOld: config.dataKeyOld }) });
+  const pipeline = createPipeline({ platformDb, push, providers, config, clock: now, devices, getRepos: () => bound.repos });
+  const timers = new Set();
+  let running = null;
+  let again = false;
 
-export function createNotify({ db, providers, config = {}, push = createPush(config) }) {
   async function emit(input, t) {
     const event = checkEvent(input ?? {});
     if (t && !currentTenant()) throw new Error('emit() inside a transaction runs inside withTenant()');
-    const write = async (q) => {
-      // A key older than the window is free again: what happened then is done, and this is something new.
-      await q.query(
-        `UPDATE notification_events SET live = false WHERE tenant_id = $1 AND kind = $2 AND event_key = $3 AND live AND created_at < now() - make_interval(secs => $4::float)`,
-        [event.forTenant, event.kind, event.key, NOTIFY_RULES.dedupeMs / 1000],
-      );
-      const [row] = await q.query(
-        `INSERT INTO notification_events (tenant_id, kind, event_key, audience, channels, data, link) VALUES ($1, $2, $3, $4::jsonb, $5::text[], $6::jsonb, $7)
-         ON CONFLICT (tenant_id, kind, event_key) WHERE live DO NOTHING RETURNING id`,
-        [event.forTenant, event.kind, event.key, JSON.stringify(event.audience), event.channels, JSON.stringify(event.data), event.path],
-      );
-      return row ? Number(row.id) : null;
-    };
-    const id = await (t ? write(t) : withTenant(currentTenant() ?? event.forTenant, () => db.tx(write)));
+    const id = await (t ? writeEvent(t, event) : withTenant(currentTenant() ?? event.forTenant, () => db.tx((q) => writeEvent(q, event))));
     log.info(id ? 'notify.event' : 'notify.duplicate', { kind: event.kind, ...(id ? { eventId: id } : {}) });
     return id;
   }
@@ -209,6 +160,8 @@ export function createNotify({ db, providers, config = {}, push = createPush(con
     },
   };
 
+  const cursorOf = (cursor) => (/^\d{1,18}$/.test(String(cursor ?? '')) ? String(cursor) : null);
+
   const deliveries = {
     async list({ userId = null, eventId = null, cursor, limit = 25 } = {}) {
       const size = Math.min(100, Math.max(1, Number(limit) || 25));
@@ -217,7 +170,7 @@ export function createNotify({ db, providers, config = {}, push = createPush(con
          FROM notification_deliveries d JOIN notification_events e ON e.tenant_id = d.tenant_id AND e.id = d.event_id
          WHERE d.tenant_id = $1 AND ($2::int IS NULL OR d.user_id = $2::int) AND ($3::bigint IS NULL OR d.event_id = $3::bigint) AND ($4::bigint IS NULL OR d.id < $4::bigint)
          ORDER BY d.id DESC LIMIT $5`,
-        [tenantId(), userId, eventId, /^\d{1,18}$/.test(String(cursor ?? '')) ? cursor : null, size + 1],
+        [tenantId(), userId, eventId, cursorOf(cursor), size + 1],
       );
       const items = rows.slice(0, size).map((r) => ({
         id: Number(r.id), eventId: Number(r.event_id), kind: r.kind, userId: r.user_id, channel: r.channel, status: r.status, attempt: r.attempt,
@@ -227,19 +180,123 @@ export function createNotify({ db, providers, config = {}, push = createPush(con
     },
   };
 
+  /** The in-app list of one account in the current business. Nobody reads or marks another person's. */
+  const inbox = {
+    async list({ userId, cursor, limit = 25, unread } = {}) {
+      const size = Math.min(100, Math.max(1, Number(limit) || 25));
+      const onlyUnread = unread === true || unread === '1';
+      const rows = await db.query(
+        `SELECT id, kind, title, body, link, created_at, read_at FROM notifications
+         WHERE tenant_id = $1 AND user_id = $2 AND ($3::bigint IS NULL OR id < $3::bigint) AND ($4::boolean IS NOT TRUE OR read_at IS NULL)
+         ORDER BY id DESC LIMIT $5`,
+        [tenantId(), userId, cursorOf(cursor), onlyUnread, size + 1],
+      );
+      const [{ n }] = await db.query('SELECT count(*)::int AS n FROM notifications WHERE tenant_id = $1 AND user_id = $2 AND read_at IS NULL', [tenantId(), userId]);
+      const items = rows.slice(0, size).map((r) => ({ id: Number(r.id), kind: r.kind, title: r.title, body: r.body, link: r.link, createdAt: r.created_at, readAt: r.read_at }));
+      return { items, nextCursor: rows.length > size ? String(items.at(-1).id) : null, unread: n };
+    },
+    async markRead({ userId }, { ids, all } = {}) {
+      if (all === true) {
+        await db.query('UPDATE notifications SET read_at = now() WHERE tenant_id = $1 AND user_id = $2 AND read_at IS NULL', [tenantId(), userId]);
+        return;
+      }
+      const list = (ids ?? []).filter((id) => Number.isSafeInteger(id) && id > 0).slice(0, 100);
+      if (!list.length) return;
+      await db.query('UPDATE notifications SET read_at = now() WHERE tenant_id = $1 AND user_id = $2 AND id = ANY($3::bigint[]) AND read_at IS NULL', [tenantId(), userId, list]);
+    },
+  };
+
+  /** Each step on its own, so a source that fails never stops sending, and sending never stops handing out. */
+  async function step(name, fn, fallback) {
+    try {
+      return await fn();
+    } catch (err) {
+      reportError(err, { msg: `notify.${name}_failed` });
+      return fallback;
+    }
+  }
+
+  /** One pass. `send: false` only takes the sources and hands out (tests that change something between the two). */
+  async function dispatch({ limit = 50, send = true } = {}) {
+    const alerts = await step('alerts', () => pipeline.takeAlerts(limit), 0);
+    const reports = await step('reports', () => pipeline.takeReports(limit), 0);
+    const events = await step('fan_out', () => pipeline.fanOut(limit), 0);
+    const idle = { claimed: 0, sent: 0, failed: 0, dropped: 0, retried: 0 };
+    const sent = send ? await step('send', () => pipeline.sendDue(Math.min(limit, SEND_BATCH)), idle) : idle;
+    return { taken: alerts + reports, events, ...sent };
+  }
+
+  /** Passes until one finds nothing new and nothing due. A delivery waiting out its backoff is not due, so this always ends. */
+  async function drain({ limit = 50, maxPasses = 200 } = {}) {
+    const total = { taken: 0, events: 0, claimed: 0, sent: 0, failed: 0, dropped: 0, retried: 0 };
+    for (let pass = 0; pass < maxPasses; pass++) {
+      const once = await dispatch({ limit });
+      for (const key of Object.keys(total)) total[key] += once[key] ?? 0;
+      if (!once.taken && !once.events && !once.claimed) break;
+    }
+    return total;
+  }
+
+  function kick() {
+    if (running) {
+      again = true;
+      return running;
+    }
+    running = new Promise((resolve) => setImmediate(resolve))
+      .then(async () => {
+        do {
+          again = false;
+          await drain();
+        } while (again);
+      })
+      .catch((err) => log.warn('notify.kick_failed', { code: err?.code ?? err?.name ?? 'error' }))
+      .finally(() => {
+        running = null;
+      });
+    return running;
+  }
+
+  function start({ everyMs = config.notifyPollMs || NOTIFY_RULES.pollMs } = {}) {
+    const timer = setInterval(kick, Math.max(100, Number(everyMs) || NOTIFY_RULES.pollMs));
+    timer.unref();
+    timers.add(timer);
+    return () => {
+      clearInterval(timer);
+      timers.delete(timer);
+    };
+  }
+
   return {
     emit,
     sendCode,
     prefs,
     deliveries,
+    inbox,
+    devices: { register: devices.register, forget: devices.forget },
     channels: () => ({
       push: { android: push.configured('android'), ios: push.configured('ios') },
       email: Boolean(providers?.email?.platform?.configured),
       whatsapp: Boolean(providers?.whatsapp?.platform?.configured),
       inapp: true,
     }),
-    /** Closes the push connection (tests, and the worker on its way out). */
-    close: () => push.close?.(),
+    dispatch,
+    drain,
+    kick,
+    start,
+    async settle() {
+      if (running) await running;
+      return drain();
+    },
+    /** The repos the module's setup hands over: the brand kit, for the workspace badge in seller emails. */
+    bind(context) {
+      bound.repos = context?.repos ?? null;
+    },
+    /** Stops the poll and closes the push connection (tests, and the worker on its way out). */
+    close: () => {
+      for (const timer of timers) clearInterval(timer);
+      timers.clear();
+      return push.close?.();
+    },
   };
 }
 
@@ -257,10 +314,91 @@ function onOrderEvent(ctx) {
   };
 }
 
+// ---- the seller API ---------------------------------------------------------------------------------------------------
+
+/** A seller's own account in the current business. A shopper's session is refused: none of this is theirs. */
+function seller(user) {
+  if (!user || !SELLER_ROLES.includes(user.role)) throw new ApiError('forbidden');
+  return user;
+}
+
+const switchable = (spec) => (spec.mandatory ? [] : ['push', 'email', 'whatsapp'].filter((channel) => channel !== 'whatsapp' || spec.whatsapp));
+
+async function prefsView(notify, userId) {
+  const saved = await notify.prefs.get({ userId });
+  const ready = notify.channels();
+  return {
+    ...saved,
+    kinds: NOTIFY_KINDS.map((kind) => {
+      const spec = NOTIFY_EVENTS[kind];
+      return { kind, label: spec.label, critical: spec.critical, mandatory: spec.mandatory, channels: switchable(spec) };
+    }),
+    available: { push: ready.push.android || ready.push.ios, email: ready.email, whatsapp: ready.whatsapp, inapp: true },
+  };
+}
+
+/** The person behind this request's account, when the account is theirs: the app's sign-in names them, and users.person_id agrees. */
+async function personOf(ctx, user, req) {
+  const [row] = await ctx.db.query('SELECT person_id FROM users WHERE tenant_id = $1 AND id = $2 AND removed_at IS NULL', [tenantId(), user.id]);
+  const personId = row?.person_id === null || row?.person_id === undefined ? null : Number(row.person_id);
+  if (!personId) return null;
+  if (req.session?.kind !== 'access') return personId;
+  const [family] = await ctx.db.platform.query(`SELECT person_id FROM token_families WHERE id = $1 AND subject_kind = 'user' AND revoked_at IS NULL`, [req.session.familyId]);
+  return family && Number(family.person_id) === personId ? personId : null;
+}
+
+function api(ctx = {}) {
+  return {
+    'notifications.list': ({ query, user }) => ctx.notify.inbox.list({ userId: seller(user).id, cursor: query.cursor, limit: query.limit, unread: query.unread }),
+    'notifications.markRead': async ({ body, user }) => {
+      await ctx.notify.inbox.markRead({ userId: seller(user).id }, body);
+    },
+    'notifications.prefs': ({ user }) => prefsView(ctx.notify, seller(user).id),
+    'notifications.savePrefs': async ({ body, user }) => {
+      const me = seller(user);
+      try {
+        await ctx.notify.prefs.save({ userId: me.id }, body);
+      } catch (err) {
+        if (err instanceof PrefsError) throw new ApiError('validation_failed', err.message, { fields: { [err.field]: err.message } });
+        throw err;
+      }
+      return prefsView(ctx.notify, me.id);
+    },
+    'push.register': async ({ body, user, req }) => {
+      const me = seller(user);
+      // Only the owner app's own sign-in on this very device can say where its pushes go.
+      if (req.session?.kind !== 'access' || !req.session.deviceId || !req.session.familyId) throw new ApiError('forbidden', 'Turn on notifications from the Bhava for Business app.');
+      if (body.deviceId !== req.session.deviceId) throw new ApiError('forbidden', 'Turn on notifications from the device you signed in on.');
+      const personId = await personOf(ctx, me, req);
+      if (!personId) throw new ApiError('forbidden', 'Sign in again to turn on notifications.');
+      try {
+        await ctx.notify.devices.register({ personId, deviceId: body.deviceId, platform: body.platform, token: body.token, appVersion: body.appVersion ?? '' });
+      } catch (err) {
+        if (/DATA_KEY/.test(err?.message ?? '')) throw new ApiError('conflict', 'Notifications are not set up on this server yet.');
+        throw err;
+      }
+    },
+    'push.unregister': async ({ params, user, req }) => {
+      const personId = await personOf(ctx, seller(user), req);
+      if (personId) await ctx.notify.devices.forget({ personId, deviceId: params.id, reason: 'signed_out' });
+    },
+  };
+}
+
 export const notifications = {
   name: 'notifications',
   setup(ctx) {
+    ctx.notify?.bind?.(ctx);
     if (ctx.notify && ctx.orderEvents) ctx.orderEvents.on(Object.keys(NOTIFY_SOURCES.orderEvents), 'notifications.orders', onOrderEvent(ctx));
   },
-  api: () => notBuilt('notifications.list', 'notifications.markRead', 'notifications.prefs', 'notifications.savePrefs', 'push.register', 'push.unregister'),
+  api,
+  /** The worker's poll hands out and sends every few seconds (a critical push leaves inside 30 s); the queue job is the net under it. */
+  jobs(ctx) {
+    const { queue } = ctx.platform;
+    queue.work(NOTIFY_QUEUE, () => ctx.notify.drain());
+    if (Number(ctx.config?.notifyPollMs) !== 0) ctx.notify.start({ everyMs: ctx.config?.notifyPollMs || NOTIFY_RULES.pollMs });
+    return async function schedule() {
+      await queue.every(NOTIFY_QUEUE, 60_000);
+    };
+  },
 };
