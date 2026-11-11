@@ -21,6 +21,7 @@ export const BAG_JS = `(() => {
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const csrf = () => $('meta[name="csrf-token"]')?.content || '';
+  const shopperCsrf = () => $('meta[name="shopper-csrf"]')?.content || '';
   const signedIn = () => $('meta[name="store-shopper"]')?.content === '1';
   const intOr = (v, d) => (Number.isInteger(v) && v > 0 ? v : d);
 
@@ -75,6 +76,7 @@ export const BAG_JS = `(() => {
     const headers = { accept: 'application/json' };
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (csrf()) headers['x-csrf-token'] = csrf();
+    if (shopperCsrf()) headers['x-shopper-csrf'] = shopperCsrf();
     const res = await fetch(path, { method, headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body) });
     let data = null;
     try { data = await res.json(); } catch {}

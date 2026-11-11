@@ -413,7 +413,7 @@ export async function addP4Shop(world, { whatsapp = true, pay = true, pickup = t
 
 // ---- a shopper's browser --------------------------------------------------------------------------------------------------
 
-const CSRF_PATTERNS = [/name="_csrf"\s+value="([^"]+)"/, /data-csrf="([^"]+)"/, /<meta\s+name="csrf-token"\s+content="([^"]+)"/i, /value="([^"]+)"\s+name="_csrf"/];
+const CSRF_PATTERNS = [/<meta\s+name="shopper-csrf"\s+content="([^"]+)"/i, /data-shopper-csrf="([^"]+)"/, /name="_shopper_csrf"\s+value="([^"]+)"/, /name="_csrf"\s+value="([^"]+)"/, /data-csrf="([^"]+)"/, /<meta\s+name="csrf-token"\s+content="([^"]+)"/i, /value="([^"]+)"\s+name="_csrf"/];
 
 /**
  * A shopper with a cookie jar on one business's own host. JSON calls go to /api/store with the page's Origin and, once
@@ -588,6 +588,21 @@ export function buyer(world, shop, { ua = UA.phone, ip = `203.0.113.${crypto.ran
       const consent = await fetch(start.headers.location, { redirect: 'manual' });
       const back = new URL(consent.headers.get('location'));
       const res = await self.open(`${back.pathname}${back.search}`);
+      // A browser follows the redirects after sign-in: through the platform's remember step when the shopper shares their
+      // details (its cookie lives on the platform's host, kept apart here), and back to the store page holding the CSRF token.
+      let to = [302, 303].includes(res.status) ? res.headers.location : '';
+      for (let hop = 0; to && hop < 5; hop += 1) {
+        const u = new URL(to, `https://${shop.host}`);
+        if (u.host === shop.host) {
+          const next = await self.open(`${u.pathname}${u.search}`);
+          to = [302, 303].includes(next.status) ? next.headers.location : '';
+        } else {
+          const away = await hit(app, `${u.pathname}${u.search}`, { host: u.host, headers: { 'user-agent': ua, 'x-forwarded-for': ip, ...(self.awayCookie ? { cookie: self.awayCookie } : {}) } });
+          const set = [away.headers['set-cookie'] ?? []].flat().map((l) => l.split(';')[0]).filter((p) => !p.endsWith('='));
+          if (set.length) self.awayCookie = set.join('; ');
+          to = [302, 303].includes(away.status) ? away.headers.location : '';
+        }
+      }
       return { start, back, res };
     },
   };

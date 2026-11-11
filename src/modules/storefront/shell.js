@@ -13,7 +13,7 @@ import { currentTenant } from '../../tenancy.js';
  */
 export const BAG_SCRIPT = '/store/bag.js';
 export const CHECKOUT_SCRIPT = '/store/checkout.js';
-export const ASSET_VERSION = '4.0.1';
+export const ASSET_VERSION = '4.0.2';
 
 /** The address a page is seen at: the business's verified domain when it has one, else the address the shopper used. */
 export function baseOf(req) {
@@ -100,6 +100,8 @@ export async function renderStorePage(ctx, req, { title, description = '', main,
     '<link rel="manifest" href="/manifest.webmanifest">',
     req.csrf ? `<meta name="csrf-token" content="${esc(req.csrf)}">` : '',
     req.shopper?.id ? '<meta name="store-shopper" content="1">' : '',
+    // A signed-in shopper's writes to /api/store must carry their session's token (shoppers/session.js).
+    req.shopperCsrf ? `<meta name="shopper-csrf" content="${esc(req.shopperCsrf)}">` : '',
     data ? `<script type="application/json" id="store-data">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>` : '',
     ...[BAG_SCRIPT, ...scripts].map((src) => `<script src="${esc(src)}?v=${ASSET_VERSION}" defer></script>`),
   ].filter(Boolean).join('\n');
