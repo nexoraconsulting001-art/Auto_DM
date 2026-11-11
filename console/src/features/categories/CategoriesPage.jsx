@@ -40,10 +40,11 @@ function CategoryRows({ categories }) {
                 <Thumb src={category.imageUrl} tall />
                 <span className="list-row-main">
                   <span className="list-row-title">{category.name}</span>
-                  <span className="list-row-meta">/c/{category.slug} · {plural(category.productCount, 'product')}</span>
+                  <span className="list-row-meta">/c/{category.slug} · {plural(category.productCount, 'product')} · {plural(category.reelCount ?? 0, 'reel')}</span>
                   {!category.visible && <span><Badge>Hidden</Badge></span>}
                 </span>
               </Link>
+              <Link className="panel-link" to={`/categories/${category.id}/reels`} aria-label={`Reel order of ${category.name}`}>Reel order</Link>
               <span className="rank-tools">
                 <IconButton label={`Move ${category.name} up`} disabled={index === 0 || moving} onClick={() => move(index, -1)}><ChevronUp size={18} aria-hidden="true" /></IconButton>
                 <IconButton label={`Move ${category.name} down`} disabled={index === categories.length - 1 || moving} onClick={() => move(index, 1)}><ChevronDown size={18} aria-hidden="true" /></IconButton>
@@ -62,7 +63,7 @@ export default function CategoriesPage() {
   return (
     <>
       <PageHeader title="Categories" actions={add} />
-      <p className="lead">Categories show as circles on your store’s home page and as chips in the shop. This order shows everywhere.</p>
+      <p className="lead">Categories show as circles on your store’s home page and as chips in the shop. This order shows everywhere. Open “Reel order” to arrange the reels inside a category.</p>
       <Loadable query={categories} label="Loading your categories" errorTitle="We couldn’t load your categories">
         {(rows) => (rows.length ? <CategoryRows categories={rows} /> : (
           <EmptyState title="No categories yet" action={<Button as={Link} variant="soft" to="/categories/new">Add your first category</Button>}>
