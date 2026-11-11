@@ -42,6 +42,9 @@ export const RESERVED_PATHS = Object.freeze([
   'oauth', 'meta', 'tls', 'report-files', 'reporting', '_t', 'r', 'p', 'c', 'l', 'go', 'shop', 'reels', 'about', 'checkout', 'order',
   'orders', 'products', 'cart', 'bio', 'creator', 'lead', 'leads', 'robots.txt', 'favicon.ico', 'sitemap.xml', 'search', 'privacy',
   'terms', 'help', 'support', 'contact', 'bhava', 'www', 'app', 'edge', 'well-known', '.well-known',
+  // Phase 4: the store (src/contracts/store-routes.js)
+  'manifest.webmanifest', 'sw.js', 'offline', 'auth', 'track', 'refer', 'policies', 'unsubscribe', 'wishlist', 'webhooks', 'returns',
+  'invoice', 'invoices', 'pay', 'store',
 ]);
 export const isReservedPath = (segment) => RESERVED_PATHS.includes(String(segment ?? '').toLowerCase());
 

@@ -1,7 +1,8 @@
 import { ANALYTICS_LIMITS as L } from '../../contracts/analytics.js';
 import { analyticsApi, trafficApi } from './api.js';
 import { customFunnelsRepo } from './custom-funnels.js';
-import { orderLink, pageMiddleware, registerBeacon } from './page.js';
+import { tenantId } from '../../tenancy.js';
+import { pageMiddleware, registerBeacon } from './page.js';
 import { savedViewsRepo } from './saved-views.js';
 import { servicesFor } from './services.js';
 import { tagSettingsRepo } from './tags.js';
@@ -92,9 +93,19 @@ export const traffic = {
     registerBeacon(app, ctx, servicesFor(ctx));
   },
 
+  /**
+   * A new order is tied to the visit that placed it from the order's own event (PRD 7.4), whichever checkout made it: the
+   * order carries its visitor (orders.visitor_id). Linking twice is harmless: the visit's order event has a unique key.
+   */
+  setup(ctx) {
+    ctx.orderEvents?.on('order.created', 'traffic.order-link', async (event) => {
+      const [order] = await ctx.db.query('SELECT id, visitor_id FROM orders WHERE tenant_id = $1 AND id = $2', [tenantId(), event.orderId]);
+      if (order?.visitor_id) await servicesFor(ctx).ingest.linkOrder(order, order.visitor_id);
+    });
+  },
+
   routes(app, ctx) {
     const { ingest, tags } = servicesFor(ctx);
-    app.post('/api/orders', orderLink(ctx, ingest));
     app.use(pageMiddleware(ctx, ingest, tags));
   },
 

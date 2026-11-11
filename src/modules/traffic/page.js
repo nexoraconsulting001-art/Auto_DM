@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { ANALYTICS_LIMITS as L, TRAFFIC_PATHS, VISITOR_COOKIE } from '../../contracts/analytics.js';
 import { TrafficBeacon } from '../../contracts/api/index.js';
-import { log, reportError } from '../../platform/log.js';
+import { reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { isBuyerPage, pageOf } from './page-kinds.js';
 import { TRAFFIC_SCRIPT } from './script.js';
@@ -176,22 +176,4 @@ function injected(html, head, script) {
 function insertBefore(html, closing, addition) {
   const at = html.toLowerCase().lastIndexOf(closing);
   return at === -1 ? html + addition : html.slice(0, at) + addition + html.slice(at);
-}
-
-/** A new order, tied to the visit that placed it. Runs after the answer, and can never affect the order. */
-export function orderLink(ctx, ingest) {
-  return (req, res, next) => {
-    const json = res.json.bind(res);
-    res.json = (body) => {
-      res.json = json;
-      const result = json(body);
-      if (res.statusCode === 201 && body?.token) {
-        ctx.repos.orders.getByToken(body.token)
-          .then((order) => (order ? ingest.linkOrder(order, visitorFrom(req)) : null))
-          .catch((err) => log.warn('traffic.order_link_failed', { code: err?.code ?? 'error' }));
-      }
-      return result;
-    };
-    next();
-  };
 }

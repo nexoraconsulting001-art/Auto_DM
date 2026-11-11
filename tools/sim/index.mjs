@@ -16,6 +16,12 @@
  *
  * Simulators refuse to run when NODE_ENV=production; see guard.mjs for the matching check on service URLs.
  *
+ * The store's simulators (razorpay, shiprocket, shopify, whatsapp) also send the webhooks their services send: signed, with
+ * duplicates, and out of order. See tools/sim/webhooks.mjs and the header of each.
+ *
+ * tools/sim/email (an HTTP mail API, for order emails) is not in SERVICES: no mail provider is chosen yet, so a test that sends
+ * email starts it itself (createEmail from tools/sim/email/index.mjs) and points EMAIL_BASE_URL at it.
+ *
  * tools/sim/sites (outside websites for imports and theme reads, hostile ones included) is not in SERVICES: safeFetch never
  * connects to loopback, so a test starts it in process and hands its transport() to the fetcher (see sites/index.mjs).
  */

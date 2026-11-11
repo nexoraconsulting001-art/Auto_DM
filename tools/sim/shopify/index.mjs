@@ -1,8 +1,21 @@
 /**
  * Shopify, two faces:
  *
- * Admin REST, base routes only: the app token exchange, the shop, and reading products and orders (PRD 9.11).
- * POST /__sim/products and POST /__sim/orders seed them. Later phases add writes and webhooks.
+ * Admin REST, for sync (PRD 9.11): the app token exchange, the shop, products (paged by Link header), one product, inventory
+ * levels and setting one, a variant's price, creating an order (which takes stock down, and with an Idempotency-Key is the
+ * same order when repeated), listing orders and registering webhooks. POST /__sim/products and POST /__sim/orders seed them.
+ * Admin calls are limited to 2 a second per shop when POST /__sim/admin/limit { on: true } is set: the third is a 429
+ * with Retry-After, lifting on the controlled clock.
+ *
+ * Webhooks, signed as Shopify signs them (base64 HMAC of the bytes with the app's client secret, in X-Shopify-Hmac-Sha256,
+ * with X-Shopify-Webhook-Id, X-Shopify-Topic and X-Shopify-Shop-Domain):
+ *   POST /__sim/admin/products/update { id, title?, variants?: [{ id, price?, inventory_quantity? }], webhook?, ...delivery }
+ *       changes an Admin product and sends products/update (S-36)
+ *   POST /__sim/admin/inventory { inventoryItemId, available, ...delivery }     sends inventory_levels/update
+ *   POST /__sim/webhooks/send { topic, payload, ...delivery }                   any topic by hand
+ *   POST /__sim/webhooks/url { url }   POST /__sim/webhooks/flush { order? }   POST /__sim/webhooks/redeliver { id, times? }   GET /__sim/webhooks
+ * Delivery options: duplicates (the same webhook id again), hold (keep back, then flush in another order), signature
+ * 'good' | 'bad' | 'none' (S-38).
  *
  * The public storefront a shopper sees, which imports read with no keys (PRD 8.3, 8.5, 8.9). Mount it under a site name with
  * tools/sim/sites (sites.mount('plants.example', shopify)) so safeFetch reaches it through its test transport:
@@ -20,7 +33,9 @@
  * feedStatus 404 or 401 makes /products.json answer that (K-17). Storefront products are kept apart from the Admin ones, and
  * their prices are whole paise here (Shopify's JSON shows rupees as text, which is what the feed answers).
  */
+import crypto from 'node:crypto';
 import { SimError, createSim, reply } from '../base.mjs';
+import { createWebhooks, webhookControls } from '../webhooks.mjs';
 import { png } from '../sites/png.mjs';
 
 const shopifyError = (status, errors) => new SimError(status, { errors });
@@ -65,22 +80,64 @@ export function generateStorefrontProducts({ count, variants = 2, withMrp = true
   });
 }
 
-export function createShopify({ token = 'sim-shopify-token', clientId = 'sim-shopify-client', clientSecret = 'sim-shopify-secret' } = {}) {
+export function createShopify({ token = 'sim-shopify-token', clientId = 'sim-shopify-client', clientSecret = 'sim-shopify-secret', shopDomain = 'sim-shop.myshopify.com', webhookUrl = null } = {}) {
   let products;
   let orders;
   let seq;
   let storefront;
+  let orderKeys;
+  let registered;
+  let limited;
+  let recent;
   const clear = () => {
     products = [];
     orders = [];
+    orderKeys = new Map();
+    registered = [];
+    limited = false;
+    recent = [];
     seq = 0;
     storefront = { name: 'Green Leaf Plants', themeColor: '#1F4D2B', headingFont: 'Playfair Display', bodyFont: 'Inter', feedStatus: 200, products: [] };
   };
   clear();
 
+  let sim = null;
+  const hooks = createWebhooks({
+    clock: { now: () => sim.clock.now() },
+    url: webhookUrl,
+    sign: (raw, payload, { bad }) => ({
+      'x-shopify-hmac-sha256': crypto.createHmac('sha256', bad ? `${clientSecret}-wrong` : clientSecret).update(raw).digest('base64'),
+      'x-shopify-webhook-id': payload?.__webhookId ?? '',
+      'x-shopify-topic': payload?.__topic ?? '',
+      'x-shopify-shop-domain': shopDomain,
+    }),
+  });
+  /** One webhook: its own id and topic travel in headers, never in the signed bytes. */
+  function sendWebhook(topic, payload, { duplicates, hold, signature, webhookId } = {}) {
+    const raw = JSON.stringify(payload);
+    const marked = { ...payload };
+    const id = webhookId ?? crypto.randomUUID();
+    Object.defineProperties(marked, { __webhookId: { value: id, enumerable: false }, __topic: { value: topic, enumerable: false } });
+    return hooks.send(marked, { raw, duplicates, hold, signature }).then((sent) => ({ ...sent, webhookId: id, topic }));
+  }
+
   function requireToken(req) {
     if (req.headers['x-shopify-access-token'] !== token) throw shopifyError(401, '[API] Invalid API key or access token (unrecognized login or wrong password)');
+    if (limited) {
+      const now = sim.clock.now();
+      recent = recent.filter((at) => now - at < 1000);
+      if (recent.length >= 2) throw new SimError(429, { errors: 'Exceeded 2 calls per second for api client. Reduce request rates to resume uninterrupted service.' }, { 'retry-after': '1.0' });
+      recent.push(now);
+    }
   }
+  const adminVariant = (variantId) => {
+    for (const product of products) {
+      const variant = (product.variants ?? []).find((v) => String(v.id) === String(variantId));
+      if (variant) return { product, variant };
+    }
+    return null;
+  };
+  const byInventoryItem = (itemId) => products.flatMap((p) => p.variants ?? []).find((v) => String(v.inventory_item_id ?? v.id) === String(itemId));
 
   /** Absolute links on whatever name the request came in on, as a real store's are. */
   const origin = (req) => `https://${String(req.headers.host ?? 'shop.example').replace(/:\d+$/, '')}`;
@@ -136,11 +193,14 @@ export function createShopify({ token = 'sim-shopify-token', clientId = 'sim-sho
 
   const html = (status, body) => reply(status, body, { 'content-type': 'text/html; charset=utf-8' });
 
-  return createSim({
+  sim = createSim({
     name: 'shopify',
     anyHost: true,
     errorBody: ({ kind }) => ({ errors: `Simulated ${kind}.` }),
-    reset: clear,
+    reset: () => {
+      clear();
+      hooks.reset();
+    },
     routes: (on) => {
       on('POST', '/admin/oauth/access_token', (req) => {
         if (req.body?.client_id !== clientId || req.body?.client_secret !== clientSecret || !req.body?.code) throw shopifyError(400, 'invalid_request');
@@ -152,11 +212,77 @@ export function createShopify({ token = 'sim-shopify-token', clientId = 'sim-sho
       });
       on('GET', '/admin/api/:version/products.json', (req) => {
         requireToken(req);
-        return { products };
+        // Paged the way Shopify pages: a page_info cursor in the Link header. With no limit given, everything at once, as before.
+        if (!req.query.limit && !req.query.page_info) return { products };
+        const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 250);
+        const offset = Math.max(Number(Buffer.from(String(req.query.page_info ?? ''), 'base64url').toString() || 0) || 0, 0);
+        const since = req.query.updated_at_min && !req.query.page_info ? Date.parse(req.query.updated_at_min) : null;
+        const all = since ? products.filter((p) => !p.updated_at || Date.parse(p.updated_at) >= since) : products;
+        const next = offset + limit < all.length ? Buffer.from(String(offset + limit)).toString('base64url') : null;
+        const link = next ? { link: `<https://${shopDomain}/admin/api/${req.params.version}/products.json?limit=${limit}&page_info=${next}>; rel="next"` } : {};
+        return reply(200, { products: all.slice(offset, offset + limit) }, link);
+      });
+      on('GET', '/admin/api/:version/products/:id.json', (req) => {
+        requireToken(req);
+        const product = products.find((p) => String(p.id) === req.params.id);
+        if (!product) throw shopifyError(404, 'Not Found');
+        return { product };
+      });
+      on('GET', '/admin/api/:version/inventory_levels.json', (req) => {
+        requireToken(req);
+        const ids = String(req.query.inventory_item_ids ?? '').split(',').filter(Boolean);
+        return { inventory_levels: ids.map(byInventoryItem).filter(Boolean).map((v) => ({ inventory_item_id: v.inventory_item_id ?? v.id, location_id: 1, available: v.inventory_quantity ?? 0 })) };
+      });
+      on('POST', '/admin/api/:version/inventory_levels/set.json', (req) => {
+        requireToken(req);
+        const variant = byInventoryItem(req.body?.inventory_item_id);
+        if (!variant) throw shopifyError(404, 'Not Found');
+        if (!Number.isInteger(req.body?.available)) throw shopifyError(422, { available: ['is not a number'] });
+        variant.inventory_quantity = req.body.available;
+        return { inventory_level: { inventory_item_id: variant.inventory_item_id ?? variant.id, location_id: 1, available: variant.inventory_quantity } };
+      });
+      on('PUT', '/admin/api/:version/variants/:id.json', (req) => {
+        requireToken(req);
+        const found = adminVariant(req.params.id);
+        if (!found) throw shopifyError(404, 'Not Found');
+        const change = req.body?.variant ?? {};
+        if (change.price !== undefined) found.variant.price = String(change.price);
+        if (change.compare_at_price !== undefined) found.variant.compare_at_price = change.compare_at_price === null ? null : String(change.compare_at_price);
+        found.product.updated_at = new Date(sim.clock.now()).toISOString();
+        return { variant: found.variant };
       });
       on('GET', '/admin/api/:version/orders.json', (req) => {
         requireToken(req);
         return { orders };
+      });
+      on('POST', '/admin/api/:version/orders.json', (req) => {
+        requireToken(req);
+        const key = req.headers['idempotency-key'];
+        if (key && orderKeys.has(key)) return reply(201, { order: orders.find((o) => o.id === orderKeys.get(key)) });
+        const input = req.body?.order;
+        if (!Array.isArray(input?.line_items) || !input.line_items.length) throw shopifyError(422, { line_items: ['must have at least one line item'] });
+        for (const line of input.line_items) {
+          const found = adminVariant(line.variant_id);
+          if (!found) throw shopifyError(422, { line_items: ['variant is invalid'] });
+          if (!Number.isInteger(line.quantity) || line.quantity < 1) throw shopifyError(422, { line_items: ['quantity must be greater than 0'] });
+        }
+        // Stock goes down in Shopify, as it does for an order made there (S-37).
+        for (const line of input.line_items) {
+          const { variant } = adminVariant(line.variant_id);
+          if (Number.isInteger(variant.inventory_quantity)) variant.inventory_quantity -= line.quantity;
+        }
+        const order = { id: ++seq, name: `#${1000 + seq}`, financial_status: input.financial_status ?? 'pending', line_items: input.line_items, note: input.note ?? '', tags: input.tags ?? '', email: input.email ?? '', created_at: new Date(sim.clock.now()).toISOString() };
+        orders.push(order);
+        if (key) orderKeys.set(key, order.id);
+        return reply(201, { order });
+      });
+      on('POST', '/admin/api/:version/webhooks.json', (req) => {
+        requireToken(req);
+        const { topic, address } = req.body?.webhook ?? {};
+        if (!topic || !address) throw shopifyError(422, { webhook: ['topic and address are required'] });
+        const webhook = { id: ++seq, topic, address, format: 'json' };
+        registered.push(webhook);
+        return reply(201, { webhook });
       });
 
       // ---- the public storefront ----
@@ -190,6 +316,32 @@ export function createShopify({ token = 'sim-shopify-token', clientId = 'sim-sho
       on('GET', '/', (req) => html(200, homePage(req)));
     },
     controls: (on) => {
+      webhookControls(on, hooks);
+      on('POST', '/webhooks/send', ({ body }) => sendWebhook(body.topic, body.payload ?? {}, body));
+      on('POST', '/admin/limit', ({ body }) => {
+        limited = body.on !== false;
+        recent = [];
+        return { limited };
+      });
+      on('POST', '/admin/products/update', async ({ body }) => {
+        const product = products.find((p) => String(p.id) === String(body.id));
+        if (!product) throw new SimError(404, { error: 'No such product.' });
+        if (body.title !== undefined) product.title = body.title;
+        for (const change of body.variants ?? []) {
+          const variant = (product.variants ?? []).find((v) => String(v.id) === String(change.id));
+          if (!variant) throw new SimError(404, { error: `No variant ${change.id}.` });
+          Object.assign(variant, change);
+        }
+        product.updated_at = new Date(sim.clock.now()).toISOString();
+        return { product, webhook: body.webhook === false ? null : await sendWebhook('products/update', product, body) };
+      });
+      on('POST', '/admin/inventory', async ({ body }) => {
+        const variant = byInventoryItem(body.inventoryItemId);
+        if (!variant) throw new SimError(404, { error: 'No such inventory item.' });
+        variant.inventory_quantity = body.available;
+        return { webhook: await sendWebhook('inventory_levels/update', { inventory_item_id: variant.inventory_item_id ?? variant.id, location_id: 1, available: body.available, updated_at: new Date(sim.clock.now()).toISOString() }, body) };
+      });
+      on('GET', '/admin/state', () => ({ products, orders, webhooks: registered }));
       on('POST', '/products', ({ body }) => {
         const product = { id: ++seq, title: 'Simulated product', variants: [], ...body };
         products.push(product);
@@ -226,4 +378,6 @@ export function createShopify({ token = 'sim-shopify-token', clientId = 'sim-sho
       });
     },
   });
+
+  return Object.assign(sim, { webhooks: hooks, shopDomain, clientSecret });
 }

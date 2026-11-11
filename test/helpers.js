@@ -111,7 +111,7 @@ export async function startApp({ ig = fakeIg(), overrides = {}, modules, logins 
   const app = createApp({ db, ig, config: appConfig, platform: { ...drivers, cache: ownCacheKeys(drivers.cache) }, ...(modules ? { modules } : {}) });
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
-  return { db, repos, platform, tenant, ig, base, port: server.address().port, close: () => server.close() };
+  return { db, repos, platform, tenant, ig, base, port: server.address().port, config: appConfig, ctx: app.locals.ctx, close: () => server.close() };
 }
 
 /** Logs in through /login and returns the session cookie plus a CSRF token read from `csrfPage`. */

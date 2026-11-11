@@ -246,6 +246,15 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, onUnauthorized,
       get: (orderId) => get(`/orders/${id(orderId)}`),
       /** @param body { status, notes? } */
       setStatus: (orderId, body) => post(`/orders/${id(orderId)}/status`, body),
+      // Phase 4: a checkout order moves through these, never by setting a status.
+      timeline: (orderId) => get(`/orders/${id(orderId)}/timeline`),
+      /** @param body { to: 'packed' | 'shipped' | 'delivered', note? } */
+      advance: (orderId, body) => post(`/orders/${id(orderId)}/advance`, body),
+      /** Before shipment only. @param body { reason?, note? } */
+      cancel: (orderId, body) => post(`/orders/${id(orderId)}/cancel`, body),
+      releaseHold: (orderId, body) => post(`/orders/${id(orderId)}/release-hold`, body),
+      reinstate: (orderId) => post(`/orders/${id(orderId)}/reinstate`),
+      addNote: (orderId, body) => post(`/orders/${id(orderId)}/notes`, body),
     },
     customers: {
       /** @param query { search?, cursor?, limit? } */
@@ -502,6 +511,174 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, onUnauthorized,
       /** @param body { name } @returns the key once, as key */
       create: (body) => post('/api-keys', body),
       revoke: (keyId) => del(`/api-keys/${id(keyId)}`),
+    },
+    // Phase 4 (PRD 9): the store. Orders as a CSV file.
+    orderDownloads: {
+      list: (query) => get('/order-downloads', query),
+      create: (body) => post('/order-downloads', body),
+      get: (itemId) => get(`/order-downloads/${id(itemId)}`),
+    },
+    // Payments, the settlement statement and refunds (9.6 to 9.8).
+    paymentSettings: {
+      get: () => get('/payment-settings'),
+      update: (body) => patch('/payment-settings', body),
+    },
+    paymentAccount: {
+      get: () => get('/payment-account'),
+      startLinked: (body) => post('/payment-account/linked', body),
+      connectUrl: () => post('/payment-account/connect'),
+      setMode: (body) => put('/payment-account/mode', body),
+      disconnect: () => del('/payment-account/own'),
+    },
+    payments: {
+      forOrder: (orderId) => get(`/orders/${id(orderId)}/payments`),
+    },
+    settlements: {
+      list: (query) => get('/settlements', query),
+      summary: (query) => get('/settlements/summary', query),
+    },
+    refunds: {
+      forOrder: (orderId) => get(`/orders/${id(orderId)}/refunds`),
+      /** Owner only. @param body { amountPaise, reason?, paymentId?, reference?, returnId?, idempotencyKey, password } */
+      create: (itemId, body) => post(`/orders/${id(itemId)}/refunds`, body),
+      get: (itemId) => get(`/refunds/${id(itemId)}`),
+      retry: (itemId) => post(`/refunds/${id(itemId)}/retry`),
+    },
+    // Shipping, stock, invoices and returns (9.10, 9.12, 9.13, 9.17).
+    shippingSettings: {
+      get: () => get('/shipping-settings'),
+      update: (body) => patch('/shipping-settings', body),
+    },
+    shipping: {
+      serviceability: (query) => get('/shipping/serviceability', query),
+    },
+    shipments: {
+      forOrder: (orderId) => get(`/orders/${id(orderId)}/shipments`),
+      /** "Ready to ship". @param body { weightGrams?, lengthCm?, breadthCm?, heightCm? } */
+      create: (itemId, body) => post(`/orders/${id(itemId)}/shipments`, body),
+      get: (itemId) => get(`/shipments/${id(itemId)}`),
+      cancel: (itemId) => post(`/shipments/${id(itemId)}/cancel`),
+      label: (itemId) => get(`/shipments/${id(itemId)}/label`),
+    },
+    inventory: {
+      list: (query) => get('/inventory', query),
+      /** @param body { productId, variantId?, stock? | delta?, lowStockThreshold?, note? } */
+      adjust: (body) => post('/inventory/adjust', body),
+      movements: (query) => get('/inventory/movements', query),
+    },
+    inventorySettings: {
+      get: () => get('/inventory/settings'),
+      update: (body) => patch('/inventory/settings', body),
+    },
+    invoiceSettings: {
+      get: () => get('/invoice-settings'),
+      update: (body) => patch('/invoice-settings', body),
+    },
+    invoices: {
+      list: (query) => get('/invoices', query),
+      get: (itemId) => get(`/invoices/${id(itemId)}`),
+    },
+    returnSettings: {
+      get: () => get('/return-settings'),
+      update: (body) => patch('/return-settings', body),
+    },
+    returns: {
+      list: (query) => get('/returns', query),
+      get: (itemId) => get(`/returns/${id(itemId)}`),
+      approve: (itemId) => post(`/returns/${id(itemId)}/approve`),
+      decline: (itemId, body) => post(`/returns/${id(itemId)}/decline`, body),
+      /** @param body { condition: 'good' | 'not_restockable' } */
+      receive: (itemId, body) => post(`/returns/${id(itemId)}/receive`, body),
+      close: (itemId, body) => post(`/returns/${id(itemId)}/close`, body),
+    },
+    // Coupons, reviews, saves and loyalty (9.14, 9.19 to 9.21).
+    coupons: {
+      list: (query) => get('/coupons', query),
+      create: (body) => post('/coupons', body),
+      get: (itemId) => get(`/coupons/${id(itemId)}`),
+      update: (itemId, body) => patch(`/coupons/${id(itemId)}`, body),
+      remove: (itemId) => del(`/coupons/${id(itemId)}`),
+      stats: (itemId) => get(`/coupons/${id(itemId)}/stats`),
+    },
+    reviews: {
+      list: (query) => get('/reviews', query),
+      approve: (itemId) => post(`/reviews/${id(itemId)}/approve`),
+      hide: (itemId) => post(`/reviews/${id(itemId)}/hide`),
+      reply: (itemId, body) => put(`/reviews/${id(itemId)}/reply`, body),
+    },
+    wishlist: {
+      counts: (query) => get('/wishlist/counts', query),
+    },
+    loyaltySettings: {
+      get: () => get('/loyalty/settings'),
+      update: (body) => patch('/loyalty/settings', body),
+    },
+    loyalty: {
+      members: (query) => get('/loyalty/members', query),
+      ledger: (itemId, query) => get(`/loyalty/members/${id(itemId)}/ledger`, query),
+      adjust: (itemId, body) => post(`/loyalty/members/${id(itemId)}/adjust`, body),
+      referrals: (query) => get('/loyalty/referrals', query),
+    },
+    // Messages to shoppers: WhatsApp and email only (9.15, 9.16).
+    alertSettings: {
+      get: () => get('/alert-settings'),
+      update: (body) => patch('/alert-settings', body),
+    },
+    whatsappAccount: {
+      get: () => get('/whatsapp-account'),
+      connect: (body) => put('/whatsapp-account', body),
+      disconnect: () => del('/whatsapp-account'),
+    },
+    whatsappTemplates: {
+      all: () => get('/whatsapp-templates'),
+      sync: () => post('/whatsapp-templates/sync'),
+    },
+    orderAlerts: {
+      list: (query) => get('/order-alerts', query),
+      retry: (itemId) => post(`/order-alerts/${id(itemId)}/retry`),
+    },
+    cartReminders: {
+      get: () => get('/cart-reminders'),
+      update: (body) => patch('/cart-reminders', body),
+      stats: (query) => get('/cart-reminders/stats', query),
+    },
+    // Shopify sync (9.11).
+    shopify: {
+      get: () => get('/shopify'),
+      /** @param body { shopDomain, accessToken, webhookSecret, mode? } */
+      connect: (body) => put('/shopify', body),
+      setMode: (body) => patch('/shopify', body),
+      disconnect: () => del('/shopify'),
+      reconcile: () => post('/shopify/reconcile'),
+      conflicts: (query) => get('/shopify/conflicts', query),
+    },
+    // Shoppers and privacy (9.17, 9.18, 9.22).
+    shoppers: {
+      list: (query) => get('/shoppers', query),
+      get: (itemId) => get(`/shoppers/${id(itemId)}`),
+    },
+    shopperDownloads: {
+      list: (query) => get('/shopper-downloads', query),
+      create: (body) => post('/shopper-downloads', body),
+      get: (itemId) => get(`/shopper-downloads/${id(itemId)}`),
+    },
+    privacy: {
+      get: () => get('/privacy'),
+      update: (body) => patch('/privacy', body),
+    },
+    policies: {
+      all: () => get('/policies'),
+      /** @param body { kind: 'privacy' | 'terms' | 'refund' | 'shipping', body } */
+      save: (body) => put('/policies', body),
+    },
+    consentNotice: {
+      get: () => get('/consent-notice'),
+      publish: (body) => post('/consent-notice', body),
+    },
+    dataRequests: {
+      list: (query) => get('/data-requests', query),
+      create: (body) => post('/data-requests', body),
+      get: (itemId) => get(`/data-requests/${id(itemId)}`),
     },
   };
 }

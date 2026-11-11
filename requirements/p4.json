@@ -1,0 +1,418 @@
+[
+  {
+    "id": "S-01",
+    "title": "Each store shows only its own brand and products"
+  },
+  {
+    "id": "S-02",
+    "title": "Search matches SKU, within one business"
+  },
+  {
+    "id": "S-03",
+    "title": "Hidden category answers the branded 404"
+  },
+  {
+    "id": "S-04",
+    "title": "A bag line is capped at 10"
+  },
+  {
+    "id": "S-05",
+    "title": "Checkout uses the database price"
+  },
+  {
+    "id": "S-06",
+    "title": "Server cart follows the shopper across devices"
+  },
+  {
+    "id": "S-07",
+    "title": "Correct WhatsApp code signs in and returns to checkout"
+  },
+  {
+    "id": "S-08",
+    "title": "Three wrong codes invalidate the code"
+  },
+  {
+    "id": "S-09",
+    "title": "Sixth code send in an hour is refused"
+  },
+  {
+    "id": "S-10",
+    "title": "In-app browser offers WhatsApp code first, no SMS"
+  },
+  {
+    "id": "S-11",
+    "title": "Same phone at two stores is two accounts"
+  },
+  {
+    "id": "S-12",
+    "title": "PIN starting with 0 is rejected"
+  },
+  {
+    "id": "S-13",
+    "title": "Default address is preselected at checkout"
+  },
+  {
+    "id": "S-14",
+    "title": "Past orders keep their address snapshot"
+  },
+  {
+    "id": "S-15",
+    "title": "Double tap places one order"
+  },
+  {
+    "id": "S-16",
+    "title": "Last unit goes to one of two shoppers"
+  },
+  {
+    "id": "S-17",
+    "title": "Order source is the reel of the DM link"
+  },
+  {
+    "id": "S-18",
+    "title": "Order rate limit holds across instances"
+  },
+  {
+    "id": "S-19",
+    "title": "Paid only after the signature check"
+  },
+  {
+    "id": "S-20",
+    "title": "Forged success callback changes nothing"
+  },
+  {
+    "id": "S-21",
+    "title": "Part-advance charges the advance, label COD is the balance"
+  },
+  {
+    "id": "S-22",
+    "title": "COD hidden above the cap, with the reason"
+  },
+  {
+    "id": "S-23",
+    "title": "Repeated captured event changes status once"
+  },
+  {
+    "id": "S-24",
+    "title": "Failed after captured keeps the order paid"
+  },
+  {
+    "id": "S-25",
+    "title": "Bad webhook signature gets 401"
+  },
+  {
+    "id": "S-26",
+    "title": "Reconciliation marks a missed payment paid"
+  },
+  {
+    "id": "S-27",
+    "title": "Partial refund shows on the order"
+  },
+  {
+    "id": "S-28",
+    "title": "Refund above the captured amount is blocked"
+  },
+  {
+    "id": "S-29",
+    "title": "Manager cannot refund"
+  },
+  {
+    "id": "S-30",
+    "title": "New cannot jump to delivered"
+  },
+  {
+    "id": "S-31",
+    "title": "Cancelling a packed paid order restores stock and prompts a refund"
+  },
+  {
+    "id": "S-32",
+    "title": "App and web show the same status and timeline"
+  },
+  {
+    "id": "S-33",
+    "title": "Non-serviceable PIN blocks the order"
+  },
+  {
+    "id": "S-34",
+    "title": "Shipment needs product weight"
+  },
+  {
+    "id": "S-35",
+    "title": "Duplicate delivered webhook alerts once"
+  },
+  {
+    "id": "S-36",
+    "title": "Shopify price change shows within a minute"
+  },
+  {
+    "id": "S-37",
+    "title": "Order is pushed to Shopify and stock drops"
+  },
+  {
+    "id": "S-38",
+    "title": "Bad Shopify HMAC is rejected"
+  },
+  {
+    "id": "S-39",
+    "title": "Unpaid prepaid order is cancelled after the hold"
+  },
+  {
+    "id": "S-40",
+    "title": "Stock is per variant"
+  },
+  {
+    "id": "S-41",
+    "title": "Late payment with no stock is flagged"
+  },
+  {
+    "id": "S-42",
+    "title": "Same-state GST splits into CGST and SGST"
+  },
+  {
+    "id": "S-43",
+    "title": "Invoices paid together get consecutive numbers"
+  },
+  {
+    "id": "S-44",
+    "title": "New financial year starts a new series"
+  },
+  {
+    "id": "S-45",
+    "title": "Percentage coupon respects its cap"
+  },
+  {
+    "id": "S-46",
+    "title": "Per-customer coupon limit holds"
+  },
+  {
+    "id": "S-47",
+    "title": "Total coupon limit holds under simultaneous checkouts"
+  },
+  {
+    "id": "S-48",
+    "title": "One WhatsApp reminder after an hour, with a cart link"
+  },
+  {
+    "id": "S-49",
+    "title": "No second reminder after an order"
+  },
+  {
+    "id": "S-50",
+    "title": "Reminder waits out the night hours"
+  },
+  {
+    "id": "S-51",
+    "title": "Abandoned cart never gets an Instagram DM"
+  },
+  {
+    "id": "S-52",
+    "title": "Paid order sends one template and one email"
+  },
+  {
+    "id": "S-53",
+    "title": "Pending template falls back to email"
+  },
+  {
+    "id": "S-54",
+    "title": "Duplicate shipped event sends one message"
+  },
+  {
+    "id": "S-55",
+    "title": "Order email comes from the seller domain"
+  },
+  {
+    "id": "S-56",
+    "title": "Cancelling an unshipped prepaid order releases stock and refunds"
+  },
+  {
+    "id": "S-57",
+    "title": "Return hidden after the window"
+  },
+  {
+    "id": "S-58",
+    "title": "Not restockable return refunds without restock"
+  },
+  {
+    "id": "S-59",
+    "title": "Sign-in writes a consent record"
+  },
+  {
+    "id": "S-60",
+    "title": "Order-only consent gets no marketing"
+  },
+  {
+    "id": "S-61",
+    "title": "Policy pages load logged out"
+  },
+  {
+    "id": "S-62",
+    "title": "Privacy page shows the grievance contact"
+  },
+  {
+    "id": "S-63",
+    "title": "Deletion erases personal data and masks tax records"
+  },
+  {
+    "id": "S-64",
+    "title": "WhatsApp consent revoked, email unaffected"
+  },
+  {
+    "id": "S-65",
+    "title": "Category page and Reels tab follow the set reel order"
+  },
+  {
+    "id": "S-66",
+    "title": "Reel position is per category"
+  },
+  {
+    "id": "S-67",
+    "title": "Home-screen app carries the seller brand"
+  },
+  {
+    "id": "S-68",
+    "title": "Failed advance leaves the order pending until the hold ends"
+  },
+  {
+    "id": "S-69",
+    "title": "Cancelled part-advance order refunds the advance"
+  },
+  {
+    "id": "S-70",
+    "title": "Managed capture transfers the amount minus the gateway fee"
+  },
+  {
+    "id": "S-71",
+    "title": "Checkout and success page carry the seller brand"
+  },
+  {
+    "id": "S-72",
+    "title": "Switching to own keys applies to new orders only"
+  },
+  {
+    "id": "S-73",
+    "title": "Managed event with mismatched business is stored and ignored"
+  },
+  {
+    "id": "S-74",
+    "title": "Failed payment opens the seller failure page with retry"
+  },
+  {
+    "id": "S-75",
+    "title": "Managed refund reduces the seller transfer"
+  },
+  {
+    "id": "S-76",
+    "title": "Own-gateway refund makes no Route reversal"
+  },
+  {
+    "id": "S-77",
+    "title": "Managed label shows the seller as shipper, charge at cost"
+  },
+  {
+    "id": "S-78",
+    "title": "Tracking link opens the seller tracking page"
+  },
+  {
+    "id": "S-79",
+    "title": "Tracking event changes only its own business"
+  },
+  {
+    "id": "S-80",
+    "title": "Return needs a photo or video"
+  },
+  {
+    "id": "S-81",
+    "title": "Only a buyer with a delivered order can review"
+  },
+  {
+    "id": "S-82",
+    "title": "Approved review updates average and count"
+  },
+  {
+    "id": "S-83",
+    "title": "Hidden review leaves the store and the average"
+  },
+  {
+    "id": "S-84",
+    "title": "Logged-out wishlist merges on sign-in"
+  },
+  {
+    "id": "S-85",
+    "title": "Inactive saved product shows unavailable"
+  },
+  {
+    "id": "S-86",
+    "title": "Owner sees save counts, never shoppers"
+  },
+  {
+    "id": "S-87",
+    "title": "Points stay pending until the return window closes"
+  },
+  {
+    "id": "S-88",
+    "title": "Redemption is capped per order"
+  },
+  {
+    "id": "S-89",
+    "title": "Refund reverses earned points"
+  },
+  {
+    "id": "S-90",
+    "title": "Self-referral at the same address is blocked"
+  },
+  {
+    "id": "S-91",
+    "title": "Loyalty is hidden without the add-on"
+  },
+  {
+    "id": "S-92",
+    "title": "Google sign-in asks for no code"
+  },
+  {
+    "id": "S-93",
+    "title": "Guest pays by UPI with no sign-in"
+  },
+  {
+    "id": "S-94",
+    "title": "Guest COD needs a WhatsApp code first"
+  },
+  {
+    "id": "S-95",
+    "title": "Three wrong COD codes create no order"
+  },
+  {
+    "id": "S-96",
+    "title": "Alert settings offer WhatsApp and email only, cost at cost"
+  },
+  {
+    "id": "S-97",
+    "title": "Shared-profile consent screen names the data fiduciary"
+  },
+  {
+    "id": "S-98",
+    "title": "Verified shopper checks out at another store without sign-up"
+  },
+  {
+    "id": "S-99",
+    "title": "One business never sees another business orders"
+  },
+  {
+    "id": "S-100",
+    "title": "Customer list shows only own orders"
+  },
+  {
+    "id": "S-101",
+    "title": "Platform name appears only on the shared consent screen"
+  },
+  {
+    "id": "S-102",
+    "title": "Revoking shared consent removes the shared profile"
+  },
+  {
+    "id": "S-103",
+    "title": "COD risk shows as a label only"
+  },
+  {
+    "id": "S-104",
+    "title": "Marketing opt-in does not carry between stores"
+  }
+]

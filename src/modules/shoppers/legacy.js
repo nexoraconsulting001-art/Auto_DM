@@ -1,11 +1,16 @@
 import express from 'express';
-import { safeNext, sameOriginOnly as sameSite } from '../auth.js';
-import { buyerSettings } from '../modules/brand/index.js';
-import { ValidationError, normalizePhone } from '../util.js';
-import { accountPage, loginPage, signupPage } from '../views/store.js';
+import { safeNext, sameOriginOnly as sameSite } from '../../auth.js';
+import { buyerSettings } from '../brand/index.js';
+import { ValidationError, normalizePhone } from '../../util.js';
+import { accountPage, loginPage, signupPage } from '../../views/store.js';
 
-/** Login, signup and "My account" for everyone. The owner uses the same login and lands in /admin. */
-export function accountRoutes({ repos, auth, config }) {
+/**
+ * The Phase 0 login, signup and "My account" pages, moved here from src/routes/account.js with their behaviour unchanged, so
+ * the shoppers track owns them and replaces them (PRD 9.3, 9.17): shoppers get Google and WhatsApp codes and lose passwords.
+ * POST /login also signs the owner and staff in and sends them to /admin (the console's own sign-in is /api/v1/auth/login):
+ * whatever replaces these pages must keep a way for a seller to sign in here, which test/helpers.js login() uses.
+ */
+export function legacyAccountRoutes({ repos, auth, config }) {
   // The .env owner's password comes from ADMIN_PASSWORD and is reset on every start.
   const isEnvOwner = (user) => user.role === 'owner' && Boolean(config?.adminPhone) && user.phone === normalizePhone(config.adminPhone);
   const r = express.Router();

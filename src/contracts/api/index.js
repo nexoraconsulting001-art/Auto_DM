@@ -10,6 +10,7 @@ import { creatorRoutes } from './creator.js';
 import { customerRoutes } from './customers.js';
 import { domainRoutes } from './domains.js';
 import { facebookRoutes } from './facebook.js';
+import { inventoryRoutes, invoiceRoutes, returnRoutes, shippingRoutes } from './fulfilment.js';
 import { importRoutes } from './imports.js';
 import { inboxRoutes } from './inbox.js';
 import { insightRoutes } from './insights.js';
@@ -19,12 +20,14 @@ import { linkRoutes } from './links.js';
 import { mediaRoutes } from './media.js';
 import { orderRoutes } from './orders.js';
 import { pageRoutes } from './pages.js';
+import { paymentRoutes, refundRoutes } from './payments.js';
 import { productRoutes } from './products.js';
 import { reachGuardRoutes } from './reach-guard.js';
 import { reelRoutes } from './reels.js';
 import { reportRoutes } from './reports.js';
 import { settingRoutes } from './settings.js';
 import { statRoutes } from './stats.js';
+import { cartReminderRoutes, couponRoutes, loyaltyRoutes, orderAlertRoutes, privacyRoutes, reviewRoutes, shopifyRoutes, shopperRoutes, wishlistRoutes } from './store.js';
 import { themeRoutes } from './themes.js';
 import { trafficRoutes } from './traffic.js';
 
@@ -77,6 +80,22 @@ export const routes = Object.freeze({
   ...themeRoutes,
   ...creatorRoutes,
   ...leadRoutes,
+  // Phase 4 (orders.* additions are in orderRoutes above)
+  ...paymentRoutes,
+  ...refundRoutes,
+  ...shippingRoutes,
+  ...inventoryRoutes,
+  ...invoiceRoutes,
+  ...returnRoutes,
+  ...couponRoutes,
+  ...reviewRoutes,
+  ...wishlistRoutes,
+  ...loyaltyRoutes,
+  ...orderAlertRoutes,
+  ...cartReminderRoutes,
+  ...shopifyRoutes,
+  ...shopperRoutes,
+  ...privacyRoutes,
 });
 
 export const routeList = Object.freeze(Object.entries(routes).map(([id, route]) => Object.freeze({ id, ...route })));
@@ -96,6 +115,7 @@ export * from './customers.js';
 export * from './domains.js';
 export * from './errors.js';
 export * from './facebook.js';
+export * from './fulfilment.js';
 export * from './imports.js';
 export * from './inbox.js';
 export * from './insights.js';
@@ -105,6 +125,7 @@ export * from './links.js';
 export * from './media.js';
 export * from './orders.js';
 export * from './pages.js';
+export * from './payments.js';
 export * from './platform.js';
 export * from './provider.js';
 export * from './products.js';
@@ -113,5 +134,6 @@ export * from './reels.js';
 export * from './reports.js';
 export * from './settings.js';
 export * from './stats.js';
+export * from './store.js';
 export * from './themes.js';
 export * from './traffic.js';

@@ -1,14 +1,17 @@
 import express from 'express';
-import QRCode from 'qrcode';
-import { PRICE_BANDS, ValidationError } from '../util.js';
-import { SORTS } from '../repos/products.js';
-import { buyerSettings } from '../modules/brand/index.js';
-import { log } from '../platform/log.js';
+import { PRICE_BANDS } from '../../util.js';
+import { SORTS } from '../../repos/products.js';
+import { buyerSettings } from '../brand/index.js';
+import { log } from '../../platform/log.js';
 import {
-  HOME_PAGE_SIZE, aboutPage, checkoutPage, homePage, notFoundPage, orderPage, productForClient, productPage,
-  reelForClient, reelStorePage, reelsFeedPage, shopPage,
-} from '../views/store.js';
+  HOME_PAGE_SIZE, aboutPage, homePage, notFoundPage, productForClient, productPage, reelForClient, reelStorePage, reelsFeedPage, shopPage,
+} from '../../views/store.js';
 
+/**
+ * The Phase 0 store pages, moved here from src/routes/store.js with their behaviour unchanged, so the storefront track owns
+ * them and replaces them page by page (PRD 9.1). Checkout and the order page went to src/modules/checkout/legacy.js, sign-in
+ * and "My account" to src/modules/shoppers/legacy.js.
+ */
 const MEDIA_REFRESH_MS = 6 * 60 * 60 * 1000;
 
 // Instagram CDN links (thumbnails and videos) expire; refresh in the background, at most every 6 hours per reel.
@@ -32,10 +35,12 @@ function mediaRefresher({ repos, ig }) {
   };
 }
 
-export function storeRoutes({ repos, ig, auth }) {
+const page = (res, view, status = 200) => res.status(status).type('html').send(String(view));
+
+/** Every browsing page, then the store's own 404 for whatever nothing answered. Mounted last (the storefront module's lastRoutes). */
+export function legacyStorePages({ repos, ig }) {
   const refreshMedia = mediaRefresher({ repos, ig });
   const r = express.Router();
-  const page = (res, view, status = 200) => res.status(status).type('html').send(String(view));
   const notFound = async (req, res, message) =>
     page(res, notFoundPage({ settings: await buyerSettings(repos), user: req.user, message }), 404);
 
@@ -52,7 +57,8 @@ export function storeRoutes({ repos, ig, auth }) {
   async function shop(req, res, category) {
     const q = String(req.query.q || '').slice(0, 80);
     const price = PRICE_BANDS.some((b) => b.key === req.query.price) ? req.query.price : '';
-    const sort = SORTS[req.query.sort] ? req.query.sort : 'popular';
+    // Only a sort this store defines: a name every object inherits ("constructor") is not one.
+    const sort = typeof req.query.sort === 'string' && Object.hasOwn(SORTS, req.query.sort) ? req.query.sort : 'popular';
     const shown = Math.min(Math.max(Number(req.query.show) || HOME_PAGE_SIZE, HOME_PAGE_SIZE), 480);
     const [settings, categories, { products, total }] = await Promise.all([
       buyerSettings(repos),
@@ -111,57 +117,14 @@ export function storeRoutes({ repos, ig, auth }) {
 
   r.get('/about', async (req, res) => page(res, aboutPage({ settings: await buyerSettings(repos), user: req.user })));
 
-  // Browsing is open to everyone; placing an order needs an account.
-  r.get('/checkout', auth.requireUser, async (req, res) => {
-    res.set('Cache-Control', 'no-store');
-    page(res, checkoutPage({ settings: await buyerSettings(repos), user: req.user, csrf: req.csrf }));
-  });
-
-  r.get('/order/:token', async (req, res) => {
-    const order = await repos.orders.getByToken(req.params.token);
-    if (!order) return notFound(req, res, 'We couldn’t find that order.');
-    const settings = await buyerSettings(repos);
-    let qrSvg = '';
-    let upiLink = '';
-    if (order.status === 'awaiting_payment') {
-      const upi = new URLSearchParams({
-        pa: settings.upi_id,
-        pn: settings.upi_payee || settings.store_name,
-        am: (order.total_paise / 100).toFixed(2),
-        cu: 'INR',
-        tn: `Order ${order.order_number}`,
-      });
-      upiLink = `upi://pay?${upi}`;
-      qrSvg = await QRCode.toString(upiLink, { type: 'svg', margin: 0, color: { dark: '#1d1b16', light: '#ffffff' } });
-    }
-    res.set('Cache-Control', 'no-store');
-    page(res, orderPage({ settings, user: req.user, csrf: req.csrf, order, qrSvg, upiLink }));
-  });
-
-  r.post('/order/:token/paid', async (req, res) => {
-    await repos.orders.markPaymentSubmitted(req.params.token);
-    res.redirect(303, `/order/${encodeURIComponent(req.params.token)}`);
-  });
-
   r.use(async (req, res) => notFound(req, res, 'This page doesn’t exist.'));
 
   return r;
 }
 
-export function apiRoutes({ repos }) {
+/** JSON the store's own pages call, under /api. */
+export function legacyStoreApi({ repos }) {
   const r = express.Router();
-  const hits = new Map();
-
-  // Basic abuse protection: at most 20 order attempts per IP per 10 minutes.
-  const limit = (req, res, next) => {
-    const now = Date.now();
-    const h = hits.get(req.ip) || { n: 0, reset: now + 10 * 60_000 };
-    if (now > h.reset) Object.assign(h, { n: 0, reset: now + 10 * 60_000 });
-    h.n++;
-    hits.set(req.ip, h);
-    if (h.n > 20) return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
-    next();
-  };
 
   // Used when the bag moves to another browser (e.g. Instagram → Chrome): fills in names, prices and photos.
   r.get('/products', async (req, res) => {
@@ -176,38 +139,5 @@ export function apiRoutes({ repos }) {
     res.json({ reels: feed.reels.map(reelForClient), nextCursor: feed.nextCursor });
   });
 
-  r.post('/orders', limit, async (req, res, next) => {
-    try {
-      if (!req.user) return res.status(401).json({ error: 'Please log in to place your order.', login: '/login?next=/checkout' });
-      const { items, customer, reelSlug, source } = req.body || {};
-      const settings = await repos.settings.getAll();
-      const reel = reelSlug ? await repos.reels.getStore(reelSlug) : null;
-      const order = await repos.orders.create(
-        { items, customer, reelId: reel?.ig_media_id ?? null, source: source || '', userId: req.user.id },
-        settings,
-      );
-      // Filled in at the shopper's next checkout.
-      await repos.users.saveAddress(req.user.id, {
-        name: order.customer_name, phone: order.phone, email: order.email, address: order.address,
-        city: order.city, state: order.state, pincode: order.pincode,
-      });
-      res.status(201).json({ token: order.public_token, orderNumber: order.order_number });
-    } catch (err) {
-      if (err instanceof ValidationError) return res.status(400).json({ error: err.message });
-      next(err);
-    }
-  });
-
-  return r;
-}
-
-export function mediaRoutes({ repos }) {
-  const r = express.Router();
-  r.get('/:id', async (req, res) => {
-    const m = await repos.media.get(req.params.id);
-    if (!m) return res.sendStatus(404);
-    res.set({ 'Content-Type': m.mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
-    res.send(m.data);
-  });
   return r;
 }

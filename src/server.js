@@ -6,22 +6,35 @@ import { openRuntimeDb } from './db/index.js';
 import { createRepos } from './repos/index.js';
 import { createGoogleAdapters } from './adapters/google/index.js';
 import { createMetaAdapters, verifyHubSignature } from './adapters/meta/index.js';
+import { createStoreAdapters } from './adapters/store.js';
 import { createAuth } from './auth.js';
 import { handleComment } from './handler.js';
 import { createInstagram } from './instagram.js';
 import { createCompliance } from './modules/compliance/index.js';
 import { MODULES } from './modules/index.js';
 import { createMetaCallObserver } from './modules/meta-calls.js';
-import { accountRoutes } from './routes/account.js';
+import { wireOrderEvents } from './modules/orders/events.js';
+import { createShopperMessages } from './modules/shopper-messages/index.js';
 import { adminRoutes, baseUrlFor, buyerBaseUrl } from './routes/admin.js';
 import { ApiError, isApiV1Url } from './contracts/api/index.js';
 import { sendApiError } from './modules/api-v1/respond.js';
 import { createTenantResolver, currentTenant, withTenant } from './tenancy.js';
 import { createPlatform, describePlatform } from './platform/index.js';
 import { log, reportError, requestIds } from './platform/log.js';
-import { apiRoutes, mediaRoutes, storeRoutes } from './routes/store.js';
 
 export const verifySignature = verifyHubSignature;
+
+/** Uploaded files, by their unguessable id. Anyone with the link can open one, so nothing private is stored as media. */
+function mediaRoutes({ repos }) {
+  const r = express.Router();
+  r.get('/:id', async (req, res) => {
+    const m = await repos.media.get(req.params.id);
+    if (!m) return res.sendStatus(404);
+    res.set({ 'Content-Type': m.mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
+    res.send(m.data);
+  });
+  return r;
+}
 
 /**
  * Builds the web app. `db` comes from openDb(); `platform` (storage, queue, analytics, cache, metrics,
@@ -35,8 +48,13 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
   const meta = createMetaAdapters(config, { onCall: metaCalls.onCall });
   const google = createGoogleAdapters(config);
   const compliance = createCompliance({ db, repos, ig, meta, config, platform });
-  const ctx = { db, repos, ig, meta, google, compliance, auth, config, platform, modules, tenantResolver: tenants };
+  const providers = createStoreAdapters(config);
+  const shopperMessages = createShopperMessages({ db, platform, providers, config });
+  const ctx = { db, repos, ig, meta, google, providers, compliance, shopperMessages, auth, config, platform, modules, tenantResolver: tenants };
   metaCalls.bind(ctx);
+  // The order event bus, then each module's own start-up: its listeners on the bus, the consent provider.
+  wireOrderEvents(ctx);
+  for (const module of modules) module.setup?.(ctx);
 
   /** The business that owns an Instagram account: linked accounts first, then the default business. */
   async function tenantForIgAccount(igUserId) {
@@ -47,6 +65,7 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
     return config.defaultTenant ? repos.tenants.getBySlug(config.defaultTenant) : null;
   }
   const app = express();
+  app.locals.ctx = ctx; // tests and scripts reach the bus and the gate through the app they built
 
   app.set('trust proxy', 1); // exactly one proxy (Caddy) terminates HTTPS in front of the app
   app.disable('x-powered-by');
@@ -146,10 +165,9 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
   // Everything below knows who is logged in, and POSTs from a cookie session need its CSRF token.
   app.use(auth.load, auth.checkCsrf);
   for (const module of modules) module.routes?.(app, ctx);
-  app.use('/', accountRoutes({ repos, auth, config }));
   if (config.adminUi !== 'console') app.use('/admin', adminRoutes({ repos, ig, auth, config }));
-  app.use('/api', apiRoutes({ repos }));
-  app.use('/', storeRoutes({ repos, ig, auth }));
+  // Last of all: the store's own pages and its 404 (the storefront module), for whatever nothing above answered.
+  for (const module of modules) module.lastRoutes?.(app, ctx);
 
   app.use((err, req, res, _next) => {
     if (isApiV1Url(req.originalUrl)) return sendApiError(err, req, res);

@@ -90,6 +90,42 @@ export const config = {
   dataKeyOld: process.env.DATA_KEY_OLD || '',
   // /metrics is served only with this token (Authorization: Bearer <token>).
   metricsToken: process.env.METRICS_TOKEN || '',
+  // The store's outside services (PRD 9, src/adapters/store.js). An empty base URL is the provider itself; tests and local runs point each
+  // at its simulator in tools/sim, which is refused when NODE_ENV=production. Every call times out after PROVIDER_TIMEOUT_MS.
+  providerTimeoutMs: Number(process.env.PROVIDER_TIMEOUT_MS) || 10_000,
+  // Razorpay. PAYMENT_MODE is the default for a business that has not chosen: 'managed' (Bhava's account with Route) or 'own'.
+  paymentMode: process.env.PAYMENT_MODE === 'own' ? 'own' : 'managed',
+  razorpayBaseUrl: process.env.RAZORPAY_BASE_URL || '',
+  razorpayAuthBaseUrl: process.env.RAZORPAY_AUTH_BASE_URL || '',
+  razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
+  razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
+  razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
+  razorpayPartnerClientId: process.env.RAZORPAY_PARTNER_CLIENT_ID || '',
+  razorpayPartnerClientSecret: process.env.RAZORPAY_PARTNER_CLIENT_SECRET || '',
+  // Shiprocket: Bhava's master account, and the token its tracking webhook carries.
+  shiprocketBaseUrl: process.env.SHIPROCKET_BASE_URL || '',
+  shiprocketEmail: process.env.SHIPROCKET_EMAIL || '',
+  shiprocketPassword: process.env.SHIPROCKET_PASSWORD || '',
+  shiprocketWebhookToken: process.env.SHIPROCKET_WEBHOOK_TOKEN || '',
+  // Shopify: each business brings its own shop and token; this only sends every shop to the simulator.
+  shopifyBaseUrl: process.env.SHOPIFY_BASE_URL || '',
+  // WhatsApp Cloud API: each business brings its own account; the app secret signs its webhooks.
+  whatsappBaseUrl: process.env.WHATSAPP_BASE_URL || '',
+  whatsappAppSecret: process.env.WHATSAPP_APP_SECRET || '',
+  whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN || '',
+  // Email to shoppers: 'none' until a provider is chosen (PRD 5.4), or 'http'. EMAIL_HOSTS lists the provider origins allowed.
+  emailDriver: process.env.EMAIL_DRIVER || 'none',
+  emailBaseUrl: process.env.EMAIL_BASE_URL || '',
+  emailHosts: process.env.EMAIL_HOSTS || '',
+  emailApiKey: process.env.EMAIL_API_KEY || '',
+  // The neutral sending domain for a business with no verified domain of its own. Never one with the platform's name in it.
+  emailNeutralDomain: (process.env.EMAIL_NEUTRAL_DOMAIN || '').toLowerCase(),
+  // Google sign-in for shoppers (PRD 9.3).
+  googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+  googleOauthBaseUrl: process.env.GOOGLE_OAUTH_BASE_URL || '',
+  // How often the worker hands new order events to their listeners.
+  orderEventsPollMs: Number(process.env.ORDER_EVENTS_POLL_MS) || 2000,
   defaultTenant: process.env.DEFAULT_TENANT ?? 'default',
   defaultTenantName: process.env.DEFAULT_TENANT_NAME || 'My store',
 };
