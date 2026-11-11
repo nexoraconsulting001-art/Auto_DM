@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { BackLink, Badge, Banner, Button, Chip, ChipRow, EmptyState, LoadMore, PageHeader, Panel, Stat } from '../../design/index.jsx';
@@ -33,6 +33,12 @@ function Items({ job }) {
   const status = ITEM_FILTERS.some(([key]) => key === params.get('status')) ? params.get('status') : 'all';
   const [reviewing, setReviewing] = useState(null);
   const items = usePagedList('import-items', (query) => api.imports.items(job.id, query), { job: job.id, status }, { refetchInterval: isRunning(job) ? 3000 : false });
+  // The last items can be written after the final timed fetch, so read the list once more when the job ends.
+  const running = isRunning(job);
+  const { refetch } = items;
+  useEffect(() => {
+    if (!running) refetch();
+  }, [running, refetch]);
 
   if (reviewing) {
     return (
