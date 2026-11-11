@@ -6,3 +6,9 @@ data
 test
 *.log
 **/.env
+# The mobile apps are not part of the server image.
+apps
+packages
+jest.apps.config.cjs
+e2e
+test-results

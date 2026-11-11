@@ -5,6 +5,12 @@
  *   test/pK/**, test/attack/pK/**    node:test files named *.test.js (test/*.test.js count as phase 0)
  *   e2e/pK/**, e2e/attack/pK/**      Playwright files named *.spec.js or *.test.js
  *   requirements/pK.json             [{ id, title }]; each id needs a test whose name starts with that id
+ *
+ * The apps (phase 5 on) keep their tests beside their code, and those count too:
+ *   apps/**, packages/**             jest files named *.test.js or *.test.jsx (`npm run test:apps`)
+ *   apps/<app>/.maestro/**           Maestro flows (*.yaml), by the `name:` in their header. The gate does not boot an
+ *                                    emulator: flows run in .github/workflows/apps.yml, and here their names are counted
+ *   apps/owner and the shared packages belong to phase 5; apps/shopper, packages/store-client and packages/pay to phase 6
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -18,6 +24,11 @@ export const ALLOW_SKIP_PATH = 'tools/gate-allow-skip.json';
 const MIGRATIONS = 'src/db/migrations';
 const IS_NODE_TEST = /\.test\.js$/;
 const IS_E2E_TEST = /\.(spec|test)\.m?js$/;
+const IS_APP_TEST = /\.test\.jsx?$/;
+const IS_FLOW = /\.ya?ml$/;
+const APP_ROOTS = ['apps', 'packages'];
+const APP_SKIP = new Set(['node_modules', 'android', 'ios', 'dist', 'build', '.expo']);
+export const APP_JEST_CONFIG = 'jest.apps.config.cjs';
 
 export const range = (n) => Array.from({ length: n + 1 }, (_, k) => k);
 const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
@@ -77,10 +88,70 @@ export function e2eFolders(root, phases) {
   return phases.flatMap(e2eDirs).filter((dir) => walk(root, dir).some((f) => IS_E2E_TEST.test(f)));
 }
 
+/** The phase an app or package folder belongs to. */
+export const appPhaseOf = (rel) => (/^(apps\/shopper|packages\/(store-client|pay))\//.test(rel) ? 6 : 5);
+
 /** The phase a test file belongs to. */
 export function phaseOf(rel) {
+  if (/^(apps|packages)\//.test(rel)) return appPhaseOf(rel);
   const m = /^(?:test|e2e)\/(?:attack\/)?p(\d+)\//.exec(rel);
   return m ? Number(m[1]) : 0;
+}
+
+/** Every file under apps/ and packages/, leaving out installed packages and build output. */
+function walkApps(root) {
+  const visit = (rel) => {
+    const dir = path.join(root, rel);
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      if (APP_SKIP.has(entry.name)) return [];
+      const child = `${rel}/${entry.name}`;
+      if (entry.isDirectory()) return visit(child);
+      return entry.isFile() ? [child] : [];
+    });
+  };
+  return APP_ROOTS.flatMap(visit).sort();
+}
+
+/** The apps' jest test files, optionally only those of the given phases. */
+export function appTestFiles(root, phases) {
+  return walkApps(root).filter((f) => IS_APP_TEST.test(f) && (!phases || phases.includes(appPhaseOf(f))));
+}
+
+/**
+ * The apps' Maestro flows: [{ file, name }]. A flow's name is the `name:` in its header (the part above `---`), and
+ * a flow without one is named after its file, so it can never stand for a requirement by accident.
+ */
+export function maestroFlows(root, phases) {
+  return walkApps(root)
+    .filter((f) => /\/\.maestro\//.test(f) && IS_FLOW.test(f) && (!phases || phases.includes(appPhaseOf(f))))
+    .map((file) => {
+      const header = fs.readFileSync(path.join(root, file), 'utf8').split(/^---\s*$/m)[0];
+      const named = /^name:\s*(.+?)\s*$/m.exec(header)?.[1].replace(/^(['"])(.*)\1$/, '$2');
+      return { file, name: named || path.basename(file).replace(IS_FLOW, '') };
+    });
+}
+
+/**
+ * Rows from jest's --json report, in the shape the gate keeps: { source: 'app', name, file, outcome, message }.
+ * `name` is the test's own title, so "P-11 sign-in offers..." counts for P-11 whatever it is grouped under.
+ * A file that could not run at all is one failing row named after the file.
+ */
+export function readJestResults(report, root = repoRoot) {
+  const rows = [];
+  const rel = (file) => path.relative(root, file).split(path.sep).join('/');
+  const outcomes = { passed: 'pass', failed: 'fail', pending: 'skip', skipped: 'skip', disabled: 'skip', todo: 'todo' };
+  for (const suite of report?.testResults ?? []) {
+    const file = rel(suite.name ?? suite.testFilePath ?? '');
+    const tests = suite.assertionResults ?? suite.testResults ?? [];
+    if (tests.length === 0 && suite.status === 'failed') {
+      rows.push({ source: 'app', name: `${file} could not run`, file, type: 'test', outcome: 'fail', message: String(suite.message ?? suite.failureMessage ?? '').slice(0, 600) });
+    }
+    for (const t of tests) {
+      rows.push({ source: 'app', name: t.title, file, type: 'test', outcome: outcomes[t.status] ?? 'fail', message: (t.failureMessages ?? []).join('\n').slice(0, 600) || undefined });
+    }
+  }
+  return rows;
 }
 
 /** Line endings are ignored so a checkout on another system still matches. */
@@ -94,6 +165,8 @@ export function phaseFileHashes(root, k) {
     ...(k === 0 ? baselineTests(root) : []),
     ...testDirs(k).flatMap((d) => walk(root, d)),
     ...e2eDirs(k).flatMap((d) => walk(root, d)),
+    ...appTestFiles(root, [k]),
+    ...maestroFlows(root, [k]).map((flow) => flow.file),
     ...(fs.existsSync(path.join(root, `requirements/p${k}.json`)) ? [`requirements/p${k}.json`] : []),
   ];
   return Object.fromEntries(files.sort().map((f) => [f, hashFile(path.join(root, f))]));
@@ -178,6 +251,9 @@ export function checkSkips(skipped, allow = { tests: [] }) {
   return { verdicts, problems };
 }
 
+/** What a phase's tests are counted as: node:test, Playwright, the apps' jest tests, and Maestro flows. */
+export const TEST_KINDS = Object.freeze(['node', 'e2e', 'app', 'flow']);
+
 /** Compares locked phases up to n with the working tree and this run's test counts. */
 export function checkLedger(root, ledger, n, byPhase) {
   const changed = [];
@@ -190,7 +266,7 @@ export function checkLedger(root, ledger, n, byPhase) {
       if (!fs.existsSync(full)) changed.push(`${file} (locked in phase ${k}) is missing`);
       else if (hashFile(full) !== hash) changed.push(`${file} (locked in phase ${k}) has changed`);
     }
-    for (const kind of ['node', 'e2e']) {
+    for (const kind of TEST_KINDS) {
       const now = byPhase[k]?.[kind] ?? 0;
       const was = locked.counts?.[kind] ?? 0;
       if (now < was) lower.push(`Phase ${k} has ${now} ${kind} test(s), the ledger has ${was}`);
@@ -214,7 +290,8 @@ export function lockPhase({ root, ledger, n, summary, reason = '', commit = '', 
   const altered = previous ? Object.keys(previous.files).filter((f) => files[f] !== previous.files[f]) : [];
   if (altered.length && !reason.trim()) throw new Error(`Phase ${n} is already locked and these files differ: ${altered.join(', ')}. Pass --reason to override`);
   const relocks = [...(previous?.relocks ?? []), ...(altered.length ? [{ at: now, reason: reason.trim(), files: altered }] : [])];
-  const counts = { node: summary.byPhase?.[n]?.node ?? 0, e2e: summary.byPhase?.[n]?.e2e ?? 0 };
+  const counted = (kind) => summary.byPhase?.[n]?.[kind] ?? 0;
+  const counts = { node: counted('node'), e2e: counted('e2e'), ...(counted('app') ? { app: counted('app') } : {}), ...(counted('flow') ? { flow: counted('flow') } : {}) };
   return {
     version: 1,
     phases: {

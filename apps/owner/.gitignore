@@ -1,0 +1,16 @@
+.expo/
+dist/
+android/
+ios/
+web-build/
+.metro-health-check*
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+google-services.json
+GoogleService-Info.plist
+.env*.local

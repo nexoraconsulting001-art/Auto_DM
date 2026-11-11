@@ -1,0 +1,221 @@
+name: Apps
+
+# The mobile apps (PRD 10.1, "iOS ready from day one"). Every push builds an Android APK and an iOS simulator app
+# from the same source, with no secret and no account: no EAS, no Apple or Google login, no Firebase project.
+# A change that breaks either build fails this workflow (I-01). The server's own jobs are in ci.yml.
+
+on:
+  push:
+    branches: ['bhava/**', main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apps-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_ID: com.bhava.business
+  EXPO_NO_TELEMETRY: '1'
+  CI: '1'
+
+jobs:
+  app-tests:
+    name: App tests, parity and bundles
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: One version of React for the console and the apps
+        run: test "$(find . -path '*/node_modules/react/package.json' -not -path './node_modules/react/package.json' | wc -l)" = 0
+      - name: Tests of the apps and their packages (jest)
+        run: npm run test:apps -- --ci
+      - name: Every seller route and console page has an app screen (PRD 10.4)
+        run: npm run parity
+      - name: No business is named in the apps (P-03)
+        run: npm run policy-check
+      - name: The app bundles for Android and iOS
+        run: npm run app:export
+
+  android:
+    name: Android release APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Generate the Android project
+        working-directory: apps/owner
+        env: { APP_ENV: preview }
+        run: npx expo prebuild --platform android --no-install
+      - name: Make a signing key for this job only
+        run: |
+          KEY_PASS="$(openssl rand -hex 24)"
+          echo "::add-mask::$KEY_PASS"
+          echo "KEY_PASS=$KEY_PASS" >> "$GITHUB_ENV"
+          keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$RUNNER_TEMP/ci.keystore" -alias ci \
+            -keyalg RSA -keysize 2048 -validity 2 -storepass "$KEY_PASS" -keypass "$KEY_PASS" -dname "CN=CI build, O=CI"
+      - name: Build the release APK
+        working-directory: apps/owner/android
+        env: { APP_ENV: preview }
+        run: |
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/ci.keystore" \
+            -Pandroid.injected.signing.store.password="$KEY_PASS" \
+            -Pandroid.injected.signing.key.alias=ci \
+            -Pandroid.injected.signing.key.password="$KEY_PASS"
+      - name: Throw the signing key away
+        if: always()
+        run: rm -f "$RUNNER_TEMP/ci.keystore"
+      - name: The APK targets API 36 or higher (P-02)
+        run: |
+          APK=apps/owner/android/app/build/outputs/apk/release/app-release.apk
+          AAPT2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)"
+          "$AAPT2" dump badging "$APK" | tee "$RUNNER_TEMP/badging.txt" | grep -E "^(package|sdkVersion|targetSdkVersion)"
+          node tools/build-check.mjs apk --package "$APP_ID" < "$RUNNER_TEMP/badging.txt"
+      - name: The APK is signed with this job's key, not a debug key
+        run: |
+          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
+          "$APKSIGNER" verify --print-certs apps/owner/android/app/build/outputs/apk/release/app-release.apk | tee "$RUNNER_TEMP/signer.txt"
+          grep -q "CN=CI build" "$RUNNER_TEMP/signer.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: owner-android-apk
+          path: apps/owner/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: iOS simulator build
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Use Xcode 26 and print what the build runs on (P-02)
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE/Contents/Developer"; fi
+          { xcodebuild -version; xcodebuild -showsdks; } | tee "$RUNNER_TEMP/xcode.txt"
+          node tools/build-check.mjs xcode < "$RUNNER_TEMP/xcode.txt"
+      - run: npm ci
+      - name: Generate the iOS project
+        working-directory: apps/owner
+        env: { APP_ENV: preview }
+        run: npx expo prebuild --platform ios --no-install
+      - name: Install pods
+        working-directory: apps/owner/ios
+        run: pod install
+      - name: Build for the simulator, with signing off
+        working-directory: apps/owner/ios
+        env: { APP_ENV: preview }
+        run: |
+          WORKSPACE="$(ls -d *.xcworkspace | head -1)"
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          set -o pipefail
+          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/derived" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -n 200
+      - name: The build used the iOS 26 SDK or newer, and carries the privacy manifest
+        run: |
+          APP="$(ls -d "$RUNNER_TEMP"/derived/Build/Products/Release-iphonesimulator/*.app | head -1)"
+          SDK="$(/usr/libexec/PlistBuddy -c 'Print :DTSDKName' "$APP/Info.plist")"
+          XCODE_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :DTXcode' "$APP/Info.plist")"
+          echo "Built with SDK $SDK, Xcode $XCODE_BUILD"
+          printf 'Xcode %s\n\t-sdk %s\n' "$(xcodebuild -version | sed -n 's/^Xcode //p')" "$SDK" | node tools/build-check.mjs xcode
+          test -f "$APP/PrivacyInfo.xcprivacy"
+          (cd "$(dirname "$APP")" && zip -qry "$RUNNER_TEMP/owner-ios-simulator.zip" "$(basename "$APP")")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: owner-ios-simulator-app
+          path: ${{ runner.temp }}/owner-ios-simulator.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  android-e2e:
+    name: Android flows on an emulator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      API_PORT: '3000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Let the emulator use hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Build an APK that talks to this job's server
+        working-directory: apps/owner
+        env:
+          APP_ENV: preview
+          API_BASE_URL: http://10.0.2.2:${{ env.API_PORT }}
+        run: |
+          npx expo prebuild --platform android --no-install
+          KEY_PASS="$(openssl rand -hex 24)"
+          echo "::add-mask::$KEY_PASS"
+          keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$RUNNER_TEMP/e2e.keystore" -alias ci \
+            -keyalg RSA -keysize 2048 -validity 2 -storepass "$KEY_PASS" -keypass "$KEY_PASS" -dname "CN=CI build, O=CI"
+          (cd android && ./gradlew :app:assembleRelease --no-daemon \
+            -PreactNativeArchitectures=x86_64 \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/e2e.keystore" \
+            -Pandroid.injected.signing.store.password="$KEY_PASS" \
+            -Pandroid.injected.signing.key.alias=ci \
+            -Pandroid.injected.signing.key.password="$KEY_PASS")
+          rm -f "$RUNNER_TEMP/e2e.keystore"
+      - name: Start the server on its built-in database, with the simulators
+        env:
+          PORT: ${{ env.API_PORT }}
+          APP_HOST: 10.0.2.2
+        run: |
+          nohup node tools/app-e2e-server.mjs > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+          for i in $(seq 1 120); do curl -fs "http://127.0.0.1:$API_PORT/healthz" > /dev/null && break; sleep 1; done
+          curl -fs "http://127.0.0.1:$API_PORT/healthz"
+      - name: Install Maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Run the flows in apps/owner/.maestro
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            adb install -r apps/owner/android/app/build/outputs/apk/release/app-release.apk
+            maestro test -e APP_ID="$APP_ID" --format junit --output "$RUNNER_TEMP/maestro.xml" apps/owner/.maestro
+      - name: Stop the server
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/server.pid" ]; then kill "$(cat "$RUNNER_TEMP/server.pid")" || true; fi
+          tail -n 100 "$RUNNER_TEMP/server.log" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owner-android-e2e
+          path: |
+            ${{ runner.temp }}/maestro.xml
+            ~/.maestro/tests
+          if-no-files-found: ignore
+          retention-days: 14

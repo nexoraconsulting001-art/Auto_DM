@@ -4,6 +4,10 @@
  *
  * A line with the marker `secret-scan:allow` is exempt from the token rules (for made-up fixture values).
  * Nothing exempts the VM address. Only a hash of it is kept here, so this file does not publish it either.
+ *
+ * Some files are refused by name, whatever they hold (the apps, PRD 10.8): Android keystores, Apple keys and
+ * certificates (.p8, .p12, provisioning profiles) and the Firebase files (google-services.json,
+ * GoogleService-Info.plist). They are supplied to a build from outside the repository and never committed.
  */
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -27,6 +31,20 @@ const TOKEN_RULES = [
   ['JSON web token', /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/],
   ['password in a URL', /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"`<>{}$]+:(?!password@)[^\s/:@'"`<>{}$]{8,}@/i],
 ];
+
+const FORBIDDEN_FILES = [
+  ['Android keystore', /\.(jks|keystore|bks)$/i],
+  ['Apple key or certificate', /\.(p8|p12|pfx|cer|mobileprovision|provisionprofile)$/i],
+  ['Firebase services file', /(^|\/)(google-services[^/]*\.json|GoogleService-Info[^/]*\.plist)$/i],
+  ['service account key', /(^|\/)[^/]*service[-_]?account[^/]*\.json$/i],
+];
+
+/** A finding for a file that may not be tracked at all, by its name; or null. */
+export function scanFileName(file) {
+  const name = String(file).split(path.sep).join('/');
+  const hit = FORBIDDEN_FILES.find(([, pattern]) => pattern.test(name));
+  return hit ? { file: name, line: 0, rule: `${hit[0]} file: keep it outside the repository` } : null;
+}
 
 // name = "value", name: 'value', name `value`, where the value looks random rather than like a word or placeholder.
 const NAMED_SECRET = /(?:secret|token|passw(?:or)?d|api[_ -]?key|private[_ -]?key|access[_ -]?key)[\w-]*["'`]?\s*(?:[:=]\s*["'`]?|["'`])([A-Za-z0-9_+/=-]{16,})/gi;
@@ -71,6 +89,8 @@ function scanRepo(root) {
   const findings = [];
   let scanned = 0;
   for (const file of tracked) {
+    const named = scanFileName(file);
+    if (named) findings.push(named);
     const full = path.join(root, file);
     if (!fs.existsSync(full) || !fs.statSync(full).isFile() || fs.statSync(full).size > MAX_FILE_BYTES) continue;
     const data = fs.readFileSync(full);

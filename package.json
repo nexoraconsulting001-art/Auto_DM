@@ -9,7 +9,9 @@
   },
   "workspaces": [
     "console",
-    "shared/*"
+    "shared/*",
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "start": "node src/server.js",
@@ -29,7 +31,12 @@
     "ledger": "node tools/ledger.mjs",
     "secret-scan": "node tools/secret-scan.mjs",
     "policy-check": "node tools/policy-check.mjs",
-    "ci:wait": "node tools/ci-wait.mjs"
+    "ci:wait": "node tools/ci-wait.mjs",
+    "test:apps": "jest --config jest.apps.config.cjs",
+    "parity": "node tools/parity-check.mjs",
+    "app:export": "npm run export --workspace @bhava/owner-app",
+    "app:server": "node tools/app-e2e-server.mjs",
+    "sim": "node tools/sim/index.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1164.0",
@@ -48,9 +55,14 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
+    "@babel/core": "^7.29.0",
     "@playwright/test": "^1.65.0",
     "@stryker-mutator/core": "^10.1.1",
     "embedded-postgres": "16.15.0-beta.19",
     "fast-check": "^4.10.2"
+  },
+  "overrides": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   }
 }

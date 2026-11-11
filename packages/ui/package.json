@@ -1,0 +1,21 @@
+{
+  "name": "@bhava/ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-platform components for the apps, drawn from a theme",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "jest"
+  },
+  "dependencies": {
+    "@bhava/theme": "*"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*",
+    "react-native-safe-area-context": "*"
+  }
+}

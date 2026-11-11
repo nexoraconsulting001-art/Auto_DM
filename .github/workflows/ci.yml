@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# One lockfile serves the server and the apps. These jobs install only the server's workspaces, so React Native and
+# Expo never reach them or the image; the apps are built and tested in apps.yml.
+env:
+  SERVER_INSTALL: npm ci --workspace @bhava/console --workspace @bhava/api-client --include-workspace-root
+
 jobs:
   test:
     name: Tests (built-in database)
@@ -17,13 +22,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
-      - run: npm ci
+      - name: Install the server, the console and the shared client (no app packages)
+        run: ${{ env.SERVER_INSTALL }}
       - name: No secrets or server addresses in tracked files
         run: npm run secret-scan
       - name: One structure for every business (PRD 5.18)
         run: npm run policy-check
       - name: The seller console builds
         run: npm run build:console
+      - name: No React Native in the server's install
+        run: test ! -e node_modules/react-native && test ! -e node_modules/expo
       - run: npm run test:ci
 
   postgres:
@@ -46,7 +54,8 @@ jobs:
         with: { node-version: 22, cache: npm }
       - name: Install pg_dump and pg_restore 16
         run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
-      - run: npm ci
+      - name: Install the server, the console and the shared client (no app packages)
+        run: ${{ env.SERVER_INSTALL }}
       - run: npm run test:ci
 
   production-profile:
@@ -92,7 +101,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
-      - run: npm ci
+      - name: Install the server, the console and the shared client (no app packages)
+        run: ${{ env.SERVER_INSTALL }}
       - name: Start MinIO (S3) and create the bucket
         run: |
           docker run -d --name minio -p 9000:9000 \

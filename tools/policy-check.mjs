@@ -4,16 +4,24 @@
  * sample business's name in code. Differences between businesses live in data (brand kit, settings, blocks, entitlements and
  * feature flags), never in code. Comments are not checked; seed data, tests and tools are not product code.
  *
- *   node tools/policy-check.mjs [folder ...]     default: src, console/src, shared
+ * The apps are held to more (PRD 10.1, P-03): nothing under apps/ or packages/ may name a business at all, in code, a
+ * comment, a string, a test, a config file or a Maestro flow. One binary serves every business, and a shopper app
+ * takes its brand from the brand kit at build time, never from the source tree.
+ *
+ *   node tools/policy-check.mjs [folder ...]     default: src, console/src, shared, apps, packages
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_FOLDERS = ['src', 'console/src', 'shared'];
-const SKIP = new Set(['node_modules', 'dist', 'build', '.vite']);
+const DEFAULT_FOLDERS = ['src', 'console/src', 'shared', 'apps', 'packages'];
+const SKIP = new Set(['node_modules', 'dist', 'build', '.vite', 'android', 'ios', '.expo']);
 const EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.sql']);
+/** Under apps/ and packages/ every text file is read for a business's name, comments and all. */
+const APP_FOLDERS = /^(apps|packages)(\/|$)/;
+const APP_TEXT = new Set([...EXTENSIONS, '.json', '.yaml', '.yml', '.md', '.txt', '.xml', '.plist', '.html', '.css', '.gradle', '.properties', '.swift', '.kt', '.java']);
+const BRAND_NAMES = /mehta\s*mart|mehtamart|plant\s*store|plantstore|offerwalebaba|mehtamartmhm/i;
 
 const WHO = String.raw`(?:tenant|business|shop|store|seller|req\.tenant|ctx\.tenant|currentTenant\(\))`;
 const FIELD = String.raw`(?:id|slug|name|domain|tenantId|tenant_id)`;
@@ -27,8 +35,17 @@ export const POLICY_RULES = Object.freeze([
   { name: 'switch-on-business', message: 'switches on a business', pattern: new RegExp(String.raw`\bswitch\s*\(\s*${WHO}\??\.${FIELD}\s*\)`, 'i') },
   { name: 'business-list', message: 'checks a business against a fixed list', pattern: new RegExp(String.raw`\[\s*${LITERAL}(?:\s*,\s*${LITERAL})*\s*\]\s*\.includes\(\s*${WHO}\??\.${FIELD}\s*\)`, 'i') },
   { name: 'fixed-tenant-sql', message: 'names a fixed business in SQL', pattern: /\btenant_id\s*(?:=|<>|!=|IN\s*\()\s*\(?\s*\d+/i },
-  { name: 'sample-business', message: 'names a sample business in code', pattern: /mehta\s*mart|mehtamart|plant\s*store|plantstore|offerwalebaba|mehtamartmhm/i },
+  { name: 'sample-business', message: 'names a sample business in code', pattern: BRAND_NAMES },
 ]);
+
+/** Findings for a file under apps/ or packages/: any line that names a business, wherever on the line it is. */
+export function checkBrandNames(text, file = 'source.js') {
+  const findings = [];
+  String(text).split('\n').forEach((line, index) => {
+    if (BRAND_NAMES.test(line)) findings.push({ file, line: index + 1, rule: 'business-name-in-app', message: "names a business in the apps' source", text: line.trim().slice(0, 160) });
+  });
+  return findings;
+}
 
 /** The text with comments blanked out, keeping line numbers. Strings are left alone, so a URL's // survives. */
 export function withoutComments(text, extension) {
@@ -77,21 +94,29 @@ export function checkSource(text, file = 'source.js') {
   return findings;
 }
 
-function* walk(dir) {
+function* walk(dir, extensions = EXTENSIONS) {
   if (!fs.existsSync(dir)) return;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (SKIP.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) yield* walk(full);
-    else if (EXTENSIONS.has(path.extname(entry.name))) yield full;
+    if (entry.isDirectory()) yield* walk(full, extensions);
+    else if (extensions.has(path.extname(entry.name))) yield full;
   }
 }
 
 /** Every finding under the folders, relative to the repo. */
 export function checkFolders(folders = DEFAULT_FOLDERS, root = ROOT) {
   const findings = [];
+  const relative = (file) => path.relative(root, file).split(path.sep).join('/');
   for (const folder of folders) {
-    for (const file of walk(path.resolve(root, folder))) findings.push(...checkSource(fs.readFileSync(file, 'utf8'), path.relative(root, file).split(path.sep).join('/')));
+    const inApps = APP_FOLDERS.test(relative(path.resolve(root, folder)));
+    for (const file of walk(path.resolve(root, folder), inApps ? APP_TEXT : EXTENSIONS)) {
+      const text = fs.readFileSync(file, 'utf8');
+      const rel = relative(file);
+      const code = EXTENSIONS.has(path.extname(file)) ? checkSource(text, rel) : [];
+      const named = inApps ? checkBrandNames(text, rel).filter((f) => !code.some((c) => c.line === f.line)) : [];
+      findings.push(...code, ...named);
+    }
   }
   return findings;
 }

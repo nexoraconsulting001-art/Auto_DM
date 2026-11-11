@@ -1,0 +1,13 @@
+{
+  "name": "@bhava/theme",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Design tokens for the apps: the Neel and Haldi seller tokens, and a theme made from a brand kit",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "jest"
+  }
+}

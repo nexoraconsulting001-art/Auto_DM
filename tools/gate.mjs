@@ -16,8 +16,8 @@ import net from 'node:net';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  ALLOW_SKIP_PATH, checkLedger, checkMigrations, checkRequirements, checkSkips, digestOf, e2eFolders, findHome,
-  nodeTestGlobs, parsePhase, phaseFileHashes, phaseOf, range, readJson, readLedger, repoRoot, scratchBase,
+  ALLOW_SKIP_PATH, APP_JEST_CONFIG, TEST_KINDS, appTestFiles, checkLedger, checkMigrations, checkRequirements, checkSkips, digestOf, e2eFolders,
+  findHome, maestroFlows, nodeTestGlobs, parsePhase, phaseFileHashes, phaseOf, range, readJestResults, readJson, readLedger, repoRoot, scratchBase,
 } from './gate-lib.mjs';
 
 const NET_GUARD = pathToFileURL(path.join(repoRoot, 'tools', 'net-guard.mjs')).href;
@@ -268,11 +268,29 @@ async function main() {
     } else {
       summary.playwright = { ran: false, exitCode: 0, total: 0, passed: 0, failed: 0, skipped: 0 };
     }
+
+    // The apps (phase 5 on). Their jest tests run here. Their Maestro flows need an emulator and run in CI
+    // (.github/workflows/apps.yml), so here only their names are counted.
+    if (appTestFiles(repoRoot, phases).length) {
+      const report = path.join(scratch, 'jest-results.json');
+      say(`gate p${n}: jest over the apps and their packages`);
+      const appEnv = { ...env, CI: '1' };
+      delete appEnv.NODE_OPTIONS; // jest has its own network guard (tools/jest/net-guard.cjs)
+      const appRun = await run(process.execPath, [path.join(repoRoot, 'node_modules', 'jest', 'bin', 'jest.js'), `--config=${APP_JEST_CONFIG}`, '--ci', '--json', `--outputFile=${report}`], appEnv);
+      const rows = readJestResults(readJson(report), repoRoot);
+      results.push(...rows);
+      summary.apps = { ran: true, exitCode: appRun.code, ...tally('app') };
+      if (!rows.length) problems.push('jest wrote no report for the apps');
+      else if (appRun.code !== 0 && summary.apps.failed === 0) problems.push(`jest exited with ${appRun.code} without naming a failing test`);
+    }
+    for (const flow of maestroFlows(repoRoot, phases)) results.push({ source: 'flow', name: flow.name, file: flow.file, type: 'test', outcome: 'declared' });
   } catch (err) {
     problems.push(`The gate could not finish: ${err.message}`);
     summary.node ??= { exitCode: null, total: 0, passed: 0, failed: 0, skipped: 0 };
     summary.playwright ??= { ran: false, exitCode: null, total: 0, passed: 0, failed: 0, skipped: 0 };
   } finally {
+    summary.apps ??= { ran: false, exitCode: 0, total: 0, passed: 0, failed: 0, skipped: 0 };
+    summary.flows = { declared: results.filter((r) => r.source === 'flow').length };
     if (server) {
       try {
         summary.postgres.stopped = await stopPostgres(server);
@@ -285,7 +303,7 @@ async function main() {
 
   // Everything below is judged on what actually ran.
   const tests = results.filter((r) => r.type !== 'suite');
-  const byPhase = Object.fromEntries(range(n).map((k) => [k, { node: 0, e2e: 0 }]));
+  const byPhase = Object.fromEntries(range(n).map((k) => [k, Object.fromEntries(TEST_KINDS.map((kind) => [kind, 0]))]));
   for (const t of tests) {
     const k = phaseOf(t.file);
     if (byPhase[k]) byPhase[k][t.source]++;
@@ -308,10 +326,10 @@ async function main() {
     ok: problems.length === 0 && failing.length === 0,
     durationMs: Date.now() - started,
     counts: {
-      total: summary.node.total + summary.playwright.total,
-      passed: summary.node.passed + summary.playwright.passed,
-      failed: summary.node.failed + summary.playwright.failed,
-      skipped: summary.node.skipped + summary.playwright.skipped,
+      total: summary.node.total + summary.playwright.total + summary.apps.total,
+      passed: summary.node.passed + summary.playwright.passed + summary.apps.passed,
+      failed: summary.node.failed + summary.playwright.failed + summary.apps.failed,
+      skipped: summary.node.skipped + summary.playwright.skipped + summary.apps.skipped,
     },
     byPhase,
     failing,
@@ -323,7 +341,7 @@ async function main() {
 
   const out = path.join(logs, `gate-p${n}.json`);
   fs.writeFileSync(out, `${JSON.stringify(summary, null, 2)}\n`);
-  say(`gate p${n}: ${summary.ok ? 'PASS' : 'FAIL'} in ${Math.round(summary.durationMs / 1000)} s; node ${summary.node.passed}/${summary.node.total} passed, e2e ${summary.playwright.passed}/${summary.playwright.total} passed, ${summary.counts.skipped} skipped`);
+  say(`gate p${n}: ${summary.ok ? 'PASS' : 'FAIL'} in ${Math.round(summary.durationMs / 1000)} s; node ${summary.node.passed}/${summary.node.total} passed, e2e ${summary.playwright.passed}/${summary.playwright.total} passed, apps ${summary.apps.passed}/${summary.apps.total} passed, ${summary.flows.declared} flow(s) counted by name, ${summary.counts.skipped} skipped`);
   for (const f of failing.slice(0, 30)) say(`  failed: [${f.file}] ${f.name}`);
   for (const p of problems) say(`  ${p}`);
   say(`Summary: ${out}\nFull output: ${logFile}`);

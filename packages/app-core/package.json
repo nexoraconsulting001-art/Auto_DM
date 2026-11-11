@@ -1,0 +1,30 @@
+{
+  "name": "@bhava/app-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "What every app shares: the session, token storage, biometric lock, push registration, deep links, the offline cache and the strings",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./access": "./src/access.js",
+    "./strings": "./src/strings/index.js"
+  },
+  "scripts": {
+    "test": "jest"
+  },
+  "dependencies": {
+    "@bhava/api-client": "*",
+    "@bhava/theme": "*",
+    "@bhava/ui": "*"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "*",
+    "expo-constants": "*",
+    "expo-crypto": "*",
+    "expo-local-authentication": "*",
+    "expo-notifications": "*",
+    "expo-secure-store": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

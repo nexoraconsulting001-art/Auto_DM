@@ -1,0 +1,25 @@
+# Runs on an emulator in .github/workflows/apps.yml (android-e2e), against tools/app-e2e-server.mjs.
+# A flow's `name` counts toward a requirement when it starts with that requirement's id (tools/gate-lib.mjs).
+appId: ${APP_ID}
+name: The app opens on sign-in with a WhatsApp code and Google, and no password
+tags:
+  - smoke
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: sign-in-whatsapp
+    timeout: 120000
+- assertVisible: Sign in to Bhava for Business
+- assertVisible:
+    id: sign-in-google
+- assertNotVisible: .*[Pp]assword.*
+- assertNotVisible: .*SMS.*
+- tapOn:
+    id: sign-in-whatsapp
+- assertVisible:
+    id: sign-in-phone
+- assertVisible:
+    id: sign-in-send
+- assertNotVisible: .*[Pp]assword.*
