@@ -1,6 +1,6 @@
-// The store's payment screen script (PAY_JS, src/modules/storefront/views/pay.js, PRD 9.6) in a real phone browser against the real server and the
-// gateway simulator: the order page's "Pay now" opens the gateway in the seller's name, the gateway's signed answer goes to
-// the server, and the shopper lands on the order page, confirmed.
+// The store's payment screen script (PAY_JS in src/modules/storefront/views/pay.js, PRD 9.6) in a real phone browser,
+// against the real server and the gateway simulator: the order page's "Pay now" opens the gateway in the seller's name,
+// the gateway's signed answer goes to the server, and the shopper lands on the order page, confirmed.
 //
 // The order page does not load this script yet and the store's Content-Security-Policy does not yet allow the gateway's
 // script and frame (both are outside this track's folders and are reported). So this test adds the script to the page

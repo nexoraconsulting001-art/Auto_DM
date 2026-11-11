@@ -1,8 +1,9 @@
-// The shopper's own side of the store in a real phone browser inside Instagram (PRD 9.3, 9.4, 9.10, 9.13, 9.17, 9.19,
+// The shopper's own side of the store in a real phone browser inside Instagram (PRD 9.2, 9.3, 9.4, 9.10, 9.13, 9.17, 9.19,
 // 9.20): signing in with a WhatsApp code, the account with its orders, tracking and invoices, cancelling before shipment,
-// asking for a return with a photo, reviewing what arrived, and the wishlist. Every screen is checked with axe (WCAG 2.1
-// AA), at 360 px, and for the platform's name. Orders are placed and moved along through the store's own API and the
-// simulators, as the seller and the gateway would; the browser does what the shopper does.
+// asking for a return with a photo, reviewing what arrived, the wishlist, and the bag following the shopper to Chrome.
+// Every screen is checked with axe (WCAG 2.1 AA and 2.2 target size), at 360 px, and for the platform's name. Orders are
+// placed and moved along through the store's own API and the simulators, as the seller and the gateway would; the browser
+// does what the shopper does.
 import { expect, test } from '@playwright/test';
 import { createRequire } from 'node:module';
 import { PLATFORM_NAME, PRODUCT_NAME, SHOP_NAME, UA, buyer, newPhone, openStore, pdfText, png } from '../../../test/p4/buyer-ui/support.js';
@@ -197,4 +198,44 @@ test('the wishlist: a heart saved while signed out is in the account after the W
   await checkScreen(page, 'The wishlist, signed in');
   await page.getByRole('button', { name: 'Add to bag' }).click();
   await expect(page.locator('[data-bag-count]').first()).toHaveText('1');
+});
+
+test('the bag follows the shopper from Instagram’s browser to Chrome once they sign in there too (9.2, S-06)', async ({ page, browser }) => {
+  const { world, shop, plant, size, pot } = store;
+  const phone = newPhone();
+  await standInGateway(page);
+  // Inside Instagram: a size of the plant and two planters, then sign in from the bag.
+  await page.goto(`${world.base}/p/${plant.slug}`);
+  await page.locator(`label:has(input[name="variant"][value="${size.L}"])`).click();
+  await page.getByRole('button', { name: 'Add to bag' }).click();
+  await page.goto(`${world.base}/p/${pot.slug}`);
+  await page.getByLabel('Quantity').selectOption('2');
+  await page.getByRole('button', { name: 'Add to bag' }).click();
+  await expect(page.locator('[data-bag-count]').first()).toHaveText('3');
+  await signIn(page, phone, '/cart');
+  await expect(page.locator('[data-lines] li')).toHaveCount(2);
+  await expect.poll(async () => (await shop.sql(
+    'SELECT coalesce(sum(l.qty), 0)::int AS n FROM cart_lines l JOIN carts c ON c.tenant_id = l.tenant_id AND c.id = l.cart_id WHERE c.tenant_id = $1',
+    [shop.tenantId],
+  ))[0].n, { message: 'The bag was not mirrored to the store after sign-in' }).toBe(3);
+
+  // The shopper opens the store in Chrome, whose storage is its own, and signs in with the same number.
+  const chrome = await browser.newContext({ userAgent: UA.phone, viewport: PHONE });
+  try {
+    const other = await chrome.newPage();
+    await standInGateway(other);
+    await other.goto(`${world.base}/login?next=${encodeURIComponent('/cart')}`);
+    await other.getByLabel('WhatsApp number').fill(phone.slice(3));
+    await other.getByRole('button', { name: 'Send code on WhatsApp' }).click();
+    await other.getByLabel('6-digit code').fill(await world.codeFor(phone));
+    await other.getByRole('button', { name: 'Sign in' }).click();
+    await other.waitForURL(`${world.base}/cart`);
+    await expect(other.locator('[data-lines] li')).toHaveCount(2);
+    await expect(other.locator('[data-lines]')).toContainText(PRODUCT_NAME);
+    await expect(other.locator('[data-lines]')).toContainText('Terracotta planter');
+    await expect(other.locator('[data-bag-count]').first()).toHaveText('3');
+    await checkScreen(other, 'The bag in Chrome, after signing in');
+  } finally {
+    await chrome.close();
+  }
 });

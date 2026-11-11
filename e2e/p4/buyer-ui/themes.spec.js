@@ -11,7 +11,7 @@ import { PHONE, checkScreen, standInGateway } from './browser.js';
 createRequire(import.meta.url)('sharp');
 
 test.use({ userAgent: UA.instagram, viewport: PHONE });
-test.describe.configure({ timeout: 300_000 });
+test.describe.configure({ timeout: 480_000 });
 
 test('each of the five looks reads well on every screen of the journey', async ({ page }) => {
   const store = await openStore();

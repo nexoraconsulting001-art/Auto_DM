@@ -1,7 +1,8 @@
 // The buyer's whole journey in a real phone browser inside Instagram (PRD 9.1 to 9.10): the reel's page, the product, the
 // bag, checkout, paying by UPI or cash on delivery, the order's own page, and the parcel's tracking page from the shipping
-// message. Every screen is checked with axe (WCAG 2.1 AA and 2.2 target size), at 360 px, for the platform's name, and the messages the shopper
-// gets on WhatsApp carry the seller's brand and direct links only. Everything runs on the simulators.
+// message. Every screen is checked with axe (WCAG 2.1 AA and 2.2 target size), at 360 px and for the platform's name, and
+// the messages the shopper gets on WhatsApp carry the seller's brand and direct links only. Everything runs on the
+// simulators. The payment gateway's own script is answered by a stand-in (browser.js), as no real service is reached.
 import { expect, test } from '@playwright/test';
 import { createRequire } from 'node:module';
 import { AGGREGATOR_NAME, PLATFORM_NAME, PRODUCT_NAME, SHOP_NAME, UA, gatewayOrderOf, linksIn, messageText, newPhone, openStore, pathOf, readAs } from '../../../test/p4/buyer-ui/support.js';
