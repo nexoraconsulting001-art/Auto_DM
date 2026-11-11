@@ -34,30 +34,131 @@ export const ensureAppRole = (db) => db.exec(ENSURE_APP_ROLE);
 /**
  * Opens the database and applies any migrations not yet applied.
  * - `url` set: Postgres via `pg`. This is what QA and production use.
+ * - `url` and `ownerUrl` set: two logins. `url` logs in as the restricted app role and does all business work;
+ *   `ownerUrl` logs in as the owner of the tables and is used for migrations and `platform` only.
  * - `url` empty: embedded Postgres (PGlite) in `dataDir`, or in memory when `dataDir` is omitted.
  *   Only for tests and quick local runs: PGlite can be open in one process at a time, so it cannot
  *   serve a web server and a worker together.
- * Returns { query(sql, params) -> rows, exec(sql), tx(fn), close(), kind, platform }. Inside tx, fn receives { query, exec }.
+ * Returns { query(sql, params) -> rows, exec(sql), tx(fn), close(), kind, logins, platform }. Inside tx, fn receives { query, exec }.
  *
  * Inside withTenant() every query and transaction runs as APP_ROLE with app.tenant_id set for that transaction, so
  * row-level security holds it to the current business. `platform` is the same three calls without that fence, for
  * the few things that are about no single business or look across them: routing, the job queue, the Platform Console.
+ *
+ * With one login (`logins` is 1) the connection is the owner's and steps down to APP_ROLE for each business
+ * transaction. With two (`logins` is 2) business work is on a connection that was never the owner, so nothing
+ * it runs can step back up; and its work outside withTenant() sees no business rows at all.
  */
-export async function openDb({ url = '', dataDir, migrate = true, poolSize = 10 } = {}) {
-  const db = fenced(url ? await openPg(url, poolSize) : await openPglite(dataDir));
+export async function openDb({ url = '', ownerUrl = '', dataDir, migrate = true, poolSize = 10 } = {}) {
+  if (ownerUrl && !url) throw new Error('DATABASE_OWNER_URL is set without DATABASE_URL: set DATABASE_URL to the app login.');
+  if (ownerUrl && ownerUrl !== url) return openTwoLogins({ url, ownerUrl, migrate, poolSize });
+  const driver = url ? await openPg(url, poolSize) : await openPglite(dataDir);
+  const db = fenced(driver, driver);
   if (migrate) await runMigrations(db);
   return db;
 }
 
+/** The connection migrations, backups and restores use: the owner's when there are two logins. */
+export const ownerDatabaseUrl = (config) => config.databaseOwnerUrl || config.databaseUrl;
+
 /**
  * Opens the database for a running process (web, worker, server commands). Postgres is the only runtime
  * database: without DATABASE_URL this refuses, unless NODE_ENV=test or ALLOW_PGLITE=1.
+ * In production, one login for everything still works and is warned about once, here at start.
  */
 export async function openRuntimeDb(config, env = process.env) {
-  if (!config.databaseUrl && env.NODE_ENV !== 'test' && env.ALLOW_PGLITE !== '1') {
+  if (!config.databaseUrl && !config.databaseOwnerUrl && env.NODE_ENV !== 'test' && env.ALLOW_PGLITE !== '1') {
     throw new Error('DATABASE_URL is required: Postgres is the only runtime database. For a quick local run on the built-in database, set ALLOW_PGLITE=1.');
   }
-  return openDb({ url: config.databaseUrl, dataDir: config.dataDir });
+  const db = await openDb({ url: config.databaseUrl, ownerUrl: config.databaseOwnerUrl, dataDir: config.dataDir });
+  if (db.logins === 1 && db.kind === 'postgres' && env.NODE_ENV === 'production') {
+    log.warn('db.single_login', { hint: 'DATABASE_URL logs in as the owner. Set DATABASE_OWNER_URL and point DATABASE_URL at the app login (HANDOFF.md).' });
+  }
+  return db;
+}
+
+// The owner pool only serves routing, the job queue and the Platform Console, so it is the smaller one.
+const ownerPoolSize = (poolSize) => Math.max(2, Math.ceil(poolSize / 2));
+
+async function openTwoLogins({ url, ownerUrl, migrate, poolSize }) {
+  const owner = await openPg(ownerUrl, ownerPoolSize(poolSize));
+  try {
+    if (migrate) await runMigrations(owner);
+    return fenced(await openAppLogin(owner, url, poolSize), owner);
+  } catch (err) {
+    await owner.close();
+    throw err;
+  }
+}
+
+// invalid_password and invalid_authorization_specification: the login is not there yet, or has another password.
+const CANNOT_LOG_IN = new Set(['28P01', '28000']);
+
+/** Connects as the app login. The first time on a server (or after a restore onto a new one) the owner makes the login. */
+async function openAppLogin(owner, url, poolSize) {
+  for (let attempt = 0; ; attempt++) {
+    const app = await openPg(url, poolSize);
+    try {
+      await assertRestrictedLogin(app);
+      return app;
+    } catch (err) {
+      await app.close();
+      if (!CANNOT_LOG_IN.has(err.code) || attempt === 3) throw err;
+    }
+    // Web and worker may both be here at once, and only one of them at a time can change a role.
+    await ensureAppLogin(owner, url).catch(() => new Promise((r) => setTimeout(r, 100 + Math.random() * 400)));
+  }
+}
+
+/**
+ * Lets the user and password in `appUrl` log in as the app role. Run on the owner connection. The user is APP_ROLE
+ * itself, or another name (one per environment when several share a server), which is then made a member of it.
+ */
+export async function ensureAppLogin(db, appUrl) {
+  const u = new URL(appUrl);
+  const name = decodeURIComponent(u.username);
+  const password = decodeURIComponent(u.password);
+  if (!name || !password) throw new Error('The app connection needs a user and a password.');
+  await db.exec(ENSURE_APP_ROLE);
+  const [{ exists, change, member }] = await db.query(
+    `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists,
+            format('ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION PASSWORD %L', $1::text, $2::text) AS change,
+            format('GRANT ${APP_ROLE} TO %I', $1::text) AS member`,
+    [name, password],
+  );
+  await db.exec(`${exists ? 'ALTER' : 'CREATE'} ${change}`);
+  if (name !== APP_ROLE) await db.exec(member);
+}
+
+/**
+ * Refuses a login that could get around the fence: one that is a superuser, can bypass row-level security, can make
+ * roles or databases, owns anything, or belongs to any role but APP_ROLE. Returns the login's name.
+ */
+export async function assertRestrictedLogin(db) {
+  const [r] = await db.query(
+    `SELECT r.rolname AS name, r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication,
+            pg_has_role(r.oid, '${APP_ROLE}', 'USAGE') AS is_app,
+            EXISTS (SELECT 1 FROM pg_class c WHERE c.relowner IN (r.oid, a.oid))
+              OR EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspowner IN (r.oid, a.oid))
+              OR EXISTS (SELECT 1 FROM pg_proc p WHERE p.proowner IN (r.oid, a.oid))
+              OR EXISTS (SELECT 1 FROM pg_database d WHERE d.datdba IN (r.oid, a.oid)) AS owns,
+            EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member IN (r.oid, a.oid) AND m.roleid <> a.oid) AS other_roles
+       FROM pg_roles r JOIN pg_roles a ON a.rolname = '${APP_ROLE}'
+      WHERE r.rolname = current_user`,
+  );
+  if (!r) throw new Error(`The role ${APP_ROLE} does not exist yet: run the migrations on the owner connection first.`);
+  const wrong = [
+    r.rolsuper && 'is a superuser',
+    r.rolbypassrls && 'can bypass row-level security',
+    r.rolcreaterole && 'can create roles',
+    r.rolcreatedb && 'can create databases',
+    r.rolreplication && 'can replicate',
+    !r.is_app && `is not ${APP_ROLE} or a member of it`,
+    r.owns && 'owns tables, functions, a schema or a database',
+    r.other_roles && `belongs to a role other than ${APP_ROLE}`,
+  ].filter(Boolean);
+  if (wrong.length) throw new Error(`DATABASE_URL must log in as the restricted app role, but its login ${wrong.join(', ')}. Put the owner's connection in DATABASE_OWNER_URL.`);
+  return r.name;
 }
 
 /** Applies migrations/NNN_name.sql in order, each in its own transaction. Returns the versions applied. */
@@ -89,26 +190,36 @@ export async function runMigrations(handle, dir = MIGRATIONS_DIR) {
   return applied;
 }
 
-/** Wraps a driver so that work inside withTenant() can only touch the current business. */
-function fenced(driver) {
+/**
+ * Puts the fence around `app` and leaves `owner` as `platform`. One login: `app` is the owner's own connection and
+ * steps down to APP_ROLE inside withTenant(). Two logins: `app` already is the restricted role, and every piece of
+ * its work names the business (or none) for that transaction, so nothing a pooled connection was left with counts.
+ */
+function fenced(app, owner) {
+  const twoLogins = app !== owner;
   // withTenant() only accepts a positive integer, so the id is safe to write into the statement.
   const fence = () => {
     const tenant = currentTenant();
+    if (twoLogins) return `SELECT set_config('app.tenant_id', '${tenant ? Number(tenant.id) : ''}', true)`;
     return tenant ? `SET LOCAL ROLE ${APP_ROLE}; SELECT set_config('app.tenant_id', '${Number(tenant.id)}', true)` : '';
   };
   return {
-    kind: driver.kind,
-    close: driver.close,
-    platform: { query: driver.query, exec: driver.exec, tx: (fn) => driver.tx(fn) },
+    kind: app.kind,
+    logins: twoLogins ? 2 : 1,
+    close: async () => {
+      await app.close();
+      if (twoLogins) await owner.close();
+    },
+    platform: { query: owner.query, exec: owner.exec, tx: (fn) => owner.tx(fn) },
     query(sql, params = []) {
       const start = fence();
-      return start ? driver.tx((t) => t.query(sql, params), start) : driver.query(sql, params);
+      return start ? app.tx((t) => t.query(sql, params), start) : app.query(sql, params);
     },
     exec(sql) {
       const start = fence();
-      return start ? driver.tx((t) => t.exec(sql), start) : driver.exec(sql);
+      return start ? app.tx((t) => t.exec(sql), start) : app.exec(sql);
     },
-    tx: (fn) => driver.tx(fn, fence()),
+    tx: (fn) => app.tx(fn, fence()),
   };
 }
 

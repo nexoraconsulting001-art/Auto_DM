@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { config as defaultConfig } from './config.js';
 import { createGoogleAdapters } from './adapters/google/index.js';
 import { createMetaAdapters } from './adapters/meta/index.js';
-import { openRuntimeDb } from './db/index.js';
+import { openRuntimeDb, ownerDatabaseUrl } from './db/index.js';
 import { createInstagram } from './instagram.js';
 import { createCompliance } from './modules/compliance/index.js';
 import { MODULES } from './modules/index.js';
@@ -19,12 +19,13 @@ export const BACKUP = 'system.backup';
 const HOUR = 3_600_000;
 
 /** Removes data past its retention: finished jobs, dead sessions, compliance events over 13 months, raw export files past 7 days. */
-export async function housekeeping({ db, queue, storage }) {
+export async function housekeeping({ db: handle, queue, storage }) {
+  const db = handle.platform ?? handle; // retention looks across every business, which only the platform path may do
   await queue.cleanup(14);
   await db.query(`DELETE FROM sessions WHERE expires_at < now() OR revoked_at < now() - interval '7 days'`);
   await db.query(`DELETE FROM platform_sessions WHERE expires_at < now() OR revoked_at < now() - interval '7 days'`);
   await db.query(`DELETE FROM compliance_events WHERE created_at < now() - interval '395 days'`);
-  if (storage) await sweepRawExports({ db, storage });
+  if (storage) await sweepRawExports({ db: handle, storage });
 }
 
 /** Registers every background job: the system's own, then each module's (see src/modules/index.js). */
@@ -35,7 +36,7 @@ export function registerJobs({ db, platform, config, modules = MODULES, metaCall
   const storage = backupStorage(config);
   if (storage) {
     queue.work(BACKUP, async () => {
-      const { key, bytes } = await runBackup({ databaseUrl: config.databaseUrl, storage });
+      const { key, bytes } = await runBackup({ databaseUrl: ownerDatabaseUrl(config), storage });
       metrics.gauge('backup_last_success_seconds', () => [{ labels: {}, value: Math.floor(Date.now() / 1000) }]);
       log.info('backup.done', { key, bytes });
     });

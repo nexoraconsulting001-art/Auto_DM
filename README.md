@@ -10,7 +10,7 @@ Needs Node 22.
 
 ```bash
 npm install
-cp .env.example .env     # set DATABASE_URL, or ALLOW_PGLITE=1 for a quick local run
+cp .env.example .env     # set DATABASE_URL, or ALLOW_PGLITE=1 for a quick local run (production: DATABASE_OWNER_URL too, see HANDOFF.md)
 npm start                # the web app
 npm run worker           # background jobs (needs Postgres when the web app is also running)
 ```

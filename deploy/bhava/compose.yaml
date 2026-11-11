@@ -7,7 +7,10 @@ x-app: &app
   restart: unless-stopped
   env_file: .env
   environment: &app-env
-    DATABASE_URL: postgres://bhava:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/bhava
+    # Two logins. Business work logs in as bhava_app, which owns nothing and cannot get around row-level security.
+    # The owner is used for database changes, backups and the platform paths, and makes the bhava_app login on first start.
+    DATABASE_URL: postgres://bhava_app:${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}@postgres:5432/bhava
+    DATABASE_OWNER_URL: postgres://bhava:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/bhava
     STORAGE_DIR: /data/files
   volumes: ["files:/data/files"]
   depends_on:
@@ -22,6 +25,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: bhava
     # Sized for a shared 6 GB VM and up to 10 test businesses. No ports: only web and worker can reach it.
+    # Web and worker each hold up to 10 app connections and 5 owner connections.
     command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=40"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     mem_limit: 512m

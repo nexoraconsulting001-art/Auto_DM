@@ -60,15 +60,19 @@ test('F-09: a spoofed X-Forwarded-Host of B does not change links generated for 
   const token = await signIn(app, a);
   const spoofed = { headers: { 'x-forwarded-host': b.host } };
 
-  const reel = need(await api(app, a, token, `/reels/${reelId}`, spoofed), 200, 'Read reel');
+  // Since Phase 4 a token for A that arrives on B's own address is refused outright (test/p4/db-login/bearer-address.test.js),
+  // so no link is generated there at all. An address that belongs to no business is the next test.
+  for (const path of [`/reels/${reelId}`, '/settings/setup']) {
+    const refused = need(await api(app, a, token, path, spoofed), 401, 'A token on another business address');
+    assert.doesNotMatch(refused.text, /beta-store|storeUrl/);
+  }
+
+  // On A's own address the link is A's.
+  const reel = need(await api(app, a, token, `/reels/${reelId}`), 200, 'Read reel');
   const link = new URL(reel.json().storeUrl);
   assert.equal(link.protocol, 'https:');
-  assert.equal(link.hostname, a.host, 'the DM link is on A\'s own address');
+  assert.equal(link.hostname, a.host, "the DM link is on A's own address");
   assert.doesNotMatch(reel.text, /beta-store/);
-
-  const setup = need(await api(app, a, token, '/settings/setup', spoofed), 200, 'Read setup');
-  assert.equal(new URL(setup.json().storeUrl).hostname, a.host);
-  assert.doesNotMatch(setup.text, /beta-store/);
 });
 
 test('F-09: generated links ignore a Host header naming somewhere else', async (t) => {

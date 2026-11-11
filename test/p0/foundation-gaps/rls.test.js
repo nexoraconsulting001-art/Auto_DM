@@ -66,8 +66,10 @@ test('db.platform is unfenced even inside a business, for the few things that lo
 
 test('the app role is not a superuser, cannot bypass the policies, and owns nothing', async () => {
   const { db } = await setup();
-  const [role] = await db.query('SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolcanlogin FROM pg_roles WHERE rolname = $1', [APP_ROLE]);
-  assert.deepEqual(role, { rolsuper: false, rolbypassrls: false, rolcreaterole: false, rolcreatedb: false, rolcanlogin: false });
+  // Whether it can log in is no longer fixed: with two database logins (Phase 4, test/p4/db-login) it is the app's own login,
+  // and a role belongs to the whole server, so another database there may already have given it one.
+  const [role] = await db.query('SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolreplication FROM pg_roles WHERE rolname = $1', [APP_ROLE]);
+  assert.deepEqual(role, { rolsuper: false, rolbypassrls: false, rolcreaterole: false, rolcreatedb: false, rolreplication: false });
   const owned = await db.query(`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tableowner = $1`, [APP_ROLE]);
   assert.deepEqual(owned, []);
 });

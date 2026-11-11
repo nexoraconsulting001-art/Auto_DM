@@ -47,6 +47,9 @@ export const config = {
   // Database: Postgres connection string, required at runtime. Empty works only with NODE_ENV=test or
   // ALLOW_PGLITE=1, for quick local runs on the built-in database in data/pgdata (one process at a time).
   databaseUrl: process.env.DATABASE_URL || '',
+  // With this set there are two logins: DATABASE_URL is the restricted app role (all business work) and this is the
+  // owner of the tables (migrations, backups and the platform paths). Empty: DATABASE_URL is the owner and does both.
+  databaseOwnerUrl: process.env.DATABASE_OWNER_URL || '',
   dataDir: process.env.DATA_DIR || path.join(rootDir, 'data', 'pgdata'),
   // Businesses (tenants). Each business is found from the web address:
   //   <slug>.PLATFORM_DOMAIN (e.g. mehtamart.shopsdomain.example), or a custom domain added for it.

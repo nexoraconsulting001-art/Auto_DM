@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { openDb } from '../src/db/index.js';
+import { APP_ROLE, openDb } from '../src/db/index.js';
 import { bindTenant, createRepos } from '../src/repos/index.js';
 import { createApp } from '../src/server.js';
 import { config } from '../src/config.js';
@@ -39,12 +39,26 @@ export function fakeIg({ failButton = false } = {}) {
   };
 }
 
+const DEFAULT_LOGINS = process.env.TEST_DB_LOGINS === '2' ? 2 : 1;
+
+/** The app login's connection for an owner connection: the same database as the role bhava_app, with one password for the whole test server. */
+export function appLoginUrl(ownerUrl) {
+  const url = new URL(ownerUrl);
+  url.username = APP_ROLE;
+  url.password = crypto.createHash('sha256').update(`app-login:${process.env.TEST_DATABASE_URL}`).digest('hex').slice(0, 32);
+  return url.href;
+}
+
 /**
  * A fresh, empty database: in memory by default, or a new database on the Postgres server at
  * TEST_DATABASE_URL (how CI proves everything also works on real Postgres).
+ * `logins: 2` opens it the way production does, with the restricted app login for business work and the owner for
+ * db.platform. That needs TEST_DATABASE_URL; the returned handle has `urls: { owner, app }`.
+ * TEST_DB_LOGINS=2 makes that the default for every test, to see what still leans on the owner outside db.platform.
  */
-export async function openTestDb({ migrate = true } = {}) {
+export async function openTestDb({ migrate = true, logins = DEFAULT_LOGINS } = {}) {
   const url = process.env.TEST_DATABASE_URL;
+  if (logins === 2 && !url) throw new Error('A two-login test database needs TEST_DATABASE_URL');
   if (!url) return openDb({ migrate });
   const admin = await openDb({ url, migrate: false, poolSize: 1 });
   const name = `t_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -52,15 +66,17 @@ export async function openTestDb({ migrate = true } = {}) {
   await admin.close();
   const target = new URL(url);
   target.pathname = `/${name}`;
-  return openDb({ url: target.href, poolSize: 3, migrate });
+  if (logins !== 2) return openDb({ url: target.href, poolSize: 3, migrate });
+  const urls = { owner: target.href, app: appLoginUrl(target.href) };
+  return Object.assign(await openDb({ url: urls.app, ownerUrl: urls.owner, poolSize: 3, migrate }), { urls });
 }
 
 /**
  * A fresh in-memory database with one business ("default", the DEFAULT_TENANT the app falls back to).
  * `repos` are bound to that business; `platform` are the unbound repos.
  */
-export async function setup() {
-  const db = await openTestDb();
+export async function setup({ logins = DEFAULT_LOGINS } = {}) {
+  const db = await openTestDb({ logins });
   const platform = createRepos(db, { secrets: createSecrets({ dataKey: TEST_DATA_KEY }) });
   const tenant = await platform.tenants.ensure({ slug: 'default', name: 'Test store' });
   return { db, repos: bindTenant(platform, tenant), platform, tenant };
@@ -84,8 +100,8 @@ function ownCacheKeys(cache) {
   return { ...cache, get: (key) => cache.get(prefix + key), set: (key, ...rest) => cache.set(prefix + key, ...rest), del: (key) => cache.del(prefix + key) };
 }
 
-export async function startApp({ ig = fakeIg(), overrides = {}, modules } = {}) {
-  const { db, repos, platform, tenant } = await setup();
+export async function startApp({ ig = fakeIg(), overrides = {}, modules, logins = DEFAULT_LOGINS } = {}) {
+  const { db, repos, platform, tenant } = await setup({ logins });
   await repos.users.ensureOwner(OWNER);
   await platform.tenants.linkIgAccount(tenant.id, IG_ACCOUNT.igUserId, IG_ACCOUNT.username);
   await repos.igAccounts.setToken(IG_ACCOUNT.igUserId, IG_ACCOUNT.token);

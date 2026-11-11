@@ -1,13 +1,16 @@
-// Replaces EVERYTHING in the database at DATABASE_URL with a backup. Stop the web and worker first.
+// Replaces EVERYTHING in the database with a backup. Stop the web and worker first.
+// Runs on the owner's connection: DATABASE_OWNER_URL when it is set, DATABASE_URL otherwise.
 //   npm run restore -- --confirm=<database name>                     # the latest backup
 //   npm run restore -- --confirm=<database name> backups/daily-07.dump
 import { config } from '../src/config.js';
 import { backupStorage, runRestore } from '../src/backup.js';
+import { ownerDatabaseUrl } from '../src/db/index.js';
 
 const args = process.argv.slice(2);
 const confirm = args.find((a) => a.startsWith('--confirm='))?.slice('--confirm='.length);
 const key = args.find((a) => !a.startsWith('--'));
-const dbName = config.databaseUrl ? new URL(config.databaseUrl).pathname.slice(1) : '';
+const databaseUrl = ownerDatabaseUrl(config);
+const dbName = databaseUrl ? new URL(databaseUrl).pathname.slice(1) : '';
 const storage = backupStorage(config);
 
 if (!storage || !dbName) {
@@ -18,7 +21,7 @@ if (confirm !== dbName) {
   console.error(`This overwrites the database "${dbName}". To go ahead, add --confirm=${dbName}`);
   process.exit(1);
 }
-runRestore({ databaseUrl: config.databaseUrl, storage, key })
+runRestore({ databaseUrl, storage, key })
   .then((r) => console.log(`Restored ${r.key} (${Math.round(r.bytes / 1024)} KB)`))
   .catch((err) => {
     console.error(err.message);

@@ -16,7 +16,7 @@ import { accountRoutes } from './routes/account.js';
 import { adminRoutes, baseUrlFor, buyerBaseUrl } from './routes/admin.js';
 import { ApiError, isApiV1Url } from './contracts/api/index.js';
 import { sendApiError } from './modules/api-v1/respond.js';
-import { createTenantResolver, withTenant } from './tenancy.js';
+import { createTenantResolver, currentTenant, withTenant } from './tenancy.js';
 import { createPlatform, describePlatform } from './platform/index.js';
 import { log, reportError, requestIds } from './platform/log.js';
 import { apiRoutes, mediaRoutes, storeRoutes } from './routes/store.js';
@@ -122,11 +122,17 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
   });
 
   // A bearer token names its own user and business, so it is checked before the web address is looked at.
+  // The address can only refuse it (below): it never changes which business the token works in.
   app.use(auth.bearer);
 
   // Everything below belongs to one business: the bearer token's, or the one found from the web address.
   app.use(async (req, res, next) => {
-    if (req.bearer) return next();
+    if (req.bearer) {
+      // The token names the business. On an address that is another business's own, it is refused like a bad token.
+      const owner = await tenants.owner(req.hostname);
+      if (owner && owner.id !== currentTenant()?.id) return auth.notLoggedIn(res);
+      return next();
+    }
     // req.hostname honours X-Forwarded-Host only from the trusted proxy in front (Caddy).
     const tenant = await tenants.resolve(req.hostname);
     if (!tenant) {

@@ -68,7 +68,8 @@ function loginLimiter(cache, prefix) {
  * Every POST made with a cookie session must carry a CSRF token derived from the session.
  *
  * The API and mobile app send "Authorization: Bearer <token>" instead. The token alone says which user
- * and which business, before and regardless of the web address, and CSRF does not apply.
+ * and which business, before the web address is looked at, and CSRF does not apply. The server then refuses
+ * a token that arrives on another business's own address.
  *
  * Sign-in methods (Google, WhatsApp code, Sign in with Apple) plug in by verifying the person and then
  * calling login(); nothing else here depends on how they proved who they are.
@@ -79,6 +80,7 @@ export function createAuth({ secret, users, sessions, tenants, cache }) {
 
   return {
     ...limiter,
+    notLoggedIn,
 
     /** Bearer sessions: sets the current business and user from the token. A bad token is refused, never treated as a guest. */
     async bearer(req, res, next) {

@@ -43,12 +43,15 @@ test('the business comes from the token, not the web address', async () => {
     await app.platform.tenants.addDomain(app.tenant.id, 'default.example');
     const session = await token(app, undefined, at('default.example'));
 
-    // An address with no business at all, and the address of a different business.
-    for (const host of ['nobody.example', 'leaf.bhava.test']) {
+    // An address with no business at all, and one that is not where the token was issued.
+    for (const host of ['nobody.example', 'default.bhava.test']) {
       const res = await fetch(`${app.base}/api/v1/auth/me`, { headers: { ...bearer(session.token), ...at(host) } });
       assert.equal(res.status, 200, host);
       assert.equal((await res.json()).business.id, app.tenant.id, host);
     }
+    // The address of a different business refuses the token (Phase 4, test/p4/db-login/bearer-address.test.js). It never switches business.
+    const elsewhere = await fetch(`${app.base}/api/v1/auth/me`, { headers: { ...bearer(session.token), ...at('leaf.bhava.test') } });
+    assert.equal(elsewhere.status, 401);
     // Without the token, those addresses mean what they always did.
     assert.equal((await fetch(`${app.base}/`, { headers: at('nobody.example') })).status, 404);
     assert.ok(other);
@@ -63,12 +66,19 @@ test('one business\'s token finds nothing of another business, on any address', 
     const { leaf } = await withLeaf(app);
     const product = await leaf.products.create({ name: 'SECRET Pot', price: '199', active: 'on' });
     const session = await token(app);
-    for (const headers of [bearer(session.token), { ...bearer(session.token), ...at('leaf.bhava.test') }]) {
+    for (const headers of [bearer(session.token), { ...bearer(session.token), ...at('nobody.example') }]) {
       const lookup = await fetch(`${app.base}/api/v1/products/${product.id}`, { headers, redirect: 'manual' });
       assert.equal(lookup.status, 404);
       assert.doesNotMatch(await lookup.text(), /SECRET/);
       assert.doesNotMatch(await (await fetch(`${app.base}/api/v1/products`, { headers })).text(), /SECRET/);
       assert.deepEqual((await (await fetch(`${app.base}/api/products?ids=${product.id}`, { headers })).json()).products, []);
+    }
+    // On the other business's own address the token is refused outright (Phase 4), which shows nothing either.
+    const headers = { ...bearer(session.token), ...at('leaf.bhava.test') };
+    for (const path of [`/api/v1/products/${product.id}`, '/api/v1/products', `/api/products?ids=${product.id}`]) {
+      const res = await fetch(`${app.base}${path}`, { headers, redirect: 'manual' });
+      assert.equal(res.status, 401, path);
+      assert.doesNotMatch(await res.text(), /SECRET/);
     }
   } finally {
     app.close();

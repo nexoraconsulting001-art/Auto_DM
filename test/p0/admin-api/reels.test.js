@@ -129,8 +129,11 @@ test('F-09: a spoofed forwarded host does not change the link, on the business\'
   assert.equal(reel.storeUrl, 'https://default.bhava.test/r/brunch-edit?src=dm');
   const leaf = await secondBusiness(app);
   assert.ok(leaf);
-  const spoofed = await fetch(`${base}/api/v1/reels/${REEL_ID}`, jsonRequest('GET', undefined, { ...bearer(owner), ...at('leaf.bhava.test') }));
+  const spoofed = await fetch(`${base}/api/v1/reels/${REEL_ID}`, jsonRequest('GET', undefined, { ...bearer(owner), ...at('evil.example') }));
   assert.equal((await ok(spoofed)).storeUrl, 'https://default.bhava.test/r/brunch-edit?src=dm');
-  const setup = await fetch(`${base}/api/v1/settings/setup`, jsonRequest('GET', undefined, { ...bearer(owner), ...at('leaf.bhava.test') }));
+  const setup = await fetch(`${base}/api/v1/settings/setup`, jsonRequest('GET', undefined, { ...bearer(owner), ...at('evil.example') }));
   assert.equal((await ok(setup)).storeUrl, 'https://default.bhava.test');
+  // Another business's own address refuses the token altogether (Phase 4), so there is no link to change.
+  const onLeaf = await fetch(`${base}/api/v1/reels/${REEL_ID}`, jsonRequest('GET', undefined, { ...bearer(owner), ...at('leaf.bhava.test') }));
+  assert.equal(onLeaf.status, 401);
 }));

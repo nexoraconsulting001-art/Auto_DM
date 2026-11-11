@@ -58,6 +58,7 @@ const dayKey = (date) => `backups/daily-${String(date.getUTCDate()).padStart(2, 
 /** Dumps the database and uploads it. Returns { key, bytes }. */
 export async function runBackup({ databaseUrl, storage, now = new Date() }) {
   if (!databaseUrl) throw new Error('Backups need DATABASE_URL');
+  // databaseUrl is the owner's connection (ownerDatabaseUrl): pg_dump refuses to read tables that row-level security hides from it.
   const { file, done } = await tempFile();
   try {
     // Privileges stay in the dump: the app role's grants are what row-level security stands on.
@@ -72,7 +73,10 @@ export async function runBackup({ databaseUrl, storage, now = new Date() }) {
   }
 }
 
-/** Replaces everything in the database at databaseUrl with a backup. `key` defaults to the latest. */
+/**
+ * Replaces everything in the database at databaseUrl (the owner's connection) with a backup. `key` defaults to the latest.
+ * The app login's password is kept by the server, not the dump: on a new server the next start makes the login again.
+ */
 export async function runRestore({ databaseUrl, storage, key }) {
   const latest = key || (await storage.get(LATEST))?.toString();
   if (!latest) throw new Error('No backup found');

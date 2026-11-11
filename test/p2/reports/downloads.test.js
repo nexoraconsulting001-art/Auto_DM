@@ -64,7 +64,8 @@ test('a file is its requester\'s and its business\'s alone', async (t) => {
   const made = await media(a);
   assert.equal((await a.file(made.fileUrl, null)).status, 401, 'Not signed in');
   assert.equal((await b.file(made.fileUrl)).status, 404, 'Another business, on its own address');
-  assert.equal((await a.file(made.fileUrl, b.token)).status, 404, 'Another business\'s session on this address');
+  // Since Phase 4 another business's token on this address is refused before the file is looked for (test/p4/db-login/bearer-address.test.js).
+  assert.equal((await a.file(made.fileUrl, b.token)).status, 401, 'Another business\'s session on this address');
   assert.equal((await b.call(`/downloads/${made.id}`)).status, 404);
   assert.deepEqual((await b.json('/downloads')).items, []);
   const noAnalytics = await a.addUser('staff', ['orders']);

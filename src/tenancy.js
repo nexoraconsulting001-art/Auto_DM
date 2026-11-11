@@ -48,27 +48,35 @@ export function createTenantResolver({ tenants, platformDomain = '', defaultTena
   const cache = new Map();
   const platform = normalizeHost(platformDomain);
 
+  // `own` is false when the address only falls back to the default business.
   async function lookup(host) {
     const byDomain = await tenants.getByDomain(host);
-    if (byDomain) return byDomain;
+    if (byDomain) return { tenant: byDomain, own: true };
     if (platform && host.endsWith(`.${platform}`)) {
       const slug = host.slice(0, -(platform.length + 1));
       if (!slug.includes('.')) {
         const bySlug = await tenants.getBySlug(slug);
-        if (bySlug) return bySlug;
+        if (bySlug) return { tenant: bySlug, own: true };
       }
     }
-    return defaultTenant ? tenants.getBySlug(defaultTenant) : null;
+    return { tenant: defaultTenant ? await tenants.getBySlug(defaultTenant) : null, own: false };
+  }
+
+  async function find(rawHost) {
+    const host = normalizeHost(rawHost);
+    const hit = cache.get(host);
+    if (hit && hit.exp > Date.now()) return hit;
+    const found = { ...(await lookup(host)), exp: Date.now() + ttlMs };
+    cache.set(host, found);
+    return found;
   }
 
   return {
-    async resolve(rawHost) {
-      const host = normalizeHost(rawHost);
-      const hit = cache.get(host);
-      if (hit && hit.exp > Date.now()) return hit.tenant;
-      const tenant = await lookup(host);
-      cache.set(host, { tenant, exp: Date.now() + ttlMs });
-      return tenant;
+    resolve: async (rawHost) => (await find(rawHost)).tenant,
+    /** The business this address belongs to (its custom domain or <slug>.<platformDomain>), or null: a fallback to the default business is not ownership. */
+    async owner(rawHost) {
+      const found = await find(rawHost);
+      return found.own ? found.tenant : null;
     },
     clear: () => cache.clear(),
   };
