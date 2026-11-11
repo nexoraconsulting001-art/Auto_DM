@@ -25,7 +25,8 @@ export function validatePassword(password) {
   if (String(password ?? '').length < 6) throw new ValidationError('Use a password of at least 6 characters');
 }
 
-const PUBLIC = 'id, name, phone, email, role, permissions, address, created_at';
+// person_id says which person has proved this account is theirs (null until someone has): sign-in, devices and re-auth follow it.
+const PUBLIC = 'id, name, phone, email, role, permissions, address, created_at, person_id';
 export const BUSINESS_ROLES = ['owner', 'manager', 'staff', 'customer'];
 const MAX_LINKED_BUSINESSES = 20;
 
@@ -135,7 +136,7 @@ export function usersRepo(db) {
     async memberOf(user, otherTenantId) {
       if (!SELLER_ROLES.includes(user.role)) return null;
       const [row] = await platform.query(
-        `SELECT t.id, t.slug, t.name, t.status, t.plan, t.created_at, u.id AS member_user_id
+        `SELECT t.id, t.slug, t.name, t.status, t.plan, t.created_at, t.account_type, u.id AS member_user_id
          FROM memberships m
          JOIN users u ON u.tenant_id = m.member_tenant_id AND u.id = m.member_user_id
          JOIN tenants t ON t.id = m.member_tenant_id

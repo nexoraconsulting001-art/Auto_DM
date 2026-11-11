@@ -37,16 +37,23 @@ const bearerToken = (req) => /^Bearer\s+(\S+)$/i.exec(req.get('authorization') |
 export const safeNext = (n, fallback = '/') =>
   typeof n === 'string' && /^\/(?!\/)[\w\-./?=&%#]*$/.test(n) && !n.startsWith('/login') ? n : fallback;
 
+/**
+ * True when a request that opens a session came from this site: it names no origin (an app, a test, a form from an old
+ * browser) or names this very host. A sign-in has no session yet, so this stands in for the CSRF token.
+ */
+export function isSameOrigin(req) {
+  const origin = req.get('origin') || req.get('referer') || '';
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === req.get('host');
+  } catch {
+    return false;
+  }
+}
+
 /** Login forms have no session yet, so instead of a CSRF token they must come from this site. */
 export function sameOriginOnly(req, res, next) {
-  const origin = req.get('origin') || req.get('referer') || '';
-  if (origin) {
-    try {
-      if (new URL(origin).host !== req.get('host')) return res.status(403).send('Please log in from this website.');
-    } catch {
-      return res.status(403).send('Please log in from this website.');
-    }
-  }
+  if (!isSameOrigin(req)) return res.status(403).send('Please log in from this website.');
   next();
 }
 
@@ -142,9 +149,13 @@ export function createAuth({ secret, users, sessions, tenants, cache, passwordLo
       res.status(403).send('This form expired. Go back, refresh the page and try again.');
     },
 
-    async login(req, res, user) {
-      await limiter.clearFailures(req);
-      const token = await sessions.create(user.id, SESSION_DAYS);
+    /**
+     * Starts a cookie session for `user` in the current business and returns its CSRF token. A sign-in without a password
+     * passes its refresh family and device, so revoking either ends this session too. Signing in never clears the
+     * failed-password count: that count is per address, and one's own good password says nothing about guesses at another's.
+     */
+    async login(req, res, user, { familyId = null, deviceId = null } = {}) {
+      const token = await sessions.create(user.id, SESSION_DAYS, 'cookie', { familyId, deviceId });
       res.cookie(COOKIE, token, {
         httpOnly: true,
         sameSite: 'lax',
