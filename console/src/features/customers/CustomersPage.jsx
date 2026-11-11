@@ -7,6 +7,9 @@ import { Badge, Banner, Button, EmptyState, ListCard, LoadMore, Loadable, PageHe
 import { api } from '../../lib/api/index.js';
 import { formatDate, formatPaise, plural, whatsAppLink } from '../../lib/format.js';
 import { useAllowed, useFilters, usePagedList, useSearchBox } from '../../lib/query.js';
+import { useLoyaltyOn } from '../loyalty/useLoyalty.js';
+import { CUSTOMER_AREA, LOYALTY_TAB } from '../orders/shared/areas.js';
+import { StoreTabs } from '../orders/shared/ui.jsx';
 
 /** Shown once, right after a reset. It lives in this page's memory only and goes when the seller leaves. */
 function NewPassword({ reset, onClose }) {
@@ -54,6 +57,7 @@ export default function CustomersPage() {
   const [reset, setReset] = useState(null);
   const [problem, setProblem] = useState('');
   const [busyId, setBusyId] = useState(null);
+  const loyaltyOn = useLoyaltyOn();
 
   async function resetPassword(customer) {
     const yes = await confirm({ title: `Set a new password for ${customer.name}?`, text: 'Their current password stops working and they are signed out.', confirm: 'Set new password', cancel: 'Cancel' });
@@ -73,7 +77,8 @@ export default function CustomersPage() {
   return (
     <>
       <PageHeader title="Customers" />
-      <p className="lead">Shoppers who created an account. Guest orders still show in Orders.</p>
+      <StoreTabs label="Customers area" tabs={loyaltyOn ? [...CUSTOMER_AREA, LOYALTY_TAB] : CUSTOMER_AREA} current="/customers" />
+      <p className="lead">Shoppers who created an account with a password. Everyone who ordered, including WhatsApp sign-ins and guests, is under Shoppers.</p>
       {reset && <NewPassword reset={reset} onClose={() => setReset(null)} />}
       {problem && <Banner tone="bad">{problem}</Banner>}
       <SearchField label="Search by name or number" value={text} onChange={(event) => setText(event.target.value)} />
