@@ -1,6 +1,7 @@
 import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { leadsApi } from './api.js';
+import { leadFormFor } from './form.js';
 import { dropFile, registerLeadPages } from './pages.js';
 import { leadsRepo } from './repo.js';
 
@@ -40,6 +41,16 @@ export const leads = {
   repos: (db) => ({ leads: leadsRepo(db) }),
   api: (ctx) => leadsApi(ctx),
   routes: (app, ctx) => registerLeadPages(app, ctx),
+  /** The form as the landing page's lead_form block: the pages module asks for it by this name. The page's own switch wins. */
+  buyerBlocks: {
+    lead_form: ({ surface, page, theme, req }, ctx) => leadFormFor(ctx, req, {
+      theme,
+      surface,
+      pageSlug: page?.slug ?? '',
+      pageOverride: page?.lead_form ?? null,
+      back: page?.slug ? `/r/${page.slug}` : '',
+    }),
+  },
   jobs(ctx) {
     ctx.platform.queue.work(QUEUE_SWEEP, () => sweepFiles(ctx));
     return async () => {
