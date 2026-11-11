@@ -75,7 +75,7 @@ test('P-05: two refreshes racing with one token leave nobody with a working sess
   assert.equal((await call(app, '/api/v1/orders', { headers: session.auth })).status, 401, 'the first access token too');
 });
 
-test('a refresh after the person was removed from the team, or its family revoked, is refused', async () => {
+test('a refresh in a family that support revoked is refused', async () => {
   await fresh();
   const session = await codeSignIn(app, { device: testDevice() });
   await app.db.platform.query(`UPDATE token_families SET revoked_at = now(), revoke_reason = 'support' WHERE id = (SELECT family_id FROM refresh_tokens WHERE token_hash = $1)`, [tokenHash(session.refreshToken)]);
@@ -117,45 +117,62 @@ test('P-08: revoking "Pixel 8" in Settings > Devices signs that device out at on
   assert.equal((await call(app, '/api/v1/orders', { headers: stranger.auth })).status, 200);
 });
 
-test('F-110 and P-68: after a sign-in the app offers device unlock; the secret re-auths with no new code, is kept only as a hash, and never signs in', async () => {
+/** Signs in on a new device and turns device unlock on there. */
+async function withUnlock(name) {
+  await fresh();
+  const device = testDevice(name);
+  const session = await codeSignIn(app, { device });
+  const enabled = await call(app, '/api/v1/auth/device-unlock', { method: 'POST', headers: session.auth });
+  assert.equal(enabled.status, 201);
+  return { device, session, secret: enabled.json.deviceSecret };
+}
+
+test('F-110: after the first sign-in the owner app offers fingerprint or face unlock, and the server keeps only a hash of its secret', async () => {
   await fresh();
   const device = testDevice('Pixel 9');
-  const session = await codeSignIn(app, { device });
-  assert.equal(session.deviceUnlock, false, 'not set up yet');
-  const enabled = await call(app, '/api/v1/auth/device-unlock', { method: 'POST', headers: session.auth });
+  const first = await codeSignIn(app, { device });
+  assert.equal(first.deviceUnlock, false, 'not set up yet, so the app offers it');
+  const enabled = await call(app, '/api/v1/auth/device-unlock', { method: 'POST', headers: first.auth });
   assert.equal(enabled.status, 201);
   const secret = enabled.json.deviceSecret;
   assert.ok(secret.length >= 40);
   const [row] = await app.db.platform.query('SELECT reauth_secret_hash FROM auth_devices WHERE device_id = $1', [device.id]);
   assert.equal(row.reauth_secret_hash, tokenHash(secret), 'only the hash is stored');
   assert.equal(JSON.stringify(row).includes(secret), false);
+  const devices = await call(app, '/api/v1/auth/devices', { headers: first.auth });
+  assert.equal(devices.json.devices.find((d) => d.current).deviceUnlock, true);
+  // Signing in on that device again says the unlock is there.
+  await fresh();
+  assert.equal((await codeSignIn(app, { device })).deviceUnlock, true);
+  // A browser session has no device to hold a secret.
+  await fresh();
+  const web = await codeSignIn(app, { transport: 'cookie' });
+  assert.equal((await call(app, '/api/v1/auth/device-unlock', { method: 'POST', headers: web.auth })).status, 409);
+});
 
-  // Reopening: the unlock releases the refresh token, and the refresh needs no code.
+test('P-68: with face unlock on, reopening the app needs no new code: the refresh token opens it and the secret re-auths, and nothing else', async () => {
+  const { session, secret } = await withUnlock('Pixel 9 Pro');
+  const before = await app.db.platform.query('SELECT count(*)::int AS n FROM seller_login_codes');
+  // Reopening: the unlock releases the stored refresh token, and the refresh needs no code.
   const reopened = await refresh(session.refreshToken);
   assert.equal(reopened.status, 201);
   const headers = bearer(reopened.json.accessToken);
-  const devices = await call(app, '/api/v1/auth/devices', { headers });
-  assert.equal(devices.json.devices.find((d) => d.current).deviceUnlock, true);
-
-  // A sensitive action: the device secret re-auths this session.
+  assert.equal((await call(app, '/api/v1/orders', { headers })).status, 200);
+  // A sensitive action: the device secret re-auths this session, still with no code.
   assert.equal((await call(app, '/api/v1/auth/device-unlock', { method: 'POST', headers })).json.code, 'reauth_required');
   const wrong = await call(app, '/api/v1/auth/reauth/verify', { method: 'POST', headers, body: { deviceSecret: 'not-the-secret' } });
   assert.deepEqual([wrong.status, wrong.json.code], [400, 'validation_failed'], 'a wrong secret is not a signed-out session');
   const ok = await call(app, '/api/v1/auth/reauth/verify', { method: 'POST', headers, body: { deviceSecret: secret } });
   assert.equal(ok.status, 200);
   assert.ok(Date.parse(ok.json.freshUntil) > Date.now() + 4 * 60_000);
-  assert.equal((await call(app, '/api/v1/auth/me', { headers })).json.freshUntil !== null, true);
+  assert.notEqual((await call(app, '/api/v1/auth/me', { headers })).json.freshUntil, null);
+  assert.deepEqual(await app.db.platform.query('SELECT count(*)::int AS n FROM seller_login_codes'), before, 'no code was sent');
 
-  // The secret works only from its own device's session.
+  // The secret works only from its own device's session, and never signs anyone in.
   await fresh();
   const elsewhere = await codeSignIn(app, { device: testDevice('Other phone') });
   await app.db.platform.query('UPDATE sessions SET fresh_until = NULL WHERE id = $1', [tokenHash(elsewhere.accessToken)]);
-  const borrowed = await call(app, '/api/v1/auth/reauth/verify', { method: 'POST', headers: elsewhere.auth, body: { deviceSecret: secret } });
-  assert.equal(borrowed.status, 400);
-  // Signing in on the same device again says the unlock is there.
-  await fresh();
-  assert.equal((await codeSignIn(app, { device })).deviceUnlock, true);
-  // There is no route that takes the secret in place of a sign-in.
+  assert.equal((await call(app, '/api/v1/auth/reauth/verify', { method: 'POST', headers: elsewhere.auth, body: { deviceSecret: secret } })).status, 400);
   assert.equal((await call(app, '/api/v1/auth/verify', { method: 'POST', body: { phone: OWNER.phone, code: secret }, ip: freshIp() })).status, 401);
 });
 

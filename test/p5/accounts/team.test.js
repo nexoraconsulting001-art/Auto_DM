@@ -114,21 +114,36 @@ test('an invitation to an email is taken up by a verified Google email, and an i
   assert.deepEqual(account, { role: 'manager', phone: `person:${person.id}` });
 });
 
-test('F-46 and P-12: staff with orders only are refused the automations API, and every route without their permission, on web and app', async () => {
-  const { session: app1 } = await invited({ contact: random10(), role: 'staff', permissions: ['orders'] });
+/** A staff member with the orders permission only, signed in on the app and on the web console. */
+async function ordersOnlyStaff() {
+  const { session: onApp } = await invited({ contact: random10(), role: 'staff', permissions: ['orders'] });
   await reset();
-  const phone = app1.user.phone;
-  const web = await codeSignIn(app, { phone, transport: 'cookie', tenantId: app.tenant.id });
-  for (const headers of [as(app1), { cookie: web.cookie }]) {
-    assert.equal((await call(app, '/api/v1/orders', { headers })).status, 200, 'their permission');
-    for (const [method, pathname, body] of [['GET', '/api/v1/automations'], ['GET', '/api/v1/customers'], ['PATCH', '/api/v1/settings/payment', { upiId: 'x@upi' }], ['GET', '/api/v1/team'], ['GET', '/api/v1/payment-account']]) {
-      const res = await call(app, pathname, { method, headers: { ...headers, ...(headers.cookie ? { 'x-csrf-token': web.csrf } : {}) }, body });
-      assert.deepEqual([res.status, res.json?.code], [403, 'forbidden'], pathname);
+  const web = await codeSignIn(app, { phone: onApp.user.phone, transport: 'cookie', tenantId: app.tenant.id });
+  return { onApp, web, clients: [as(onApp), { cookie: web.cookie, 'x-csrf-token': web.csrf }] };
+}
+
+test('F-46: staff with orders only are refused the automations API with 403, on web and app, logged with ids only', async () => {
+  const { onApp, clients } = await ordersOnlyStaff();
+  for (const headers of clients) {
+    assert.equal((await call(app, '/api/v1/orders', { headers })).status, 200, 'their own permission');
+    for (const [method, pathname, body] of [['GET', '/api/v1/automations'], ['POST', '/api/v1/automations', { name: 'x' }]]) {
+      const res = await call(app, pathname, { method, headers, body });
+      assert.deepEqual([res.status, res.json?.code], [403, 'forbidden'], `${method} ${pathname}`);
     }
   }
-  const lines = await captureLogs(() => call(app, '/api/v1/automations', { headers: as(app1) }));
+  const lines = await captureLogs(() => call(app, '/api/v1/automations', { headers: as(onApp) }));
   assert.ok(lines.some((l) => l.includes('api.forbidden')));
-  assert.equal(lines.join('\n').includes(phone), false, 'refusals are logged with ids only');
+  assert.equal(lines.join(String.fromCharCode(10)).includes(onApp.user.phone), false, 'refusals are logged with ids only');
+});
+
+test('P-12: staff without a permission get 403 from every route that needs it: payments, customers, the team', async () => {
+  const { clients } = await ordersOnlyStaff();
+  for (const headers of clients) {
+    for (const [method, pathname, body] of [['PATCH', '/api/v1/settings/payment', { upiId: 'x@upi' }], ['GET', '/api/v1/payment-account'], ['GET', '/api/v1/customers'], ['GET', '/api/v1/team']]) {
+      const res = await call(app, pathname, { method, headers, body });
+      assert.deepEqual([res.status, res.json?.code], [403, 'forbidden'], `${method} ${pathname}`);
+    }
+  }
 });
 
 test('F-48: a manager is refused billing, staff, roles, keys and refunds', async () => {
@@ -223,31 +238,43 @@ test('F-47: a removed staff member is signed out on web and app at once, and can
   await assert.rejects(() => codeSignIn(app, { phone: appSide.user.phone, tenantId: app.tenant.id }), /403/, 'nor by asking for it');
 });
 
-test('P-09 and P-10: the switcher lists exactly the person\'s businesses, and switching shows only that business\'s orders', async () => {
-  const phone = random10();
-  const plant = await otherBusiness(app, 'Plant Store');
-  const plantRepos = bindTenant(app.platform, plant);
-  const [plantOwner] = await app.db.platform.query(`INSERT INTO users (tenant_id, name, phone, email, password_hash, role) VALUES ($1, 'Plant Owner', $2, '', '!', 'owner') RETURNING id`, [plant.id, random10()]);
-  assert.ok(plantOwner.id);
-  await typedAccount(app, plant, { phone, role: 'staff', permissions: ['orders'] });
-  await typedAccount(app, app.tenant, { phone, role: 'staff', permissions: ['orders'] });
-  await otherBusiness(app, 'Not Theirs');
-  const mehtaOrder = await placeOrder(app.tenant);
-  const plantOrder = await placeOrder(plant);
-  assert.ok(plantRepos);
+/** A person with typed staff accounts at this business and at Plant Store, an order in each, and a third business that is not theirs. */
+let twoShopsWorld = null;
+function twoShops() {
+  twoShopsWorld ??= (async () => {
+    const phone = random10();
+    const plant = await otherBusiness(app, 'Plant Store');
+    await app.db.platform.query(`INSERT INTO users (tenant_id, name, phone, email, password_hash, role) VALUES ($1, 'Plant Owner', $2, '', '!', 'owner')`, [plant.id, random10()]);
+    await typedAccount(app, plant, { phone, role: 'staff', permissions: ['orders'] });
+    await typedAccount(app, app.tenant, { phone, role: 'staff', permissions: ['orders'] });
+    await otherBusiness(app, 'Not Theirs');
+    const mehtaOrder = await placeOrder(app.tenant);
+    const plantOrder = await placeOrder(plant);
+    await reset();
+    const session = await codeSignIn(app, { phone, tenantId: app.tenant.id, device: testDevice('Two shops') });
+    return { plant, mehtaOrder, plantOrder, session };
+  })();
+  return twoShopsWorld;
+}
 
-  await reset();
-  const session = await codeSignIn(app, { phone, tenantId: app.tenant.id, device: testDevice('Two shops') });
+test('P-09: a staff user in two businesses opens the switcher and exactly those two are listed', async () => {
+  const { plant, session } = await twoShops();
   const listed = await call(app, '/api/v1/auth/businesses', { headers: as(session) });
   assert.deepEqual(listed.json.businesses.map((b) => b.id).sort(), [app.tenant.id, plant.id].sort(), 'exactly those two');
   assert.equal(listed.json.businesses.find((b) => b.current).id, app.tenant.id);
+  assert.ok(listed.json.businesses.every((b) => b.role === 'staff'));
+});
 
+test('P-10: switching business shows only the new business orders, with no stale rows', async () => {
+  const { plant, mehtaOrder, plantOrder, session } = await twoShops();
   const here = await call(app, '/api/v1/orders', { headers: as(session) });
   const there = await call(app, '/api/v1/orders', { headers: as(session, { 'x-tenant-id': String(plant.id) }) });
   assert.equal(there.status, 200);
   const ids = (res) => res.json.items.map((o) => o.id);
   assert.ok(ids(here).includes(mehtaOrder.id) && !ids(here).includes(plantOrder.id));
   assert.ok(ids(there).includes(plantOrder.id) && !ids(there).includes(mehtaOrder.id), 'no stale rows from the other business');
+  const me = await call(app, '/api/v1/auth/me', { headers: as(session, { 'x-tenant-id': String(plant.id) }) });
+  assert.equal(me.json.business.id, plant.id);
 });
 
 test('P-06: an owner of business A asking for business B\'s order gets 404, logged with ids only; X-Tenant-Id for a business they are not in is 403', async () => {

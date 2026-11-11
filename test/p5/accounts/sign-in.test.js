@@ -296,49 +296,54 @@ test('with PASSWORD_LOGIN off, password login answers 404 on every host', async 
   }
 });
 
-test('F-50 and P-24: the review code opens the demo business on the review number only, with the flag on, and every try is logged', async () => {
-  const reviewPhone = '+919000000099';
-  const reviewCode = '424242';
-  const hash = codeHash('test-secret', { purpose: 'signin', subject: reviewPhone, code: reviewCode });
-  const review = await accountsApp({ overrides: { reviewLoginPhone: reviewPhone, reviewLoginCodeHash: hash } });
-  try {
-    const demo = await review.platform.tenants.create({ slug: 'demo-review', name: 'Demo Store' });
-    await withTenant(demo, () => review.platform.products.create({ name: 'Sample kurta', price: '499', active: 'on' }));
-    const uses = () => review.db.platform.query('SELECT accepted, reason FROM review_login_uses ORDER BY id');
-    const tryIt = (phone, code) => call(review, '/api/v1/auth/verify', { method: 'POST', body: { phone, code, device: testDevice('Review iPad') }, ip: freshIp() });
-
+// The review login (F-50, P-24): its own app, with the review number and the hash of its code configured.
+const REVIEW_PHONE = '+919000000099';
+const REVIEW_CODE = '424242';
+let reviewWorld = null;
+async function review() {
+  reviewWorld ??= (async () => {
+    const hash = codeHash('test-secret', { purpose: 'signin', subject: REVIEW_PHONE, code: REVIEW_CODE });
+    const world = await accountsApp({ overrides: { reviewLoginPhone: REVIEW_PHONE, reviewLoginCodeHash: hash } });
+    const demo = await world.platform.tenants.create({ slug: 'demo-review', name: 'Demo Store' });
+    await withTenant(demo, () => world.platform.products.create({ name: 'Sample kurta', price: '499', active: 'on' }));
+    const uses = () => world.db.platform.query('SELECT accepted, reason FROM review_login_uses ORDER BY id');
+    const tryIt = (phone, code) => call(world, '/api/v1/auth/verify', { method: 'POST', body: { phone, code, device: testDevice('Review iPad') }, ip: freshIp() });
     // Before the demo business is named the login opens nothing.
-    assert.equal((await tryIt('9000000099', reviewCode)).status, 401);
-    await review.db.platform.query('UPDATE review_logins SET tenant_id = $1', [demo.id]);
+    assert.equal((await tryIt('9000000099', REVIEW_CODE)).status, 401);
+    await world.db.platform.query('UPDATE review_logins SET tenant_id = $1', [demo.id]);
+    return { world, demo, uses, tryIt };
+  })();
+  return reviewWorld;
+}
+after(async () => (await reviewWorld)?.world.close());
 
-    // F-50: the review code on another number is rejected and logged.
-    const other = await tryIt('9876543210', reviewCode);
-    assert.deepEqual([other.status, other.json.code], [401, 'unauthorized']);
-    assert.deepEqual((await uses()).at(-1), { accepted: false, reason: 'wrong_number' });
+test('F-50: the review code on another number is rejected and logged, and so is every other try on the review number', async () => {
+  const { uses, tryIt, world } = await review();
+  const other = await tryIt('9876543210', REVIEW_CODE);
+  assert.deepEqual([other.status, other.json.code], [401, 'unauthorized']);
+  assert.deepEqual((await uses()).at(-1), { accepted: false, reason: 'wrong_number' });
+  assert.equal(other.json.error, (await tryIt('9876500000', '000000')).json.error, 'refused like any wrong code');
+  assert.equal((await tryIt('9000000099', '111111')).status, 401);
+  assert.deepEqual((await uses()).at(-1), { accepted: false, reason: 'wrong_code' });
+  const stored = JSON.stringify(await world.db.platform.query('SELECT * FROM review_login_uses'));
+  assert.equal(stored.includes('9000000099') || stored.includes(REVIEW_CODE), false, 'no number or code in the log rows');
+});
 
-    // A wrong code on the review number is logged too.
-    assert.equal((await tryIt('9000000099', '111111')).status, 401);
-    assert.deepEqual((await uses()).at(-1), { accepted: false, reason: 'wrong_code' });
-
-    // P-24: the review number with the review code opens the demo business, with its sample data.
-    const ok = await tryIt('9000000099', reviewCode);
-    assert.equal(ok.status, 201);
-    assert.equal(ok.json.business.id, demo.id);
-    assert.deepEqual(ok.json.businesses.map((b) => b.id), [demo.id], 'the demo business only');
-    assert.deepEqual((await uses()).at(-1), { accepted: true, reason: '' });
-    const products = await call(review, '/api/v1/products', { headers: { authorization: `Bearer ${ok.json.accessToken}` } });
-    assert.equal(products.status, 200);
-    assert.equal(products.json.items.length, 1);
-
-    // With the flag off it is an ordinary wrong code.
-    await review.db.platform.query('UPDATE review_logins SET enabled = false');
-    assert.equal((await tryIt('9000000099', reviewCode)).status, 401);
-    assert.deepEqual((await uses()).at(-1), { accepted: false, reason: 'flag_off' });
-    const stored = JSON.stringify(await review.db.platform.query('SELECT * FROM review_login_uses'));
-    assert.equal(stored.includes('9000000099') || stored.includes(reviewCode), false, 'no number or code in the log rows');
-  } finally {
-    await review.close();
-  }
+test('P-24: the review login opens the demo business with its sample data, only with the review flag on', async () => {
+  const { uses, tryIt, demo, world } = await review();
+  const ok = await tryIt('9000000099', REVIEW_CODE);
+  assert.equal(ok.status, 201);
+  assert.equal(ok.json.business.id, demo.id);
+  assert.deepEqual(ok.json.businesses.map((b) => b.id), [demo.id], 'the demo business only');
+  assert.deepEqual((await uses()).at(-1), { accepted: true, reason: '' });
+  const products = await call(world, '/api/v1/products', { headers: { authorization: `Bearer ${ok.json.accessToken}` } });
+  assert.equal(products.status, 200);
+  assert.equal(products.json.items.length, 1);
+  // With the flag off it is an ordinary wrong code.
+  await world.db.platform.query('UPDATE review_logins SET enabled = false');
+  assert.equal((await tryIt('9000000099', REVIEW_CODE)).status, 401);
+  assert.deepEqual((await uses()).at(-1), { accepted: false, reason: 'flag_off' });
+  await world.db.platform.query('UPDATE review_logins SET enabled = true');
 });
 
 test('the shared helpers sign in through these routes: signIn for the console, appSession for the app', async () => {
