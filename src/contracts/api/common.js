@@ -44,5 +44,6 @@ export const ErrorBody = z.object({
   code: z.enum(ERROR_CODES),
   fields: z.record(z.string(), z.string()).optional(),
   reason: z.string().optional(),
+  storeUrl: z.string().optional(),
   requestId: z.string().optional(),
 });

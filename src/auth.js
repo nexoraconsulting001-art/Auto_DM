@@ -20,7 +20,13 @@ const safeEqual = (a, b) => {
 function readCookie(req, name) {
   for (const part of (req.headers.cookie || '').split(';')) {
     const [k, ...v] = part.trim().split('=');
-    if (k === name) return decodeURIComponent(v.join('='));
+    if (k !== name) continue;
+    // A cookie that cannot be decoded is no session, never a server fault.
+    try {
+      return decodeURIComponent(v.join('='));
+    } catch {
+      return '';
+    }
   }
   return '';
 }
@@ -62,21 +68,28 @@ function loginLimiter(cache, prefix) {
 }
 
 /**
- * One login per business site. Shoppers and the owner sign in with phone + password; business roles are
- * owner, staff and customer. The cookie holds a random session token; the session itself lives in the
+ * Sessions for a business's own people. How someone proves who they are is not decided here: sellers sign in without
+ * passwords (src/modules/accounts), and the Phase 0 phone + password login exists only while PASSWORD_LOGIN is on.
+ * The cookie holds a random session token; the session itself lives in the
  * database (see repos/sessions.js), so it works across web servers and can be revoked.
  * Every POST made with a cookie session must carry a CSRF token derived from the session.
  *
- * The API and mobile app send "Authorization: Bearer <token>" instead. The token alone says which user
- * and which business, before the web address is looked at, and CSRF does not apply. The server then refuses
- * a token that arrives on another business's own address.
+ * The API and mobile app send "Authorization: Bearer <token>" instead: the owner app's access token (PRD 10.2), or the
+ * Phase 0 30-day token while PASSWORD_LOGIN is on. The token alone says which user and which business, before the web
+ * address is looked at, and CSRF does not apply. The server then refuses a token that arrives on another business's
+ * own address. Either way req.session says what kind of session it is and whether its last re-auth is still fresh.
  *
  * Sign-in methods (Google, WhatsApp code, Sign in with Apple) plug in by verifying the person and then
  * calling login(); nothing else here depends on how they proved who they are.
  */
-export function createAuth({ secret, users, sessions, tenants, cache }) {
+export function createAuth({ secret, users, sessions, tenants, cache, passwordLogin = false }) {
   const limiter = loginLimiter(cache, 'login-attempts');
   const notLoggedIn = (res) => res.status(401).json({ error: 'Please log in again.', code: 'unauthorized' });
+  // The app's access tokens always; the Phase 0 30-day token only while PASSWORD_LOGIN is on.
+  const bearerKinds = passwordLogin ? ['access', 'bearer'] : ['access'];
+  const csrfFor = (token) => hmac(secret, `csrf:${token}`);
+  /** What the router reads for routes marked fresh, and what a handler needs to end or refresh this session. */
+  const describe = (kind, found) => ({ kind, familyId: found.familyId ?? null, deviceId: found.deviceId ?? null, fresh: Boolean(found.fresh), freshUntil: found.freshUntil ?? null });
 
   return {
     ...limiter,
@@ -86,12 +99,12 @@ export function createAuth({ secret, users, sessions, tenants, cache }) {
     async bearer(req, res, next) {
       const token = bearerToken(req);
       if (token === null) return next();
-      const session = await tenants.findBearerSession(token);
+      const session = await tenants.findSession(token, bearerKinds);
       if (!session) return notLoggedIn(res);
       return withTenant(session.tenant, async () => {
         const user = await users.get(session.userId);
         if (!user) return notLoggedIn(res);
-        Object.assign(req, { user, bearer: true, sessionToken: token, csrf: '' });
+        Object.assign(req, { user, bearer: true, sessionToken: token, csrf: '', session: describe(session.kind, session) });
         Object.assign(res.locals, { user, csrf: '' });
         next();
       });
@@ -101,13 +114,23 @@ export function createAuth({ secret, users, sessions, tenants, cache }) {
     async load(req, res, next) {
       if (req.bearer) return next();
       const token = readCookie(req, COOKIE);
-      const userId = token ? await sessions.userIdFor(token) : null;
-      req.user = userId ? await users.get(userId) : null;
-      req.sessionToken = req.user ? token : '';
-      req.csrf = req.user ? hmac(secret, `csrf:${token}`) : '';
-      res.locals.user = req.user;
-      res.locals.csrf = req.csrf;
-      next();
+      const signedIn = (user, found) => {
+        req.user = user;
+        req.sessionToken = user ? token : '';
+        req.csrf = user ? csrfFor(token) : '';
+        req.session = user ? describe('cookie', found) : null;
+        res.locals.user = req.user;
+        res.locals.csrf = req.csrf;
+        next();
+      };
+      // On the host that belongs to no business (PLATFORM_APP_HOST) the cookie session names its own business, as a token does.
+      if (req.appHost) {
+        const found = token ? await tenants.findSession(token, ['cookie']) : null;
+        if (!found) return signedIn(null);
+        return withTenant(found.tenant, async () => signedIn(await users.get(found.userId), found));
+      }
+      const found = token ? await sessions.find(token) : null;
+      signedIn(found ? await users.get(found.userId) : null, found);
     },
 
     /** Rejects POSTs from a cookie session that lack the session's CSRF token. */
@@ -129,7 +152,7 @@ export function createAuth({ secret, users, sessions, tenants, cache }) {
         path: '/',
         maxAge: SESSION_DAYS * 86_400_000,
       });
-      return hmac(secret, `csrf:${token}`);
+      return csrfFor(token);
     },
 
     async logout(req, res) {

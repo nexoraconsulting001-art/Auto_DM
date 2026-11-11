@@ -36,12 +36,14 @@ export function usersRepo(db) {
   /**
    * Sign-in with a password proves this account is yours. The same phone on an account at another business proves
    * nothing, because owners type in staff phone numbers unverified. So the two are linked only when this password
-   * also opens that account. With one-time codes (PRD 5.11) a verified phone will be the proof instead.
+   * also opens that account. This runs only while PASSWORD_LOGIN is on. Without passwords (Phase 5) the proof is a
+   * verified identity: src/modules/accounts writes the same pair of rows when a person's verified phone equals a seller
+   * account's phone in another business, and never for a phone nobody has verified.
    */
   async function linkMyOtherBusinesses(me, password) {
     const others = await platform.query(
       `SELECT u.tenant_id, u.id, u.password_hash FROM users u
-       WHERE u.phone = $1 AND u.tenant_id <> $2 AND u.role = ANY($3)
+       WHERE u.phone = $1 AND u.tenant_id <> $2 AND u.role = ANY($3) AND u.removed_at IS NULL
          AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.tenant_id = $2 AND m.user_id = $4 AND m.member_tenant_id = u.tenant_id)
        LIMIT ${MAX_LINKED_BUSINESSES}`,
       [me.phone, me.tenant_id, SELLER_ROLES, me.id],
@@ -58,7 +60,8 @@ export function usersRepo(db) {
 
   return {
     async get(id) {
-      const [row] = await db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND id = $2`, [tenantId(), Number(id) || 0]);
+      // An account removed from the team (removed_at) is nobody: its row stays only for the audit trail.
+      const [row] = await db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND id = $2 AND removed_at IS NULL`, [tenantId(), Number(id) || 0]);
       return row || null;
     },
     async findByPhone(phone) {
@@ -87,7 +90,7 @@ export function usersRepo(db) {
     async verify(phone, password) {
       const p = normalizePhone(phone);
       if (!p) return null;
-      const [row] = await db.query('SELECT * FROM users WHERE tenant_id = $1 AND phone = $2', [tenantId(), p]);
+      const [row] = await db.query('SELECT * FROM users WHERE tenant_id = $1 AND phone = $2 AND removed_at IS NULL', [tenantId(), p]);
       if (!row || !(await checkPassword(password, row.password_hash))) return null;
       delete row.password_hash;
       if (SELLER_ROLES.includes(row.role)) {
@@ -136,7 +139,7 @@ export function usersRepo(db) {
          FROM memberships m
          JOIN users u ON u.tenant_id = m.member_tenant_id AND u.id = m.member_user_id
          JOIN tenants t ON t.id = m.member_tenant_id
-         WHERE m.tenant_id = $1 AND m.user_id = $2 AND m.member_tenant_id = $3 AND u.role = ANY($4)`,
+         WHERE m.tenant_id = $1 AND m.user_id = $2 AND m.member_tenant_id = $3 AND u.role = ANY($4) AND u.removed_at IS NULL`,
         [tenantId(), Number(user.id), Number(otherTenantId), SELLER_ROLES],
       );
       if (!row) return null;
@@ -151,7 +154,7 @@ export function usersRepo(db) {
          FROM users u
          JOIN tenants t ON t.id = u.tenant_id
          LEFT JOIN brand_kits k ON k.tenant_id = t.id
-         WHERE u.role = ANY($3) AND ((u.tenant_id = $1 AND u.id = $2) OR EXISTS (
+         WHERE u.role = ANY($3) AND u.removed_at IS NULL AND ((u.tenant_id = $1 AND u.id = $2) OR EXISTS (
            SELECT 1 FROM memberships m WHERE m.tenant_id = $1 AND m.user_id = $2 AND m.member_tenant_id = u.tenant_id AND m.member_user_id = u.id))
          ORDER BY current DESC, t.name`,
         [tenantId(), Number(user.id), SELLER_ROLES],
@@ -159,7 +162,7 @@ export function usersRepo(db) {
     },
     /** The business's own people: owners, managers and staff. */
     async listTeam() {
-      return db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND role = ANY($2) ORDER BY created_at`, [tenantId(), SELLER_ROLES]);
+      return db.query(`SELECT ${PUBLIC} FROM users WHERE tenant_id = $1 AND role = ANY($2) AND removed_at IS NULL ORDER BY created_at`, [tenantId(), SELLER_ROLES]);
     },
     async saveAddress(id, address) {
       await db.query('UPDATE users SET address = $3 WHERE tenant_id = $1 AND id = $2', [tenantId(), Number(id), JSON.stringify(address)]);

@@ -5,6 +5,14 @@ import { fileURLToPath } from 'node:url';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+/** 1 or 0 when set; otherwise on only under test: NODE_ENV=test, or inside node's own test runner. */
+function passwordLoginFrom(env) {
+  if (env.PASSWORD_LOGIN !== undefined && env.PASSWORD_LOGIN !== '') return env.PASSWORD_LOGIN === '1';
+  return env.NODE_ENV === 'test' || (env.NODE_ENV !== 'production' && Boolean(env.NODE_TEST_CONTEXT));
+}
+const list = (value) => String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
+const positive = (value, fallback) => (Number(value) > 0 ? Number(value) : fallback);
+
 export const config = {
   rootDir,
   // Instagram / Meta
@@ -58,6 +66,27 @@ export const config = {
   platformDomain: (process.env.PLATFORM_DOMAIN || '').toLowerCase(),
   // Where Bhava's own team signs in. Empty means admin.PLATFORM_DOMAIN.
   platformHost: (process.env.PLATFORM_HOST || '').toLowerCase(),
+  // Where sellers sign in: the owner app and the web sign-in page talk to /api/v1 here. It belongs to no business.
+  // Empty means app.PLATFORM_DOMAIN (see platformAppHostOf).
+  platformAppHost: (process.env.PLATFORM_APP_HOST || '').toLowerCase(),
+  // Seller sign-in (PRD 5.11, 10.2). There are no passwords: PASSWORD_LOGIN keeps the Phase 0 phone-and-password login for
+  // tests and local runs only. It defaults to on under test and off otherwise, and the server refuses to start with it in production.
+  passwordLogin: passwordLoginFrom(process.env),
+  accessTokenMinutes: positive(process.env.ACCESS_TOKEN_MINUTES, 15),
+  refreshTokenDays: positive(process.env.REFRESH_TOKEN_DAYS, 60),
+  // Google sign-in for sellers: its own OAuth client, apart from the shoppers' one below. GOOGLE_KEYS_BASE_URL points the
+  // sign-in page, the code exchange and the signing keys at tools/sim/google; empty is Google itself.
+  sellerGoogleClientId: process.env.SELLER_GOOGLE_CLIENT_ID || '',
+  sellerGoogleClientSecret: process.env.SELLER_GOOGLE_CLIENT_SECRET || '',
+  googleKeysBaseUrl: process.env.GOOGLE_KEYS_BASE_URL || '',
+  // Sign in with Apple: the audiences an identity token may be for (the owner app's bundle id, and the Services ID for the web).
+  // APPLE_KEYS_BASE_URL points the signing keys at tools/sim/apple; empty is Apple itself.
+  appleSigninAudiences: list(process.env.APPLE_SIGNIN_AUDIENCES),
+  appleKeysBaseUrl: process.env.APPLE_KEYS_BASE_URL || '',
+  // App Review's fixed login (PRD 5.11, 10.6): the review number in E.164 and the hash of its code (codeHash in src/contracts/accounts.js, keyed with SESSION_SECRET).
+  // Both empty turns it off. The code itself is never in the environment.
+  reviewLoginPhone: process.env.REVIEW_LOGIN_PHONE || '',
+  reviewLoginCodeHash: process.env.REVIEW_LOGIN_CODE_HASH || '',
   // Switchable modules (see src/platform/index.js). QA defaults shown; production changes these only.
   storageDriver: process.env.STORAGE_DRIVER || 'local',
   storageDir: process.env.STORAGE_DIR || path.join(rootDir, 'data', 'files'),
@@ -129,3 +158,15 @@ export const config = {
   defaultTenant: process.env.DEFAULT_TENANT ?? 'default',
   defaultTenantName: process.env.DEFAULT_TENANT_NAME || 'My store',
 };
+
+/** The host where sellers sign in, which belongs to no business: PLATFORM_APP_HOST, or app.PLATFORM_DOMAIN. Empty when neither is set. */
+export function platformAppHostOf(cfg = config) {
+  if (cfg.platformAppHost) return String(cfg.platformAppHost).toLowerCase();
+  return cfg.platformDomain ? `app.${String(cfg.platformDomain).toLowerCase()}` : '';
+}
+
+/** Settings a production server must not start with. Throws with the name of the setting. */
+export function assertStartable(cfg = config, env = process.env) {
+  if (String(env.NODE_ENV ?? '').trim().toLowerCase() !== 'production') return;
+  if (cfg.passwordLogin) throw new Error('PASSWORD_LOGIN is on. Sellers sign in without passwords: remove it before starting in production.');
+}

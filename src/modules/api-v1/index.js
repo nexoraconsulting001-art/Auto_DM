@@ -1,8 +1,9 @@
 import express from 'express';
 import multer from 'multer';
+import { APPS, APP_HEADERS, APP_PLATFORMS, isBelowMinimum } from '../../contracts/accounts.js';
 import { ApiError, IdText, isAllowed, routeList } from '../../contracts/api/index.js';
 import { log } from '../../platform/log.js';
-import { tenantId, withTenant } from '../../tenancy.js';
+import { currentTenant, tenantId, withTenant } from '../../tenancy.js';
 
 /** What every module's api() says it answers, checked against the contract. */
 function collectHandlers(ctx) {
@@ -61,7 +62,11 @@ function serve(route, handler) {
   const receiveFile = route.upload && uploader(route.upload);
 
   async function run(req, res) {
+    // On the host that belongs to no business, only the routes that need none are answered before sign-in.
+    if (!route.noBusiness && !currentTenant()) throw new ApiError('unauthorized');
     if (!isAllowed(req.user ?? null, route.access)) throw new ApiError(req.user ? 'forbidden' : 'unauthorized', req.user ? route.access.denied : undefined);
+    // Keys, credentials, roles and account deletion need a re-auth in the last few minutes (PRD 5.11): the app re-auths and repeats the call.
+    if (route.fresh && !req.session?.fresh) throw new ApiError('reauth_required');
     if (route.body && !req.is('application/json')) throw new ApiError('unsupported_media_type', 'Send this as JSON.');
 
     const params = route.params ? pathParams(route.params, req.params) : {};
@@ -121,6 +126,42 @@ function switchBusiness({ repos }) {
 }
 
 /**
+ * The minimum app version (PRD 10.2). A request from an app names itself in X-App, X-App-Version and X-App-Platform;
+ * one older than the minimum gets 426 `update_required` with the store link, whatever it asked for. The web console
+ * sends none of these and is never refused. app.requirements is exempt, so an old app can still learn where to update.
+ */
+function appVersionGate({ repos }) {
+  return async (req, _res, next) => {
+    const app = req.get(APP_HEADERS.app);
+    if (app === undefined || req.path.toLowerCase() === '/app/requirements') return next();
+    const platform = req.get(APP_HEADERS.platform);
+    if (!APPS.includes(app) || !APP_PLATFORMS.includes(platform)) throw new ApiError('validation_failed', 'This app could not be recognised. Update it and try again.');
+    const minimum = await repos.appVersions.minimum({ app, platform, tenantId: app === 'shopper' ? currentTenant()?.id ?? null : null });
+    if (minimum && isBelowMinimum(req.get(APP_HEADERS.version), minimum.minVersion)) throw new ApiError('update_required', undefined, { storeUrl: minimum.storeUrl });
+    return next();
+  };
+}
+
+const routers = new WeakMap();
+
+/** The router for ctx, built once: mounted at /api/v1 inside a business, and by the server on the host that belongs to none. */
+export function apiRouterFor(ctx) {
+  if (routers.has(ctx)) return routers.get(ctx);
+  const handlers = collectHandlers(ctx);
+  const r = express.Router();
+  r.use((_req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+  });
+  r.use(appVersionGate(ctx));
+  r.use(switchBusiness(ctx));
+  for (const route of routeList) r[route.method.toLowerCase()](route.path, serve(route, handlers.get(route.id)));
+  r.use((_req, _res, next) => next(new ApiError('not_found')));
+  routers.set(ctx, r);
+  return r;
+}
+
+/**
  * The seller API. Routes come from src/contracts/api; this router checks who is calling, validates the
  * input and the output, and answers errors in the one format. Modules supply the work:
  *
@@ -132,15 +173,6 @@ function switchBusiness({ repos }) {
 export const apiV1 = {
   name: 'api-v1',
   routes(app, ctx) {
-    const handlers = collectHandlers(ctx);
-    const r = express.Router();
-    r.use((_req, res, next) => {
-      res.set('Cache-Control', 'no-store');
-      next();
-    });
-    r.use(switchBusiness(ctx));
-    for (const route of routeList) r[route.method.toLowerCase()](route.path, serve(route, handlers.get(route.id)));
-    r.use((_req, _res, next) => next(new ApiError('not_found')));
-    app.use('/api/v1', r);
+    app.use('/api/v1', apiRouterFor(ctx));
   },
 };

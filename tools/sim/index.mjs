@@ -22,6 +22,10 @@
  * tools/sim/email (an HTTP mail API, for order emails) is not in SERVICES: no mail provider is chosen yet, so a test that sends
  * email starts it itself (createEmail from tools/sim/email/index.mjs) and points EMAIL_BASE_URL at it.
  *
+ * tools/sim/apple (Sign in with Apple: the signing keys and identity tokens, right and wrong) is not in SERVICES either: a test
+ * that signs in with Apple starts it itself (createApple from tools/sim/apple/index.mjs) and points APPLE_KEYS_BASE_URL at it.
+ * Google's keys and seller tokens are part of tools/sim/google: point GOOGLE_KEYS_BASE_URL at it.
+ *
  * tools/sim/sites (outside websites for imports and theme reads, hostile ones included) is not in SERVICES: safeFetch never
  * connects to loopback, so a test starts it in process and hands its transport() to the fetcher (see sites/index.mjs).
  */

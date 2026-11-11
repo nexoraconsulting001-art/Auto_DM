@@ -66,6 +66,6 @@ export const SetupStatus = z.object({
 export const settingRoutes = {
   'settings.get': { method: 'GET', path: '/settings', access: MANAGERS, response: Settings },
   'settings.update': { method: 'PATCH', path: '/settings', access: MANAGERS, body: SettingsUpdate, response: Settings },
-  'settings.updatePayment': { method: 'PATCH', path: '/settings/payment', access: OWNER_ONLY, body: PaymentSettingsUpdate, response: Settings },
+  'settings.updatePayment': { method: 'PATCH', path: '/settings/payment', access: OWNER_ONLY, fresh: true, body: PaymentSettingsUpdate, response: Settings },
   'settings.setup': { method: 'GET', path: '/settings/setup', access: MANAGERS, response: SetupStatus },
 };

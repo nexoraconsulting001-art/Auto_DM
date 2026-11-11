@@ -4,9 +4,11 @@ import { currentTenant } from '../../tenancy.js';
 const SESSION_DAYS = 30;
 
 /**
- * Signing in to the API. Logging in happens on the business's own address, which is how the business is
- * known at that moment. The mobile app gets a bearer token, and after that the token alone says who and
- * which business. The web console gets the usual httpOnly cookie session and a CSRF token.
+ * The Phase 0 answers of the auth routes: who is signed in, their businesses, signing out, and phone-and-password
+ * login. Password login happens on the business's own address, which is how the business is known at that moment,
+ * and exists only while PASSWORD_LOGIN is on: the server answers 404 for it otherwise. Sign-in without passwords,
+ * access and refresh tokens and devices are src/modules/accounts. Signing out works for every kind of session:
+ * repos.sessions.revoke ends an app's refresh family with it.
  */
 export const apiAuth = {
   name: 'api-auth',
@@ -16,7 +18,7 @@ export const apiAuth = {
       const kit = await repos.brandKit.get();
       return {
         user: { id: user.id, name: user.name, phone: user.phone, role: user.role, permissions: user.permissions ?? [] },
-        business: { id: business.id, slug: business.slug, name: business.name, plan: business.plan, logoUrl: kit.logoUrl },
+        business: { id: business.id, slug: business.slug, name: business.name, plan: business.plan, logoUrl: kit.logoUrl, accountType: business.account_type ?? 'seller' },
       };
     }
 
@@ -34,7 +36,7 @@ export const apiAuth = {
         return { token, expiresInDays: SESSION_DAYS, ...(await describe(user)) };
       },
 
-      'auth.me': async ({ user, req }) => ({ ...(await describe(user)), ...(req.csrf ? { csrf: req.csrf } : {}) }),
+      'auth.me': async ({ user, req }) => ({ ...(await describe(user)), ...(req.csrf ? { csrf: req.csrf } : {}), freshUntil: req.session?.freshUntil ?? null }),
 
       'auth.logout': async ({ req, res }) => {
         if (req.bearer) await repos.sessions.revoke(req.sessionToken);

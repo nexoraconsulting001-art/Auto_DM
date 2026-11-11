@@ -14,6 +14,9 @@ const ORDER = [
   'audit',
   'alerts',
   'gateway-keys',
+  'accounts',
+  'team',
+  'demo-tenant',
   'api-auth',
   'platform-console',
   'ig-connect',
@@ -76,6 +79,8 @@ test('the rules the order stands for hold, wherever new modules are added', () =
     // ...and before admin-api, whose routes they may take over.
     assert.ok(before(pageModule, 'admin-api'), `${pageModule} comes before admin-api`);
   }
+  // Phase 5's accounts come before api-auth, which still answers the Phase 0 auth routes, and so before every module that reads who is signed in.
+  for (const accountModule of ['accounts', 'team', 'demo-tenant']) assert.ok(before(accountModule, 'api-auth'), `${accountModule} comes before api-auth`);
   // The seller console, the Phase 0 API and the contract router stay last, in that order.
   assert.deepEqual(names.slice(-3), ['admin-console', 'admin-api', 'api-v1']);
 });

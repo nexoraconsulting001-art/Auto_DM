@@ -180,8 +180,8 @@ export const orderAlertRoutes = {
   'alertSettings.get': { method: 'GET', path: '/alert-settings', access: MANAGERS, response: AlertSettings },
   'alertSettings.update': { method: 'PATCH', path: '/alert-settings', access: MANAGERS, body: AlertSettingsUpdate, response: AlertSettings },
   'whatsappAccount.get': { method: 'GET', path: '/whatsapp-account', access: MANAGERS, response: WhatsappAccount },
-  'whatsappAccount.connect': { method: 'PUT', path: '/whatsapp-account', access: OWNER_ONLY, body: WhatsappConnect, response: WhatsappAccount },
-  'whatsappAccount.disconnect': { method: 'DELETE', path: '/whatsapp-account', access: OWNER_ONLY, status: 204, response: null },
+  'whatsappAccount.connect': { method: 'PUT', path: '/whatsapp-account', access: OWNER_ONLY, fresh: true, body: WhatsappConnect, response: WhatsappAccount },
+  'whatsappAccount.disconnect': { method: 'DELETE', path: '/whatsapp-account', access: OWNER_ONLY, fresh: true, status: 204, response: null },
   'whatsappTemplates.all': { method: 'GET', path: '/whatsapp-templates', access: MANAGERS, response: z.object({ items: z.array(WhatsappTemplate) }) },
   /** Reads each template's review status again from WhatsApp, and submits any that are missing. */
   'whatsappTemplates.sync': { method: 'POST', path: '/whatsapp-templates/sync', access: MANAGERS, response: z.object({ items: z.array(WhatsappTemplate) }) },
@@ -221,9 +221,9 @@ export const ShopifyConflict = z.object({ id: Id, kind: z.string(), localId: Id,
 
 export const shopifyRoutes = {
   'shopify.get': { method: 'GET', path: '/shopify', access: MANAGERS, response: ShopifyConnection },
-  'shopify.connect': { method: 'PUT', path: '/shopify', access: OWNER_ONLY, body: ShopifyConnect, response: ShopifyConnection },
+  'shopify.connect': { method: 'PUT', path: '/shopify', access: OWNER_ONLY, fresh: true, body: ShopifyConnect, response: ShopifyConnection },
   'shopify.setMode': { method: 'PATCH', path: '/shopify', access: OWNER_ONLY, body: z.object({ mode: z.enum(['source', 'two_way']).optional(), paused: z.boolean().optional() }), response: ShopifyConnection },
-  'shopify.disconnect': { method: 'DELETE', path: '/shopify', access: OWNER_ONLY, status: 204, response: null },
+  'shopify.disconnect': { method: 'DELETE', path: '/shopify', access: OWNER_ONLY, fresh: true, status: 204, response: null },
   /** Runs the reconcile now, in the background. */
   'shopify.reconcile': { method: 'POST', path: '/shopify/reconcile', access: MANAGERS, status: 202, response: ShopifyConnection },
   'shopify.conflicts': { method: 'GET', path: '/shopify/conflicts', access: MANAGERS, query: ListQuery, response: page(ShopifyConflict) },

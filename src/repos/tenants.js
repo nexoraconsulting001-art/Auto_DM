@@ -4,7 +4,7 @@ import { hashSessionToken } from './sessions.js';
 
 const COLS = 'id, slug, name, status, plan, created_at';
 /** The verified primary domain goes with the business, because the links a DM carries are built on it. */
-const WITH_PRIMARY = `t.id, t.slug, t.name, t.status, t.plan, t.created_at,
+const WITH_PRIMARY = `t.id, t.slug, t.name, t.status, t.plan, t.created_at, t.account_type,
   (SELECT p.domain FROM tenant_domains p WHERE p.tenant_id = t.id AND p.is_primary AND p.status = 'verified') AS primary_domain`;
 
 /** Addresses Bhava keeps for itself; no business can take one. */
@@ -62,17 +62,32 @@ export function tenantsRepo(handle) {
       if (row.tenant_id !== Number(tenantId)) throw new ValidationError(`${domain} already belongs to another business`);
       return domain;
     },
-    /** A live bearer session's business and user id, or null. Runs before any business is known, so it lives here. */
-    async findBearerSession(token) {
-      if (!token || token.length > 100) return null;
+    /**
+     * A live session by its token alone, of one of `kinds` ('access', 'bearer', 'cookie'), or null. Runs before any business
+     * is known, so it lives here: the session names its business. Read on every request, so each of these ends it at once:
+     * the session or its refresh family revoked, the account removed from the team, the token expired.
+     * Returns { tenant, userId, kind, familyId, deviceId, fresh, freshUntil }.
+     */
+    async findSession(token, kinds) {
+      if (typeof token !== 'string' || !token || token.length > 100 || !kinds?.length) return null;
       const [row] = await db.query(
-        `SELECT s.user_id, ${WITH_PRIMARY} FROM sessions s JOIN tenants t ON t.id = s.tenant_id
-         WHERE s.id = $1 AND s.kind = 'bearer' AND s.revoked_at IS NULL AND s.expires_at > now()`,
-        [hashSessionToken(token)],
+        `SELECT s.user_id, s.kind AS session_kind, s.family_id, s.device_id, s.fresh_until, COALESCE(s.fresh_until > now(), false) AS fresh, ${WITH_PRIMARY}
+         FROM sessions s
+         JOIN tenants t ON t.id = s.tenant_id
+         JOIN users u ON u.tenant_id = s.tenant_id AND u.id = s.user_id
+         LEFT JOIN token_families f ON f.id = s.family_id
+         WHERE s.id = $1 AND s.kind = ANY($2) AND s.revoked_at IS NULL AND s.expires_at > now()
+           AND u.removed_at IS NULL AND (s.family_id IS NULL OR f.revoked_at IS NULL)`,
+        [hashSessionToken(token), kinds],
       );
       if (!row) return null;
-      const { user_id: userId, ...tenant } = row;
-      return { tenant, userId };
+      const { user_id: userId, session_kind: kind, family_id: familyId, device_id: deviceId, fresh, fresh_until: freshUntil, ...tenant } = row;
+      return { tenant, userId, kind, familyId, deviceId, fresh, freshUntil };
+    },
+    /** A live Phase 0 bearer session's business and user id, or null. */
+    async findBearerSession(token) {
+      const session = await this.findSession(token, ['bearer']);
+      return session ? { tenant: session.tenant, userId: session.userId } : null;
     },
     /** The business that owns this Instagram account, or null. */
     async getByIgAccount(igUserId) {

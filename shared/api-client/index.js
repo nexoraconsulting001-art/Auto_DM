@@ -3,7 +3,7 @@
  * by a test. No dependencies, so the web console and the owner app can both use it.
  *
  *   const api = createApiClient();                                                  // web console: same site, cookie session
- *   const api = createApiClient({ baseUrl: 'https://shop.example/api/v1', getToken });   // owner app: bearer token
+ *   const api = createApiClient({ baseUrl: 'https://app.example/api/v1', getToken, getTenantId, app });   // owner app: access token
  *
  *   const { items, nextCursor } = await api.products.list({ search: 'pot', limit: 20 });
  *   await api.products.update(12, { active: false });
@@ -12,7 +12,7 @@
  */
 export class ApiError extends Error {
   /** `status` is 0 when the server could not be reached; `code` is from the API's error format. */
-  constructor({ status, code, message, fields, reason, requestId }) {
+  constructor({ status, code, message, fields, reason, requestId, storeUrl }) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -20,6 +20,8 @@ export class ApiError extends Error {
     this.fields = fields ?? {};
     this.reason = reason;
     this.requestId = requestId;
+    /** With code `update_required` (426): where to get the newer app. */
+    this.storeUrl = storeUrl;
   }
 }
 
@@ -44,6 +46,7 @@ async function toError(response) {
     fields: body?.fields,
     reason: body?.reason,
     requestId: body?.requestId,
+    storeUrl: body?.storeUrl,
   });
 }
 
@@ -51,16 +54,23 @@ async function toError(response) {
  * @param {object} [options]
  * @param {string} [options.baseUrl] where /api/v1 is; defaults to this site
  * @param {() => (string|null|Promise<string|null>)} [options.getToken] the bearer token, when not using a cookie session
+ * @param {() => (number|string|null|Promise<number|string|null>)} [options.getTenantId] the business to work in, sent as X-Tenant-Id (the owner app's switcher)
+ * @param {{ name: 'owner' | 'shopper', version: string, platform: 'android' | 'ios' }} [options.app] sent as X-App, X-App-Version and X-App-Platform
  * @param {(error: ApiError) => void} [options.onUnauthorized] called on any 401
+ * @param {(error: ApiError) => void} [options.onUpdateRequired] called on 426 `update_required`; error.storeUrl is the store link
+ * @param {(error: ApiError) => void} [options.onReauthRequired] called on 403 `reauth_required`: re-auth, then repeat the request
  * @param {typeof fetch} [options.fetch] replaces the global fetch
  */
-export function createApiClient({ baseUrl = '/api/v1', getToken, onUnauthorized, fetch: send = (...args) => globalThis.fetch(...args) } = {}) {
+export function createApiClient({ baseUrl = '/api/v1', getToken, getTenantId, app, onUnauthorized, onUpdateRequired, onReauthRequired, fetch: send = (...args) => globalThis.fetch(...args) } = {}) {
   let csrf = ''; // the cookie session's token, learned from auth.login and auth.me
 
   async function request(method, path, { json, form } = {}) {
     const headers = { accept: 'application/json' };
     const token = await getToken?.();
     if (token) headers.authorization = `Bearer ${token}`;
+    const tenant = await getTenantId?.();
+    if (tenant !== undefined && tenant !== null && tenant !== '') headers['x-tenant-id'] = String(tenant);
+    if (app) Object.assign(headers, { 'x-app': app.name, 'x-app-version': app.version, 'x-app-platform': app.platform });
     if (csrf && method !== 'GET') headers['x-csrf-token'] = csrf;
     if (json !== undefined) headers['content-type'] = 'application/json';
 
@@ -78,6 +88,8 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, onUnauthorized,
     if (!response.ok) {
       const error = await toError(response);
       if (response.status === 401) onUnauthorized?.(error);
+      if (error.code === 'update_required') onUpdateRequired?.(error);
+      if (error.code === 'reauth_required') onReauthRequired?.(error);
       throw error;
     }
     return response.status === 204 ? null : response.json();
@@ -102,6 +114,44 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, onUnauthorized,
       logout: () => post('/auth/logout').finally(() => { csrf = ''; }),
       /** @returns { businesses: [{ id, slug, name, role, logoUrl, current }] }: send an id as X-Tenant-Id to work in it */
       businesses: () => get('/auth/businesses'),
+      // Passwordless sign-in (5.11, 10.2, 10.3). Sessions come back as AuthSession: for transport 'bearer' accessToken,
+      // accessExpiresInSeconds and refreshToken; for 'cookie' the CSRF token, which this client then sends by itself.
+      /** @param body { phone } @returns { sent, channel, expiresInSeconds, resendInSeconds, alternatives }: the same for every number */
+      start: (body) => post('/auth/start', body),
+      /** @param body { phone, code, transport?, device?: { id, name, platform, app?, appVersion? }, tenantId? } */
+      verify: (body) => post('/auth/verify', body).then(rememberCsrf),
+      /** The end of a browser sign-in. @param body { code, verifier, transport?, device?, tenantId? } */
+      exchange: (body) => post('/auth/exchange', body).then(rememberCsrf),
+      /** @param body { identityToken, nonce, name?, transport?, device?, tenantId? } */
+      apple: (body) => post('/auth/apple', body).then(rememberCsrf),
+      /** @param body { refreshToken } @returns { accessToken, accessExpiresInSeconds, refreshToken }: store the new refresh token before using the access token */
+      refresh: (body) => post('/auth/refresh', body),
+      devices: () => get('/auth/devices'),
+      revokeDevice: (deviceId) => del(`/auth/devices/${id(deviceId)}`),
+      /** @returns { sent, channel, expiresInSeconds, resendInSeconds } */
+      reauthStart: () => post('/auth/reauth/start'),
+      /** @param body { code } or { deviceSecret } @returns { freshUntil } */
+      reauthVerify: (body) => post('/auth/reauth/verify', body),
+      /** Needs a fresh session. @returns { deviceSecret }, once: keep it in SecureStore behind fingerprint or face unlock */
+      enableDeviceUnlock: () => post('/auth/device-unlock'),
+      /** @param body { kind: 'phone', phone, code? } | { kind: 'google', code, verifier } | { kind: 'apple', identityToken, nonce } */
+      linkIdentity: (body) => post('/auth/identities', body),
+      /** @param body { confirm: 'DELETE' } @returns { status, requestedAt, dueAt } */
+      deleteAccount: (body) => post('/auth/delete-account', body),
+    },
+    // The team (5.11): owner only, and every change needs a fresh session.
+    team: {
+      /** @param query { cursor?, limit? } @returns { items, nextCursor, invites }: members, and every open invitation */
+      list: (query) => get('/team', query),
+      /** @param body { contact, role, permissions? } */
+      invite: (body) => post('/team/invites', body),
+      update: (memberId, body) => patch(`/team/${id(memberId)}`, body),
+      remove: (memberId) => del(`/team/${id(memberId)}`),
+    },
+    // Before sign-in (10.2): the minimum version, the store link and which sign-in buttons to show.
+    app: {
+      /** @param query { app?: 'owner' | 'shopper', platform: 'android' | 'ios', tenantId? } */
+      requirements: (query) => get('/app/requirements', query),
     },
     products: {
       /** @param query { search?, status?: 'all' | 'active' | 'archived' | 'featured' | 'attention' | 'sold_out' | 'price_changed', category?, source?, cursor?, limit? } */

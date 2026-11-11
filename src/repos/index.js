@@ -1,4 +1,5 @@
 import { activityRepo } from './activity.js';
+import { appVersionsRepo } from './app-versions.js';
 import { categoriesRepo } from './categories.js';
 import { mediaRepo } from './media.js';
 import { productsRepo } from './products.js';
@@ -14,14 +15,15 @@ import { createSecrets } from '../platform/secrets.js';
 import { MODULES } from '../modules/index.js';
 
 /**
- * Every repo except `tenants` and `platformUsers` works on the current business only (see tenancy.js)
- * and throws when called outside withTenant(). Those two are the platform-level repos.
+ * Every repo except `tenants`, `appVersions` and `platformUsers` works on the current business only (see tenancy.js)
+ * and throws when called outside withTenant(). Those are the platform-level repos.
  * `storage` holds uploaded files (in memory unless given, which suits tests); `secrets` encrypts tokens.
  * Each entry in src/modules/index.js can add repos; repos.orders comes from the orders module.
  */
 export function createRepos(db, { storage = createStorage({ storageDriver: 'memory' }), secrets = createSecrets({}), modules = MODULES } = {}) {
   const repos = {
     activity: activityRepo(db),
+    appVersions: appVersionsRepo(db),
     categories: categoriesRepo(db),
     media: mediaRepo(db, { storage }),
     products: productsRepo(db),

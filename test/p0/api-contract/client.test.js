@@ -86,6 +86,51 @@ test('the CSRF token is learned from the session, sent on changes only, and forg
   assert.equal(calls[5].headers['x-csrf-token'], undefined);
 });
 
+test('the owner app names itself and its business on every call, and hears about an update or a re-auth', async () => {
+  const seen = [];
+  const answers = [
+    () => jsonResponse({}),
+    () => jsonResponse({ error: 'Update required.', code: 'update_required', storeUrl: 'https://store.example/app' }, 426),
+    () => jsonResponse({ error: 'Confirm it’s you to continue.', code: 'reauth_required' }, 403),
+    () => jsonResponse({ error: 'You don’t have access to this.', code: 'forbidden' }, 403),
+  ];
+  const calls = [];
+  const client = createApiClient({
+    baseUrl: 'https://app.example/api/v1',
+    getToken: () => 'access-1',
+    getTenantId: () => 42,
+    app: { name: 'owner', version: '1.4.0', platform: 'ios' },
+    onUpdateRequired: (e) => seen.push(['update', e.storeUrl]),
+    onReauthRequired: (e) => seen.push(['reauth', e.code]),
+    fetch: async (url, options) => {
+      calls.push({ url, ...options });
+      return answers.shift()();
+    },
+  });
+  await client.orders.list();
+  assert.deepEqual([calls[0].headers.authorization, calls[0].headers['x-tenant-id'], calls[0].headers['x-app'], calls[0].headers['x-app-version'], calls[0].headers['x-app-platform']], ['Bearer access-1', '42', 'owner', '1.4.0', 'ios']);
+  const old = await client.orders.list().catch((e) => e);
+  assert.deepEqual([old.status, old.code, old.storeUrl], [426, 'update_required', 'https://store.example/app']);
+  const stale = await client.settings.updatePayment({}).catch((e) => e);
+  assert.deepEqual([stale.status, stale.code], [403, 'reauth_required']);
+  await client.orders.list().catch(() => {});
+  assert.deepEqual(seen, [['update', 'https://store.example/app'], ['reauth', 'reauth_required']], 'an ordinary 403 is neither');
+
+  // The web console sends none of it.
+  const web = fake();
+  await createApiClient({ fetch: web.fetch }).orders.list();
+  assert.deepEqual(['x-tenant-id', 'x-app', 'x-app-version', 'x-app-platform'].filter((name) => name in web.calls[0].headers), []);
+});
+
+test('a cookie sign-in without a password teaches the client its CSRF token', async () => {
+  const { calls, fetch } = fake((url) => (url.endsWith('/auth/verify') ? jsonResponse({ csrf: 'from-verify' }) : jsonResponse({})));
+  const client = createApiClient({ fetch });
+  await client.auth.start({ phone: '9876543210' });
+  await client.auth.verify({ phone: '9876543210', code: '123456', transport: 'cookie' });
+  await client.settings.update({});
+  assert.deepEqual([calls[0].headers['x-csrf-token'], calls[2].headers['x-csrf-token']], [undefined, 'from-verify']);
+});
+
 test('every failure arrives as an ApiError', async () => {
   const seen = [];
   const answers = [

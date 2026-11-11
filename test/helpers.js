@@ -106,7 +106,7 @@ export async function startApp({ ig = fakeIg(), overrides = {}, modules, logins 
   await platform.tenants.linkIgAccount(tenant.id, IG_ACCOUNT.igUserId, IG_ACCOUNT.username);
   await repos.igAccounts.setToken(IG_ACCOUNT.igUserId, IG_ACCOUNT.token);
   // Drivers follow the environment, so the CI production profile runs the whole app on Redis, S3 and ClickHouse.
-  const appConfig = { ...config, storageDriver: process.env.STORAGE_DRIVER || 'memory', queueDriver: process.env.QUEUE_DRIVER || 'pg', analyticsDriver: process.env.ANALYTICS_DRIVER || 'pg', cacheDriver: process.env.CACHE_DRIVER || 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dataKey: TEST_DATA_KEY, dryRun: false, oneDmPerUser: false, ...overrides };
+  const appConfig = { ...config, storageDriver: process.env.STORAGE_DRIVER || 'memory', queueDriver: process.env.QUEUE_DRIVER || 'pg', analyticsDriver: process.env.ANALYTICS_DRIVER || 'pg', cacheDriver: process.env.CACHE_DRIVER || 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', passwordLogin: true, adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dataKey: TEST_DATA_KEY, dryRun: false, oneDmPerUser: false, ...overrides };
   const drivers = createPlatform(appConfig, { db });
   const app = createApp({ db, ig, config: appConfig, platform: { ...drivers, cache: ownCacheKeys(drivers.cache) }, ...(modules ? { modules } : {}) });
   const server = app.listen(0);
@@ -122,4 +122,64 @@ export async function login(base, { phone = OWNER.phone, password = OWNER.passwo
   const page = await (await fetch(`${base}${csrfPage}`, { headers: { cookie } })).text();
   const csrf = /name="_csrf" value="([^"]+)"/.exec(page)?.[1] || /data-csrf="([^"]+)"/.exec(page)?.[1];
   return { cookie, csrf, location: res.headers.get('location') };
+}
+
+/** The host where sellers sign in (PLATFORM_APP_HOST) in every test app: it belongs to no business. Send it as x-forwarded-host. */
+export const APP_HOST = 'app.bhava.test';
+const onAppHost = (headers = {}) => ({ 'x-forwarded-host': APP_HOST, 'content-type': 'application/json', ...headers });
+const digitsOf = (phone) => String(phone).replace(/\D/g, '');
+
+/**
+ * The newest one-time code WhatsApp was asked to deliver to `phone`, read from the WhatsApp simulator's outbox
+ * (`whatsapp` is createWhatsApp() from tools/sim/whatsapp, started by the test and wired into the app). The code is
+ * the first 6-digit value among the message's template parameters, or in its text.
+ */
+export async function sellerCodeFor(whatsapp, phone) {
+  const local = digitsOf(phone).slice(-10);
+  const { sent } = await whatsapp.get('/sent');
+  const message = [...sent].reverse().find((m) => digitsOf(m.to).endsWith(local));
+  if (!message) throw new Error('No WhatsApp message was sent to that number');
+  const texts = [];
+  const walk = (value) => {
+    if (typeof value === 'string') texts.push(value);
+    else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+  };
+  walk(message.body?.template?.components ?? message.body?.text ?? message.body);
+  const code = texts.map((t) => /(?<!\d)\d{6}(?!\d)/.exec(t)?.[0]).find(Boolean);
+  if (!code) throw new Error('The WhatsApp message to that number holds no 6-digit code');
+  return code;
+}
+
+async function verifiedSession(base, { phone, whatsapp, transport, device, tenantId, headers }) {
+  if (!whatsapp) throw new Error('Pass the WhatsApp simulator the app sends through: signIn(base, { phone, whatsapp })');
+  const start = await fetch(`${base}/api/v1/auth/start`, { method: 'POST', headers: onAppHost(headers), body: JSON.stringify({ phone }) });
+  if (start.status !== 202) throw new Error(`auth.start failed with ${start.status}`);
+  const code = await sellerCodeFor(whatsapp, phone);
+  const res = await fetch(`${base}/api/v1/auth/verify`, { method: 'POST', headers: onAppHost(headers), body: JSON.stringify({ phone, code, transport, ...(device ? { device } : {}), ...(tenantId ? { tenantId } : {}) }) });
+  if (res.status !== 201) throw new Error(`auth.verify failed with ${res.status}`);
+  return { res, session: await res.json() };
+}
+
+/**
+ * Signs a seller in to the web console without a password: asks for a WhatsApp code on the sign-in host, reads it from
+ * the WhatsApp simulator and verifies it. Returns { cookie, csrf, session, headers }; `headers` are what a later
+ * request on the sign-in host sends (the cookie, the CSRF token and the host). login() is the Phase 0 password way.
+ */
+export async function signIn(base, { phone = OWNER.phone, whatsapp, tenantId } = {}) {
+  const { res, session } = await verifiedSession(base, { phone, whatsapp, transport: 'cookie', tenantId });
+  const cookie = res.headers.get('set-cookie').split(';')[0];
+  return { cookie, csrf: session.csrf, session, headers: onAppHost({ cookie, 'x-csrf-token': session.csrf }) };
+}
+
+/** A device as the owner app describes itself at sign-in. */
+export const testDevice = (name = 'Pixel 8', id = crypto.randomBytes(16).toString('hex')) => ({ id, name, platform: 'android', app: 'owner', appVersion: '1.0.0' });
+
+/**
+ * Signs a seller in the way the owner app does. Returns { accessToken, refreshToken, session, device, headers };
+ * `headers` are what the app sends on a later request: the access token and the sign-in host.
+ */
+export async function appSession(base, { phone = OWNER.phone, whatsapp, device = testDevice(), tenantId, app } = {}) {
+  const appHeaders = app ? { 'x-app': app.name ?? 'owner', 'x-app-version': app.version, 'x-app-platform': app.platform ?? device.platform } : {};
+  const { session } = await verifiedSession(base, { phone, whatsapp, transport: 'bearer', device, tenantId, headers: appHeaders });
+  return { accessToken: session.accessToken, refreshToken: session.refreshToken, session, device, headers: onAppHost({ authorization: `Bearer ${session.accessToken}`, ...appHeaders }) };
 }

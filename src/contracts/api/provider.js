@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PKCE_CHALLENGE } from '../accounts.js';
 import { Timestamp, text } from './common.js';
 
 /**
@@ -69,3 +70,38 @@ export const PROVIDER_PATHS = Object.freeze({
   deletionStatus: '/meta/deletion/:code',
   tlsAsk: '/tls/ask',
 });
+
+/**
+ * Seller sign-in in a browser (PRD 5.11, 10.3), on PLATFORM_APP_HOST and outside /api/v1. The accounts module mounts
+ * these in beforeTenant. Google's page is the only page in the flow that is not ours.
+ *
+ *   googleStart     GET, GoogleStartQuery. Redirects to Google with a state that is signed, single-use and tied to
+ *                   this browser by an httpOnly cookie, and that carries the target, the purpose and the challenge.
+ *   googleCallback  GET, OAuthCallbackQuery. The one redirect address registered with Google. Checks the state,
+ *                   swaps the code, checks the ID token (signature against Google's keys, audience SELLER_GOOGLE_CLIENT_ID,
+ *                   issuer, expiry, nonce), finds or makes the person, and then:
+ *                     target app  writes an auth_handoffs row bound to the challenge and redirects to
+ *                                 OWNER_APP_CALLBACK?code=<single-use code>. The app sends it with its verifier to
+ *                                 auth.exchange. The code lives HANDOFF_SECONDS and is useless without the verifier.
+ *                     target web  sets the console's session cookie and redirects to /admin (or `next`, a local path).
+ *                   A refusal goes back the same way with ?error=<kind> and never says whether an account exists.
+ *   signIn          GET. The web sign-in page: Google and a WhatsApp code, no password field.
+ */
+export const AUTH_PATHS = Object.freeze({
+  googleStart: '/auth/google/start',
+  googleCallback: '/auth/google/callback',
+  signIn: '/signin',
+});
+/** Where a browser sign-in returns to the owner app: its own scheme, opened by the system browser. */
+export const OWNER_APP_SCHEME = 'bhavabusiness';
+export const OWNER_APP_CALLBACK = `${OWNER_APP_SCHEME}://auth/callback`;
+export const GoogleStartQuery = z.object({
+  target: z.enum(['app', 'web']).default('web'),
+  purpose: z.enum(['signin', 'link']).default('signin'),
+  /** PKCE S256 challenge. Required for target "app". */
+  challenge: z.string().regex(PKCE_CHALLENGE).optional(),
+  /** Target "web" only: a path on this site to open afterwards. */
+  next: z.string().max(500).regex(/^\/(?!\/)[\w\-./?=&%#]*$/).optional(),
+}).refine((q) => q.target !== 'app' || Boolean(q.challenge), { message: 'A sign-in from the app needs a challenge' });
+/** What the app receives on OWNER_APP_CALLBACK: one of the two. */
+export const HandoffRedirect = z.object({ code: z.string().optional(), error: z.enum(['denied', 'failed', 'expired']).optional() });

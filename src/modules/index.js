@@ -1,4 +1,5 @@
 import { abandonedCart } from './abandoned-cart/index.js';
+import { accounts } from './accounts/index.js';
 import { adminApi } from './admin-api/index.js';
 import { adminConsole } from './admin-console/index.js';
 import { alerts } from './alerts/index.js';
@@ -15,6 +16,7 @@ import { compliance } from './compliance/index.js';
 import { consent } from './consent/index.js';
 import { coupons } from './coupons/index.js';
 import { creator } from './creator/index.js';
+import { demoTenant } from './demo-tenant/index.js';
 import { domains } from './domains/index.js';
 import { entitlements } from './entitlements/index.js';
 import { facebook } from './facebook/index.js';
@@ -42,6 +44,7 @@ import { shipping } from './shipping/index.js';
 import { shopifySync } from './shopify-sync/index.js';
 import { shoppers } from './shoppers/index.js';
 import { storefront } from './storefront/index.js';
+import { team } from './team/index.js';
 import { themes } from './themes/index.js';
 import { traffic } from './traffic/index.js';
 import { wishlist } from './wishlist/index.js';
@@ -63,8 +66,8 @@ import { wishlist } from './wishlist/index.js';
  *   jobs({ db, repos, platform, config, ig, meta, google, compliance, modules }) Calls platform.queue.work(...). May return an async schedule(), run every minute.
  *   onMetaCall(call, ctx)                 Told about every call to Meta, ids and numbers only. See meta-calls.js.
  *
- * ctx is { db, repos, ig, meta, google, providers, compliance, shopperMessages, orderEvents, auth, config, platform, modules }. meta is src/adapters/meta; google is
- * src/adapters/google; providers is src/adapters/store.js (razorpay, shiprocket, shopify, whatsapp, email). compliance is the only path to Meta for a message, and
+ * ctx is { db, repos, ig, meta, google, apple, providers, compliance, shopperMessages, orderEvents, auth, config, platform, modules }. meta is src/adapters/meta; google is
+ * src/adapters/google (ga4, and signIn for sellers); apple is src/adapters/apple (signIn); providers is src/adapters/store.js (razorpay, shiprocket, shopify, whatsapp, email). compliance is the only path to Meta for a message, and
  * shopperMessages the only path to WhatsApp or email for one to a shopper. orderEvents is the order event bus (src/modules/orders/events.js).
  * platform.fetcher is safeFetch and platform.images is sharp (src/platform).
  *
@@ -74,9 +77,13 @@ import { wishlist } from './wishlist/index.js';
  * Phase 4's store (PRD 9) follows them, one folder per track. Sign-in and the account come first, as they did in Phase 0, then what
  * checkout calls (consent, cart, coupons, inventory, loyalty), checkout itself, and what follows an order. storefront is last of them:
  * its browsing pages and the store's 404 mount in lastRoutes, after everything.
+ *
+ * Phase 5's seller accounts (PRD 5.11, 10.2, 10.3, 10.6) sit just before api-auth, which still answers the Phase 0 auth routes:
+ * accounts (sign-in without passwords, tokens, devices, re-auth, deletion, the review login, minimum versions), team and demo-tenant.
+ * Their browser routes (AUTH_PATHS) mount in beforeTenant, on the host that belongs to no business.
  */
 export const MODULES = [
-  brand, entitlements, igAccounts, audit, alerts, gatewayKeys, apiAuth, platformConsole, igConnect, compliance, automations, links, facebook, domains,
+  brand, entitlements, igAccounts, audit, alerts, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, igConnect, compliance, automations, links, facebook, domains,
   insights, reachGuard, traffic, reports,
   catalog, imports, categories, pages, themes, creator, leads,
   shoppers, consent, cart, coupons, inventory, loyalty, checkout, orders, payments, refunds, shipping, invoices, returns, reviews, wishlist,

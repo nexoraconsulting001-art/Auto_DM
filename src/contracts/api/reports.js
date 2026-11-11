@@ -183,8 +183,8 @@ export const reportRoutes = {
   'scheduledReports.addRecipient': { method: 'POST', path: '/scheduled-reports/:id/recipients', access: OWNER_ONLY, params: IdParams, body: RecipientAdd, status: 201, response: ScheduledRecipient },
   'scheduledReports.removeRecipient': { method: 'DELETE', path: '/scheduled-report-recipients/:id', access: OWNER_ONLY, params: IdParams, status: 204, response: null },
   'apiKeys.list': { method: 'GET', path: '/api-keys', access: OWNER_ONLY, query: ListQuery, response: page(ApiKey) },
-  'apiKeys.create': { method: 'POST', path: '/api-keys', access: OWNER_ONLY, body: ApiKeyInput, status: 201, response: ApiKeyCreated },
-  'apiKeys.revoke': { method: 'DELETE', path: '/api-keys/:id', access: OWNER_ONLY, params: IdParams, status: 204, response: null },
+  'apiKeys.create': { method: 'POST', path: '/api-keys', access: OWNER_ONLY, fresh: true, body: ApiKeyInput, status: 201, response: ApiKeyCreated },
+  'apiKeys.revoke': { method: 'DELETE', path: '/api-keys/:id', access: OWNER_ONLY, fresh: true, params: IdParams, status: 204, response: null },
 };
 
 // ---- the reporting API (7.13): outside /api/v1 and not part of `routes`, because a key, not a session, says who is calling ----

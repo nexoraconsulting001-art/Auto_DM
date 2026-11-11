@@ -1,9 +1,10 @@
 import path from 'node:path';
 import express from 'express';
 import { pathToFileURL } from 'node:url';
-import { config as defaultConfig } from './config.js';
+import { assertStartable, config as defaultConfig, platformAppHostOf } from './config.js';
 import { openRuntimeDb } from './db/index.js';
 import { createRepos } from './repos/index.js';
+import { createAppleAdapters } from './adapters/apple/index.js';
 import { createGoogleAdapters } from './adapters/google/index.js';
 import { createMetaAdapters, verifyHubSignature } from './adapters/meta/index.js';
 import { createStoreAdapters } from './adapters/store.js';
@@ -11,6 +12,8 @@ import { createAuth } from './auth.js';
 import { handleComment } from './handler.js';
 import { createInstagram } from './instagram.js';
 import { createCompliance } from './modules/compliance/index.js';
+import { adminConsole } from './modules/admin-console/index.js';
+import { apiRouterFor } from './modules/api-v1/index.js';
 import { MODULES } from './modules/index.js';
 import { createMetaCallObserver } from './modules/meta-calls.js';
 import { wireOrderEvents } from './modules/orders/events.js';
@@ -18,7 +21,7 @@ import { createShopperMessages } from './modules/shopper-messages/index.js';
 import { adminRoutes, baseUrlFor, buyerBaseUrl } from './routes/admin.js';
 import { ApiError, isApiV1Url } from './contracts/api/index.js';
 import { sendApiError } from './modules/api-v1/respond.js';
-import { createTenantResolver, currentTenant, withTenant } from './tenancy.js';
+import { createTenantResolver, currentTenant, normalizeHost, withTenant } from './tenancy.js';
 import { createPlatform, describePlatform } from './platform/index.js';
 import { log, reportError, requestIds } from './platform/log.js';
 
@@ -43,14 +46,17 @@ function mediaRoutes({ repos }) {
  */
 export function createApp({ db, config = defaultConfig, modules = MODULES, metaCalls = createMetaCallObserver(modules), ig = createInstagram(config, { onCall: metaCalls.onCall }), platform = createPlatform(config, { db }) }) {
   const repos = createRepos(db, { storage: platform.storage, secrets: platform.secrets, modules });
-  const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions, tenants: repos.tenants, cache: platform.cache });
+  const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions, tenants: repos.tenants, cache: platform.cache, passwordLogin: Boolean(config.passwordLogin) });
+  // Where sellers sign in (PLATFORM_APP_HOST): an address that belongs to no business.
+  const appHost = platformAppHostOf(config);
   const tenants = createTenantResolver({ tenants: repos.tenants, platformDomain: config.platformDomain, defaultTenant: config.defaultTenant });
   const meta = createMetaAdapters(config, { onCall: metaCalls.onCall });
   const google = createGoogleAdapters(config);
+  const apple = createAppleAdapters(config);
   const compliance = createCompliance({ db, repos, ig, meta, config, platform });
   const providers = createStoreAdapters(config);
   const shopperMessages = createShopperMessages({ db, platform, providers, config });
-  const ctx = { db, repos, ig, meta, google, providers, compliance, shopperMessages, auth, config, platform, modules, tenantResolver: tenants };
+  const ctx = { db, repos, ig, meta, google, apple, providers, compliance, shopperMessages, auth, config, platform, modules, tenantResolver: tenants };
   metaCalls.bind(ctx);
   // The order event bus, then each module's own start-up: its listeners on the bus, the consent provider.
   wireOrderEvents(ctx);
@@ -140,6 +146,15 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
     }
   });
 
+  // Sellers have no passwords (PRD 5.11). The Phase 0 phone-and-password routes answer only while PASSWORD_LOGIN is on,
+  // which is tests and local runs: everywhere else they are not there. The platform host's own sign-in is mounted above.
+  if (!config.passwordLogin) {
+    app.post(['/login', '/signup', '/api/v1/auth/login'], (req, res) => {
+      if (isApiV1Url(req.originalUrl)) return sendApiError(new ApiError('not_found'), req, res);
+      return res.status(404).type('text').send('Sign in with a WhatsApp code or Google.');
+    });
+  }
+
   // A bearer token names its own user and business, so it is checked before the web address is looked at.
   // The address can only refuse it (below): it never changes which business the token works in.
   app.use(auth.bearer);
@@ -152,6 +167,11 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
       if (owner && owner.id !== currentTenant()?.id) return auth.notLoggedIn(res);
       return next();
     }
+    // The sign-in host belongs to no business, not even the default one: a session there names its own (auth.load).
+    if (appHost && normalizeHost(req.hostname) === appHost) {
+      req.appHost = true;
+      return next();
+    }
     // req.hostname honours X-Forwarded-Host only from the trusted proxy in front (Caddy).
     const tenant = await tenants.resolve(req.hostname);
     if (!tenant) {
@@ -161,9 +181,26 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
     withTenant(tenant, next);
   });
 
-  app.use('/media', mediaRoutes({ repos }));
+  app.use('/media', (req, res, next) => (currentTenant() ? next() : res.sendStatus(404)), mediaRoutes({ repos }));
   // Everything below knows who is logged in, and POSTs from a cookie session need its CSRF token.
   app.use(auth.load, auth.checkCsrf);
+
+  // On the sign-in host, before anyone is signed in, there is no business. Only two things are served there: the API
+  // (its router answers the routes marked noBusiness and refuses the rest) and the console's shell, which holds no data.
+  // Once signed in, the session's business is the current one and everything below works as on its own address.
+  let signInHost = null;
+  const buildSignInHost = () => {
+    const r = express.Router();
+    r.use('/api/v1', apiRouterFor(ctx));
+    adminConsole.routes({ use: (mount, consoleRouter) => r.use(mount, consoleRouter) }, { config: { ...config, adminUi: 'console' } });
+    r.use((_req, res) => res.status(404).type('text').send('Not found.'));
+    return r;
+  };
+  app.use((req, res, next) => {
+    if (!req.appHost || currentTenant()) return next();
+    signInHost ??= buildSignInHost();
+    return signInHost(req, res, next);
+  });
   for (const module of modules) module.routes?.(app, ctx);
   if (config.adminUi !== 'console') app.use('/admin', adminRoutes({ repos, ig, auth, config }));
   // Last of all: the store's own pages and its 404 (the storefront module), for whatever nothing above answered.
@@ -186,6 +223,7 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
 }
 
 async function main(config = defaultConfig) {
+  assertStartable(config);
   const db = await openRuntimeDb(config);
   const platform = createPlatform(config, { db });
   const repos = createRepos(db, { storage: platform.storage, secrets: platform.secrets });

@@ -105,6 +105,6 @@ export const trafficRoutes = {
   'traffic.breakdown': { method: 'GET', path: '/traffic/breakdown', access: reader, query: TrafficBreakdownQuery, response: TrafficBreakdown },
   'traffic.realtime': { method: 'GET', path: '/traffic/realtime', access: reader, response: TrafficRealtime },
   'tags.get': { method: 'GET', path: '/tags', access: OWNER_ONLY, response: TagSettings },
-  'tags.update': { method: 'PATCH', path: '/tags', access: OWNER_ONLY, body: TagSettingsUpdate, response: TagSettings },
+  'tags.update': { method: 'PATCH', path: '/tags', access: OWNER_ONLY, fresh: true, body: TagSettingsUpdate, response: TagSettings },
   'tags.health': { method: 'GET', path: '/tags/health', access: reader, response: TagHealth },
 };
