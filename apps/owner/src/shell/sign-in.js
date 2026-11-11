@@ -76,3 +76,50 @@ export function createSignIn({ session, config, crypto, browser, apple }) {
     },
   };
 }
+
+/**
+ * Whether what was typed could be a mobile number at all, before it is sent: 10 to 15 digits, with an optional + and
+ * spaces. The server decides the rest, and answers the same for every number.
+ */
+export function looksLikePhone(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^\+?[\d\s().-]{8,24}$/.test(raw)) return false;
+  const digits = raw.replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 15;
+}
+
+/**
+ * Adding another way in to the signed-in account (PRD 5.11: one account, Google and a phone): a WhatsApp number (a
+ * code to it, then the code back), Google in the system browser, or Apple on iOS. Each answers the account's ways in
+ * as masked labels. Every call needs a fresh session, so the caller runs each through `runFresh`.
+ */
+export function createLinking({ session, config, crypto, browser, apple }) {
+  return {
+    /** Sends a code to the number. `pending` is true while the code is awaited. */
+    startPhone: (phone) => session.api.auth.linkIdentity({ kind: 'phone', phone: String(phone).trim() }),
+    verifyPhone: (phone, code) => session.api.auth.linkIdentity({ kind: 'phone', phone: String(phone).trim(), code: String(code).trim() }),
+
+    async google() {
+      const verifier = await randomToken(crypto, 64);
+      const challenge = await pkceChallenge(crypto, verifier);
+      const start = `${config.apiOrigin}${GOOGLE_START}?target=app&purpose=link&challenge=${encodeURIComponent(challenge)}`;
+      const result = await browser.openAuthSessionAsync(start, OWNER_APP_CALLBACK);
+      if (result?.type !== 'success') throw cancelled();
+      const link = parseLink(result.url);
+      if (link?.kind !== 'auth' || !link.code) throw Object.assign(new Error('link failed'), { code: link?.error === 'denied' ? 'cancelled' : 'failed' });
+      return session.api.auth.linkIdentity({ kind: 'google', code: link.code, verifier });
+    },
+
+    async apple() {
+      const nonce = await randomToken(crypto, 32);
+      const hashed = await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA256, nonce);
+      let credential;
+      try {
+        credential = await apple.signInAsync({ requestedScopes: [apple.AppleAuthenticationScope.EMAIL], nonce: hashed });
+      } catch (error) {
+        throw error?.code === 'ERR_REQUEST_CANCELED' ? cancelled() : error;
+      }
+      return session.api.auth.linkIdentity({ kind: 'apple', identityToken: credential.identityToken, nonce });
+    },
+  };
+}

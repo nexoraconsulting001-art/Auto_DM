@@ -7,7 +7,7 @@
  *                        Phase 6). `kit` is what repos.brandKit.get() answers: { colors, headingFont, bodyFont },
  *                        with the colour keys ground, card, ink, muted, line, primary, on_primary and accent.
  *
- * A theme is plain data: { name, color, font, text, space, radius, tap }. Components in @bhava/ui read it from
+ * A theme is plain data: { name, color, font, text, space, radius, tap, chart }. Components in @bhava/ui read it from
  * the ThemeProvider and never import a colour themselves, so one component serves both apps.
  */
 export const color = Object.freeze({
@@ -70,7 +70,30 @@ export const radius = Object.freeze({ small: 10, tile: 14, field: 16, card: 24, 
 /** The smallest thing a finger is asked to hit, on both platforms. */
 export const tap = Object.freeze({ min: 44, large: 52 });
 
-export const sellerTheme = Object.freeze({ name: 'neel-haldi', color, font, text, space, radius, tap });
+/**
+ * The extra touch area a control smaller than `min` needs on each side to reach it, for Pressable's hitSlop.
+ * A 32 point icon gets 6 on every side; anything already at 44 gets none.
+ */
+export function hitSlopFor(width, height = width, min = tap.min) {
+  const x = Math.max(0, Math.ceil((min - width) / 2));
+  const y = Math.max(0, Math.ceil((min - height) / 2));
+  return { top: y, bottom: y, left: x, right: x };
+}
+
+/** How charts are drawn, from the colours above: the line, the area under it, the track of a ring, the bar that stands out. */
+const chartOf = (c) => Object.freeze({
+  line: c.primary,
+  fill: c.primaryTint,
+  track: c.primaryTint,
+  bar: c.primaryLine,
+  highlight: c.accent,
+  grid: c.lineSoft,
+  label: c.ink3,
+  series: Object.freeze([c.primary, c.accent, c.goodText, c.primaryOnInk, c.badText]),
+});
+export const chart = chartOf(color);
+
+export const sellerTheme = Object.freeze({ name: 'neel-haldi', color, font, text, space, radius, tap, chart });
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const full = (hex) => (hex.length === 4 ? `#${[...hex.slice(1)].map((c) => c + c).join('')}` : hex).toLowerCase();
@@ -117,33 +140,35 @@ export function fromBrandKit(kit = {}, { fonts = {} } = {}) {
   const onPrimary = kitOnPrimary && contrast(kitOnPrimary, primary) >= 4.5 ? kitOnPrimary : readable(primary);
   const heading = fonts[kit?.headingFont];
   const body = fonts[kit?.bodyFont];
+  const brandColor = Object.freeze({
+    ...color,
+    ground,
+    surface: pick(c.card ?? c.surface, mix(ground, '#ffffff', 0.6)),
+    surfaceSunken: mix(ground, ink, 0.05),
+    ink,
+    ink2: mix(ink, ground, 0.25),
+    ink3: contrast(pick(c.muted, ground), ground) >= 4.5 ? pick(c.muted, ground) : mix(ink, ground, 0.35),
+    line: pick(c.line, mix(ground, ink, 0.12)),
+    lineSoft: mix(ground, ink, 0.07),
+    dots: mix(ground, ink, 0.18),
+    primary,
+    primaryDeep: mix(primary, '#000000', 0.2),
+    primaryTint: mix(primary, ground, 0.88),
+    primaryLine: mix(primary, ground, 0.7),
+    primaryOnInk: mix(primary, '#ffffff', 0.4),
+    onPrimary,
+    accent,
+    accentTint: mix(accent, ground, 0.85),
+    accentText: contrast(accent, ground) >= 4.5 ? accent : mix(accent, readable(ground), 0.6),
+  });
   return Object.freeze({
     name: 'brand',
-    color: Object.freeze({
-      ...color,
-      ground,
-      surface: pick(c.card ?? c.surface, mix(ground, '#ffffff', 0.6)),
-      surfaceSunken: mix(ground, ink, 0.05),
-      ink,
-      ink2: mix(ink, ground, 0.25),
-      ink3: contrast(pick(c.muted, ground), ground) >= 4.5 ? pick(c.muted, ground) : mix(ink, ground, 0.35),
-      line: pick(c.line, mix(ground, ink, 0.12)),
-      lineSoft: mix(ground, ink, 0.07),
-      dots: mix(ground, ink, 0.18),
-      primary,
-      primaryDeep: mix(primary, '#000000', 0.2),
-      primaryTint: mix(primary, ground, 0.88),
-      primaryLine: mix(primary, ground, 0.7),
-      primaryOnInk: mix(primary, '#ffffff', 0.4),
-      onPrimary,
-      accent,
-      accentTint: mix(accent, ground, 0.85),
-      accentText: contrast(accent, ground) >= 4.5 ? accent : mix(accent, readable(ground), 0.6),
-    }),
+    color: brandColor,
     font: Object.freeze({ display: heading, displayBold: heading, body, bodyMedium: body, bodySemiBold: body, bodyBold: body }),
     text,
     space,
     radius,
     tap,
+    chart: chartOf(brandColor),
   });
 }

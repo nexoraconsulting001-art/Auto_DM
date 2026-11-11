@@ -3,7 +3,7 @@
  * which features this person may open, which four sit in the tab bar, what a deep link opens.
  */
 import { matchPath } from '@bhava/app-core';
-import { canOpen } from '@bhava/app-core/access';
+import { ACCOUNT_TYPES, canOpen } from '@bhava/app-core/access';
 
 export const TAB_COUNT = 4;
 export const TABS = 'tabs';
@@ -15,7 +15,9 @@ export const screenName = (feature, screen) => `${feature.name}.${screen.name}`;
 
 /**
  * What this person sees: `tabs` (up to four primary features), `more` (the other features with a menu entry) and
- * `screens` (every screen of every feature they may open, tabs included). `who` is { user, entitlements }.
+ * `screens` (every screen of every feature they may open, tabs included). `who` is { user, entitlements, accountType }:
+ * a creator's account sees what is for creators and for everyone, a seller's what is for sellers and for everyone
+ * (a feature says so with `nav.accountTypes`; one that says nothing is for both).
  */
 export function buildNavigation(features, who) {
   const open = features.filter((feature) => canOpen(feature, who) && feature.screens.length > 0);
@@ -73,6 +75,8 @@ export function registryProblems(features) {
       }
     }
     if (feature.nav !== null && (typeof feature.nav?.label !== 'string' || typeof feature.nav?.order !== 'number')) problems.push(`${where}: nav is null, or has a label key and an order`);
+    const types = feature.nav?.accountTypes;
+    if (types !== undefined && (!Array.isArray(types) || types.length === 0 || types.some((type) => !ACCOUNT_TYPES.includes(type)))) problems.push(`${where}: nav.accountTypes lists 'seller', 'creator' or both`);
     for (const locale of ['en', 'hi']) {
       for (const key of Object.keys(feature.strings?.[locale] ?? {})) if (!key.startsWith(`${feature.name}.`)) problems.push(`${where}: string key "${key}" must start with "${feature.name}."`);
     }
