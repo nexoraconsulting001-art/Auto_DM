@@ -21,13 +21,13 @@ export const toCoupon = (row) => ({
   id: row.id, code: row.code, kind: row.kind, percentBp: row.percent_bp, amountPaise: row.amount_paise === null ? null : Number(row.amount_paise),
   maxDiscountPaise: row.max_discount_paise === null ? null : Number(row.max_discount_paise), minOrderPaise: Number(row.min_order_paise),
   startsAt: row.starts_at, endsAt: row.ends_at, maxUses: row.max_uses, maxUsesPerCustomer: row.max_uses_per_customer, usedCount: row.used_count,
-  firstOrderOnly: row.first_order_only, scope: row.scope, scopeIds: row.scope_ids ?? [], pageId: row.page_id, active: row.active, createdAt: row.created_at,
+  firstOrderOnly: row.first_order_only, scope: row.scope, scopeIds: row.scope_ids ?? [], pageId: row.page_id, active: row.active, appOnly: Boolean(row.app_only), createdAt: row.created_at,
 });
 
 const COLUMNS = Object.freeze({
   code: 'code', kind: 'kind', percentBp: 'percent_bp', amountPaise: 'amount_paise', maxDiscountPaise: 'max_discount_paise', minOrderPaise: 'min_order_paise',
   startsAt: 'starts_at', endsAt: 'ends_at', maxUses: 'max_uses', maxUsesPerCustomer: 'max_uses_per_customer', firstOrderOnly: 'first_order_only',
-  scope: 'scope', scopeIds: 'scope_ids', pageId: 'page_id', active: 'active',
+  scope: 'scope', scopeIds: 'scope_ids', pageId: 'page_id', active: 'active', appOnly: 'app_only',
 });
 
 const invalid = (field, message) => new ApiError('validation_failed', message, { fields: { [field]: message } });
@@ -97,7 +97,7 @@ export function couponsApi({ db, repos }) {
         code: body.code, kind: body.kind, percent_bp: body.percentBp ?? null, amount_paise: body.amountPaise ?? null, max_discount_paise: body.maxDiscountPaise ?? null,
         min_order_paise: body.minOrderPaise ?? 0, starts_at: body.startsAt ?? null, ends_at: body.endsAt ?? null, max_uses: body.maxUses ?? null,
         max_uses_per_customer: body.maxUsesPerCustomer ?? null, first_order_only: body.firstOrderOnly ?? false, scope: body.scope ?? 'all',
-        scope_ids: body.scopeIds ?? [], page_id: body.pageId ?? null, active: body.active ?? true, used_count: 0,
+        scope_ids: body.scopeIds ?? [], page_id: body.pageId ?? null, active: body.active ?? true, app_only: body.appOnly ?? false, used_count: 0,
       };
       if (!COUPON_CODE.test(next.code)) throw invalid('code', 'Use 2 to 40 letters, digits, - or _');
       check(next);
@@ -105,10 +105,10 @@ export function couponsApi({ db, repos }) {
       try {
         const [row] = await db.query(
           `INSERT INTO coupons (tenant_id, code, kind, percent_bp, amount_paise, max_discount_paise, min_order_paise, starts_at, ends_at, max_uses, max_uses_per_customer,
-             first_order_only, scope, scope_ids, page_id, active)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::int[], $15, $16) RETURNING *`,
+             first_order_only, scope, scope_ids, page_id, active, app_only)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::int[], $15, $16, $17) RETURNING *`,
           [tenantId(), next.code, next.kind, next.percent_bp, next.amount_paise, next.max_discount_paise, next.min_order_paise, next.starts_at, next.ends_at, next.max_uses,
-            next.max_uses_per_customer, next.first_order_only, next.scope, next.scope_ids, next.page_id, next.active],
+            next.max_uses_per_customer, next.first_order_only, next.scope, next.scope_ids, next.page_id, next.active, Boolean(next.app_only)],
         );
         return toCoupon(row);
       } catch (err) {
@@ -145,10 +145,10 @@ export function couponsApi({ db, repos }) {
           await checkOwned(t, next);
           const [updated] = await t.query(
             `UPDATE coupons SET code = $3, kind = $4, percent_bp = $5, amount_paise = $6, max_discount_paise = $7, min_order_paise = $8, starts_at = $9, ends_at = $10,
-               max_uses = $11, max_uses_per_customer = $12, first_order_only = $13, scope = $14, scope_ids = $15::int[], page_id = $16, active = $17, updated_at = now()
+               max_uses = $11, max_uses_per_customer = $12, first_order_only = $13, scope = $14, scope_ids = $15::int[], page_id = $16, active = $17, app_only = $18, updated_at = now()
              WHERE tenant_id = $1 AND id = $2 RETURNING *`,
             [tenantId(), row.id, next.code, next.kind, next.percent_bp, next.amount_paise, next.max_discount_paise, next.min_order_paise, next.starts_at, next.ends_at,
-              next.max_uses, next.max_uses_per_customer, next.first_order_only, next.scope, next.scope_ids, next.page_id, next.active],
+              next.max_uses, next.max_uses_per_customer, next.first_order_only, next.scope, next.scope_ids, next.page_id, next.active, Boolean(next.app_only)],
           );
           return toCoupon(updated);
         });

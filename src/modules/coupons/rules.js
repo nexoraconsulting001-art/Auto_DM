@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { formatRupees } from '../../contracts/catalog.js';
+import { currentChannel } from '../../platform/channel.js';
 import { tenantId } from '../../tenancy.js';
 import { splitDiscount } from '../checkout/pricing.js';
 
@@ -15,7 +16,11 @@ import { splitDiscount } from '../checkout/pricing.js';
  *   release(t, orderId)   a cancelled order's use stops counting, once.
  *
  * A customer is known by a keyed hash of the phone number, so a guest's uses count too (S-46) and no number is copied.
+ *
+ * An app-only coupon (coupons.app_only, Phase 6, P-63) applies only when the request came through the shopper app's gate with a valid app
+ * session (currentChannel() is 'app'); anywhere else it is refused with APP_ONLY_MESSAGE. A trigger on coupon_redemptions is the second lock.
  */
+export const APP_ONLY_MESSAGE = 'This offer works only in the app';
 export const COUPON_CODE = /^[A-Z0-9][A-Z0-9_-]{1,39}$/;
 export const normalizeCode = (code) => String(code ?? '').trim().toUpperCase();
 
@@ -45,6 +50,7 @@ export async function evaluate(q, { code: typed, lines, phone = '', shopperId = 
   if (!COUPON_CODE.test(code)) return refused(code, 'This code isn’t valid.');
   const [coupon] = await q.query(`SELECT * FROM coupons WHERE tenant_id = $1 AND code = $2${lock ? ' FOR UPDATE' : ''}`, [tid, code]);
   if (!coupon || !coupon.active) return refused(code, 'This code isn’t valid.');
+  if (coupon.app_only && currentChannel() !== 'app') return refused(code, APP_ONLY_MESSAGE, coupon);
   if (coupon.starts_at && new Date(coupon.starts_at) > now) return refused(code, 'This code isn’t active yet.', coupon);
   if (coupon.ends_at && new Date(coupon.ends_at) <= now) return refused(code, 'This code has expired.', coupon);
   if (coupon.max_uses !== null && coupon.used_count >= coupon.max_uses) return refused(code, 'This code has been used up.', coupon);
