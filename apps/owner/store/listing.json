@@ -1,0 +1,27 @@
+{
+  "note": "The store listings for Bhava for Business, one app in each store for every business (PRD 10.6). Bhava's name only: no business is named. Every permission the app config asks for is in permissions, and its sentence appears word for word in both descriptions; check.mjs fails otherwise, and on any store limit. Nothing account-specific (developer name, contact email, privacy policy address) is kept here: it is entered in each console.",
+  "appName": "Bhava for Business",
+  "play": {
+    "title": "Bhava for Business",
+    "shortDescription": "Run your Instagram and Facebook shop: orders, DMs, automations and payments.",
+    "category": "BUSINESS",
+    "fullDescription": "Bhava for Business is the app for sellers on Bhava. Everything you can do in the web console, you can do here, so you never need a laptop to run your shop.\n\nOrders\n- See new orders as they come in, and confirm cash on delivery orders in one tap.\n- Pack, ship and track orders, book couriers and handle returns and refunds.\n- Orders stay readable offline; changes wait until you are back online.\n\nCustomers and messages\n- Answer Instagram and Facebook Messenger messages from one inbox.\n- See the conversations that need a person, and reply in your shop's voice.\n\nAutomations\n- Reply to comments and DMs automatically with your products and links.\n- Test an automation before it goes live, and see what it sold.\n\nCatalog and payments\n- Add products, photos, stock and prices, or import your catalog.\n- Set up payments and cash on delivery. Payment keys are entered after a fresh check and are never shown again.\n\nInsights and alerts\n- Follow sales, reach and account health, and get alerts that open the right screen.\n\nMore than one business\n- Switch between every business you work in, with only that business's data on screen.\n\nSign in\n- Sign in with a WhatsApp code or Google. There are no passwords.\n\nPermissions\n- The camera and photo library are used only when you add product photos or your logo.\n- Fingerprint or Face ID unlocks the app on this phone; it never replaces your sign-in.\n- Notifications tell you about new orders and alerts; you choose which ones and set quiet hours.\n\nYou can delete your account in Settings at any time."
+  },
+  "appStore": {
+    "name": "Bhava for Business",
+    "subtitle": "Run your social shop",
+    "promotionalText": "Orders, messages, automations and payments for your Instagram and Facebook shop, in one app.",
+    "keywords": "seller,shop,orders,instagram,dm,automation,cod,catalog,inventory,inbox,payments",
+    "primaryCategory": "Business",
+    "secondaryCategory": "Productivity",
+    "description": "Bhava for Business is the app for sellers on Bhava. Everything you can do in the web console, you can do here, so you never need a laptop to run your shop.\n\nOrders\n- See new orders as they come in, and confirm cash on delivery orders in one tap.\n- Pack, ship and track orders, book couriers and handle returns and refunds.\n- Orders stay readable offline; changes wait until you are back online.\n\nCustomers and messages\n- Answer Instagram and Facebook Messenger messages from one inbox.\n- See the conversations that need a person, and reply in your shop's voice.\n\nAutomations\n- Reply to comments and DMs automatically with your products and links.\n- Test an automation before it goes live, and see what it sold.\n\nCatalog and payments\n- Add products, photos, stock and prices, or import your catalog.\n- Set up payments and cash on delivery. Payment keys are entered after a fresh check and are never shown again.\n\nInsights and alerts\n- Follow sales, reach and account health, and get alerts that open the right screen.\n\nMore than one business\n- Switch between every business you work in, with only that business's data on screen.\n\nSign in\n- Sign in with a WhatsApp code, Google or Sign in with Apple. There are no passwords.\n\nPermissions\n- The camera and photo library are used only when you add product photos or your logo.\n- Fingerprint or Face ID unlocks the app on this phone; it never replaces your sign-in.\n- Notifications tell you about new orders and alerts; you choose which ones and set quiet hours.\n\nYou can delete your account in Settings at any time."
+  },
+  "permissions": {
+    "android.permission.CAMERA": "The camera and photo library are used only when you add product photos or your logo.",
+    "android.permission.USE_BIOMETRIC": "Fingerprint or Face ID unlocks the app on this phone; it never replaces your sign-in.",
+    "android.permission.POST_NOTIFICATIONS": "Notifications tell you about new orders and alerts; you choose which ones and set quiet hours.",
+    "NSCameraUsageDescription": "The camera and photo library are used only when you add product photos or your logo.",
+    "NSPhotoLibraryUsageDescription": "The camera and photo library are used only when you add product photos or your logo.",
+    "NSFaceIDUsageDescription": "Fingerprint or Face ID unlocks the app on this phone; it never replaces your sign-in."
+  }
+}

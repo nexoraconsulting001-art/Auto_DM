@@ -1,0 +1,63 @@
+# The seller signs in on the emulator, then on a second phone ("Pixel 8") through the API. Revoking Pixel 8 in
+# Settings > Devices signs it out; revoking this phone signs the app out and it stays out.
+appId: ${APP_ID}
+name: 'P-08: Revoke Pixel 8 in Settings > Devices and it is signed out; revoke this phone and the app signs out'
+---
+- runFlow:
+    file: common/sign-in-with-code.yaml
+    env:
+      PHONE: ${PHONE_DEVICES}
+# The emulator's code was used when it signed in, so the second phone's code goes out at once (the 30 second
+# resend wait only holds back a code while the last one is unused); api-device.js fails if none arrives.
+- runScript:
+    file: support/api-device.js
+    env:
+      ACTION: signIn
+      API_URL: ${API_URL}
+      SIGN_IN_HOST: ${SIGN_IN_HOST}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+      PHONE: ${PHONE_DEVICES}
+      NAME: Pixel 8
+- runFlow:
+    file: common/open-more.yaml
+    env:
+      FEATURE: devices
+- extendedWaitUntil:
+    visible:
+      id: device-${output.deviceId}
+    timeout: 30000
+- assertVisible: Pixel 8
+- tapOn:
+    id: device-${output.deviceId}-revoke
+- tapOn:
+    id: devices-confirm-confirm
+- extendedWaitUntil:
+    notVisible:
+      id: device-${output.deviceId}
+    timeout: 30000
+- runScript:
+    file: support/api-device.js
+    env:
+      ACTION: expectSignedOut
+      API_URL: ${API_URL}
+      SIGN_IN_HOST: ${SIGN_IN_HOST}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+      TOKEN: ${output.deviceToken}
+# Now this phone, the one device left.
+- tapOn:
+    id: device-.*-revoke
+- tapOn:
+    id: devices-confirm-confirm
+- extendedWaitUntil:
+    visible:
+      id: sign-in-whatsapp
+    timeout: 60000
+- stopApp
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: sign-in-whatsapp
+    timeout: 60000
+- assertNotVisible:
+    id: top-bar

@@ -1,7 +1,5 @@
 {
-  "note": "Seller routes and console pages with no owner-app screen yet (PRD 10.4). Building a screen: add its ids to the feature's routeIds and delete them here. Nothing may be added to this file; the release track empties it and runs the check with --strict.",
-  "routes": [
-    "auth.login"
-  ],
+  "note": "Empty for good: the owner app is released with every seller route and console page mapped (PRD 10.4). npm run parity fails on any entry here; give the route or page an app screen instead.",
+  "routes": [],
   "pages": []
 }

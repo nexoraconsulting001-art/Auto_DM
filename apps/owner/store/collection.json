@@ -1,0 +1,250 @@
+{
+  "note": "What Bhava for Business collects, and the files that collect it. The privacy manifest, the App Privacy answers and the Data safety answers are worked out from this file (answers.cjs). check.mjs reads the app: a field that takes a phone number, an email address, a name, an address or a payment detail, a photo or file picker, a device or push identifier, or an analytics or crash SDK, must be in the sources of an item here, and every source must still exist. Nothing is shared with a third party for its own use, nothing is used for tracking or advertising, and the app has no analytics or crash reporting SDK.",
+  "encryptedInTransit": true,
+  "deletionRequest": {
+    "available": true,
+    "how": "Settings > Delete my account, in the app (PRD 10.6)"
+  },
+  "items": [
+    {
+      "id": "phone",
+      "what": "Phone number",
+      "why": "Signing in with a WhatsApp code, the account's own number, inviting team members, the business's payment and courier details and its grievance contact.",
+      "apple": "NSPrivacyCollectedDataTypePhoneNumber",
+      "play": {
+        "category": "Personal info",
+        "type": "Phone number"
+      },
+      "purposes": [
+        "accountManagement",
+        "appFunctionality",
+        "security"
+      ],
+      "required": false,
+      "tracking": false,
+      "sources": [
+        "apps/owner/src/shell/SignInScreen.js",
+        "apps/owner/src/features/account/AccountScreen.js",
+        "apps/owner/src/features/payments/PaymentsScreen.js",
+        "apps/owner/src/features/privacy/PrivacyScreen.js",
+        "apps/owner/src/features/shipping/ShippingScreen.js"
+      ]
+    },
+    {
+      "id": "email",
+      "what": "Email address",
+      "why": "Signing in with Google or Apple, inviting team members, where reports are sent, and the business's payment, courier and store contact details.",
+      "apple": "NSPrivacyCollectedDataTypeEmailAddress",
+      "play": {
+        "category": "Personal info",
+        "type": "Email address"
+      },
+      "purposes": [
+        "accountManagement",
+        "appFunctionality"
+      ],
+      "required": false,
+      "tracking": false,
+      "sources": [
+        "apps/owner/src/shell/sign-in.js",
+        "apps/owner/src/features/payments/PaymentsScreen.js",
+        "apps/owner/src/features/shipping/ShippingScreen.js",
+        "apps/owner/src/features/privacy/PrivacyScreen.js",
+        "apps/owner/src/features/reports/ReportsScreen.js",
+        "apps/owner/src/features/store-settings/StoreSettingsScreen.js",
+        "apps/owner/src/features/team/TeamScreen.js"
+      ]
+    },
+    {
+      "id": "name",
+      "what": "Name",
+      "why": "The account holder's name, team members' names, and the legal and contact names the payment account needs.",
+      "apple": "NSPrivacyCollectedDataTypeName",
+      "play": {
+        "category": "Personal info",
+        "type": "Name"
+      },
+      "purposes": [
+        "accountManagement",
+        "appFunctionality"
+      ],
+      "required": false,
+      "tracking": false,
+      "sources": [
+        "apps/owner/src/features/payments/PaymentsScreen.js"
+      ]
+    },
+    {
+      "id": "address",
+      "what": "Physical address",
+      "why": "The business's pickup address for couriers, the address printed on its invoices, and its grievance contact address.",
+      "apple": "NSPrivacyCollectedDataTypePhysicalAddress",
+      "play": {
+        "category": "Personal info",
+        "type": "Address"
+      },
+      "purposes": [
+        "appFunctionality"
+      ],
+      "required": false,
+      "tracking": false,
+      "sources": [
+        "apps/owner/src/features/shipping/ShippingScreen.js",
+        "apps/owner/src/features/invoices/InvoicesScreen.js",
+        "apps/owner/src/features/privacy/PrivacyScreen.js"
+      ]
+    },
+    {
+      "id": "user-id",
+      "what": "Google or Apple account identifier",
+      "why": "Signing in with Google or Sign in with Apple, or linking one to the account, ties that account to the seller.",
+      "apple": "NSPrivacyCollectedDataTypeUserID",
+      "play": {
+        "category": "Personal info",
+        "type": "User IDs"
+      },
+      "purposes": [
+        "accountManagement",
+        "security"
+      ],
+      "required": false,
+      "tracking": false,
+      "sources": [
+        "apps/owner/src/shell/sign-in.js",
+        "apps/owner/src/shell/SignInScreen.js",
+        "apps/owner/src/features/account/AccountScreen.js"
+      ]
+    },
+    {
+      "id": "photos",
+      "what": "Photos",
+      "why": "Product photos and the business logo, which the seller chooses and uploads to their shop.",
+      "apple": "NSPrivacyCollectedDataTypePhotosorVideos",
+      "play": {
+        "category": "Photos and videos",
+        "type": "Photos"
+      },
+      "purposes": [
+        "appFunctionality"
+      ],
+      "required": false,
+      "tracking": false,
+      "sources": [
+        "apps/owner/src/features/products/kit.js"
+      ]
+    },
+    {
+      "id": "files",
+      "what": "Files the seller imports",
+      "why": "Catalog and data files (such as CSV) the seller chooses to import.",
+      "apple": "NSPrivacyCollectedDataTypeOtherUserContent",
+      "play": {
+        "category": "Files and docs",
+        "type": "Files and docs"
+      },
+      "purposes": [
+        "appFunctionality"
+      ],
+      "required": false,
+      "tracking": false,
+      "sources": [
+        "apps/owner/src/features/products/kit.js"
+      ]
+    },
+    {
+      "id": "messages",
+      "what": "Messages to customers",
+      "why": "Replies the seller writes in the inbox, sent to their customers on Instagram or Facebook Messenger.",
+      "apple": "NSPrivacyCollectedDataTypeEmailsOrTextMessages",
+      "play": {
+        "category": "Messages",
+        "type": "Other in-app messages"
+      },
+      "purposes": [
+        "appFunctionality"
+      ],
+      "required": false,
+      "tracking": false,
+      "sources": [
+        "apps/owner/src/features/inbox/ThreadScreen.js"
+      ]
+    },
+    {
+      "id": "content",
+      "what": "Shop content the seller writes",
+      "why": "Automation messages, product details and store pages the seller writes for their shop.",
+      "apple": "NSPrivacyCollectedDataTypeOtherUserContent",
+      "play": {
+        "category": "App activity",
+        "type": "Other user-generated content"
+      },
+      "purposes": [
+        "appFunctionality"
+      ],
+      "required": false,
+      "tracking": false,
+      "sources": [
+        "apps/owner/src/features/automations/BuilderScreen.js",
+        "apps/owner/src/features/automations/panels.js"
+      ]
+    },
+    {
+      "id": "payment-details",
+      "what": "The business's payment details",
+      "why": "The UPI id shown on payment QR codes and the business's own payment gateway key, entered after a fresh check and never shown back.",
+      "apple": "NSPrivacyCollectedDataTypeOtherFinancialInfo",
+      "play": {
+        "category": "Financial info",
+        "type": "Other financial info"
+      },
+      "purposes": [
+        "appFunctionality"
+      ],
+      "required": false,
+      "tracking": false,
+      "sources": [
+        "apps/owner/src/features/payments/PaymentsScreen.js"
+      ]
+    },
+    {
+      "id": "device",
+      "what": "Device identifiers",
+      "why": "A random id for each installation, the device's name and its push token, so Settings > Devices can list and sign out each phone and alerts reach it.",
+      "apple": "NSPrivacyCollectedDataTypeDeviceID",
+      "play": {
+        "category": "Device or other IDs",
+        "type": "Device or other IDs"
+      },
+      "purposes": [
+        "appFunctionality",
+        "security"
+      ],
+      "required": true,
+      "tracking": false,
+      "sources": [
+        "apps/owner/src/App.js",
+        "packages/app-core/src/push.js"
+      ]
+    },
+    {
+      "id": "activity",
+      "what": "Account activity",
+      "why": "Sensitive changes (keys, team, account deletion) are recorded in the business's audit log, and each device's last use is shown in Settings > Devices.",
+      "apple": "NSPrivacyCollectedDataTypeProductInteraction",
+      "play": {
+        "category": "App activity",
+        "type": "Other actions"
+      },
+      "purposes": [
+        "security",
+        "appFunctionality"
+      ],
+      "required": true,
+      "tracking": false,
+      "sources": [
+        "src/modules/audit",
+        "apps/owner/src/features/devices/DevicesScreen.js"
+      ]
+    }
+  ]
+}

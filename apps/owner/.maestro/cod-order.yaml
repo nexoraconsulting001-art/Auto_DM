@@ -1,0 +1,37 @@
+# Business a's cash on delivery order, seeded new with cash due. A second owner of a then reads it the way the web
+# console does on refresh (support/console-order.js).
+appId: ${APP_ID}
+name: 'P-18: Confirm a cash on delivery order in the app, and the web console shows the same status'
+---
+- runFlow:
+    file: common/sign-in-with-code.yaml
+    env:
+      PHONE: ${PHONE_ORDERS}
+- tapOn:
+    id: tab-orders
+- extendedWaitUntil:
+    visible: ${ORDER_A_NUMBER}
+    timeout: 60000
+- tapOn: ${ORDER_A_NUMBER}
+- extendedWaitUntil:
+    visible:
+      id: order-action-confirm
+    timeout: 30000
+- tapOn:
+    id: order-action-confirm
+- extendedWaitUntil:
+    visible:
+      id: order-action-done
+    timeout: 30000
+- assertNotVisible:
+    id: order-action-confirm
+- runScript:
+    file: support/console-order.js
+    env:
+      API_URL: ${API_URL}
+      SIGN_IN_HOST: ${SIGN_IN_HOST}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+      PHONE: ${PHONE_ORDER_CONSOLE}
+      ORDER_ID: ${ORDER_A_ID}
+      EXPECT: packed
+- assertTrue: ${output.consoleStatus == 'packed'}
