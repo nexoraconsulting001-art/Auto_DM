@@ -301,6 +301,7 @@ function createAppSubmissions(ctx) {
   async function applyStoreEvent(platform, event) {
     if (!event || typeof event !== 'object') return;
     const source = event.source === 'play' ? 'provider:play' : 'provider:appstore';
+    let liveUrl = null;
     await db.tx(async (t) => {
       const row = await rowOf(platform, t, true);
       if (!row) return;
@@ -321,10 +322,12 @@ function createAppSubmissions(ctx) {
         const { moved } = await go('live', { set: { live_version: version, live_build_number: Number.isInteger(event.buildNumber) ? event.buildNumber : row.build_number, store_url: storeUrl } });
         if (moved) {
           await notifyOwner(t, 'app.live', `app.live:${row.id}:${version}`);
-          await setStoreUrl(platform, storeUrl);
+          liveUrl = storeUrl;
         }
       }
     });
+    // Outside the transaction: the app settings write uses its own connection and must not wait on this one.
+    if (liveUrl) await setStoreUrl(platform, liveUrl);
   }
 
   async function setStoreUrl(platform, url) {
