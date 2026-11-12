@@ -1,5 +1,8 @@
 import { z } from 'zod';
+import { APP_PLATFORMS, APP_VERSION } from '../accounts.js';
+import { BUILD_REASONS, OTA_STATUSES, SUBMISSION_STATES } from '../apps.js';
 import { Channel } from '../compliance.js';
+import { AppBuild, AppBuildRequest, AppSubmission } from './apps.js';
 import { PresetSlots } from '../themes.js';
 import { Count, Id, IdParams, IdText, ListQuery, Timestamp, page, required, text } from './common.js';
 
@@ -115,6 +118,104 @@ export const CustomisationDecision = z.object({
 }).refine((d) => d.decision !== 'alternative' || d.alternative !== '', { message: 'Say what was offered instead', path: ['alternative'] });
 export const CustomisationListQuery = ListQuery.extend({ tenantId: IdText.optional(), decision: z.enum(['all', 'open', 'accepted', 'alternative', 'declined']).default('all') });
 
+// ---- Phase 6: the branded shopper apps ----
+const AppRequestKey = z.string().regex(/^[\w-]{8,80}$/, 'Use 8 to 80 letters, digits, - or _');
+const AppVersionText = z.string().regex(APP_VERSION, 'Use a version like 1.2.0');
+export const AppBatch = z.object({
+  id: Id,
+  reason: z.enum(BUILD_REASONS),
+  tenantId: Id.nullable(),
+  appVersion: z.string(),
+  runtimeVersion: z.string(),
+  note: z.string(),
+  status: z.enum(['open', 'finished']),
+  createdAt: Timestamp,
+  finishedAt: Timestamp.nullable(),
+  counts: z.object({ total: Count, built: Count, failed: Count, submitted: Count }),
+});
+export const AppBatchDetail = AppBatch.extend({ builds: z.array(AppBuild.extend({ tenantId: Id, tenantName: z.string() })) });
+/** A native change rebuilds every entitled brand on the new runtime. A failed brand never stops the batch. */
+export const AppBatchCreate = z.object({
+  reason: z.literal('native_change'),
+  note: Reason,
+  appVersion: AppVersionText,
+  runtimeVersion: z.string().trim().min(1).max(40),
+  fingerprint: z.string().trim().min(8).max(80),
+  platforms: z.array(z.enum(APP_PLATFORMS)).min(1).max(2).default(['android', 'ios']),
+  requestKey: AppRequestKey,
+});
+const AppMinimum = z.object({ minVersion: z.string(), storeUrl: z.string() });
+export const AppMinimums = z.object({ android: AppMinimum, ios: AppMinimum });
+/** Empty minVersion or storeUrl takes the minimum away. */
+export const AppMinimumSet = z.object({
+  platform: z.enum(APP_PLATFORMS),
+  minVersion: z.union([z.literal(''), AppVersionText]),
+  storeUrl: z.union([z.literal(''), z.string().trim().max(500).regex(/^https:\/\/(play\.google\.com\/store\/apps\/details\?id=|apps\.apple\.com\/)\S+$/, 'Use the app’s Google Play or App Store link')]),
+});
+/** Demo access for store review (2.1(a)): the review number and its code, which is stored only as a hash. */
+export const AppReviewAccessSet = z.object({
+  phone: z.string().trim().regex(/^\+[1-9][0-9]{7,14}$/, 'Use the number with its country code, like +919876543210').nullable().default(null),
+  code: z.string().regex(/^[0-9]{6}$/, 'Use a 6-digit code').nullable().default(null),
+  enabled: z.boolean(),
+}).refine((b) => !b.enabled || (b.phone && b.code), 'Give the review number and its code to turn review access on');
+export const PlatformSubmission = AppSubmission.extend({ id: Id, tenantId: Id, tenantName: z.string() });
+export const SubmissionMove = z.object({
+  to: z.enum(SUBMISSION_STATES),
+  reason: Reason,
+  storeUrl: z.string().trim().max(500).regex(/^https:\/\/\S+$/, 'Use the app’s store link').optional(),
+  rejection: z.object({ guideline: z.string().trim().regex(/^[0-9A-Za-z_.:() -]{1,40}$/, 'Use the guideline number, like 4.2.6'), message: z.string().max(4000).default('') }).optional(),
+}).superRefine((b, issue) => {
+  if (b.to === 'rejected' && !b.rejection) issue.addIssue({ code: 'custom', path: ['rejection'], message: 'Give the guideline the store named' });
+  if (b.to === 'live' && !b.storeUrl) issue.addIssue({ code: 'custom', path: ['storeUrl'], message: 'Give the app’s store link' });
+});
+export const Playbook = z.object({ code: z.string(), guideline: z.string(), title: z.string(), doc: z.string(), autoResubmit: z.boolean() });
+export const PlatformRejection = z.object({ id: Id, tenantId: Id, tenantName: z.string(), platform: z.enum(APP_PLATFORMS), guideline: z.string(), message: z.string(), playbook: Playbook, rejectedAt: Timestamp });
+export const ReviewTask = z.object({
+  id: Id,
+  tenantId: Id,
+  tenantName: z.string(),
+  platform: z.enum(APP_PLATFORMS),
+  guideline: z.string(),
+  status: z.enum(['open', 'resolved']),
+  openedAt: Timestamp,
+  resolvedAt: Timestamp.nullable(),
+  resolvedBy: z.string(),
+  resolution: z.string(),
+});
+export const OtaRelease = z.object({
+  id: Id,
+  runtimeVersion: z.string(),
+  bundleFingerprint: z.string(),
+  bundleId: z.string(),
+  message: z.string(),
+  rollout: z.union([z.literal(10), z.literal(50), z.literal(100)]),
+  status: z.enum(OTA_STATUSES),
+  blockReason: z.string(),
+  rollbackReason: z.string(),
+  channelsTotal: Count,
+  channelsDone: Count,
+  publishedBy: z.string(),
+  createdAt: Timestamp,
+  advancedAt: Timestamp.nullable(),
+  rolledBackAt: Timestamp.nullable(),
+});
+export const OtaPublish = z.object({
+  runtimeVersion: z.string().trim().min(1).max(40),
+  bundleFingerprint: z.string().trim().min(8).max(80),
+  bundleId: z.string().trim().min(1).max(120),
+  bundleHash: z.string().regex(/^[0-9a-f]{64}$/, 'The bundle hash is 64 lower-case hex digits'),
+  message: z.string().max(500).default(''),
+  requestKey: AppRequestKey,
+});
+export const OtaHealth = z.object({
+  hours: z.array(z.object({ hour: Timestamp, launches: Count, crashes: Count })),
+  launches: Count,
+  crashes: Count,
+  crashRate: z.number().nullable(),
+  baseline: z.number().nullable(),
+  threshold: z.number(),
+});
+
 export const platformRoutes = {
   'platform.businesses': { method: 'GET', path: '/tenants', platformRoles: anyone, query: ListQuery, response: page(BusinessSummary) },
   'platform.createBusiness': { method: 'POST', path: '/tenants', platformRoles: anyone, body: BusinessCreate, status: 201, response: BusinessCreated },
@@ -141,6 +242,26 @@ export const platformRoutes = {
   'platform.customisationRequests': { method: 'GET', path: '/customisation-requests', platformRoles: anyone, query: CustomisationListQuery, response: page(CustomisationRequest) },
   'platform.createCustomisationRequest': { method: 'POST', path: '/tenants/:id/customisation-requests', platformRoles: anyone, params: IdParams, body: CustomisationRequestCreate, status: 201, response: CustomisationRequest },
   'platform.decideCustomisationRequest': { method: 'POST', path: '/customisation-requests/:id/decision', platformRoles: anyone, params: IdParams, body: CustomisationDecision, response: CustomisationRequest },
+  // Phase 6: the branded shopper apps. Answered by src/modules/app-builds (batches, a business's build), app-config (minimum
+  // version, review access), app-submissions (store states, rejections, playbooks, review tasks) and ota (releases).
+  'platform.appBatches': { method: 'GET', path: '/app-build-batches', platformRoles: anyone, query: ListQuery, response: page(AppBatch) },
+  'platform.appBatch': { method: 'GET', path: '/app-build-batches/:id', platformRoles: anyone, params: IdParams, response: AppBatchDetail },
+  'platform.createAppBatch': { method: 'POST', path: '/app-build-batches', platformRoles: superAdmin, body: AppBatchCreate, status: 201, response: AppBatch },
+  'platform.buildBusinessApp': { method: 'POST', path: '/tenants/:id/app-builds', platformRoles: anyone, params: IdParams, body: AppBuildRequest, status: 202, response: z.object({ builds: z.array(AppBuild) }) },
+  'platform.setAppMinimum': { method: 'PUT', path: '/tenants/:id/app-minimum', platformRoles: superAdmin, params: IdParams, body: AppMinimumSet, response: AppMinimums },
+  'platform.setAppReviewAccess': { method: 'PUT', path: '/tenants/:id/app-review-access', platformRoles: superAdmin, params: IdParams, body: AppReviewAccessSet, status: 204, response: null },
+  'platform.appSubmissions': { method: 'GET', path: '/app-submissions', platformRoles: anyone, query: ListQuery.extend({ state: z.enum(SUBMISSION_STATES).optional(), platform: z.enum(APP_PLATFORMS).optional() }), response: page(PlatformSubmission) },
+  'platform.setSubmissionState': { method: 'POST', path: '/app-submissions/:id/state', platformRoles: anyone, params: IdParams, body: SubmissionMove, response: PlatformSubmission },
+  'platform.appRejections': { method: 'GET', path: '/app-rejections', platformRoles: anyone, query: ListQuery.extend({ tenantId: IdText.optional(), guideline: z.string().max(40).optional() }), response: page(PlatformRejection) },
+  'platform.appPlaybooks': { method: 'GET', path: '/app-playbooks', platformRoles: anyone, response: z.object({ items: z.array(Playbook) }) },
+  'platform.appReviewTasks': { method: 'GET', path: '/app-review-tasks', platformRoles: anyone, query: ListQuery.extend({ status: z.enum(['open', 'resolved']).optional() }), response: page(ReviewTask) },
+  'platform.resolveAppReviewTask': { method: 'POST', path: '/app-review-tasks/:id/resolve', platformRoles: anyone, params: IdParams, body: z.object({ resolution: Reason }), response: ReviewTask },
+  'platform.otaReleases': { method: 'GET', path: '/ota-releases', platformRoles: anyone, query: ListQuery, response: page(OtaRelease) },
+  /** A fingerprint that is not the runtime's is recorded as blocked (native_change) and answers 409; nothing is published. */
+  'platform.publishOta': { method: 'POST', path: '/ota-releases', platformRoles: superAdmin, body: OtaPublish, status: 201, response: OtaRelease },
+  'platform.advanceOta': { method: 'POST', path: '/ota-releases/:id/advance', platformRoles: superAdmin, params: IdParams, response: OtaRelease },
+  'platform.rollBackOta': { method: 'POST', path: '/ota-releases/:id/roll-back', platformRoles: anyone, params: IdParams, body: z.object({ reason: Reason }), response: OtaRelease },
+  'platform.otaHealth': { method: 'GET', path: '/ota-releases/:id/health', platformRoles: anyone, params: IdParams, response: OtaHealth },
 };
 
 export const platformRouteList = Object.freeze(Object.entries(platformRoutes).map(([id, route]) => Object.freeze({ id, ...route })));

@@ -77,11 +77,13 @@ export function tokensService(ctx) {
     const outcome = await db().tx(async (t) => {
       const [spent] = await t.query(
         `UPDATE refresh_tokens SET used_at = now() WHERE token_hash = $1 AND used_at IS NULL
+           AND family_id IN (SELECT id FROM token_families WHERE subject_kind = 'user')
          RETURNING id, family_id, tenant_id, user_id, expires_at > now() AS live`,
         [tokenHash(token)],
       );
       if (!spent) {
-        const [seen] = await t.query('SELECT family_id FROM refresh_tokens WHERE token_hash = $1', [tokenHash(token)]);
+        // A shopper app's refresh token (Phase 6) is unknown here: it is neither spent nor does it end its family.
+        const [seen] = await t.query(`SELECT family_id FROM refresh_tokens WHERE token_hash = $1 AND family_id IN (SELECT id FROM token_families WHERE subject_kind = 'user')`, [tokenHash(token)]);
         if (!seen) return { refused: 'unknown' };
         await revokeFamilies(t, { familyIds: [Number(seen.family_id)], reason: 'token_reuse' });
         return { refused: 'token_reuse', familyId: Number(seen.family_id) };

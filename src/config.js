@@ -182,6 +182,37 @@ export const config = {
   googleOauthBaseUrl: process.env.GOOGLE_OAUTH_BASE_URL || '',
   // How often the worker hands new order events to their listeners.
   orderEventsPollMs: Number(process.env.ORDER_EVENTS_POLL_MS) || 2000,
+  // The branded shopper apps (PRD 10.7 to 10.14). Each base URL points its adapter at a simulator in tools/sim, which is refused
+  // when NODE_ENV=production; any other host that is not the provider's throws at start. Empty is the provider itself.
+  // EAS (src/adapters/eas): builds, store submits and over-the-air updates. Empty EXPO_TOKEN: the eas driver reports not_configured.
+  expoToken: process.env.EXPO_TOKEN || '',
+  easBaseUrl: process.env.EAS_BASE_URL || '',
+  easAccount: process.env.EAS_ACCOUNT || '',
+  // The stores (src/adapters/appstores). PLAY_BASE_URL serves both the Play API and its token exchange in a simulator.
+  appStoreBaseUrl: process.env.APPSTORE_BASE_URL || '',
+  playBaseUrl: process.env.PLAY_BASE_URL || '',
+  // Our one Play service account (its JSON, or the base64 of it) that each business invites in its own Play Console.
+  playServiceAccount: process.env.PLAY_SERVICE_ACCOUNT || '',
+  // The lowest App Store Connect role and the Play permission that may submit (the PRD marks both to confirm).
+  appStoreRoleNeeded: process.env.APP_STORE_ROLE_NEEDED || 'APP_MANAGER',
+  playPermissionNeeded: process.env.PLAY_PERMISSION_NEEDED || 'RELEASE_TO_PRODUCTION',
+  // 'local' builds on our own runner, 'eas' on EAS.
+  appBuildDriver: process.env.APP_BUILD_DRIVER === 'eas' ? 'eas' : 'local',
+  appBuildPollMs: positive(process.env.APP_BUILD_POLL_MS, 15_000),
+  storeReviewPollMs: positive(process.env.STORE_REVIEW_POLL_MS, 900_000),
+  // A shopper app's short access token and its rotating refresh token, apart from the sellers' (ACCESS_TOKEN_MINUTES, REFRESH_TOKEN_DAYS).
+  shopperAccessTokenMinutes: positive(process.env.SHOPPER_ACCESS_TOKEN_MINUTES, 15),
+  shopperRefreshTokenDays: positive(process.env.SHOPPER_REFRESH_TOKEN_DAYS, 90),
+  // Offers plus new-reel pushes per shopper per week (order updates are never capped).
+  shopperPushWeeklyCap: positive(process.env.SHOPPER_PUSH_WEEKLY_CAP, 2),
+  shopperPushPollMs: positive(process.env.SHOPPER_PUSH_POLL_MS, 5000),
+  // Over-the-air roll back: when the crash rate reaches OTA_CRASH_MULTIPLIER times the baseline and at least OTA_CRASH_FLOOR,
+  // after OTA_MIN_LAUNCHES launches in OTA_WINDOW_MINUTES. OTA_BASELINE_CRASH_RATE is used when a runtime has no earlier release.
+  otaCrashMultiplier: positive(process.env.OTA_CRASH_MULTIPLIER, 2),
+  otaCrashFloor: positive(process.env.OTA_CRASH_FLOOR, 0.01),
+  otaMinLaunches: positive(process.env.OTA_MIN_LAUNCHES, 50),
+  otaWindowMinutes: positive(process.env.OTA_WINDOW_MINUTES, 60),
+  otaBaselineCrashRate: positive(process.env.OTA_BASELINE_CRASH_RATE, 0.005),
   defaultTenant: process.env.DEFAULT_TENANT ?? 'default',
   defaultTenantName: process.env.DEFAULT_TENANT_NAME || 'My store',
 };

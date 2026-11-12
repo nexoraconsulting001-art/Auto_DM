@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { ApiError } from '../../contracts/api/errors.js';
 import { STORE_LIMITS } from '../../contracts/orders.js';
+import { currentChannel } from '../../platform/channel.js';
 import { log, reportError } from '../../platform/log.js';
 import { visitorIdFrom } from '../../platform/visitor.js';
 import { tenantId } from '../../tenancy.js';
@@ -141,15 +142,15 @@ export async function placeOrder(ctx, req, body) {
         `INSERT INTO orders (tenant_id, order_number, public_token, flow, payment_mode, reel_id, page_id, source, utm, user_id, shopper_id, visitor_id,
            customer_name, phone, email, address, city, state, pincode, shipping_address,
            subtotal_paise, discount_paise, loyalty_paise, shipping_paise, cod_fee_paise, tax_paise, total_paise, advance_paise, balance_paise,
-           coupon_id, coupon_code, loyalty_points, idempotency_key, terms_accepted_at, consent_notice_version, hold_expires_at)
+           coupon_id, coupon_code, loyalty_points, idempotency_key, terms_accepted_at, consent_notice_version, hold_expires_at, channel)
          VALUES ($1, $2, $3, 'checkout', $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb,
-           $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, now(), $33, $34) RETURNING *`,
+           $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, now(), $33, $34, $35) RETURNING *`,
         [tenantId(), `${ORDER_NUMBER(settings.store_name)}-${n}`, crypto.randomBytes(16).toString('base64url'), body.paymentMode,
           source.reelId, source.pageId, source.source, JSON.stringify(source.utm), req.user?.role === 'customer' ? req.user.id : null, shopper?.id ?? null, visitorId,
           address.name, phone, body.email ?? '', [address.line1, address.line2, address.landmark].filter(Boolean).join(', ').slice(0, 300), address.city, stateName(address.stateCode), address.pincode,
           JSON.stringify(snapshot), quote.subtotalPaise, quote.discountPaise, quote.loyaltyPaise, quote.shippingPaise, quote.codFeePaise, quote.taxPaise, quote.totalPaise,
           quote.advancePaise, quote.balancePaise, priced.coupon?.coupon.id ?? null, priced.coupon?.code ?? '', quote.pointsUsed, body.idempotencyKey,
-          body.consent.noticeVersion, holdUntil],
+          body.consent.noticeVersion, holdUntil, currentChannel()],  // the session's channel (Phase 6), never the body's
       );
 
       const items = [];

@@ -183,3 +183,77 @@ export async function appSession(base, { phone = OWNER.phone, whatsapp, device =
   const { session } = await verifiedSession(base, { phone, whatsapp, transport: 'bearer', device, tenantId, headers: appHeaders });
   return { accessToken: session.accessToken, refreshToken: session.refreshToken, session, device, headers: onAppHost({ authorization: `Bearer ${session.accessToken}`, ...appHeaders }) };
 }
+
+// ---- Phase 6: the branded shopper app ----
+
+/** A Play App Signing fingerprint shaped like the real ones (32 pairs of hex digits). Made up. */
+export const TEST_SIGNING_SHA256 = Array.from({ length: 32 }, (_, i) => (i * 7 + 16).toString(16).toUpperCase().padStart(2, '0')).join(':');
+
+/**
+ * Gives a business its shopper app: the plan features for `platforms` (tenant_features overrides of app.android, app.ios) and a
+ * valid app_configs row, upserted. `config` holds app_configs columns by their SQL names to change, as { app_name: 'Kesar' }.
+ * `app` is what startApp() or setup() returned; `tenant` another business of the same database. Returns the row.
+ */
+export async function enableApp(app, { platforms = ['android'], config = {}, tenant = app.tenant } = {}) {
+  const features = { android: 'app.android', ios: 'app.ios' };
+  for (const platform of platforms) {
+    await app.db.platform.query(
+      `INSERT INTO tenant_features (tenant_id, feature, enabled, limit_value) VALUES ($1, $2, true, NULL)
+       ON CONFLICT (tenant_id, feature) DO UPDATE SET enabled = true, limit_value = NULL`,
+      [tenant.id, features[platform]],
+    );
+  }
+  const row = {
+    app_name: 'Test store', short_name: 'Test', android_package: `com.example.t${tenant.id}`, ios_bundle_id: `com.example.t${tenant.id}`, url_scheme: `shop${tenant.id}`,
+    shop_domain: 'shop.test', support_email: 'help@shop.test', privacy_url: 'https://shop.test/policies/privacy', apple_team_id: 'ABCDE12345',
+    play_account_id: '1234567890', play_signing_sha256: [TEST_SIGNING_SHA256], ...config,
+  };
+  const columns = Object.keys(row);
+  const [saved] = await app.db.platform.query(
+    `INSERT INTO app_configs (tenant_id, ${columns.join(', ')}) VALUES ($1, ${columns.map((_, i) => `$${i + 2}`).join(', ')})
+     ON CONFLICT (tenant_id) DO UPDATE SET ${columns.map((c) => `${c} = EXCLUDED.${c}`).join(', ')}, updated_at = now() RETURNING *`,
+    [tenant.id, ...columns.map((c) => row[c])],
+  );
+  return saved;
+}
+
+/**
+ * Stands in for the shopper app of business `tenantId` on `base`: every request carries X-App: shopper, X-App-Tenant,
+ * X-App-Version and X-App-Platform, and once start() has opened a session, Authorization: Shopper <access token>.
+ *   start(grant = 'guest' | { grant, ... })   POST /api/store/app/session with this device; keeps the tokens. -> { status, body }
+ *   refresh()                                 POST /api/store/app/session/refresh; keeps the new tokens. -> { status, body }
+ *   fetch(path, { method, body, headers })    a body that is an object goes as JSON. -> the Response
+ * `host` is sent as x-forwarded-host, for a business's own address.
+ */
+export function shopperApp(base, { tenantId, platform = 'android', version = '1.0.0', device = { id: crypto.randomBytes(16).toString('hex'), name: 'Pixel 8' }, host } = {}) {
+  const headers = { 'x-app': 'shopper', 'x-app-tenant': String(tenantId), 'x-app-version': version, 'x-app-platform': platform, ...(host ? { 'x-forwarded-host': host } : {}) };
+  const tokens = { accessToken: '', refreshToken: '' };
+  const call = (path, { body, headers: extra = {}, ...init } = {}) => fetch(`${base}${path}`, {
+    redirect: 'manual',
+    ...init,
+    headers: { ...headers, ...(tokens.accessToken ? { authorization: `Shopper ${tokens.accessToken}` } : {}), ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...extra },
+    ...(body !== undefined ? { body: typeof body === 'string' ? body : JSON.stringify(body) } : {}),
+  });
+  const answer = async (res) => {
+    const text = await res.text();
+    let parsed = text;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch { /* not JSON */ }
+    if (res.ok && parsed?.accessToken) Object.assign(tokens, { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken ?? tokens.refreshToken });
+    return { status: res.status, body: parsed };
+  };
+  return {
+    device,
+    headers,
+    tokens,
+    fetch: call,
+    async start(grant = 'guest') {
+      const body = typeof grant === 'string' ? { grant } : grant;
+      return answer(await call('/api/store/app/session', { method: 'POST', body: { ...body, device } }));
+    },
+    async refresh() {
+      return answer(await call('/api/store/app/session/refresh', { method: 'POST', body: { refreshToken: tokens.refreshToken } }));
+    },
+  };
+}

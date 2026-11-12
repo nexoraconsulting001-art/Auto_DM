@@ -1,6 +1,8 @@
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { config as defaultConfig } from './config.js';
+import { createAppStores } from './adapters/appstores/index.js';
+import { createEas } from './adapters/eas/index.js';
 import { createGoogleAdapters } from './adapters/google/index.js';
 import { createMetaAdapters } from './adapters/meta/index.js';
 import { createStoreAdapters } from './adapters/store.js';
@@ -53,11 +55,13 @@ export function registerJobs({ db, platform, config, modules = MODULES, metaCall
   const repos = createRepos(db, { storage: platform.storage, secrets: platform.secrets, modules });
   const meta = createMetaAdapters(config, { onCall: metaCalls.onCall });
   const google = createGoogleAdapters(config);
+  const eas = createEas(config);
+  const appStores = createAppStores(config);
   const compliance = createCompliance({ db, repos, ig, meta, config, platform });
   const providers = createStoreAdapters(config);
   const shopperMessages = createShopperMessages({ db, platform, providers, config });
   const notify = createNotify({ db, providers, config });
-  const jobContext = { db, repos, platform, config, ig, meta, google, providers, compliance, shopperMessages, notify, modules };
+  const jobContext = { db, repos, platform, config, ig, meta, google, eas, appStores, providers, compliance, shopperMessages, notify, modules };
   metaCalls.bind(jobContext);
   // The order event bus: listeners register in each module's setup, and this worker is what delivers.
   const orderEvents = wireOrderEvents(jobContext);

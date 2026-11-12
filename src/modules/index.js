@@ -5,6 +5,11 @@ import { adminConsole } from './admin-console/index.js';
 import { alerts } from './alerts/index.js';
 import { apiAuth } from './api-auth/index.js';
 import { apiV1 } from './api-v1/index.js';
+import { appApi } from './app-api/index.js';
+import { appBuilds } from './app-builds/index.js';
+import { appConfig } from './app-config/index.js';
+import { appLinks } from './app-links/index.js';
+import { appSubmissions } from './app-submissions/index.js';
 import { audit } from './audit/index.js';
 import { automations } from './automations/index.js';
 import { brand } from './brand/index.js';
@@ -33,6 +38,7 @@ import { loyalty } from './loyalty/index.js';
 import { notifications } from './notifications/index.js';
 import { orderAlerts } from './order-alerts/index.js';
 import { orders } from './orders/index.js';
+import { ota } from './ota/index.js';
 import { pages } from './pages/index.js';
 import { payments } from './payments/index.js';
 import { platformConsole } from './platform-console/index.js';
@@ -43,7 +49,10 @@ import { returns } from './returns/index.js';
 import { reviews } from './reviews/index.js';
 import { shipping } from './shipping/index.js';
 import { shopifySync } from './shopify-sync/index.js';
+import { shopperPush } from './shopper-push/index.js';
 import { shoppers } from './shoppers/index.js';
+import { storeAccess } from './store-access/index.js';
+import { storeListings } from './store-listings/index.js';
 import { storefront } from './storefront/index.js';
 import { team } from './team/index.js';
 import { themes } from './themes/index.js';
@@ -66,14 +75,17 @@ import { wishlist } from './wishlist/index.js';
  *   takesOver(ctx)                        -> { id: handler } for ids admin-api answers (Phase 0): replaces its handler there.
  *   jobs({ db, repos, platform, config, ig, meta, google, providers, compliance, shopperMessages, notify, modules }) Calls platform.queue.work(...). May return an async schedule(), run every minute.
  *   onMetaCall(call, ctx)                 Told about every call to Meta, ids and numbers only. See meta-calls.js.
+ *   owns                                  { migrations, tables, api, store, platform, jobs }: as data, what the module holds and
+ *                                         answers (Phase 6 folders; test/p6/contract reads it). Not a hook: nothing runs it.
  *
- * ctx is { db, repos, ig, meta, google, apple, providers, compliance, shopperMessages, notify, orderEvents, auth, config, platform, modules }. meta is src/adapters/meta; google is
+ * ctx is { db, repos, ig, meta, google, apple, eas, appStores, providers, compliance, shopperMessages, notify, orderEvents, auth, config, platform, modules }. meta is src/adapters/meta; google is
  * src/adapters/google (ga4, and signIn for sellers); apple is src/adapters/apple (signIn); providers is src/adapters/store.js (razorpay, shiprocket, shopify, whatsapp, email). compliance is the only path to Meta for a message, and
  * shopperMessages the only path to WhatsApp or email for one to a shopper. notify is the only path to a seller (PRD 5.13, 10.5): owner push,
  * Bhava's own WhatsApp number and Bhava's own email sender, and the in-app list. notify.emit({ event, tenantId, key, data }, t) writes an outbox
  * row, inside your transaction when you pass it; notify.sendCode({ to, code, purpose }) sends a seller's login code; notify.prefs and
  * notify.deliveries are the preferences and the delivery log (src/modules/notifications, src/contracts/notifications.js).
- * orderEvents is the order event bus (src/modules/orders/events.js).
+ * orderEvents is the order event bus (src/modules/orders/events.js). eas is src/adapters/eas (app builds, store submits, over-the-air
+ * updates) and appStores is src/adapters/appstores ({ appStoreConnect, googlePlay }); both are also in the jobs context.
  * platform.fetcher is safeFetch and platform.images is sharp (src/platform).
  *
  * Phase 3's buyer pages (catalog to leads) come after traffic, so traffic's page middleware counts them, and before admin-api,
@@ -89,12 +101,22 @@ import { wishlist } from './wishlist/index.js';
  *
  * notifications (PRD 5.13, 10.5) comes right after alerts, which it drains: it answers notifications.* and push.*, and listens to the
  * order event bus for new orders.
+ *
+ * Phase 6's branded shopper app (PRD 10.7 to 10.14) adds nine folders. app-links sits after reports and before catalog, so the
+ * install banner it wraps into HTML answers sees every buyer page, as traffic's script does, and its two well-known files mount
+ * before anything else could answer those paths. app-api sits directly before shoppers: its gate has decided who an app request
+ * is (req.appSession, req.shopper, the app channel) before the shoppers module's session middleware runs, which then leaves such
+ * a request alone. The other seven (shopper-push, ota, app-config, app-builds, store-access, store-listings, app-submissions)
+ * follow the store's order modules, and storefront stays last of the buyer modules, directly before admin-console.
  */
 export const MODULES = [
   brand, entitlements, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, igConnect, compliance, automations, links, facebook, domains,
   insights, reachGuard, traffic, reports,
+  appLinks,
   catalog, imports, categories, pages, themes, creator, leads,
-  shoppers, consent, cart, coupons, inventory, loyalty, checkout, orders, payments, refunds, shipping, invoices, returns, reviews, wishlist,
-  orderAlerts, abandonedCart, shopifySync, storefront,
+  appApi, shoppers, consent, cart, coupons, inventory, loyalty, checkout, orders, payments, refunds, shipping, invoices, returns, reviews, wishlist,
+  orderAlerts, abandonedCart, shopifySync,
+  shopperPush, ota, appConfig, appBuilds, storeAccess, storeListings, appSubmissions,
+  storefront,
   adminConsole, adminApi, apiV1,
 ];

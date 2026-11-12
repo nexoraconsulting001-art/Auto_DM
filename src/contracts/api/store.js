@@ -34,6 +34,8 @@ export const Coupon = z.object({
   /** The reel or post it was made for (7.4). */
   pageId: Id.nullable(),
   active: z.boolean(),
+  /** Redeemable only on an order placed in the business's own app (Phase 6, P-63). */
+  appOnly: z.boolean().default(false),
   createdAt: Timestamp,
 });
 const couponFields = {
@@ -53,9 +55,9 @@ const couponFields = {
   pageId: Id.nullable(),
   active: z.boolean(),
 };
-export const CouponCreate = z.object(couponFields).partial().required({ code: true, kind: true });
+export const CouponCreate = z.object(couponFields).partial().required({ code: true, kind: true }).extend({ appOnly: z.boolean().default(false) });
 /** The code and kind of a coupon that has been used can't change; the server refuses. */
-export const CouponUpdate = z.object(couponFields).partial();
+export const CouponUpdate = z.object(couponFields).partial().extend({ appOnly: z.boolean().optional() });
 export const CouponStats = z.object({ couponId: Id, orders: Count, discountPaise: Paise, revenuePaise: Paise });
 
 export const couponRoutes = {

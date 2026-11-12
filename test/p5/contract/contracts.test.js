@@ -27,6 +27,8 @@ const FRESH = [
   'auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.deleteAccount', 'team.invite', 'team.update', 'team.remove',
   'settings.updatePayment', 'paymentAccount.startLinked', 'paymentAccount.connectUrl', 'paymentAccount.setMode', 'paymentAccount.disconnect',
   'shippingSettings.update', 'shopify.connect', 'shopify.disconnect', 'whatsappAccount.connect', 'whatsappAccount.disconnect', 'tags.update', 'apiKeys.create', 'apiKeys.revoke',
+  // Phase 6 (the shopper app contract): the business's App Store Connect key and its own push credentials.
+  'storeAccess.save', 'pushCredentials.save',
 ];
 const PLATFORM_TABLES = ['people', 'person_identities', 'seller_login_codes', 'token_families', 'refresh_tokens', 'auth_devices', 'auth_handoffs', 'review_logins', 'review_login_uses', 'account_deletion_requests', 'app_min_versions'];
 

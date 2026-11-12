@@ -1,3 +1,4 @@
+import { APP_ENTITLEMENTS } from '../../contracts/apps.js';
 import { tenantId } from '../../tenancy.js';
 
 /**
@@ -24,12 +25,20 @@ export function entitlementsRepo(db) {
     return row ?? { enabled: false, limit_value: null };
   }
 
+  /** A feature an app brings with it (APP_ENTITLEMENTS.includes: loyalty) is on whenever either app is, by plan or by override. */
+  async function resolve(feature) {
+    const row = await lookup(feature);
+    if (row.enabled || !APP_ENTITLEMENTS.includes.includes(String(feature))) return row;
+    for (const app of [APP_ENTITLEMENTS.android, APP_ENTITLEMENTS.ios]) if ((await lookup(app)).enabled) return { enabled: true, limit_value: row.limit_value };
+    return row;
+  }
+
   return {
     async can(feature) {
-      return (await lookup(feature)).enabled;
+      return (await resolve(feature)).enabled;
     },
     async limit(feature) {
-      const { enabled, limit_value: limit } = await lookup(feature);
+      const { enabled, limit_value: limit } = await resolve(feature);
       if (!enabled) return 0;
       return limit ?? Infinity;
     },

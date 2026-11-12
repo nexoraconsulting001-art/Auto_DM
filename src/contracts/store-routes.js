@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { APP_PLATFORMS, DEVICE_ID, PKCE_VERIFIER } from './accounts.js';
+import { BUYER_BLOCKS } from './buyer-pages.js';
+import { PUSH_TOKEN } from './notifications.js';
 import { PINCODE_MESSAGE, STORE_LIMITS } from './orders.js';
 
 /**
@@ -255,3 +258,206 @@ export const PaymentReturn = z.strictObject({ orderToken: z.string().max(100), g
 export const ReviewCreate = z.strictObject({ orderNumber: z.string().max(40), productId: id, rating: z.number().int().min(1).max(5), body: line(STORE_LIMITS.review.textChars).default('') });
 export const WishlistPut = z.strictObject({ add: z.array(id).max(STORE_LIMITS.wishlistItems).default([]), remove: z.array(id).max(STORE_LIMITS.wishlistItems).default([]) });
 export const ConsentSave = z.strictObject({ choices: ConsentChoices.partial().required({ noticeVersion: true }) });
+
+// ---- the branded shopper app (Phase 6, PRD 10.7, 10.9 to 10.14) ----
+
+/**
+ * APP_ROUTES: what the seller's own shopper app calls, on the business's own host, beside the store's STORE_ROUTES. Each row is
+ * { method, path, owner, kind, auth, body?, query?, response? }. kind is json, page (a browser route) or wellknown (the two
+ * verified-link files). auth: none (no token needed), app (any app session, a guest one included), shopper (signed in), web (a
+ * browser, not gated).
+ *
+ * Every app request carries X-App: shopper, X-App-Tenant (the business id written into the build), X-App-Version and
+ * X-App-Platform, and Authorization: Shopper <access token> (SHOPPER_APP_HEADERS and SHOPPER_AUTH_SCHEME in src/contracts/apps.js).
+ * The business comes from the host. A build-time id that does not match it is a 404 with nothing in the body; below the
+ * business's minimum version the answer is 426 with the store link. The gate is src/modules/app-api/gate.js.
+ *
+ * Errors are { error, code, fields? } with the codes of src/contracts/api/errors.js. Every answer is Cache-Control: no-store
+ * except the two well-known files. Everything a shopper sees is the seller's brand: no platform name in any answer, error,
+ * header, push or host. No route takes a price, a total, a discount or a channel: the server works out every amount and sets
+ * the order's channel from the session.
+ *
+ * Phase 4 JSON the app calls unchanged, with its app session: productsLookup, cartGet, cartPut, otpSend, otpVerify (purpose cod
+ * only), addresses, addressCreate, addressUpdate, addressRemove, sharedConsentSave, sharedConsentRevoke, checkoutQuote,
+ * checkoutPlace, paymentReturn, orderRetry, accountOrderCancel, serviceability, couponCheck, returnCreate, consentGet,
+ * consentSave, dataRequest (kind access), reviewCreate, reviewList, wishlistGet, wishlistPut. Payment uses the hosted page
+ * GET /order/:token in a browser tab.
+ */
+const DEVICE = z.string().regex(DEVICE_ID, 'Unknown device');
+const SLUG = z.string().regex(/^[a-z0-9][a-z0-9-]{0,119}$/, 'Unknown address');
+const Cursor = z.string().max(512).regex(/^[\w-]+$/, 'Invalid cursor');
+const pageOf = (item) => z.object({ items: z.array(item), nextCursor: z.string().nullable() });
+const Limit = z.coerce.number().int().min(1).max(48).default(24);
+const When = z.union([z.date().transform((d) => d.toISOString()), z.string()]);
+/** The catalog's sorts, as SORTS in src/modules/storefront/catalog.js names them (a test keeps the two equal). */
+export const APP_SORTS = Object.freeze(['popular', 'newest', 'price-asc', 'price-desc', 'discount']);
+export const POLICY_KINDS = Object.freeze(['privacy', 'terms', 'refund', 'shipping']);
+const HOME_BLOCKS = Object.keys(BUYER_BLOCKS).filter((key) => BUYER_BLOCKS[key].surfaces.includes('store_home'));
+
+export const AppDevice = z.strictObject({ id: DEVICE, name: line(80).default('') });
+export const AppSessionStart = z.discriminatedUnion('grant', [
+  z.strictObject({ grant: z.literal('guest'), device: AppDevice }),
+  z.strictObject({ grant: z.literal('otp'), device: AppDevice, phone: Phone, code: z.string().regex(/^[0-9]{6}$/, 'Enter the 6-digit code') }),
+  z.strictObject({ grant: z.literal('handoff'), device: AppDevice, code: z.string().min(1).max(200), codeVerifier: z.string().regex(PKCE_VERIFIER) }),
+]);
+export const AppRefresh = z.strictObject({ refreshToken: z.string().min(1).max(200) });
+export const AppleSignInBody = z.strictObject({ identityToken: z.string().min(1).max(5000), nonce: z.string().min(1).max(200), name: line(80).optional(), device: AppDevice });
+export const AppDeleteBody = z.strictObject({ confirm: z.literal(true, 'Confirm to delete your account') });
+export const AppShopper = z.object({ id, name: z.string(), phoneMasked: z.string(), email: z.string(), phoneVerified: z.boolean(), hasGoogle: z.boolean(), hasApple: z.boolean() });
+export const AppSession = z.object({ accessToken: z.string(), accessExpiresInSeconds: z.number().int(), refreshToken: z.string(), guest: z.boolean(), shopper: AppShopper.nullable() });
+export const AppRefreshed = z.object({ accessToken: z.string(), accessExpiresInSeconds: z.number().int(), refreshToken: z.string() });
+export const AppBootstrap = z.object({
+  name: z.string(),
+  minVersion: z.string(),
+  storeUrl: z.string(),
+  /** apple only on ios with a bundle id set. */
+  signIn: z.object({ whatsapp: z.boolean(), google: z.boolean(), apple: z.boolean() }),
+  features: z.object({ coupons: z.boolean(), loyalty: z.boolean(), reviews: z.boolean(), wishlist: z.boolean(), returns: z.boolean(), cod: z.boolean() }),
+  /** app_configs over the brand kit. */
+  theme: z.object({ colors: z.record(z.string(), z.string()), headingFont: z.string(), bodyFont: z.string(), logoUrl: z.string() }),
+  links: z.object({ privacy: z.string(), terms: z.string(), refund: z.string(), shipping: z.string() }),
+  supportEmail: z.string(),
+  /** Whether the brand's own push credentials are set. */
+  push: z.object({ android: z.boolean(), ios: z.boolean() }),
+  noticeVersion: z.number().int().nullable(),
+});
+export const AppMe = z.object({ shopper: AppShopper.nullable(), sharedProfile: z.object({ available: z.boolean(), linked: z.boolean(), consented: z.boolean() }) });
+export const AppDeletion = z.object({ status: z.enum(['completed', 'waiting']), signedOut: z.boolean(), message: z.string() });
+export const AppProductCard = z.object({
+  id, slug: z.string(), name: z.string(), pricePaise: z.number().int(), comparePaise: z.number().int().nullable(), image: z.string(), inStock: z.boolean(),
+  rating: z.number().nullable(), ratingCount: z.number().int(),
+});
+export const AppReelCard = z.object({ slug: z.string(), title: z.string(), image: z.string(), videoUrl: z.string().nullable(), pinned: z.boolean(), productCount: z.number().int() });
+export const AppCategoryCard = z.object({ slug: z.string(), name: z.string(), image: z.string() });
+export const AppHome = z.object({
+  blocks: z.array(z.object({ type: z.enum(HOME_BLOCKS), settings: z.record(z.string(), z.unknown()) })),
+  categories: z.array(AppCategoryCard),
+  reels: z.array(AppReelCard).max(12),
+  products: z.array(AppProductCard).max(12),
+});
+export const AppCatalogQuery = z.strictObject({ q: z.string().max(80).regex(NO_NUL).optional(), category: SLUG.optional(), sort: z.enum(APP_SORTS).optional(), cursor: Cursor.optional(), limit: Limit });
+export const AppPageQuery = z.strictObject({ cursor: Cursor.optional(), limit: Limit });
+export const AppReelsQuery = z.strictObject({ category: SLUG.optional(), cursor: Cursor.optional(), limit: Limit });
+export const AppProduct = AppProductCard.extend({
+  description: z.string(),
+  images: z.array(z.string()),
+  options: z.array(z.object({ name: z.string(), values: z.array(z.string()) })),
+  variants: z.array(z.object({ id, option: z.string(), pricePaise: z.number().int(), inStock: z.boolean(), image: z.string() })),
+  maxQty: z.number().int(),
+  reels: z.array(AppReelCard),
+});
+export const AppCategory = z.object({ category: AppCategoryCard, reels: z.array(AppReelCard), products: pageOf(AppProductCard) });
+export const AppReels = z.object({ chips: z.array(AppCategoryCard), items: z.array(AppReelCard), nextCursor: z.string().nullable() });
+/** A landing page read by slug only: nothing is recorded (no visit, tap or click: P-51). */
+export const AppLanding = z.object({
+  slug: z.string(),
+  title: z.string(),
+  media: z.object({ kind: z.enum(['video', 'image']), url: z.string(), poster: z.string() }),
+  products: z.array(AppProductCard),
+  moreReels: z.array(AppReelCard),
+});
+export const AppOrderSummary = z.object({
+  orderNumber: z.string(), token: z.string(), placedAt: When, fulfilmentStatus: z.string(), paymentStatus: z.string(),
+  totalPaise: z.number().int(), itemCount: z.number().int(), image: z.string(),
+});
+export const AppOrder = AppOrderSummary.extend({
+  paymentMode: z.string(),
+  lines: z.array(z.object({ name: z.string(), option: z.string(), qty: z.number().int(), unitPaise: z.number().int(), linePaise: z.number().int(), image: z.string(), productSlug: z.string() })),
+  totals: z.object({
+    subtotalPaise: z.number().int(), discountPaise: z.number().int(), loyaltyPaise: z.number().int(), shippingPaise: z.number().int(), codFeePaise: z.number().int(),
+    taxPaise: z.number().int(), totalPaise: z.number().int(), advancePaise: z.number().int(), balancePaise: z.number().int(),
+  }),
+  address: z.object({ name: z.string(), line1: z.string(), line2: z.string(), city: z.string(), state: z.string(), pincode: z.string() }),
+  timeline: z.array(z.object({ status: z.string(), at: When })),
+  shipments: z.array(z.object({
+    courier: z.string(), awb: z.string(), status: z.string(), expectedAt: When.nullable(), trackingPath: z.string(),
+    scans: z.array(z.object({ at: When, text: z.string(), location: z.string() })),
+  })),
+  invoices: z.array(z.object({ number: z.string(), path: z.string() })),
+  canCancel: z.boolean(),
+  canReturn: z.boolean(),
+  canReorder: z.boolean(),
+});
+/** An order by its unguessable token: no name, phone or address. */
+export const AppOrderState = z.object({
+  orderNumber: z.string(), fulfilmentStatus: z.string(), paymentStatus: z.string(), totalPaise: z.number().int(),
+  next: z.enum(['pay', 'pending', 'done', 'failed']), payPath: z.string(),
+});
+/** Today's prices, through the cart's own pricing; what cannot be bought is named, never added. Writes the cart only. */
+export const AppReorder = z.object({
+  lines: z.array(PricedLine),
+  added: z.number().int(),
+  missing: z.array(z.object({ name: z.string(), option: z.string(), reason: z.enum(['inactive', 'sold_out', 'removed']) })),
+  capped: z.array(z.object({ name: z.string(), qty: z.number().int() })),
+  addressId: id.nullable(),
+  notices: z.array(z.string()),
+});
+export const AppRewards = z.object({
+  enabled: z.boolean(),
+  pointsBalance: z.number().int(),
+  pendingPoints: z.number().int(),
+  valuePaise: z.number().int(),
+  expiring: z.object({ points: z.number().int(), at: When }).nullable(),
+  history: z.array(z.object({ at: When, points: z.number().int(), reason: z.string(), orderNumber: z.string().nullable() })).max(20),
+  /** url is https://<this host>/refer/<code>: the business's own host, never a platform one. */
+  referral: z.object({ code: z.string(), url: z.string(), text: z.string() }).nullable(),
+});
+export const AppPolicy = z.object({ kind: z.enum(POLICY_KINDS), title: z.string(), body: z.string(), updatedAt: When.nullable() });
+const PushPermission = z.enum(['not_asked', 'granted', 'provisional', 'denied']);
+export const PushDeviceBody = z.strictObject({ token: z.string().regex(PUSH_TOKEN).nullable(), permission: PushPermission });
+export const PushPrefs = z.object({ permission: PushPermission, orderUpdates: z.boolean(), offers: z.boolean(), newReels: z.boolean(), configured: z.boolean() });
+/** first_order_prompt may turn on order updates only; offers and new reels turn on only from settings, with an explicit true. */
+export const PushPrefsSave = z.strictObject({
+  orderUpdates: z.boolean().optional(),
+  offers: z.boolean().optional(),
+  newReels: z.boolean().optional(),
+  source: z.enum(['first_order_prompt', 'settings']),
+}).refine((b) => b.orderUpdates !== undefined || b.offers !== undefined || b.newReels !== undefined, 'Choose at least one notification');
+export const PushFollowOrder = z.strictObject({ orderToken: z.string().min(1).max(100) });
+export const AppHealthBody = z.strictObject({ updateId: z.string().max(120).nullable(), runtimeVersion: z.string().min(1).max(40), event: z.enum(['launch', 'crash']) });
+export const AppPlatform = z.enum(APP_PLATFORMS);
+
+const app = (method, path, owner, auth, extra = {}) => Object.freeze({ method, path, owner, kind: 'json', auth, ...extra });
+const browser = (method, path, owner) => Object.freeze({ method, path, owner, kind: 'page', auth: 'web' });
+const wellknown = (path, owner) => Object.freeze({ method: 'GET', path, owner, kind: 'wellknown', auth: 'web' });
+
+export const APP_ROUTES = Object.freeze({
+  // app-api: the gate, sessions, the feeds, the account
+  appBootstrap: app('GET', '/api/store/app/bootstrap', 'app-api', 'none', { response: AppBootstrap }),
+  appSessionStart: app('POST', '/api/store/app/session', 'app-api', 'none', { body: AppSessionStart, response: AppSession }),
+  appSessionRefresh: app('POST', '/api/store/app/session/refresh', 'app-api', 'none', { body: AppRefresh, response: AppRefreshed }),
+  /** Ends this sign-in and answers a new guest session for the same device. */
+  appSessionEnd: app('POST', '/api/store/app/session/end', 'app-api', 'app', { response: AppSession }),
+  appApple: app('POST', '/api/store/app/apple', 'app-api', 'none', { body: AppleSignInBody, response: AppSession }),
+  /** Google in the system browser (no app headers): 302 to Google, then 303 to <url_scheme>://auth?code=... */
+  appGoogleStart: browser('GET', '/auth/app/google', 'app-api'),
+  appGoogleCallback: browser('GET', '/auth/app/google/callback', 'app-api'),
+  appMe: app('GET', '/api/store/app/me', 'app-api', 'app', { response: AppMe }),
+  /** The Phase 4 erasure flow (src/modules/consent/erasure.js), exactly as POST /api/store/data-requests runs it. */
+  appAccountDelete: app('POST', '/api/store/app/account/delete', 'app-api', 'shopper', { body: AppDeleteBody, response: AppDeletion }),
+  appHome: app('GET', '/api/store/app/home', 'app-api', 'app', { response: AppHome }),
+  appCatalog: app('GET', '/api/store/app/catalog', 'app-api', 'app', { query: AppCatalogQuery, response: pageOf(AppProductCard) }),
+  appProduct: app('GET', '/api/store/app/products/:slug', 'app-api', 'app', { response: AppProduct }),
+  appCategories: app('GET', '/api/store/app/categories', 'app-api', 'app', { response: z.object({ items: z.array(AppCategoryCard) }) }),
+  /** Pinned reels first, then the set order, hidden windows left out: the query the /c/:slug and /reels pages use (P-65). */
+  appCategory: app('GET', '/api/store/app/categories/:slug', 'app-api', 'app', { query: AppPageQuery, response: AppCategory }),
+  appReels: app('GET', '/api/store/app/reels', 'app-api', 'app', { query: AppReelsQuery, response: AppReels }),
+  appLanding: app('GET', '/api/store/app/landing/:slug', 'app-api', 'app', { response: AppLanding }),
+  appOrders: app('GET', '/api/store/app/orders', 'app-api', 'shopper', { query: AppPageQuery, response: pageOf(AppOrderSummary) }),
+  appOrder: app('GET', '/api/store/app/orders/:orderNumber', 'app-api', 'shopper', { response: AppOrder }),
+  appOrderByToken: app('GET', '/api/store/app/order/:token', 'app-api', 'app', { response: AppOrderState }),
+  appReorder: app('POST', '/api/store/app/orders/:orderNumber/reorder', 'app-api', 'shopper', { response: AppReorder }),
+  appRewards: app('GET', '/api/store/app/rewards', 'app-api', 'shopper', { response: AppRewards }),
+  appPolicy: app('GET', '/api/store/app/policies/:kind', 'app-api', 'app', { response: AppPolicy }),
+  // shopper-push: the device, its three toggles, and a guest's order
+  pushDevice: app('PUT', '/api/store/app/push/device', 'shopper-push', 'app', { body: PushDeviceBody, response: PushPrefs }),
+  pushDeviceRemove: app('DELETE', '/api/store/app/push/device', 'shopper-push', 'app', { response: null }),
+  pushPrefsGet: app('GET', '/api/store/app/push/prefs', 'shopper-push', 'app', { response: PushPrefs }),
+  pushPrefsSave: app('PUT', '/api/store/app/push/prefs', 'shopper-push', 'app', { body: PushPrefsSave, response: PushPrefs }),
+  pushFollowOrder: app('POST', '/api/store/app/push/orders', 'shopper-push', 'app', { body: PushFollowOrder, response: null }),
+  // ota: launches and crashes of the running update
+  appHealth: app('POST', '/api/store/app/health', 'ota', 'app', { body: AppHealthBody, response: null }),
+  // app-links: the verified-link files, per business host, built from app_configs (10.12)
+  assetLinks: wellknown('/.well-known/assetlinks.json', 'app-links'),
+  appleAppSite: wellknown('/.well-known/apple-app-site-association', 'app-links'),
+});

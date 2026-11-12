@@ -30,10 +30,13 @@ const TOKEN_RULES = [
   ['Meta access token', /\bEAA[A-Za-z0-9]{40,}\b|\bIG(?:AA|QV|QW)[A-Za-z0-9_-]{40,}\b/],
   ['JSON web token', /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/],
   ['password in a URL', /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"`<>{}$]+:(?!password@)[^\s/:@'"`<>{}$]{8,}@/i],
+  // A Google service account's JSON (a Play or Firebase key) by its marker, whatever the file is called (P-36).
+  ['service account JSON', /"type"\s*:\s*"service_account"/],
 ];
 
 const FORBIDDEN_FILES = [
   ['Android keystore', /\.(jks|keystore|bks)$/i],
+  // App Store Connect API keys are AuthKey_<KEY ID>.p8; the extension alone refuses them.
   ['Apple key or certificate', /\.(p8|p12|pfx|cer|mobileprovision|provisionprofile)$/i],
   ['Firebase services file', /(^|\/)(google-services[^/]*\.json|GoogleService-Info[^/]*\.plist)$/i],
   ['service account key', /(^|\/)[^/]*service[-_]?account[^/]*\.json$/i],

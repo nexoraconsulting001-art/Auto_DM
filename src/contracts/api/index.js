@@ -1,6 +1,7 @@
 import { activityRoutes } from './activity.js';
 import { alertRoutes } from './alerts.js';
 import { appRoutes } from './app.js';
+import { appPublishingRoutes } from './apps.js';
 import { auditRoutes } from './audit.js';
 import { authRoutes } from './auth.js';
 import { automationRoutes } from './automations.js';
@@ -133,6 +134,8 @@ export const routes = Object.freeze({
   ...appRoutes,
   ...notificationRoutes,
   ...pushRoutes,
+  // Phase 6: the branded shopper app (apps.js)
+  ...appPublishingRoutes,
 });
 
 export const routeList = Object.freeze(Object.entries(routes).map(([id, route]) => Object.freeze({ id, ...assertRouteFields(id, route) })));
@@ -146,6 +149,7 @@ export * from './access.js';
 export * from './activity.js';
 export * from './alerts.js';
 export * from './app.js';
+export * from './apps.js';
 export * from './audit.js';
 export * from './auth.js';
 export * from './automations.js';

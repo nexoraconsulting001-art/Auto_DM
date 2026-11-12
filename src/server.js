@@ -5,6 +5,8 @@ import { assertStartable, config as defaultConfig, platformAppHostOf } from './c
 import { openRuntimeDb } from './db/index.js';
 import { createRepos } from './repos/index.js';
 import { createAppleAdapters } from './adapters/apple/index.js';
+import { createAppStores } from './adapters/appstores/index.js';
+import { createEas } from './adapters/eas/index.js';
 import { createGoogleAdapters } from './adapters/google/index.js';
 import { createMetaAdapters, verifyHubSignature } from './adapters/meta/index.js';
 import { createStoreAdapters } from './adapters/store.js';
@@ -54,12 +56,15 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
   const meta = createMetaAdapters(config, { onCall: metaCalls.onCall });
   const google = createGoogleAdapters(config);
   const apple = createAppleAdapters(config);
+  // The branded shopper apps (Phase 6): builds, submits and updates on EAS; access and review state on the two stores.
+  const eas = createEas(config);
+  const appStores = createAppStores(config);
   const compliance = createCompliance({ db, repos, ig, meta, config, platform });
   const providers = createStoreAdapters(config);
   const shopperMessages = createShopperMessages({ db, platform, providers, config });
   // Everything a seller is told goes through notify; everything a shopper is told goes through shopperMessages.
   const notify = createNotify({ db, providers, config });
-  const ctx = { db, repos, ig, meta, google, apple, providers, compliance, shopperMessages, notify, auth, config, platform, modules, tenantResolver: tenants };
+  const ctx = { db, repos, ig, meta, google, apple, eas, appStores, providers, compliance, shopperMessages, notify, auth, config, platform, modules, tenantResolver: tenants };
   metaCalls.bind(ctx);
   // The order event bus, then each module's own start-up: its listeners on the bus, the consent provider.
   wireOrderEvents(ctx);

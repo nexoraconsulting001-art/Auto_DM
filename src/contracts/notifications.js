@@ -194,6 +194,26 @@ export const NOTIFY_EVENTS = Object.freeze({
     many: { title: 'Your app\'s review moved on', body: 'See where the app for {business} stands.' },
     email: 'account', whatsapp: '', link: '/app',
   }),
+  // Phase 6 (P-61): the owner's app went live, needs a change, or its build stopped. The store link itself is on the screen the
+  // push opens and in the email; the push text holds no address.
+  'app.live': event({
+    label: 'Your app went live', audience: 'owner', channels: ['push', 'email', 'inapp'],
+    one: { title: 'Your app is live', body: 'It is in the store now. Tap for the link.' },
+    many: { title: 'Your app is live', body: 'It is in the store now. Tap for the link.' },
+    email: 'account', whatsapp: '', link: '/app-publishing',
+  }),
+  'app.rejected': event({
+    label: 'Your app needs a change', audience: 'owner', channels: ['push', 'email', 'inapp'],
+    one: { title: 'Your app needs a change', body: 'The store asked for a change. Tap to see what to do.' },
+    many: { title: 'Your app needs a change', body: 'The store asked for a change. Tap to see what to do.' },
+    email: 'account', whatsapp: '', link: '/app-publishing',
+  }),
+  'app.build_failed': event({
+    label: 'Your app build stopped', audience: 'owner', channels: ['push', 'email', 'inapp'],
+    one: { title: 'Your app build stopped', body: 'Tap to see which detail to fix.' },
+    many: { title: 'Your app build stopped', body: 'Tap to see which detail to fix.' },
+    email: 'account', whatsapp: '', link: '/app-publishing',
+  }),
 });
 
 export const NOTIFY_KINDS = Object.freeze(Object.keys(NOTIFY_EVENTS));

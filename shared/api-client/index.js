@@ -746,6 +746,39 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, getTenantId, ap
       create: (body) => post('/data-requests', body),
       get: (itemId) => get(`/data-requests/${id(itemId)}`),
     },
+    // The business's own shopper app (10.7 to 10.14). Where a path takes one, `platform` is 'android' or 'ios'.
+    appPublishing: {
+      get: () => get('/app-publishing'),
+      save: (body) => put('/app-publishing', body),
+      validate: () => post('/app-publishing/validate'),
+      /** @param query { platform?, cursor?, limit? } */
+      builds: (query) => get('/app-publishing/builds', query),
+      /** @param body { platforms: ('android' | 'ios')[], requestKey } */
+      requestBuild: (body) => post('/app-publishing/builds', body),
+      submissions: () => get('/app-publishing/submissions'),
+    },
+    appListing: {
+      get: (platform) => get(`/app-listing/${id(platform)}`),
+      save: (platform, body) => put(`/app-listing/${id(platform)}`, body),
+      assets: (platform) => get(`/app-listing/${id(platform)}/assets`),
+    },
+    storeAccess: {
+      get: () => get('/store-access'),
+      /** Needs a fresh session. @param body { accountType?, legalName?, dunsStatus?, playAccountAfterCutoff?, closedTest?, ascKey? } */
+      save: (platform, body) => put(`/store-access/${id(platform)}`, body),
+      check: (platform) => post(`/store-access/${id(platform)}/check`),
+    },
+    pushCampaigns: {
+      list: (query) => get('/push-campaigns', query),
+      summary: () => get('/push-campaigns/summary'),
+      /** @param body { title, body, couponId?, linkPath?, requestKey } */
+      send: (body) => post('/push-campaigns', body),
+    },
+    pushCredentials: {
+      get: () => get('/push-credentials'),
+      /** Needs a fresh session. @param body { fcm?: { serviceAccount } | null, apns?: { keyId, teamId, key, env } | null } */
+      save: (body) => put('/push-credentials', body),
+    },
   };
 }
 

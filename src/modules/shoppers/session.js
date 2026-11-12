@@ -37,6 +37,8 @@ function sentToken(req) {
 
 export function shopperSession({ config }, service) {
   return async (req, res, next) => {
+    // The shopper app's gate (src/modules/app-api/gate.js) already decided who an app request is: no cookie replaces it and no CSRF applies.
+    if (req.appSession) return next();
     try {
       req.shopper = null;
       req.shopperToken = '';

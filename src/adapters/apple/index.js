@@ -7,7 +7,7 @@ import { IdTokenError, createKeySet, verifyIdToken } from '../oidc.js';
  * sends it here; this side checks it and says who signed in. There is no code exchange and no client secret: the
  * token is proof by itself once its signature (Apple's published keys), issuer, audience, expiry and nonce hold.
  *
- *   apple.signIn.verify(identityToken, { nonce }) -> { sub, email, emailVerified, privateEmail }
+ *   apple.signIn.verify(identityToken, { nonce, audiences? }) -> { sub, email, emailVerified, privateEmail }
  *
  * `nonce` is the raw value the app made for this sign-in. The app gives Apple its SHA-256 in hex, Apple signs that
  * into the token, and the raw value comes here: a token replayed from another sign-in has another nonce.
@@ -39,10 +39,12 @@ export function createAppleSignIn(config = {}, { env = process.env, fetch } = {}
     get configured() {
       return audiences.length > 0;
     },
-    async verify(identityToken, { nonce } = {}) {
-      if (!audiences.length) throw new IdTokenError('wrong_audience');
+    /** `audiences`, when given and not empty, replaces the configured ones for this call: a shopper app's token is for its brand's bundle id (Phase 6). */
+    async verify(identityToken, { nonce, audiences: callAudiences } = {}) {
+      const allowed = Array.isArray(callAudiences) && callAudiences.map(String).filter(Boolean).length ? callAudiences.map(String).filter(Boolean) : audiences;
+      if (!allowed.length) throw new IdTokenError('wrong_audience');
       if (typeof nonce !== 'string' || !nonce) throw new IdTokenError('wrong_nonce');
-      const claims = await verifyIdToken(identityToken, { keys, issuers, audiences, nonce: appleNonce(nonce) });
+      const claims = await verifyIdToken(identityToken, { keys, issuers, audiences: allowed, nonce: appleNonce(nonce) });
       const emailVerified = claims.email_verified === true || claims.email_verified === 'true';
       return {
         sub: claims.sub,

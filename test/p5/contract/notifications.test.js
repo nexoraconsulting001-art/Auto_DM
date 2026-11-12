@@ -25,6 +25,8 @@ const ROUTES = ['notifications.list', 'notifications.markRead', 'notifications.p
 const KINDS = [
   'order.new', 'order.cod_to_confirm', 'token.expiring', 'token.invalid', 'dm.usage_80', 'dm.usage_100', 'needs_human', 'reach_guard.alert', 'payment.failed',
   'return.requested', 'report.weekly', 'report.monthly', 'staff.changed', 'device.signed_in', 'account.deletion_requested', 'app.review_state',
+  // Phase 6 (the shopper app contract): the owner's app went live, needs a change, or its build stopped.
+  'app.live', 'app.rejected', 'app.build_failed',
 ];
 
 let app;
@@ -45,7 +47,7 @@ after(async () => {
   await whatsapp?.close();
 });
 
-test('the kinds are data: sixteen seeded, each with channels, wording for one and many, a layout, a template and a link', () => {
+test('the kinds are data: nineteen seeded, each with channels, wording for one and many, a layout, a template and a link', () => {
   assert.deepEqual(n.NOTIFY_CHANNELS, ['push', 'email', 'whatsapp', 'inapp']);
   assert.deepEqual([...n.NOTIFY_KINDS].sort(), [...KINDS].sort());
   for (const kind of n.NOTIFY_KINDS) {
@@ -191,8 +193,9 @@ test('notifications has a folder, comes right after alerts, and answers exactly 
 
 test('nothing outside the notifications module calls the push adapter, the platform WhatsApp sender or the platform email sender', () => {
   const offenders = [];
-  // Where they are made (the adapters), and the one module that may call them.
-  const allowed = (rel) => rel.startsWith('src/modules/notifications/') || rel.startsWith('src/adapters/push/') || rel.startsWith('src/adapters/whatsapp/') || rel.startsWith('src/adapters/email/');
+  // Where they are made (the adapters), the one module that may call them, and the shopper app's one push sender (Phase 6),
+  // which sends through forCredentials with the brand's own credentials only.
+  const allowed = (rel) => rel === 'src/modules/shopper-push/sender.js' || rel.startsWith('src/modules/notifications/') || rel.startsWith('src/adapters/push/') || rel.startsWith('src/adapters/whatsapp/') || rel.startsWith('src/adapters/email/');
   const calls = /adapters\/push|createPush\b|\bPushError\b|whatsapp\??\.platform\b|email\??\.platform\b|\.platform\??\.send\(|platformSender|forCredentials\(/;
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
