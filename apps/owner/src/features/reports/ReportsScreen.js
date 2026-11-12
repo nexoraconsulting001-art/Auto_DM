@@ -9,17 +9,12 @@ import { useServices } from '../../shell/hooks.js';
 import { FileButton, Loadable, MoreButton, Page, Refusal, itemsOf, useCan, useConnection, usePaged } from '../products/kit.js';
 import { DOWNLOAD_FORMATS, FIXED_DOWNLOADS, REPORT_FREQUENCIES, REPORT_KINDS } from '../products/limits.js';
 import { formatDay, formatHour } from '../insights/figures.js';
+import { isEmail, scheduleBody } from './rules.js';
 
 export const REPORTS_KEY = ['reports'];
 const RUN_TONES = { building: 'neutral', sent: 'good', failed: 'bad', skipped: 'neutral' };
 const FILE_TONES = { queued: 'neutral', running: 'primary', ready: 'good', failed: 'bad', expired: 'neutral' };
 const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-const isEmail = (v) => {
-  const s = String(v ?? '').trim();
-  const at = s.indexOf('@');
-  return s.length <= 254 && !/\s/.test(s) && at > 0 && at === s.lastIndexOf('@') && s.indexOf('.', at + 2) > 0 && !s.endsWith('.');
-};
-
 /** Summary files (7.12): the fixed sheets, made on the server; explore, funnel and cohort files start from their own screens. */
 function Downloads() {
   const { api } = useServices();
@@ -140,19 +135,6 @@ export function ReportScreen({ route }) {
       </Loadable>
     </Page>
   );
-}
-
-/** Pure: a new schedule from the form: the saved view, how often, the hour, and the weekday or day of the month. */
-export function scheduleBody({ viewId, frequency, hourOfDay, weekday, dayOfMonth, format }) {
-  if (!viewId) return { error: 'reports.scheduled.pickView' };
-  const body = { viewId: Number(viewId), frequency, hourOfDay: Number(hourOfDay), format };
-  if (frequency === 'weekly') body.weekday = Number(weekday);
-  if (frequency === 'monthly') {
-    const day = Number(dayOfMonth);
-    if (!Number.isInteger(day) || day < 1 || day > 28) return { error: 'reports.scheduled.dayBad' };
-    body.dayOfMonth = day;
-  }
-  return { body };
 }
 
 /**

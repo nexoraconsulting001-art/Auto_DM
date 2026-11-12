@@ -10,7 +10,7 @@
  */
 
 /** CATALOG_LIMITS.maxPricePaise: above ₹100 crore is a misread, refused. */
-export const MAX_PRICE_PAISE = 1_000_000_000_000;
+export const MAX_PRICE_PAISE = 100_000_000_000;
 /** PaiseInput in src/contracts/api/common.js: a typed amount is at most this many paise. */
 export const MAX_INPUT_PAISE = 2147483647;
 
@@ -55,9 +55,12 @@ export function parseRupees(input) {
   return paise;
 }
 
-/** Integer paise as "₹1,299" or "₹1,299.50". Anything that isn't a whole number of paise shows nothing, never a guess. */
+/**
+ * Paise from the server as "₹1,299" or "₹1,299.50". A rate the server sends in paise (revenue per session) is shown to
+ * the nearest paisa, as formatRupees does. Anything that isn't a number shows nothing, never a guess.
+ */
 export function formatMoney(paise) {
-  if (typeof paise !== 'number' || !Number.isSafeInteger(paise)) return '';
+  if (typeof paise !== 'number' || !Number.isFinite(paise) || Math.abs(paise) > Number.MAX_SAFE_INTEGER) return '';
   return formatRupees(paise);
 }
 

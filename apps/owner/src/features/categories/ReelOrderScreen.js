@@ -9,27 +9,10 @@ import { RULE_MATCHES } from '../products/limits.js';
 import { SortableRow } from './sortable.js';
 import { HIDDEN_KEYS, arrange, optimistic, pin, reorder, saveBody, splitSequence, unpin } from './sequence.js';
 import { CATEGORIES_KEY } from './CategoriesScreen.js';
+import { dayToIso, isoToDay } from './dates.js';
 
 const reelsKey = (id) => [...CATEGORIES_KEY, 'reels', String(id)];
 const rulesKey = (id) => [...CATEGORIES_KEY, 'rules', String(id)];
-
-/** "2026-11-05" typed on the phone as the start of that day where the phone is, as the API's ISO time; '' is none. */
-export function dayToIso(text) {
-  const value = String(text ?? '').trim();
-  if (!value) return null;
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return undefined;
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  if (date.getMonth() !== Number(match[2]) - 1) return undefined;
-  return date.toISOString();
-}
-/** An ISO time as the day it falls on where the phone is, for the field. */
-export function isoToDay(iso) {
-  if (!iso) return '';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
 
 /** The window a reel shows in, in this category only (K-46). Both empty clears it. */
 function ScheduleSheet({ item, categoryId, onClose, onSaved }) {
