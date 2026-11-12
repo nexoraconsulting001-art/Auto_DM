@@ -1,14 +1,50 @@
 import ReturnsScreen from './ReturnsScreen.js';
 
-/**
- * Asking to return an order, with at least one photo or short video.
- * Not built yet: one placeholder screen. Whoever builds this replaces the screens below; the format is in ../index.js.
- */
+/** Asking to return an order, with at least one photo or short video. */
 export default {
   name: 'returns',
   screens: [
     { name: 'index', path: 'account/orders/:orderNumber/return', title: 'returns.title', component: ReturnsScreen },
   ],
   nav: null,
-  strings: { en: { 'returns.title': 'Return an order' }, hi: { 'returns.title': 'ऑर्डर लौटाएँ' } },
+  strings: {
+    en: {
+      'returns.title': 'Return items',
+      'returns.which': 'What are you returning?',
+      'returns.less': 'One fewer',
+      'returns.more': 'One more',
+      'returns.pickOne': 'Choose at least one item.',
+      'returns.want': 'What would you like?',
+      'returns.refund': 'A refund',
+      'returns.exchange': 'An exchange',
+      'returns.reason': 'What is wrong with it?',
+      'returns.proof': 'Photos or a short video',
+      'returns.proofHint': 'Show the item, and the problem if there is one. Up to 4 files.',
+      'returns.addProof': 'Add photos or video',
+      'returns.removeFile': 'Remove',
+      'returns.needProof': 'Add a photo or video of the item.',
+      'returns.send': 'Send return request',
+      'returns.sent': 'Your return request is sent. The store will look at it and tell you what happens next.',
+      'returns.back': 'Back to my order',
+    },
+    hi: {
+      'returns.title': 'सामान लौटाएँ',
+      'returns.which': 'आप क्या लौटा रहे हैं?',
+      'returns.less': 'एक कम',
+      'returns.more': 'एक और',
+      'returns.pickOne': 'कम से कम एक चीज़ चुनें।',
+      'returns.want': 'आप क्या चाहेंगे?',
+      'returns.refund': 'रिफ़ंड',
+      'returns.exchange': 'बदलना',
+      'returns.reason': 'इसमें क्या ख़राबी है?',
+      'returns.proof': 'फ़ोटो या छोटा वीडियो',
+      'returns.proofHint': 'सामान दिखाएँ, और ख़राबी हो तो वह भी। ज़्यादा से ज़्यादा 4 फ़ाइलें।',
+      'returns.addProof': 'फ़ोटो या वीडियो जोड़ें',
+      'returns.removeFile': 'हटाएँ',
+      'returns.needProof': 'सामान की फ़ोटो या वीडियो जोड़ें।',
+      'returns.send': 'लौटाने का अनुरोध भेजें',
+      'returns.sent': 'आपका अनुरोध भेज दिया गया है। स्टोर उसे देखकर बताएगा कि आगे क्या होगा।',
+      'returns.back': 'मेरे ऑर्डर पर लौटें',
+    },
+  },
 };
