@@ -1,0 +1,75 @@
+# A guest pays online with the payment simulator's test card and the app says Paid, because the server says so.
+appId: ${APP_ID}
+name: 'P-29: Check out as a guest, pay with the test card and see Paid in the app'
+---
+- launchApp:
+    clearState: true
+    permissions:
+      notifications: allow
+- extendedWaitUntil:
+    visible:
+      id: tab-catalog
+    timeout: 120000
+- runFlow:
+    file: common/to-checkout.yaml
+    env:
+      PRODUCT_SLUG: ${PRODUCT_SLUG}
+      PRODUCT_NAME: ${PRODUCT_NAME}
+      SHOPPER_NAME: ${SHOPPER_NAME}
+      SHOPPER_PHONE: ${SHOPPER_PHONE}
+      SHOPPER_LINE1: ${SHOPPER_LINE1}
+      SHOPPER_CITY: ${SHOPPER_CITY}
+      SHOPPER_PINCODE: ${SHOPPER_PINCODE}
+      SHOPPER_STATE_CODE: ${SHOPPER_STATE_CODE}
+      SHOPPER_EMAIL: ${SHOPPER_EMAIL}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+      SIM_RAZORPAY_URL: ${SIM_RAZORPAY_URL}
+- assertNotVisible:
+    id: screen-sign-in
+- runFlow:
+    file: common/address.yaml
+    env:
+      PRODUCT_SLUG: ${PRODUCT_SLUG}
+      PRODUCT_NAME: ${PRODUCT_NAME}
+      SHOPPER_NAME: ${SHOPPER_NAME}
+      SHOPPER_PHONE: ${SHOPPER_PHONE}
+      SHOPPER_LINE1: ${SHOPPER_LINE1}
+      SHOPPER_CITY: ${SHOPPER_CITY}
+      SHOPPER_PINCODE: ${SHOPPER_PINCODE}
+      SHOPPER_STATE_CODE: ${SHOPPER_STATE_CODE}
+      SHOPPER_EMAIL: ${SHOPPER_EMAIL}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+      SIM_RAZORPAY_URL: ${SIM_RAZORPAY_URL}
+- scrollUntilVisible:
+    element:
+      id: mode-prepaid
+- tapOn:
+    id: mode-prepaid
+- assertNotVisible:
+    id: cod-code
+- scrollUntilVisible:
+    element:
+      id: agree-terms
+- tapOn:
+    id: agree-terms
+- scrollUntilVisible:
+    element:
+      id: place-order
+- tapOn:
+    id: place-order
+- extendedWaitUntil:
+    visible:
+      id: payment-working
+    timeout: 60000
+- runScript:
+    file: support/pay.js
+    env:
+      SIM_RAZORPAY_URL: ${SIM_RAZORPAY_URL}
+- assertTrue: ${output.paymentId != null && output.paymentId != ''}
+# The payment page is the system browser's tab: coming back to the app, the app asks the server and settles.
+- back
+- extendedWaitUntil:
+    visible: 'Paid. Thank you!'
+    timeout: 90000
+- assertVisible:
+    id: order-number

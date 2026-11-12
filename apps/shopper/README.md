@@ -100,5 +100,12 @@ Those paths must be ones the server lists (`APP_LINK_PATHS`); a test checks both
 - `.maestro/*.yaml`: flows run on an emulator in `.github/workflows/brand-apps.yml`, once per fixture brand, against
   the job's own server (`.maestro/support/server.mjs`) with a seeded store for that brand. A flow's `name` counts
   toward a requirement when it starts with the requirement's id.
+- `.maestro/shots/shots.yaml` and `tools/listing-shots`: the store listing screenshots, taken from the real build on the emulator
+  (Android) and the simulator (iOS) with the brand's seeded catalog, fitted to the sizes in `ASSET_SPECS` and checked against
+  them. A shot is accepted only from a capture folder stamped with the hash of the build being listed.
+- `.maestro/support/scan-binary.mjs`: run on every built APK and simulator app: no platform name and no other brand's
+  name in any file of the build, and no key, keystore content or password in a build log.
+- `test/p6/brand-ci`: the flows read against the app, the server half of every flow run against the job's server, the
+  capture tools, the scan and the workflow.
 - `test/p6/shopper-app-workspace`: the parts that run with the server's tests (the client against the contract, the
   build tool, the policy check).

@@ -1,0 +1,42 @@
+# The store listing screenshots (tools/listing-shots): the real build, on the emulator or simulator, with the brand's seeded
+# catalog. Not run with the flows (Maestro runs only the top of .maestro); tools/listing-shots/capture-*.sh runs it from the
+# folder the pictures go to. The pictures are named for the screens in tools/listing-shots (SCREENS), in this order.
+appId: ${APP_ID}
+name: Listing screenshots of the real build (not a test)
+tags:
+  - shots
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: screen-home
+    timeout: 120000
+- extendedWaitUntil:
+    visible:
+      id: brand-name
+    timeout: 60000
+- takeScreenshot: home
+- tapOn:
+    id: tab-catalog
+- extendedWaitUntil:
+    visible:
+      id: product-${PRODUCT_SLUG}
+    timeout: 60000
+- takeScreenshot: catalog
+- tapOn:
+    id: product-${PRODUCT_SLUG}
+- extendedWaitUntil:
+    visible:
+      id: add-to-cart
+    timeout: 30000
+- takeScreenshot: product
+- tapOn:
+    id: add-to-cart
+- tapOn:
+    id: tab-cart
+- extendedWaitUntil:
+    visible:
+      id: go-checkout
+    timeout: 30000
+- takeScreenshot: cart

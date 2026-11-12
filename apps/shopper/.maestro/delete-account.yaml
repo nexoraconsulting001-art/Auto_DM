@@ -1,0 +1,34 @@
+# Account deletion from inside the app (Apple 5.1.1(v), Google Play): one deliberate confirmation, then the account is gone.
+appId: ${APP_ID}
+name: 'P-30: Delete the account in the app'
+---
+- runFlow:
+    file: common/sign-in.yaml
+    env:
+      SHOPPER_PHONE: ${SHOPPER_PHONE}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+- scrollUntilVisible:
+    element:
+      id: account-delete
+- tapOn:
+    id: account-delete
+- extendedWaitUntil:
+    visible:
+      id: delete-start
+    timeout: 30000
+- tapOn:
+    id: delete-start
+- tapOn:
+    id: delete-sheet-confirm
+- extendedWaitUntil:
+    visible:
+      id: screen-account-deleted
+    timeout: 60000
+- tapOn:
+    id: deleted-home
+- tapOn:
+    id: tab-account
+- assertVisible:
+    id: account-sign-in
+- assertNotVisible:
+    id: account-sign-out

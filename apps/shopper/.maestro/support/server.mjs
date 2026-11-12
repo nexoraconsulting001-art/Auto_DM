@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { PRODUCT, seedDataDir } from './seed.mjs';
+import { PRODUCT, SHOPPER, seedDataDir } from './seed.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const load = (rel) => import(pathToFileURL(path.join(ROOT, rel)).href);
@@ -35,16 +35,29 @@ async function healthy(url, { tries = 240, every = 500 } = {}) {
 }
 
 /** What the flows are told: ids, the brand's own names and local addresses. */
-export const flowEnv = (brand, seeded, { apiUrl, appHost }) => ({
+export const flowEnv = (brand, seeded, { apiUrl, appHost, simUrls = {} }) => ({
   APP_ID: brand.android?.package ?? '',
   APP_NAME: brand.name,
   SHORT_NAME: brand.shortName,
   APP_SCHEME: brand.scheme,
   TENANT_ID: String(seeded.tenantId),
   PRODUCT_NAME: PRODUCT.name,
+  PRODUCT_SLUG: seeded.productSlug ?? '',
+  SHOPPER_NAME: SHOPPER.name,
+  SHOPPER_PHONE: SHOPPER.phone,
+  SHOPPER_LINE1: SHOPPER.line1,
+  SHOPPER_CITY: SHOPPER.city,
+  SHOPPER_PINCODE: SHOPPER.pincode,
+  SHOPPER_STATE_CODE: SHOPPER.stateCode,
+  SHOPPER_EMAIL: SHOPPER.email,
   API_URL: apiUrl,
   APP_HOST: appHost,
+  SIM_WHATSAPP_URL: simUrls.whatsapp ?? '',
+  SIM_RAZORPAY_URL: simUrls.razorpay ?? '',
 });
+
+/** The payment simulator's own keys, which the server is told so it can open gateway orders there. */
+const GATEWAY = Object.freeze({ keyId: 'rzp_test_sim', keySecret: 'sim-key-secret', webhookSecret: 'sim-webhook-secret' });
 
 /** Starts the world for one brand. Answers { env, port, close }. */
 export async function startFlowServer(brand, { env = process.env, stdio = 'inherit' } = {}) {
@@ -60,9 +73,11 @@ export async function startFlowServer(brand, { env = process.env, stdio = 'inher
   let server = null;
   try {
     const dataKey = crypto.randomBytes(32).toString('base64');
-    const seeded = await seedDataDir(dataDir, brand, { env, dataKey });
     const [{ startAll }, { serverEnv }] = await Promise.all([load('tools/sim/index.mjs'), load('tools/app-e2e-server.mjs')]);
-    sims = await startAll({ basePort: simPort, env: { ...env, NODE_ENV: 'development' } });
+    // The WhatsApp simulator takes the token the server is given, so the codes the server sends are accepted there.
+    const whatsappToken = crypto.randomBytes(24).toString('hex');
+    sims = await startAll({ basePort: simPort, env: { ...env, NODE_ENV: 'development' }, options: { whatsapp: { token: whatsappToken }, razorpay: GATEWAY } });
+    const seeded = await seedDataDir(dataDir, brand, { env, dataKey, whatsappToken, gateway: { url: sims.urls.razorpay, keyId: GATEWAY.keyId, keySecret: GATEWAY.keySecret } });
     const settings = {
       ...serverEnv({ urls: sims.urls, env }),
       PORT: String(port),
@@ -72,11 +87,18 @@ export async function startFlowServer(brand, { env = process.env, stdio = 'inher
       PUBLIC_BASE_URL: `http://${appHost}:${port}`,
       DATA_DIR: dataDir,
       DATA_KEY: dataKey,
+      PLATFORM_WHATSAPP_TOKEN: whatsappToken,
+      RAZORPAY_KEY_ID: GATEWAY.keyId,
+      RAZORPAY_KEY_SECRET: GATEWAY.keySecret,
+      RAZORPAY_WEBHOOK_SECRET: GATEWAY.webhookSecret,
     };
     server = spawn(process.execPath, ['src/server.js'], { cwd: ROOT, env: settings, stdio });
     const exited = new Promise((resolve) => server.once('exit', resolve));
     const up = await Promise.race([healthy(`http://127.0.0.1:${port}/healthz`), exited.then(() => false)]);
     if (!up) throw new Error('The server did not come up');
+    // The payment simulator sends the gateway's signed webhooks to this server, as Razorpay would.
+    const hook = await fetch(`${sims.urls.razorpay}/__sim/webhooks/url`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: `http://127.0.0.1:${port}/webhooks/razorpay` }) });
+    if (!hook.ok) throw new Error('The payment simulator would not take the webhook address');
     const close = async () => {
       if (server.exitCode === null) {
         server.kill();
@@ -85,7 +107,7 @@ export async function startFlowServer(brand, { env = process.env, stdio = 'inher
       await sims.close();
       removeData();
     };
-    return { env: flowEnv(brand, seeded, { apiUrl: `http://127.0.0.1:${port}`, appHost }), port, seeded, close };
+    return { env: flowEnv(brand, seeded, { apiUrl: `http://127.0.0.1:${port}`, appHost, simUrls: sims.urls }), port, seeded, close };
   } catch (error) {
     if (server && server.exitCode === null) server.kill();
     await sims?.close();

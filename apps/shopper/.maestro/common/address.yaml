@@ -1,0 +1,38 @@
+# Shared steps. On checkout with no saved address: type the invented delivery address and e-mail from the job's values.
+appId: ${APP_ID}
+name: Type the delivery address (shared steps)
+---
+- tapOn:
+    id: addr-name
+- inputText: ${SHOPPER_NAME}
+- tapOn:
+    id: addr-phone
+- inputText: ${SHOPPER_PHONE}
+- tapOn:
+    id: addr-line1
+- inputText: ${SHOPPER_LINE1}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: addr-pincode
+- tapOn:
+    id: addr-pincode
+- inputText: ${SHOPPER_PINCODE}
+- tapOn:
+    id: addr-city
+- inputText: ${SHOPPER_CITY}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: addr-state
+- tapOn:
+    id: addr-state
+- tapOn:
+    id: state-${SHOPPER_STATE_CODE}
+- scrollUntilVisible:
+    element:
+      id: checkout-email
+- tapOn:
+    id: checkout-email
+- inputText: ${SHOPPER_EMAIL}
+- hideKeyboard

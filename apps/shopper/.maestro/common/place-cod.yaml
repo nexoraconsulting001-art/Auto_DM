@@ -1,0 +1,48 @@
+# Shared steps. On checkout with the address typed: choose cash on delivery, get the WhatsApp code the store sent to the
+# phone on the order, enter it, agree to the terms and place the order. Ends on the order's confirmation.
+appId: ${APP_ID}
+name: Place a cash on delivery order with a WhatsApp code (shared steps)
+---
+- scrollUntilVisible:
+    element:
+      id: mode-cod
+- tapOn:
+    id: mode-cod
+- scrollUntilVisible:
+    element:
+      id: cod-send
+- tapOn:
+    id: cod-send
+- extendedWaitUntil:
+    visible:
+      id: cod-code-input
+    timeout: 30000
+- runScript:
+    file: ../support/code.js
+    env:
+      PHONE: ${SHOPPER_PHONE}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+- tapOn:
+    id: cod-code-input
+- inputText: ${output.code}
+- hideKeyboard
+- tapOn:
+    id: cod-verify
+- extendedWaitUntil:
+    visible:
+      id: cod-verified
+    timeout: 30000
+- scrollUntilVisible:
+    element:
+      id: agree-terms
+- tapOn:
+    id: agree-terms
+- scrollUntilVisible:
+    element:
+      id: place-order
+- tapOn:
+    id: place-order
+- extendedWaitUntil:
+    visible:
+      id: order-status
+    timeout: 60000

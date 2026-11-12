@@ -1,0 +1,89 @@
+# Cash on delivery asks for a code sent to the phone on WhatsApp; with it the order is placed, shows under Orders, and
+# its tracking opens.
+appId: ${APP_ID}
+name: 'P-28: Check out with cash on delivery using a WhatsApp code, then find the order under Orders with its tracking'
+---
+- runFlow:
+    file: common/sign-in.yaml
+    env:
+      SHOPPER_PHONE: ${SHOPPER_PHONE}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+- tapOn:
+    id: tab-catalog
+- runFlow:
+    file: common/to-checkout.yaml
+    env:
+      PRODUCT_SLUG: ${PRODUCT_SLUG}
+      PRODUCT_NAME: ${PRODUCT_NAME}
+      SHOPPER_NAME: ${SHOPPER_NAME}
+      SHOPPER_PHONE: ${SHOPPER_PHONE}
+      SHOPPER_LINE1: ${SHOPPER_LINE1}
+      SHOPPER_CITY: ${SHOPPER_CITY}
+      SHOPPER_PINCODE: ${SHOPPER_PINCODE}
+      SHOPPER_STATE_CODE: ${SHOPPER_STATE_CODE}
+      SHOPPER_EMAIL: ${SHOPPER_EMAIL}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+      SIM_RAZORPAY_URL: ${SIM_RAZORPAY_URL}
+- runFlow:
+    when:
+      visible:
+        id: addr-name
+    file: common/address.yaml
+    env:
+      PRODUCT_SLUG: ${PRODUCT_SLUG}
+      PRODUCT_NAME: ${PRODUCT_NAME}
+      SHOPPER_NAME: ${SHOPPER_NAME}
+      SHOPPER_PHONE: ${SHOPPER_PHONE}
+      SHOPPER_LINE1: ${SHOPPER_LINE1}
+      SHOPPER_CITY: ${SHOPPER_CITY}
+      SHOPPER_PINCODE: ${SHOPPER_PINCODE}
+      SHOPPER_STATE_CODE: ${SHOPPER_STATE_CODE}
+      SHOPPER_EMAIL: ${SHOPPER_EMAIL}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+      SIM_RAZORPAY_URL: ${SIM_RAZORPAY_URL}
+- runFlow:
+    file: common/place-cod.yaml
+    env:
+      PRODUCT_SLUG: ${PRODUCT_SLUG}
+      PRODUCT_NAME: ${PRODUCT_NAME}
+      SHOPPER_NAME: ${SHOPPER_NAME}
+      SHOPPER_PHONE: ${SHOPPER_PHONE}
+      SHOPPER_LINE1: ${SHOPPER_LINE1}
+      SHOPPER_CITY: ${SHOPPER_CITY}
+      SHOPPER_PINCODE: ${SHOPPER_PINCODE}
+      SHOPPER_STATE_CODE: ${SHOPPER_STATE_CODE}
+      SHOPPER_EMAIL: ${SHOPPER_EMAIL}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+      SIM_RAZORPAY_URL: ${SIM_RAZORPAY_URL}
+- assertVisible: 'Order placed. Pay on delivery.'
+- assertVisible:
+    id: order-number
+- tapOn:
+    id: status-track
+- extendedWaitUntil:
+    visible:
+      id: screen-tracking
+    timeout: 30000
+- back
+- tapOn:
+    id: tab-account
+- tapOn:
+    id: row-orders
+- extendedWaitUntil:
+    visible:
+      id: order-.*
+    timeout: 60000
+- tapOn:
+    id: order-.*
+- extendedWaitUntil:
+    visible:
+      id: screen-order
+    timeout: 30000
+- assertVisible:
+    id: order-track
+- tapOn:
+    id: order-track
+- extendedWaitUntil:
+    visible:
+      id: screen-tracking
+    timeout: 30000

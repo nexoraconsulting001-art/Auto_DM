@@ -1,0 +1,18 @@
+# The link a message carries opens the app on the product itself, on the brand's own link scheme. Nothing is asked first.
+appId: ${APP_ID}
+name: 'P-50: A link to a product opens the app on that product'
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: tab-home
+    timeout: 120000
+- openLink: ${APP_SCHEME}://p/${PRODUCT_SLUG}
+- extendedWaitUntil:
+    visible:
+      id: product-name
+    timeout: 30000
+- assertVisible: ${PRODUCT_NAME}
+- assertNotVisible:
+    id: screen-sign-in
