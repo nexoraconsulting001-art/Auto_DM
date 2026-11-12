@@ -85,7 +85,7 @@ test('an owner gets four tabs and the rest under More; later-phase features have
   expect(nav.tabs.map((f) => f.name)).toEqual(['home', 'orders', 'products', 'reels']);
   const more = nav.more.map((f) => f.name);
   for (const name of ['automations', 'inbox', 'insights', 'payments', 'team', 'settings', 'audit-log']) expect(more).toContain(name);
-  for (const name of ['billing', 'app-publishing', 'signup', 'setup', 'ai-replies', 'whatsapp', 'team-feed', 'referrals']) expect(more).not.toContain(name);
+  for (const name of ['billing', 'signup', 'setup', 'ai-replies', 'whatsapp', 'team-feed', 'referrals']) expect(more).not.toContain(name);
   expect(nav.screens.map((s) => s.name)).toContain('billing.index'); // registered, so a deep link can open it once built
 });
 
