@@ -38,6 +38,27 @@ import { DEFAULT_TIMEOUT_MS, createHttp, hmac, providerUrl, sameBytes } from '..
  *   verifyCheckout({ gatewayOrderId, gatewayPaymentId, signature }, keySecret)   what the shopper's browser brings back (S-19, S-20)
  *   verifyWebhook(rawBody, signatureHeader, webhookSecret)                       X-Razorpay-Signature over the exact bytes (S-25)
  *
+ * billing (Phase 7, PRD 5.12): Razorpay Subscriptions on Bhava's own account, for what a business pays Bhava. ctx.providers.razorpay.billing:
+ *
+ *   createCustomer({ name, email, phone, reference })                       -> { id }              the same customer for the same email and phone
+ *   ensurePlan({ code, cycle, amountPaise, name })                          -> { id }              a provider plan for one price: prices are our rows
+ *                                                                                                  (plan_prices), so the caller keeps the id in provider_plans
+ *   createSubscription({ customerId, planId, totalCount?, startAt?, notes }) -> subscription        notes carry our business id; nothing else names it
+ *   changeSubscription(id, { planId, at: 'now' | 'cycle_end' })             -> subscription        an upgrade is 'now', a downgrade 'cycle_end'
+ *   addCharge(id, { name, amountPaise, quantity?, idempotencyKey })         -> { id, amountPaise, quantity }   a one-off line on the next charge. The
+ *                                                                                                  same key answers the same line: it is looked for first
+ *   cancel(id, { atCycleEnd? })                                             -> subscription
+ *   fetch(id)                                                               -> subscription
+ *   verifyWebhook(rawBody, signatureHeader)                                 with RAZORPAY_BILLING_WEBHOOK_SECRET; false on anything missing
+ *
+ * subscription is { id, status, planId, customerId, currentStart, currentEnd, paidCount, hostedUrl, notes }. hostedUrl is Razorpay's
+ * own page, where the payer authorises the mandate or changes the card: no card data ever reaches Bhava. Money is integer paise.
+ * The keys are RAZORPAY_BILLING_KEY_ID and RAZORPAY_BILLING_KEY_SECRET, or Bhava's main keys when those are empty.
+ *
+ * route also has settlementReport(account, { year, month }) -> [{ kind: 'transfer' | 'reversal', id, amountPaise, feePaise, taxPaise,
+ * paymentId, transferId, settlementId, settled, at }]: what Razorpay says it settled to one linked account in a month, which the
+ * monthly statement is reconciled against (F-83).
+ *
  * Every call has a 10 s timeout and follows no redirect. RAZORPAY_BASE_URL points at tools/sim/razorpay, which is refused when
  * NODE_ENV=production; any other host that isn't Razorpay's throws at start-up. Failures are ProviderError (src/adapters/http.js):
  * a refund or order whose answer was lost has delivery 'unknown' and is repeated only with its idempotency key.
@@ -62,6 +83,18 @@ const toPayment = (p) => ({
 });
 const toOrder = (o, keyId) => ({ id: o.id, amountPaise: o.amount, amountPaidPaise: o.amount_paid ?? 0, status: o.status, receipt: o.receipt ?? '', keyId });
 const toRefund = (r) => ({ id: r.id, status: r.status, amountPaise: r.amount, paymentId: r.payment_id });
+const toDate = (seconds) => (Number(seconds) > 0 ? new Date(Number(seconds) * 1000) : null);
+const toSubscription = (s) => ({
+  id: s.id,
+  status: s.status,
+  planId: s.plan_id,
+  customerId: s.customer_id ?? null,
+  currentStart: toDate(s.current_start),
+  currentEnd: toDate(s.current_end),
+  paidCount: s.paid_count ?? 0,
+  hostedUrl: s.short_url ?? '',
+  notes: s.notes ?? {},
+});
 
 export function verifyCheckout({ gatewayOrderId, gatewayPaymentId, signature } = {}, keySecret) {
   if (!keySecret || typeof gatewayOrderId !== 'string' || typeof gatewayPaymentId !== 'string' || typeof signature !== 'string') return false;
@@ -145,6 +178,13 @@ function createRoute(config, request) {
       const { body } = await request('GET', `/v2/accounts/${encodeURIComponent(id)}`, { headers: auth(), retries: 2 });
       return { id: body.id, status: body.status };
     },
+    async settlementReport(account, { year, month }) {
+      const { body } = await request('GET', '/v1/settlements/recon/combined', { headers: { ...auth(), 'x-razorpay-account': linked(account) }, query: { year: Number(year), month: Number(month) }, retries: 2 });
+      return (body?.items ?? []).map((row) => ({
+        kind: row.type, id: row.entity_id, amountPaise: row.amount ?? 0, feePaise: row.fee ?? 0, taxPaise: row.tax ?? 0, paymentId: row.payment_id ?? null,
+        transferId: row.transfer_id ?? null, settlementId: row.settlement_id ?? null, settled: Boolean(row.settled), at: toDate(row.created_at),
+      }));
+    },
     async fetchTransfer(id) {
       const { body } = await request('GET', `/v1/transfers/${encodeURIComponent(id)}`, { headers: auth(), retries: 2 });
       return { id: body.id, status: body.status, amountPaise: body.amount, amountReversedPaise: body.amount_reversed ?? 0, recipient: body.recipient };
@@ -191,6 +231,57 @@ function createPartner(config, request, authRequest) {
   };
 }
 
+/** Subscriptions on Bhava's own account: what a business pays Bhava (PRD 5.12). */
+function createBilling(config, request) {
+  const auth = () => ({ authorization: basic(need(config.razorpayBillingKeyId || config.razorpayKeyId, 'RAZORPAY_KEY_ID'), need(config.razorpayBillingKeySecret || config.razorpayKeySecret, 'RAZORPAY_KEY_SECRET')) });
+  const sub = (id) => `/v1/subscriptions/${encodeURIComponent(need(id, 'a subscription id'))}`;
+  const wholePaise = (amount) => {
+    if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('Razorpay needs an amount in whole paise');
+    return amount;
+  };
+  return {
+    kind: 'billing',
+    async createCustomer({ name, email = '', phone = '', reference = '' }) {
+      const { body } = await request('POST', '/v1/customers', { headers: auth(), json: { name, email, contact: phone, fail_existing: '0', notes: { reference } }, retries: 2 });
+      return { id: body.id };
+    },
+    async ensurePlan({ code, cycle, amountPaise, name }) {
+      if (cycle !== 'monthly' && cycle !== 'yearly') throw new Error('A plan is monthly or yearly');
+      const { body } = await request('POST', '/v1/plans', { headers: auth(), json: { period: cycle, interval: 1, item: { name, amount: wholePaise(amountPaise), currency: 'INR' }, notes: { code, cycle } } });
+      return { id: body.id };
+    },
+    async createSubscription({ customerId, planId, totalCount = 120, startAt = null, notes = {} }) {
+      const { body } = await request('POST', '/v1/subscriptions', {
+        headers: auth(),
+        json: { plan_id: need(planId, 'a plan id'), customer_id: need(customerId, 'a customer id'), total_count: totalCount, quantity: 1, customer_notify: 0, ...(startAt ? { start_at: Math.floor(+new Date(startAt) / 1000) } : {}), notes },
+      });
+      return toSubscription(body);
+    },
+    async changeSubscription(id, { planId, at = 'now' }) {
+      if (at !== 'now' && at !== 'cycle_end') throw new Error('A change happens now or at cycle_end');
+      const { body } = await request('PATCH', sub(id), { headers: auth(), json: { plan_id: need(planId, 'a plan id'), schedule_change_at: at, customer_notify: 0 } });
+      return toSubscription(body);
+    },
+    async addCharge(id, { name, amountPaise, quantity = 1, idempotencyKey }) {
+      const key = need(idempotencyKey, 'an idempotency key');
+      // Razorpay has no idempotency header for add-ons, so the key rides in the notes and is looked for before a new line is made.
+      const { body: existing } = await request('GET', '/v1/addons', { headers: auth(), query: { subscription_id: need(id, 'a subscription id') }, retries: 2 });
+      const found = (existing?.items ?? []).find((addon) => addon.subscription_id === id && addon.notes?.key === key);
+      const made = found ?? (await request('POST', `${sub(id)}/addons`, { headers: auth(), json: { item: { name, amount: wholePaise(amountPaise), currency: 'INR' }, quantity, notes: { key } } })).body;
+      return { id: made.id, amountPaise: made.item?.amount ?? amountPaise, quantity: made.quantity ?? quantity };
+    },
+    async cancel(id, { atCycleEnd = false } = {}) {
+      const { body } = await request('POST', `${sub(id)}/cancel`, { headers: auth(), json: { cancel_at_cycle_end: atCycleEnd ? 1 : 0 } });
+      return toSubscription(body);
+    },
+    async fetch(id) {
+      const { body } = await request('GET', sub(id), { headers: auth(), retries: 2 });
+      return toSubscription(body);
+    },
+    verifyWebhook: (rawBody, signatureHeader) => verifyWebhook(rawBody, signatureHeader, config.razorpayBillingWebhookSecret),
+  };
+}
+
 /** Both implementations, and which is the default. Throws at start-up on a bad address. */
 export function createRazorpay(config = {}, { env = process.env } = {}) {
   const baseUrl = providerUrl({ value: config.razorpayBaseUrl, real: RAZORPAY_HOST, name: 'RAZORPAY_BASE_URL', env });
@@ -203,5 +294,5 @@ export function createRazorpay(config = {}, { env = process.env } = {}) {
   const partner = createPartner(config, request, authRequest);
   const defaultMode = config.paymentMode === 'own' ? 'own' : 'managed';
   const forMode = (mode) => ((mode ?? defaultMode) === 'own' ? partner : route);
-  return { route, partner, forMode, defaultMode, default: forMode(defaultMode), verifyCheckout, verifyWebhook };
+  return { route, partner, billing: createBilling(config, request), forMode, defaultMode, default: forMode(defaultMode), verifyCheckout, verifyWebhook };
 }

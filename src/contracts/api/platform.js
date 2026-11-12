@@ -3,8 +3,10 @@ import { APP_PLATFORMS, APP_VERSION } from '../accounts.js';
 import { BUILD_REASONS, OTA_STATUSES, SUBMISSION_STATES } from '../apps.js';
 import { Channel } from '../compliance.js';
 import { AppBuild, AppBuildRequest, AppSubmission } from './apps.js';
+import { BILLING_CYCLES, SIGNUP_MODES, SUBSCRIPTION_STATUSES } from '../billing.js';
+import { BhavaInvoice, BillingItem } from './billing.js';
 import { PresetSlots } from '../themes.js';
-import { Count, Id, IdParams, IdText, ListQuery, Timestamp, page, required, text } from './common.js';
+import { Count, Id, IdParams, IdText, ListQuery, Paise, PaiseInput, Timestamp, page, required, text } from './common.js';
 
 /**
  * The Platform Console's routes, on its own host and not under /api/v1. Not part of `routes`, so the seller client
@@ -216,6 +218,61 @@ export const OtaHealth = z.object({
   threshold: z.number(),
 });
 
+// ---- Phase 7: billing, flags and sign-up ----
+
+/** A business's plan as support sees it: what it is billed, what was overridden, and every change with its actor and reason. */
+export const PlatformBilling = z.object({
+  tenantId: Id,
+  plan: z.enum(TIERS),
+  cycle: z.enum(BILLING_CYCLES),
+  status: z.enum(SUBSCRIPTION_STATUSES).nullable(),
+  graceUntil: Timestamp.nullable(),
+  periodEnd: Timestamp.nullable(),
+  offerCode: z.string().nullable(),
+  items: z.array(BillingItem),
+  overrides: z.array(z.object({ feature: z.string(), enabled: z.boolean(), limit: Count.nullable() })),
+  changes: z.array(z.object({ fromPlan: z.string(), toPlan: z.string(), fromCycle: z.string(), toCycle: z.string(), actor: z.string(), source: z.string(), reason: z.string(), at: Timestamp })),
+});
+/** Changes the plan without a payment. Audited, and the owner is told (5.7). */
+export const PlanOverride = z.object({ plan: z.enum(TIERS), cycle: z.enum(BILLING_CYCLES).optional(), reason: Reason });
+/** Corrects an issued invoice. Without taxablePaise it reverses the whole invoice; never more than what is left of it. */
+export const CreditNoteCreate = z.object({ invoiceId: Id, taxablePaise: PaiseInput.optional(), reason: Reason });
+export const BillingHold = z.object({ reason: Reason });
+export const PlatformBillingSettings = z.object({
+  legalName: z.string(), gstin: z.string(), stateCode: z.string(), address: z.string(), sac: z.string(), taxRateBp: z.number().int(),
+  statementDay: z.number().int(), graceDays: z.number().int(), afterGrace: z.enum(['suspend', 'move_to_free']), proration: z.enum(['none', 'daily']),
+  yearlyMonths: z.number().int(), freeCanBuyPacks: z.boolean(), referralRewardPaise: Paise,
+});
+export const BillingSettingsSave = z.object({
+  legalName: text(200).optional(),
+  gstin: z.union([z.literal(''), z.string().regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/, 'Enter a valid GSTIN')]).optional(),
+  stateCode: z.union([z.literal(''), z.string().regex(/^[0-9]{2}$/, 'Use the two-digit state code')]).optional(),
+  address: text(400).optional(),
+  sac: z.union([z.literal(''), z.string().regex(/^[0-9]{4,8}$/, 'Enter the SAC')]).optional(),
+  taxRateBp: z.number().int().min(0).max(10000).optional(),
+  statementDay: z.number().int().min(1).max(28).optional(),
+  graceDays: z.number().int().min(0).max(60).optional(),
+  afterGrace: z.enum(['suspend', 'move_to_free']).optional(),
+  proration: z.enum(['none', 'daily']).optional(),
+  freeCanBuyPacks: z.boolean().optional(),
+  referralRewardPaise: PaiseInput.optional(),
+  reason: Reason,
+});
+
+const FlagKey = z.string().regex(/^[a-z][a-z0-9_.]{1,59}$/, 'Use lower-case letters, digits, dots and underscores');
+export const FeatureFlag = z.object({ key: z.string(), description: z.string(), enabled: z.boolean(), percent: z.number().int().min(0).max(100), businesses: Count, updatedAt: Timestamp });
+export const FeatureFlagSave = z.object({ key: FlagKey, description: text(300).default(''), enabled: z.boolean().default(false), percent: z.number().int().min(0).max(100).default(0), reason: Reason });
+/** enabled null removes the business's own setting, so the flag's default and percentage decide again. */
+export const TenantFlagSet = z.object({ key: FlagKey, enabled: z.boolean().nullable(), reason: Reason });
+export const TenantFlags = z.object({ items: z.array(z.object({ key: z.string(), on: z.boolean(), own: z.boolean().nullable() })) });
+
+export const PlatformSignup = z.object({ mode: z.enum(SIGNUP_MODES), freePerInstagram: z.number().int(), updatedAt: Timestamp });
+export const SignupModeSet = z.object({ mode: z.enum(SIGNUP_MODES), reason: Reason });
+export const SignupInvite = z.object({ id: Id, note: z.string(), maxUses: Count, uses: Count, expiresAt: Timestamp.nullable(), revokedAt: Timestamp.nullable(), createdBy: z.string(), createdAt: Timestamp });
+export const SignupInviteCreate = z.object({ note: text(200).default(''), maxUses: z.number().int().min(1).max(10000).default(1), expiresInDays: z.number().int().min(1).max(365).optional() });
+/** The code is in this answer and nowhere else: only its hash is stored. */
+export const SignupInviteCreated = z.object({ invite: SignupInvite, code: z.string() });
+
 export const platformRoutes = {
   'platform.businesses': { method: 'GET', path: '/tenants', platformRoles: anyone, query: ListQuery, response: page(BusinessSummary) },
   'platform.createBusiness': { method: 'POST', path: '/tenants', platformRoles: anyone, body: BusinessCreate, status: 201, response: BusinessCreated },
@@ -262,6 +319,31 @@ export const platformRoutes = {
   'platform.advanceOta': { method: 'POST', path: '/ota-releases/:id/advance', platformRoles: superAdmin, params: IdParams, response: OtaRelease },
   'platform.rollBackOta': { method: 'POST', path: '/ota-releases/:id/roll-back', platformRoles: anyone, params: IdParams, body: z.object({ reason: Reason }), response: OtaRelease },
   'platform.otaHealth': { method: 'GET', path: '/ota-releases/:id/health', platformRoles: anyone, params: IdParams, response: OtaHealth },
+  // Phase 7: answered by src/modules/billing (a business's plan, credit notes, billing holds, Bhava's own details),
+  // entitlements (flags) and signup (mode and invites).
+  'platform.billing': { method: 'GET', path: '/tenants/:id/billing', platformRoles: anyone, params: IdParams, response: PlatformBilling },
+  'platform.overridePlan': { method: 'POST', path: '/tenants/:id/plan', platformRoles: superAdmin, params: IdParams, body: PlanOverride, response: PlatformBilling },
+  'platform.createCreditNote': { method: 'POST', path: '/tenants/:id/credit-notes', platformRoles: superAdmin, params: IdParams, body: CreditNoteCreate, status: 201, response: BhavaInvoice },
+  'platform.suspendBilling': { method: 'POST', path: '/tenants/:id/billing/suspend', platformRoles: anyone, params: IdParams, body: BillingHold, response: PlatformBilling },
+  'platform.resumeBilling': { method: 'POST', path: '/tenants/:id/billing/resume', platformRoles: anyone, params: IdParams, body: BillingHold, response: PlatformBilling },
+  'platform.billingSettings': { method: 'GET', path: '/billing-settings', platformRoles: anyone, response: PlatformBillingSettings },
+  'platform.saveBillingSettings': { method: 'PUT', path: '/billing-settings', platformRoles: superAdmin, body: BillingSettingsSave, response: PlatformBillingSettings },
+  'platform.flags': { method: 'GET', path: '/flags', platformRoles: anyone, response: z.object({ items: z.array(FeatureFlag) }) },
+  'platform.saveFlag': { method: 'PUT', path: '/flags', platformRoles: superAdmin, body: FeatureFlagSave, response: FeatureFlag },
+  'platform.tenantFlags': { method: 'GET', path: '/tenants/:id/flags', platformRoles: anyone, params: IdParams, response: TenantFlags },
+  'platform.setTenantFlag': { method: 'PUT', path: '/tenants/:id/flags', platformRoles: anyone, params: IdParams, body: TenantFlagSet, response: TenantFlags },
+  'platform.signup': { method: 'GET', path: '/signup', platformRoles: anyone, response: PlatformSignup },
+  'platform.setSignupMode': { method: 'PUT', path: '/signup', platformRoles: superAdmin, body: SignupModeSet, response: PlatformSignup },
+  'platform.signupInvites': { method: 'GET', path: '/signup/invites', platformRoles: anyone, query: ListQuery, response: page(SignupInvite) },
+  'platform.createSignupInvite': { method: 'POST', path: '/signup/invites', platformRoles: anyone, body: SignupInviteCreate, status: 201, response: SignupInviteCreated },
+  'platform.revokeSignupInvite': { method: 'POST', path: '/signup/invites/:id/revoke', platformRoles: anyone, params: IdParams, response: SignupInvite },
 };
+
+/** Which module answers each Phase 7 Platform Console route. */
+export const BILLING_PLATFORM_OWNERS = Object.freeze({
+  billing: Object.freeze(['platform.billing', 'platform.overridePlan', 'platform.createCreditNote', 'platform.suspendBilling', 'platform.resumeBilling', 'platform.billingSettings', 'platform.saveBillingSettings']),
+  entitlements: Object.freeze(['platform.flags', 'platform.saveFlag', 'platform.tenantFlags', 'platform.setTenantFlag']),
+  signup: Object.freeze(['platform.signup', 'platform.setSignupMode', 'platform.signupInvites', 'platform.createSignupInvite', 'platform.revokeSignupInvite']),
+});
 
 export const platformRouteList = Object.freeze(Object.entries(platformRoutes).map(([id, route]) => Object.freeze({ id, ...route })));

@@ -62,7 +62,7 @@ export const SiteRead = z.object({
 export const themeRoutes = {
   'themes.presets': { method: 'GET', path: '/theme/presets', access: MANAGERS, response: z.object({ items: z.array(ThemePresetCard) }) },
   'themes.get': { method: 'GET', path: '/theme', access: MANAGERS, response: BuyerTheme },
-  'themes.choose': { method: 'PUT', path: '/theme', access: MANAGERS, body: ThemeChoose, response: BuyerTheme },
+  'themes.choose': { feature: 'theme_presets', method: 'PUT', path: '/theme', access: MANAGERS, body: ThemeChoose, response: BuyerTheme },
   'themes.updateText': { method: 'PATCH', path: '/theme', access: MANAGERS, body: ThemeText, response: BuyerTheme },
   'themes.readSite': { method: 'POST', path: '/theme/site-reads', access: MANAGERS, body: SiteReadCreate, status: 201, response: SiteRead },
   'themes.siteReads': { method: 'GET', path: '/theme/site-reads', access: MANAGERS, query: ListQuery, response: page(SiteRead) },

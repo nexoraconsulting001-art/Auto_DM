@@ -95,10 +95,10 @@ export const SiteAdapter = z.object({ name: z.string(), label: z.string(), enabl
 export const CSV_UPLOAD = Object.freeze({ field: 'file', maxBytes: L.csvBytes, mimeTypes: Object.freeze(['text/csv', 'text/plain', 'application/vnd.ms-excel', 'application/csv', 'application/octet-stream']) });
 
 export const importRoutes = {
-  'imports.link': { method: 'POST', path: '/imports/link', access, body: LinkImport, response: LinkImportResult },
-  'imports.bulk': { method: 'POST', path: '/imports/bulk', access, body: BulkImport, status: 202, response: ImportJob },
-  'imports.csv': { method: 'POST', path: '/imports/csv', access, upload: CSV_UPLOAD, status: 202, response: ImportJob },
-  'imports.shopify': { method: 'POST', path: '/imports/shopify', access, body: ShopifyImport, status: 202, response: ImportJob },
+  'imports.link': { feature: 'catalog.import', method: 'POST', path: '/imports/link', access, body: LinkImport, response: LinkImportResult },
+  'imports.bulk': { feature: 'catalog.import', method: 'POST', path: '/imports/bulk', access, body: BulkImport, status: 202, response: ImportJob },
+  'imports.csv': { feature: 'catalog.import', method: 'POST', path: '/imports/csv', access, upload: CSV_UPLOAD, status: 202, response: ImportJob },
+  'imports.shopify': { feature: 'catalog.import', method: 'POST', path: '/imports/shopify', access, body: ShopifyImport, status: 202, response: ImportJob },
   'imports.list': { method: 'GET', path: '/imports', access, query: ListQuery, response: page(ImportJob) },
   'imports.adapters': { method: 'GET', path: '/import-adapters', access, response: z.object({ items: z.array(SiteAdapter) }) },
   'imports.get': { method: 'GET', path: '/imports/:id', access, params: IdParams, response: ImportJob },

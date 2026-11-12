@@ -7,6 +7,13 @@
  * a compliance rule refused the request, and is its reason code (src/contracts/compliance.js). `storeUrl` appears with
  * `update_required`: where to get the newer app.
  *
+ * Two codes are the plan's (PRD 5.7), both 403, and both come from the router before the handler runs:
+ *   `plan.feature_off`     this business's plan does not have the route's feature. `feature` names it and `plan` is the
+ *                          lowest plan that includes it (absent when only an add-on or an override can turn it on).
+ *   `plan.limit_reached`   the plan has the feature and its limit is used up. `feature`, `limit` and `used` say where it
+ *                          stands, and `plan` is the lowest plan with more.
+ * Both also carry `reason` (`plan`, or `plan.not_included` on the Phase 3 routes), as the handlers' own refusals did.
+ *
  * Two codes ask the client to do something and then repeat the request: `reauth_required` (403: prove it is you again with
  * auth.reauthStart and auth.reauthVerify) and `update_required` (426: the app is older than the minimum; open `storeUrl`).
  * Programs branch on `code`; people read `error`.
@@ -16,6 +23,8 @@ export const ERROR_STATUS = Object.freeze({
   unauthorized: 401,
   forbidden: 403,
   reauth_required: 403,
+  'plan.feature_off': 403,
+  'plan.limit_reached': 403,
   not_found: 404,
   conflict: 409,
   payload_too_large: 413,
@@ -33,6 +42,8 @@ const DEFAULT_MESSAGE = {
   unauthorized: 'Please log in again.',
   forbidden: 'You don’t have access to this.',
   reauth_required: 'Confirm it’s you to continue.',
+  'plan.feature_off': 'This isn’t on your plan.',
+  'plan.limit_reached': 'You have reached your plan’s limit.',
   not_found: 'We couldn’t find that.',
   conflict: 'That can’t be done right now.',
   payload_too_large: 'That is too large to upload.',
@@ -46,7 +57,7 @@ const DEFAULT_MESSAGE = {
 
 /** Throw from a route handler to answer with this error. `fields` maps field names to messages. */
 export class ApiError extends Error {
-  constructor(code, message = DEFAULT_MESSAGE[code], { fields, reason, storeUrl } = {}) {
+  constructor(code, message = DEFAULT_MESSAGE[code], { fields, reason, storeUrl, feature, plan, limit, used } = {}) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
@@ -54,6 +65,10 @@ export class ApiError extends Error {
     this.fields = fields;
     this.reason = reason;
     this.storeUrl = storeUrl;
+    this.feature = feature;
+    this.plan = plan;
+    this.limit = limit;
+    this.used = used;
   }
 }
 

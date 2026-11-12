@@ -49,7 +49,7 @@ export const TeamUpdate = z.object({ role: Role.optional(), permissions: Permiss
 export const teamRoutes = {
   /** A page of members, with every open invitation beside it. */
   'team.list': { method: 'GET', path: '/team', access: OWNER_ONLY, query: ListQuery, response: page(TeamMember).extend({ invites: z.array(TeamInvite) }) },
-  'team.invite': { method: 'POST', path: '/team/invites', access: OWNER_ONLY, fresh: true, body: TeamInviteInput, status: 201, response: TeamInvite },
+  'team.invite': { limit: { feature: 'staff.seats', counts: 'team.seats' }, method: 'POST', path: '/team/invites', access: OWNER_ONLY, fresh: true, body: TeamInviteInput, status: 201, response: TeamInvite },
   'team.update': { method: 'PATCH', path: '/team/:id', access: OWNER_ONLY, fresh: true, params: IdParams, body: TeamUpdate, response: TeamMember },
   'team.remove': { method: 'DELETE', path: '/team/:id', access: OWNER_ONLY, fresh: true, params: IdParams, status: 204, response: null },
 };

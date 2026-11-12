@@ -22,13 +22,16 @@ const readJson = (file) => JSON.parse(fs.readFileSync(path.join(repoRoot, file),
 const ACCOUNTS = ['auth.start', 'auth.verify', 'auth.exchange', 'auth.apple', 'auth.refresh', 'auth.devices', 'auth.revokeDevice', 'auth.reauthStart', 'auth.reauthVerify', 'auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.deleteAccount', 'app.requirements'];
 const TEAM = ['team.list', 'team.invite', 'team.update', 'team.remove'];
 const PHASE0_AUTH = ['auth.login', 'auth.me', 'auth.logout', 'auth.businesses'];
-const NO_BUSINESS = ['auth.start', 'auth.verify', 'auth.exchange', 'auth.apple', 'auth.refresh', 'app.requirements'];
+// Phase 7 adds self-serve sign-up: the person has signed in on this host and has no business yet.
+const NO_BUSINESS = ['auth.start', 'auth.verify', 'auth.exchange', 'auth.apple', 'auth.refresh', 'app.requirements', 'signup.status', 'signup.start', 'signup.firstAutomation', 'signup.finish'];
 const FRESH = [
   'auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.deleteAccount', 'team.invite', 'team.update', 'team.remove',
   'settings.updatePayment', 'paymentAccount.startLinked', 'paymentAccount.connectUrl', 'paymentAccount.setMode', 'paymentAccount.disconnect',
   'shippingSettings.update', 'shopify.connect', 'shopify.disconnect', 'whatsappAccount.connect', 'whatsappAccount.disconnect', 'tags.update', 'apiKeys.create', 'apiKeys.revoke',
   // Phase 6 (the shopper app contract): the business's App Store Connect key and its own push credentials.
   'storeAccess.save', 'pushCredentials.save',
+  // Phase 7 (billing): whatever changes what a business pays.
+  'billing.change', 'billing.addItem', 'billing.removeItem', 'billing.paymentMethod',
 ];
 const PLATFORM_TABLES = ['people', 'person_identities', 'seller_login_codes', 'token_families', 'refresh_tokens', 'auth_devices', 'auth_handoffs', 'review_logins', 'review_login_uses', 'account_deletion_requests', 'app_min_versions'];
 

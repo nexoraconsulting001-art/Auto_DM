@@ -311,7 +311,8 @@ test('ordering is tier 2: below it changes are refused and the buyer pages are n
   await setPlan(w, 't1');
   const save = await w.api(`/categories/${category.id}/reels`, { method: 'PUT', body: { order: ids.toReversed() } });
   assert.equal(save.status, 403);
-  assert.equal(save.body.code, 'forbidden');
+  assert.equal(save.body.code, 'plan.feature_off'); // Phase 7: the router answers for the plan, from the route table
+  assert.equal(save.body.plan, 't2');
   assert.equal((await w.api(`/categories/${category.id}/rules`, { method: 'POST', body: { match: 'hashtag', value: 'x' } })).status, 403);
   assert.equal((await w.api(`/categories/${category.id}/reels`)).status, 200, 'reading is never refused');
   assert.deepEqual(await sequenceIds(w, category.id), ids);

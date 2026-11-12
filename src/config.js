@@ -133,6 +133,16 @@ export const config = {
   razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
   razorpayPartnerClientId: process.env.RAZORPAY_PARTNER_CLIENT_ID || '',
   razorpayPartnerClientSecret: process.env.RAZORPAY_PARTNER_CLIENT_SECRET || '',
+  // Bhava's own billing (PRD 5.12): Razorpay Subscriptions on Bhava's account. The keys default to the two above; the webhook has
+  // its own address (/webhooks/billing/razorpay) and its own secret, and without the secret every billing webhook is refused.
+  razorpayBillingKeyId: process.env.RAZORPAY_BILLING_KEY_ID || '',
+  razorpayBillingKeySecret: process.env.RAZORPAY_BILLING_KEY_SECRET || '',
+  razorpayBillingWebhookSecret: process.env.RAZORPAY_BILLING_WEBHOOK_SECRET || '',
+  // Where the provider sends the payer back after its hosted page. Empty means the business's own console (/admin/settings/plan).
+  billingReturnUrl: (process.env.BILLING_RETURN_URL || '').replace(/\/+$/, ''),
+  // Self-serve sign-up (PRD 5.20). The mode itself is a row (signup_settings, set in the Platform Console); this only says where
+  // a new business's fallback address is made: <slug>.<SIGNUP_HOST_SUFFIX>. Empty means PLATFORM_DOMAIN.
+  signupHostSuffix: (process.env.SIGNUP_HOST_SUFFIX || '').toLowerCase(),
   // Shiprocket: Bhava's master account, and the token its tracking webhook carries.
   shiprocketBaseUrl: process.env.SHIPROCKET_BASE_URL || '',
   shiprocketEmail: process.env.SHIPROCKET_EMAIL || '',

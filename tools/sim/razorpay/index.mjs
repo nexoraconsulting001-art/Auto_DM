@@ -11,6 +11,11 @@
  *   POST /v2/accounts              GET /v2/accounts/:id                  linked accounts (Route)
  *   GET  /v1/transfers/:id
  *   POST /token                                                          Partner OAuth: authorization_code or refresh_token
+ *   POST /v1/customers   POST /v1/plans { period, interval, item: { name, amount } }                 Bhava's own billing (PRD 5.12)
+ *   POST /v1/subscriptions { plan_id, customer_id, total_count, notes }      GET /v1/subscriptions/:id
+ *   PATCH /v1/subscriptions/:id { plan_id, schedule_change_at: 'now' | 'cycle_end' }                 POST /v1/subscriptions/:id/cancel
+ *   POST /v1/subscriptions/:id/addons { item: { name, amount }, quantity, notes }    GET /v1/addons?subscription_id=
+ *   GET  /v1/settlements/recon/combined?year=&month=    with X-Razorpay-Account: what was settled to one linked account in a month
  *
  * Controls (under /__sim), beside the shared ones in base.mjs (faults, calls, the clock):
  *   POST /pay { orderId, method?, outcome?: 'captured' | 'failed' | 'authorized', webhook?, hold?, duplicates?, signature?, amount? }
@@ -22,6 +27,13 @@
  *   POST /transfers/settle { id } | /transfers/fail { id }                sends transfer.processed / transfer.failed
  *   POST /oauth/code { accountId }              -> { code }: what the seller's consent screen would send back
  *   POST /webhooks/send { event, payload?, accountId?, ...delivery }     any event by hand, signed like the rest
+ *   POST /billing/webhook-url { url }           where subscription events go: their own address, signed with billingWebhookSecret
+ *   POST /subscriptions/authorize { id }        the payer finished the hosted page: active, subscription.activated
+ *   POST /subscriptions/charge { id, outcome?: 'charged' | 'failed' | 'halted', ...delivery }
+ *       A renewal on the controlled clock. charged: a captured payment for the plan's amount plus every add-on waiting, the
+ *       period moves on one cycle from the clock's now, subscription.charged. failed: a failed payment, status pending,
+ *       subscription.pending. halted: Razorpay gave up retrying, status halted, subscription.halted.
+ *   POST /subscriptions/cancel { id }           subscription.cancelled
  *   POST /webhooks/url { url }    POST /webhooks/flush { order? }    POST /webhooks/redeliver { id, times? }    GET /webhooks
  *
  * Delivery options on every control that sends a webhook: duplicates (the same event id again), hold (keep it back, then
@@ -41,7 +53,12 @@ const seconds = (ms) => Math.floor(ms / 1000);
 const FEE_BP = 200; // 2% gateway fee
 const FEE_TAX_BP = 1800; // 18% GST on the fee
 
-export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-secret', webhookSecret = 'sim-webhook-secret', webhookUrl = null, partner = { clientId: 'sim-partner-client', clientSecret: 'sim-partner-secret' } } = {}) {
+export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-secret', webhookSecret = 'sim-webhook-secret', webhookUrl = null, billingWebhookSecret = 'sim-billing-webhook-secret', billingWebhookUrl = null, partner = { clientId: 'sim-partner-client', clientSecret: 'sim-partner-secret' } } = {}) {
+  let customers;
+  let plans;
+  let subscriptions;
+  let addons;
+  let billingUrl = billingWebhookUrl;
   let orders;
   let payments;
   let refunds;
@@ -62,6 +79,11 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
     tokens = new Map();
     codes = new Map();
     ownWebhooks = new Map();
+    customers = new Map();
+    plans = new Map();
+    subscriptions = new Map();
+    addons = new Map();
+    billingUrl = billingWebhookUrl;
     seq = 0;
   };
   clear();
@@ -186,6 +208,100 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
         if (!transfer) throw razorpayError(400, 'The id provided does not exist');
         return transfer;
       });
+      // ---- Subscriptions: what a business pays Bhava. Bhava's own keys only.
+      const billingOnly = (req) => {
+        if (caller(req) !== 'platform') throw razorpayError(400, 'Subscriptions are not enabled for this account.');
+      };
+      const subscriptionOf = (id) => {
+        const subscription = subscriptions.get(id);
+        if (!subscription) throw razorpayError(400, 'The id provided does not exist');
+        return subscription;
+      };
+      on('POST', '/v1/customers', (req) => {
+        billingOnly(req);
+        const { name = '', email = '', contact = '', notes = {} } = req.body ?? {};
+        const existing = [...customers.values()].find((c) => c.email === email && c.contact === contact && (email || contact));
+        if (existing) return existing;
+        const customer = { id: nextId('cust'), entity: 'customer', name, email, contact, notes, created_at: seconds(sim.clock.now()) };
+        customers.set(customer.id, customer);
+        return customer;
+      });
+      on('POST', '/v1/plans', (req) => {
+        billingOnly(req);
+        const { period, interval = 1, item, notes = {} } = req.body ?? {};
+        if (!['monthly', 'yearly'].includes(period)) throw razorpayError(400, 'period is monthly or yearly.');
+        if (!Number.isInteger(item?.amount) || item.amount < 100) throw razorpayError(400, 'The amount must be an integer of at least 100 paise.');
+        const plan = { id: nextId('plan'), entity: 'plan', period, interval, item: { name: item.name ?? '', amount: item.amount, currency: 'INR' }, notes, created_at: seconds(sim.clock.now()) };
+        plans.set(plan.id, plan);
+        return plan;
+      });
+      on('POST', '/v1/subscriptions', (req) => {
+        billingOnly(req);
+        const { plan_id: planId, customer_id: customerId, total_count: totalCount = 120, quantity = 1, start_at: startAt = null, notes = {} } = req.body ?? {};
+        if (!plans.has(planId)) throw razorpayError(400, 'The plan does not exist.');
+        if (customerId && !customers.has(customerId)) throw razorpayError(400, 'The customer does not exist.');
+        const id = nextId('sub');
+        const subscription = { id, entity: 'subscription', plan_id: planId, customer_id: customerId ?? null, status: 'created', quantity, total_count: totalCount, paid_count: 0, current_start: null, current_end: null, start_at: startAt, ended_at: null, has_scheduled_changes: false, scheduled_plan_id: null, short_url: `https://rzp.io/i/${id}`, notes, created_at: seconds(sim.clock.now()) };
+        subscriptions.set(id, subscription);
+        return subscriptionView(subscription);
+      });
+      on('GET', '/v1/subscriptions/:id', (req) => {
+        billingOnly(req);
+        return subscriptionView(subscriptionOf(req.params.id));
+      });
+      on('PATCH', '/v1/subscriptions/:id', (req) => {
+        billingOnly(req);
+        const subscription = subscriptionOf(req.params.id);
+        const { plan_id: planId, schedule_change_at: at = 'now' } = req.body ?? {};
+        if (!plans.has(planId)) throw razorpayError(400, 'The plan does not exist.');
+        if (['cancelled', 'completed', 'expired'].includes(subscription.status)) throw razorpayError(400, 'The subscription has ended.');
+        if (at === 'cycle_end') Object.assign(subscription, { has_scheduled_changes: true, scheduled_plan_id: planId });
+        else Object.assign(subscription, { plan_id: planId, has_scheduled_changes: false, scheduled_plan_id: null });
+        return subscriptionView(subscription);
+      });
+      on('POST', '/v1/subscriptions/:id/cancel', (req) => {
+        billingOnly(req);
+        const subscription = subscriptionOf(req.params.id);
+        if (req.body?.cancel_at_cycle_end) subscription.cancel_at_cycle_end = true;
+        else Object.assign(subscription, { status: 'cancelled', ended_at: seconds(sim.clock.now()) });
+        return subscriptionView(subscription);
+      });
+      on('POST', '/v1/subscriptions/:id/addons', (req) => {
+        billingOnly(req);
+        const subscription = subscriptionOf(req.params.id);
+        const { item, quantity = 1, notes = {} } = req.body ?? {};
+        if (!Number.isInteger(item?.amount) || item.amount < 0) throw razorpayError(400, 'The amount must be whole paise.');
+        const addon = { id: nextId('ao'), entity: 'addon', subscription_id: subscription.id, item: { name: item.name ?? '', amount: item.amount, currency: 'INR' }, quantity, notes, invoice_id: null, created_at: seconds(sim.clock.now()) };
+        addons.set(addon.id, addon);
+        return addon;
+      });
+      on('GET', '/v1/addons', (req) => {
+        billingOnly(req);
+        const items = [...addons.values()].filter((a) => !req.query?.subscription_id || a.subscription_id === req.query.subscription_id);
+        return { entity: 'collection', count: items.length, items };
+      });
+      on('GET', '/v1/settlements/recon/combined', (req) => {
+        if (caller(req) !== 'platform') throw razorpayError(400, 'Route is not enabled for this account.');
+        const account = req.headers['x-razorpay-account'];
+        if (!accounts.has(account)) throw razorpayError(400, 'The linked account does not exist.');
+        const year = Number(req.query?.year);
+        const month = Number(req.query?.month);
+        const inMonth = (at) => {
+          const d = new Date(at * 1000 + 330 * 60_000);
+          return d.getUTCFullYear() === year && d.getUTCMonth() + 1 === month;
+        };
+        const items = [];
+        for (const transfer of transfers.values()) {
+          if (transfer.recipient !== account) continue;
+          const payment = payments.get(transfer.source);
+          const settled = transfer.status === 'processed';
+          if (inMonth(transfer.created_at)) items.push({ entity_id: transfer.id, type: 'transfer', amount: transfer.amount, fee: payment?.fee ?? 0, tax: payment?.tax ?? 0, payment_id: transfer.source, transfer_id: transfer.id, settled, settlement_id: settled ? `setl_${transfer.id.slice(4)}` : null, created_at: transfer.created_at });
+          for (const refund of refunds.values()) {
+            if (refund.reversal?.transfer_id === transfer.id && inMonth(refund.created_at)) items.push({ entity_id: refund.reversal.id, type: 'reversal', amount: refund.reversal.amount, fee: 0, tax: 0, payment_id: refund.payment_id, transfer_id: transfer.id, settled: true, settlement_id: null, created_at: refund.created_at });
+          }
+        }
+        return { entity: 'collection', count: items.length, items };
+      });
       on('POST', '/token', (req) => {
         const body = req.body ?? {};
         if (body.client_id !== partner.clientId || body.client_secret !== partner.clientSecret) throw razorpayError(401, 'The client is not recognised.');
@@ -217,6 +333,61 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
       });
       webhookControls(on, hooks);
       on('POST', '/webhooks/send', ({ body }) => sendEvent(body.event, body.payload ?? {}, body.accountId ?? 'platform', body));
+      on('POST', '/billing/webhook-url', ({ body }) => {
+        billingUrl = body.url || null;
+        return { url: billingUrl, secret: billingWebhookSecret };
+      });
+      const controlled = (id) => {
+        const subscription = subscriptions.get(id);
+        if (!subscription) throw new SimError(404, { error: 'No such subscription.' });
+        return subscription;
+      };
+      const subscriptionEvent = (event, subscription, payment, options) => sendEvent(event, { subscription: { entity: subscriptionView(subscription) }, ...(payment ? { payment: { entity: payment } } : {}) }, 'billing', options);
+      on('POST', '/subscriptions/authorize', async ({ body }) => {
+        const subscription = controlled(body.id);
+        if (subscription.status === 'created') subscription.status = 'authenticated';
+        return { subscription: subscriptionView(subscription), webhook: await subscriptionEvent('subscription.authenticated', subscription, null, body) };
+      });
+      on('POST', '/subscriptions/charge', async ({ body }) => {
+        const subscription = controlled(body.id);
+        if (['cancelled', 'completed', 'expired'].includes(subscription.status)) throw new SimError(409, { error: 'That subscription has ended.' });
+        const outcome = body.outcome ?? 'charged';
+        if (!['charged', 'failed', 'halted'].includes(outcome)) throw new SimError(400, { error: 'outcome is charged, failed or halted.' });
+        const now = seconds(sim.clock.now());
+        if (outcome === 'halted') {
+          subscription.status = 'halted';
+          return { subscription: subscriptionView(subscription), webhooks: [await subscriptionEvent('subscription.halted', subscription, null, body)] };
+        }
+        if (outcome === 'charged' && subscription.has_scheduled_changes) Object.assign(subscription, { plan_id: subscription.scheduled_plan_id, has_scheduled_changes: false, scheduled_plan_id: null });
+        const plan = plans.get(subscription.plan_id);
+        const waiting = [...addons.values()].filter((a) => a.subscription_id === subscription.id && !a.invoice_id);
+        const amount = plan.item.amount * subscription.quantity + waiting.reduce((sum, a) => sum + a.item.amount * a.quantity, 0);
+        const invoiceId = nextId('inv');
+        const payment = {
+          id: nextId('pay'), entity: 'payment', amount, currency: 'INR', status: outcome === 'charged' ? 'captured' : 'failed', order_id: null, invoice_id: invoiceId, method: body.method ?? 'card',
+          captured: outcome === 'charged', error_code: outcome === 'failed' ? 'BAD_REQUEST_ERROR' : null, error_description: outcome === 'failed' ? 'Payment failed' : null, created_at: now,
+        };
+        payments.set(payment.id, { ...payment, amount_refunded: 0, refund_status: null, fee: 0, tax: 0, owner: 'platform' });
+        if (outcome === 'failed') {
+          subscription.status = 'pending';
+          return { subscription: subscriptionView(subscription), payment, webhooks: [await subscriptionEvent('subscription.pending', subscription, payment, body)] };
+        }
+        for (const addon of waiting) addon.invoice_id = invoiceId;
+        const end = new Date(now * 1000);
+        if (plan.period === 'yearly') end.setUTCFullYear(end.getUTCFullYear() + plan.interval);
+        else end.setUTCMonth(end.getUTCMonth() + plan.interval);
+        Object.assign(subscription, { status: 'active', paid_count: subscription.paid_count + 1, current_start: now, current_end: seconds(+end) });
+        const webhooks = [];
+        if (subscription.paid_count === 1) webhooks.push(await subscriptionEvent('subscription.activated', subscription, null, body));
+        webhooks.push(await subscriptionEvent('subscription.charged', subscription, payment, body));
+        if (subscription.cancel_at_cycle_end) Object.assign(subscription, { status: 'cancelled', ended_at: subscription.current_end });
+        return { subscription: subscriptionView(subscription), payment, addons: waiting, webhooks };
+      });
+      on('POST', '/subscriptions/cancel', async ({ body }) => {
+        const subscription = controlled(body.id);
+        Object.assign(subscription, { status: 'cancelled', ended_at: seconds(sim.clock.now()) });
+        return { subscription: subscriptionView(subscription), webhook: await subscriptionEvent('subscription.cancelled', subscription, null, body) };
+      });
       on('POST', '/pay', async ({ body }) => {
         const order = orders.get(body.orderId);
         if (!order) throw new SimError(404, { error: 'No such order.' });
@@ -265,9 +436,11 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
         codes.set(code, accountId);
         return { code, accountId, keySecret: `sim-own-key-secret-${accountId}` };
       });
-      on('GET', '/state', () => ({ orders: [...orders.values()].map(publicView), payments: [...payments.values()].map(publicView), refunds: [...refunds.values()].map(publicView), transfers: [...transfers.values()], accounts: [...accounts.values()] }));
+      on('GET', '/state', () => ({ subscriptions: [...subscriptions.values()].map(subscriptionView), addons: [...addons.values()], plans: [...plans.values()], customers: [...customers.values()], orders: [...orders.values()].map(publicView), payments: [...payments.values()].map(publicView), refunds: [...refunds.values()].map(publicView), transfers: [...transfers.values()], accounts: [...accounts.values()] }));
     },
   });
+
+  const subscriptionView = ({ scheduled_plan_id: _scheduled, cancel_at_cycle_end: _atEnd, ...rest }) => rest;
 
   function settle(order, payment) {
     Object.assign(order, { status: 'paid', amount_paid: payment.amount, amount_due: Math.max(0, order.amount - payment.amount) });
@@ -279,10 +452,11 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
 
   /** One event, in Razorpay's envelope. The bytes are made without the helper fields, and signed exactly as sent. */
   async function sendEvent(event, payload, owner = 'platform', { duplicates, hold, signature, eventId } = {}) {
-    const own = owner === 'platform' ? null : ownWebhooks.get(owner);
+    // 'billing' is Bhava's own account too, at its own address with its own secret.
+    const own = owner === 'platform' ? null : owner === 'billing' ? (billingUrl ? { url: billingUrl, secret: billingWebhookSecret } : null) : ownWebhooks.get(owner);
     if (owner !== 'platform' && !own) return { delivered: false, reason: 'no_webhook_url' };
     const id = eventId ?? nextId('evt');
-    const envelope = { entity: 'event', account_id: owner === 'platform' ? 'acc_platform' : owner, event, contains: Object.keys(payload), payload, created_at: seconds(sim.clock.now()) };
+    const envelope = { entity: 'event', account_id: owner === 'platform' || owner === 'billing' ? 'acc_platform' : owner, event, contains: Object.keys(payload), payload, created_at: seconds(sim.clock.now()) };
     const raw = JSON.stringify(envelope);
     const marked = { ...envelope };
     Object.defineProperties(marked, { __secret: { value: own?.secret ?? webhookSecret, enumerable: false }, __eventId: { value: id, enumerable: false } });
@@ -309,5 +483,5 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
     return { transfer, webhook: await sendEvent(event, { transfer: { entity: transfer } }, 'platform', body) };
   }
 
-  return Object.assign(sim, { webhooks: hooks, keyId, keySecret, webhookSecret, partner });
+  return Object.assign(sim, { webhooks: hooks, keyId, keySecret, webhookSecret, billingWebhookSecret, partner });
 }

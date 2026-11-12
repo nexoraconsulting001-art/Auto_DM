@@ -23,7 +23,7 @@ export const DomainName = z.object({ domain: required(253, 'Enter a domain') });
 
 export const domainRoutes = {
   'domains.list': { method: 'GET', path: '/domains', access: staffWith('catalog'), query: ListQuery, response: page(Domain) },
-  'domains.add': { method: 'POST', path: '/domains', access: OWNER_ONLY, body: DomainName, status: 201, response: Domain },
+  'domains.add': { feature: 'custom_domain', method: 'POST', path: '/domains', access: OWNER_ONLY, body: DomainName, status: 201, response: Domain },
   'domains.setPrimary': { method: 'PUT', path: '/domains/primary', access: OWNER_ONLY, body: DomainName, response: Domain },
   'domains.check': { method: 'POST', path: '/domains/:id/check', access: OWNER_ONLY, params: DomainParams, response: Domain },
   'domains.remove': { method: 'DELETE', path: '/domains/:id', access: OWNER_ONLY, params: DomainParams, status: 204, response: null },

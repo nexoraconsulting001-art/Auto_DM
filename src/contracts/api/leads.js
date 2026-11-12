@@ -61,8 +61,8 @@ export const leadRoutes = {
   /** Records a consent withdrawal the shopper sent some other way; all channels when none are named. (Not named "withdraw": no seller route may contain "raw".) */
   'leads.revokeConsent': { method: 'POST', path: '/leads/:id/revoke-consent', access: reader, params: IdParams, body: LeadConsentRevoke, response: Lead },
   'leadForms.get': { method: 'GET', path: '/lead-forms', access: MANAGERS, response: LeadForms },
-  'leadForms.update': { method: 'PATCH', path: '/lead-forms', access: MANAGERS, body: LeadFormUpdate, response: LeadForms },
-  'leadForms.setConsent': { method: 'PUT', path: '/lead-forms/consent', access: MANAGERS, body: ConsentUpdate, response: LeadForms },
+  'leadForms.update': { feature: 'lead_form', method: 'PATCH', path: '/lead-forms', access: MANAGERS, body: LeadFormUpdate, response: LeadForms },
+  'leadForms.setConsent': { feature: 'lead_form', method: 'PUT', path: '/lead-forms/consent', access: MANAGERS, body: ConsentUpdate, response: LeadForms },
   'leadDownloads.list': { method: 'GET', path: '/lead-downloads', access: MANAGERS, query: ListQuery, response: page(LeadDownload) },
   'leadDownloads.create': { method: 'POST', path: '/lead-downloads', access: MANAGERS, body: LeadDownloadCreate, status: 201, response: LeadDownload },
   'leadDownloads.get': { method: 'GET', path: '/lead-downloads/:id', access: MANAGERS, params: IdParams, response: LeadDownload },

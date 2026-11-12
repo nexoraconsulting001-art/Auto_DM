@@ -139,11 +139,11 @@ export const paymentRoutes = {
   'paymentSettings.update': { method: 'PATCH', path: '/payment-settings', access: MANAGERS, body: PaymentOptionsUpdate, response: PaymentOptions },
   'paymentAccount.get': { method: 'GET', path: '/payment-account', access: MANAGERS, response: PaymentAccount },
   /** Managed mode: starts the Route linked account and its KYC. */
-  'paymentAccount.startLinked': { method: 'POST', path: '/payment-account/linked', access: OWNER_ONLY, fresh: true, body: LinkedAccountStart, response: PaymentAccount },
+  'paymentAccount.startLinked': { feature: 'store.payments', method: 'POST', path: '/payment-account/linked', access: OWNER_ONLY, fresh: true, body: LinkedAccountStart, response: PaymentAccount },
   /** Own mode: where to send the owner to connect their own gateway account (Partner OAuth). Keys can instead be saved through repos.gatewayKeys (5.15). */
-  'paymentAccount.connectUrl': { method: 'POST', path: '/payment-account/connect', access: OWNER_ONLY, fresh: true, response: ConnectUrl },
+  'paymentAccount.connectUrl': { feature: 'store.payments', method: 'POST', path: '/payment-account/connect', access: OWNER_ONLY, fresh: true, response: ConnectUrl },
   /** Applies to new orders only: an order keeps the mode it was placed in (S-72). */
-  'paymentAccount.setMode': { method: 'PUT', path: '/payment-account/mode', access: OWNER_ONLY, fresh: true, body: PaymentModeUpdate, response: PaymentAccount },
+  'paymentAccount.setMode': { feature: 'store.payments', method: 'PUT', path: '/payment-account/mode', access: OWNER_ONLY, fresh: true, body: PaymentModeUpdate, response: PaymentAccount },
   'paymentAccount.disconnect': { method: 'DELETE', path: '/payment-account/own', access: OWNER_ONLY, fresh: true, status: 204, response: null },
   /** Not paged: an order has a handful. */
   'payments.forOrder': { method: 'GET', path: '/orders/:id/payments', access: reader, params: IdParams, response: z.object({ items: z.array(Payment) }) },

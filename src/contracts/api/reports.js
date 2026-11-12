@@ -177,13 +177,13 @@ export const reportRoutes = {
   'reports.unsubscribe': { method: 'POST', path: '/reports/unsubscribe', access: PUBLIC, body: ReportUnsubscribe, response: ReportUnsubscribed },
   'reports.get': { method: 'GET', path: '/reports/:id', access: reader, params: IdParams, response: ReportRun },
   'scheduledReports.list': { method: 'GET', path: '/scheduled-reports', access: MANAGERS, query: ListQuery, response: page(ScheduledReport) },
-  'scheduledReports.create': { method: 'POST', path: '/scheduled-reports', access: MANAGERS, body: ScheduledReportInput, status: 201, response: ScheduledReport },
+  'scheduledReports.create': { feature: 'reports.scheduled', method: 'POST', path: '/scheduled-reports', access: MANAGERS, body: ScheduledReportInput, status: 201, response: ScheduledReport },
   'scheduledReports.update': { method: 'PATCH', path: '/scheduled-reports/:id', access: MANAGERS, params: IdParams, body: ScheduledReportUpdate, response: ScheduledReport },
   'scheduledReports.remove': { method: 'DELETE', path: '/scheduled-reports/:id', access: MANAGERS, params: IdParams, status: 204, response: null },
   'scheduledReports.addRecipient': { method: 'POST', path: '/scheduled-reports/:id/recipients', access: OWNER_ONLY, params: IdParams, body: RecipientAdd, status: 201, response: ScheduledRecipient },
   'scheduledReports.removeRecipient': { method: 'DELETE', path: '/scheduled-report-recipients/:id', access: OWNER_ONLY, params: IdParams, status: 204, response: null },
   'apiKeys.list': { method: 'GET', path: '/api-keys', access: OWNER_ONLY, query: ListQuery, response: page(ApiKey) },
-  'apiKeys.create': { method: 'POST', path: '/api-keys', access: OWNER_ONLY, fresh: true, body: ApiKeyInput, status: 201, response: ApiKeyCreated },
+  'apiKeys.create': { feature: 'reporting.api', method: 'POST', path: '/api-keys', access: OWNER_ONLY, fresh: true, body: ApiKeyInput, status: 201, response: ApiKeyCreated },
   'apiKeys.revoke': { method: 'DELETE', path: '/api-keys/:id', access: OWNER_ONLY, fresh: true, params: IdParams, status: 204, response: null },
 };
 

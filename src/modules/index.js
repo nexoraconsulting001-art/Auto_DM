@@ -11,6 +11,7 @@ import { appConfig } from './app-config/index.js';
 import { appLinks } from './app-links/index.js';
 import { appSubmissions } from './app-submissions/index.js';
 import { audit } from './audit/index.js';
+import { billing } from './billing/index.js';
 import { automations } from './automations/index.js';
 import { brand } from './brand/index.js';
 import { cart } from './cart/index.js';
@@ -43,6 +44,7 @@ import { pages } from './pages/index.js';
 import { payments } from './payments/index.js';
 import { platformConsole } from './platform-console/index.js';
 import { reachGuard } from './reach-guard/index.js';
+import { referrals } from './referrals/index.js';
 import { refunds } from './refunds/index.js';
 import { reports } from './reports/index.js';
 import { returns } from './returns/index.js';
@@ -51,12 +53,14 @@ import { shipping } from './shipping/index.js';
 import { shopifySync } from './shopify-sync/index.js';
 import { shopperPush } from './shopper-push/index.js';
 import { shoppers } from './shoppers/index.js';
+import { signup } from './signup/index.js';
 import { storeAccess } from './store-access/index.js';
 import { storeListings } from './store-listings/index.js';
 import { storefront } from './storefront/index.js';
 import { team } from './team/index.js';
 import { themes } from './themes/index.js';
 import { traffic } from './traffic/index.js';
+import { usage } from './usage/index.js';
 import { wishlist } from './wishlist/index.js';
 
 /**
@@ -72,6 +76,9 @@ import { wishlist } from './wishlist/index.js';
  *   lastRoutes(app, ctx)                  Mounted after every module's routes: the store's own pages and its 404 for what nothing answered.
  *   platformRoutes(router, ctx)           Platform Console routes; guard them with requirePlatformRole from src/auth.js.
  *   api(ctx)                              -> { 'products.list': handler }. Answers routes of the /api/v1 contract (src/contracts/api).
+ *   counters(ctx)                         -> { 'team.seats': async ({ params, body, user }) => number }. How many of a limited thing the
+ *                                         business has in use, by the name a route's `limit.counts` gives (Phase 7). The router compares it
+ *                                         with repos.entitlements.limit(limit.feature) before the handler runs.
  *   takesOver(ctx)                        -> { id: handler } for ids admin-api answers (Phase 0): replaces its handler there.
  *   jobs({ db, repos, platform, config, ig, meta, google, providers, compliance, shopperMessages, notify, modules }) Calls platform.queue.work(...). May return an async schedule(), run every minute.
  *   onMetaCall(call, ctx)                 Told about every call to Meta, ids and numbers only. See meta-calls.js.
@@ -108,9 +115,14 @@ import { wishlist } from './wishlist/index.js';
  * is (req.appSession, req.shopper, the app channel) before the shoppers module's session middleware runs, which then leaves such
  * a request alone. The other seven (shopper-push, ota, app-config, app-builds, store-access, store-listings, app-submissions)
  * follow the store's order modules, and storefront stays last of the buyer modules, directly before admin-console.
+ *
+ * Phase 7 (PRD 3, 5.7, 5.12, 5.20) adds four folders directly after entitlements, which they build on: billing (the plan, the
+ * price list, invoices, the provider's webhooks, statements), usage (the meters, registered with compliance in setup), signup
+ * (the PUBLIC sign-up routes on the host that belongs to no business) and referrals. They come before compliance and the
+ * automations, so a webhook address or a setup() of theirs is in place before anything sends.
  */
 export const MODULES = [
-  brand, entitlements, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, igConnect, compliance, automations, links, facebook, domains,
+  brand, entitlements, billing, usage, signup, referrals, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, igConnect, compliance, automations, links, facebook, domains,
   insights, reachGuard, traffic, reports,
   appLinks,
   catalog, imports, categories, pages, themes, creator, leads,

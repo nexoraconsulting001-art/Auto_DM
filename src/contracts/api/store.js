@@ -61,12 +61,12 @@ export const CouponUpdate = z.object(couponFields).partial().extend({ appOnly: z
 export const CouponStats = z.object({ couponId: Id, orders: Count, discountPaise: Paise, revenuePaise: Paise });
 
 export const couponRoutes = {
-  'coupons.list': { method: 'GET', path: '/coupons', access: MANAGERS, query: ListQuery.extend({ search: text(40).optional(), show: z.enum(['all', 'active', 'ended']).default('all') }), response: page(Coupon) },
-  'coupons.create': { method: 'POST', path: '/coupons', access: MANAGERS, body: CouponCreate, status: 201, response: Coupon },
-  'coupons.get': { method: 'GET', path: '/coupons/:id', access: MANAGERS, params: IdParams, response: Coupon },
-  'coupons.update': { method: 'PATCH', path: '/coupons/:id', access: MANAGERS, params: IdParams, body: CouponUpdate, response: Coupon },
-  'coupons.remove': { method: 'DELETE', path: '/coupons/:id', access: MANAGERS, params: IdParams, status: 204, response: null },
-  'coupons.stats': { method: 'GET', path: '/coupons/:id/stats', access: MANAGERS, params: IdParams, response: CouponStats },
+  'coupons.list': { feature: 'store.coupons', method: 'GET', path: '/coupons', access: MANAGERS, query: ListQuery.extend({ search: text(40).optional(), show: z.enum(['all', 'active', 'ended']).default('all') }), response: page(Coupon) },
+  'coupons.create': { feature: 'store.coupons', method: 'POST', path: '/coupons', access: MANAGERS, body: CouponCreate, status: 201, response: Coupon },
+  'coupons.get': { feature: 'store.coupons', method: 'GET', path: '/coupons/:id', access: MANAGERS, params: IdParams, response: Coupon },
+  'coupons.update': { feature: 'store.coupons', method: 'PATCH', path: '/coupons/:id', access: MANAGERS, params: IdParams, body: CouponUpdate, response: Coupon },
+  'coupons.remove': { feature: 'store.coupons', method: 'DELETE', path: '/coupons/:id', access: MANAGERS, params: IdParams, status: 204, response: null },
+  'coupons.stats': { feature: 'store.coupons', method: 'GET', path: '/coupons/:id/stats', access: MANAGERS, params: IdParams, response: CouponStats },
 };
 
 // ---- reviews (src/modules/reviews) ----
@@ -88,18 +88,18 @@ export const Review = z.object({
 export const ReviewReply = z.object({ reply: required(1000, 'Write a reply first') });
 
 export const reviewRoutes = {
-  'reviews.list': { method: 'GET', path: '/reviews', access: catalog, query: ListQuery.extend({ status: z.enum(['all', 'pending', 'approved', 'hidden']).default('all'), productId: z.coerce.number().int().positive().optional() }), response: page(Review) },
-  'reviews.approve': { method: 'POST', path: '/reviews/:id/approve', access: catalog, params: IdParams, response: Review },
-  'reviews.hide': { method: 'POST', path: '/reviews/:id/hide', access: catalog, params: IdParams, response: Review },
+  'reviews.list': { feature: 'store.reviews', method: 'GET', path: '/reviews', access: catalog, query: ListQuery.extend({ status: z.enum(['all', 'pending', 'approved', 'hidden']).default('all'), productId: z.coerce.number().int().positive().optional() }), response: page(Review) },
+  'reviews.approve': { feature: 'store.reviews', method: 'POST', path: '/reviews/:id/approve', access: catalog, params: IdParams, response: Review },
+  'reviews.hide': { feature: 'store.reviews', method: 'POST', path: '/reviews/:id/hide', access: catalog, params: IdParams, response: Review },
   /** One public reply per review. */
-  'reviews.reply': { method: 'PUT', path: '/reviews/:id/reply', access: catalog, params: IdParams, body: ReviewReply, response: Review },
+  'reviews.reply': { feature: 'store.reviews', method: 'PUT', path: '/reviews/:id/reply', access: catalog, params: IdParams, body: ReviewReply, response: Review },
 };
 
 // ---- wishlist (src/modules/wishlist) ----
 /** How many shoppers saved each product. Never who (S-86). */
 export const SaveCount = z.object({ productId: Id, name: z.string(), saves: Count });
 export const wishlistRoutes = {
-  'wishlist.counts': { method: 'GET', path: '/wishlist/counts', access: analytics, query: ListQuery, response: page(SaveCount) },
+  'wishlist.counts': { feature: 'store.wishlist', method: 'GET', path: '/wishlist/counts', access: analytics, query: ListQuery, response: page(SaveCount) },
 };
 
 // ---- loyalty and referrals (src/modules/loyalty); 403 without the `loyalty` feature (S-91) ----
@@ -132,12 +132,12 @@ export const LoyaltyAdjust = z.object({ points: z.number().int().min(-1000000).m
 export const Referral = z.object({ id: Id, referrerShopperId: Id, status: z.enum(['pending', 'rewarded', 'blocked', 'void']), blockReason: z.string(), orderId: Id.nullable(), createdAt: Timestamp });
 
 export const loyaltyRoutes = {
-  'loyaltySettings.get': { method: 'GET', path: '/loyalty/settings', access: MANAGERS, response: LoyaltySettings },
-  'loyaltySettings.update': { method: 'PATCH', path: '/loyalty/settings', access: MANAGERS, body: LoyaltySettingsUpdate, response: LoyaltySettings },
-  'loyalty.members': { method: 'GET', path: '/loyalty/members', access: customers, query: ListQuery, response: page(LoyaltyMember) },
-  'loyalty.ledger': { method: 'GET', path: '/loyalty/members/:id/ledger', access: customers, params: IdParams, query: ListQuery, response: page(LoyaltyEntry) },
-  'loyalty.adjust': { method: 'POST', path: '/loyalty/members/:id/adjust', access: OWNER_ONLY, params: IdParams, body: LoyaltyAdjust, response: LoyaltyMember },
-  'loyalty.referrals': { method: 'GET', path: '/loyalty/referrals', access: customers, query: ListQuery, response: page(Referral) },
+  'loyaltySettings.get': { feature: 'loyalty', method: 'GET', path: '/loyalty/settings', access: MANAGERS, response: LoyaltySettings },
+  'loyaltySettings.update': { feature: 'loyalty', method: 'PATCH', path: '/loyalty/settings', access: MANAGERS, body: LoyaltySettingsUpdate, response: LoyaltySettings },
+  'loyalty.members': { feature: 'loyalty', method: 'GET', path: '/loyalty/members', access: customers, query: ListQuery, response: page(LoyaltyMember) },
+  'loyalty.ledger': { feature: 'loyalty', method: 'GET', path: '/loyalty/members/:id/ledger', access: customers, params: IdParams, query: ListQuery, response: page(LoyaltyEntry) },
+  'loyalty.adjust': { feature: 'loyalty', method: 'POST', path: '/loyalty/members/:id/adjust', access: OWNER_ONLY, params: IdParams, body: LoyaltyAdjust, response: LoyaltyMember },
+  'loyalty.referrals': { feature: 'loyalty', method: 'GET', path: '/loyalty/referrals', access: customers, query: ListQuery, response: page(Referral) },
 };
 
 // ---- shopper alerts (src/modules/order-alerts): WhatsApp and email only, no SMS (S-96) ----
@@ -223,7 +223,7 @@ export const ShopifyConflict = z.object({ id: Id, kind: z.string(), localId: Id,
 
 export const shopifyRoutes = {
   'shopify.get': { method: 'GET', path: '/shopify', access: MANAGERS, response: ShopifyConnection },
-  'shopify.connect': { method: 'PUT', path: '/shopify', access: OWNER_ONLY, fresh: true, body: ShopifyConnect, response: ShopifyConnection },
+  'shopify.connect': { feature: 'shopify.sync', method: 'PUT', path: '/shopify', access: OWNER_ONLY, fresh: true, body: ShopifyConnect, response: ShopifyConnection },
   'shopify.setMode': { method: 'PATCH', path: '/shopify', access: OWNER_ONLY, body: z.object({ mode: z.enum(['source', 'two_way']).optional(), paused: z.boolean().optional() }), response: ShopifyConnection },
   'shopify.disconnect': { method: 'DELETE', path: '/shopify', access: OWNER_ONLY, fresh: true, status: 204, response: null },
   /** Runs the reconcile now, in the background. */

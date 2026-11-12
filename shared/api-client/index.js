@@ -12,7 +12,7 @@
  */
 export class ApiError extends Error {
   /** `status` is 0 when the server could not be reached; `code` is from the API's error format. */
-  constructor({ status, code, message, fields, reason, requestId, storeUrl }) {
+  constructor({ status, code, message, fields, reason, requestId, storeUrl, feature, plan, limit, used }) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -22,6 +22,11 @@ export class ApiError extends Error {
     this.requestId = requestId;
     /** With code `update_required` (426): where to get the newer app. */
     this.storeUrl = storeUrl;
+    /** With code `plan.feature_off` or `plan.limit_reached` (403): the feature, the lowest plan that has it (or has more), and for a limit where it stands. */
+    this.feature = feature;
+    this.plan = plan;
+    this.limit = limit;
+    this.used = used;
   }
 }
 
@@ -47,6 +52,10 @@ async function toError(response) {
     reason: body?.reason,
     requestId: body?.requestId,
     storeUrl: body?.storeUrl,
+    feature: body?.feature,
+    plan: body?.plan,
+    limit: body?.limit,
+    used: body?.used,
   });
 }
 
@@ -778,6 +787,41 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, getTenantId, ap
       get: () => get('/push-credentials'),
       /** Needs a fresh session. @param body { fcm?: { serviceAccount } | null, apns?: { keyId, teamId, key, env } | null } */
       save: (body) => put('/push-credentials', body),
+    },
+    // The plan, billing and usage (3, 5.7, 5.12). Owner only, except features. No call takes an amount or card details.
+    billing: {
+      plan: () => get('/billing'),
+      catalog: () => get('/billing/catalog'),
+      /** Needs a fresh session. @param body { plan, cycle?, requestKey } @returns { plan, effective, checkoutUrl } */
+      change: (body) => post('/billing/change', body),
+      /** Needs a fresh session. @param body { code, quantity?, requestKey } */
+      addItem: (body) => post('/billing/items', body),
+      /** Needs a fresh session. */
+      removeItem: (itemId) => del(`/billing/items/${id(itemId)}`),
+      usage: () => get('/billing/usage'),
+      invoices: (query) => get('/billing/invoices', query),
+      invoiceFile: (itemId) => get(`/billing/invoices/${id(itemId)}/file`),
+      statements: (query) => get('/billing/statements', query),
+      /** @param query { format?: 'pdf' | 'csv' } */
+      statementFile: (itemId, query) => get(`/billing/statements/${id(itemId)}/file`, query),
+      /** Needs a fresh session. @returns { url }: the provider's own page. */
+      paymentMethod: () => post('/billing/payment-method'),
+      /** What this business has, to hide what it has not: { plan, features: { name: { on, limit } } }. Any signed-in seller. */
+      features: () => get('/billing/features'),
+    },
+    referrals: {
+      get: () => get('/referrals'),
+    },
+    // Self-serve sign-up (5.20), on the host that belongs to no business, after signing in there.
+    signup: {
+      /** @param query { runToken?, inviteCode?, ref? } */
+      status: (query) => get('/signup', query),
+      /** @param body { accountType: 'creator' | 'seller', name, inviteCode?, referralCode?, runToken? } */
+      start: (body) => post('/signup', body),
+      /** @param body { runToken, mediaId, keyword, link } */
+      firstAutomation: (body) => post('/signup/first-automation', body),
+      /** @param body { runToken } */
+      finish: (body) => post('/signup/finish', body),
     },
   };
 }

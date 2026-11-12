@@ -45,5 +45,9 @@ export const ErrorBody = z.object({
   fields: z.record(z.string(), z.string()).optional(),
   reason: z.string().optional(),
   storeUrl: z.string().optional(),
+  feature: z.string().optional(),
+  plan: z.string().optional(),
+  limit: z.number().int().optional(),
+  used: z.number().int().optional(),
   requestId: z.string().optional(),
 });

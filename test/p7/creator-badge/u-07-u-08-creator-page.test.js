@@ -1,10 +1,9 @@
-// PRD 2 and 8.14: the Free creator page and its made-with mark. Moved unchanged from test/p0/spec-p0/white-label.test.js,
-// because the creator page is built in Phase 7, which this run does not build. See requirements/later.json.
-// The name ends in .later.js so no runner picks it up. To bring it back, rename it to *.test.js under the phase that builds the page.
+// PRD 2, 3 and 8.14: the Free creator page and its made-with mark (U-07, U-08). Moved from test/later, where it waited for
+// Phase 7; the test for the clean DM stays in test/p0/spec-p0/white-label.test.js.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addBusiness, addReel, assertBuyerPageClean, hit, need, noPlatformName, setPlan, startWorld } from '../p0/spec-p0/support.js';
-import { buyerPaths } from '../p0/spec-p0/surfaces.js';
+import { addBusiness, addReel, assertBuyerPageClean, hit, need, noPlatformName, setPlan, signIn, startWorld } from '../../p0/spec-p0/support.js';
+import { buyerPaths } from '../../p0/spec-p0/surfaces.js';
 
 const REEL = '17900000000000030';
 
@@ -12,6 +11,9 @@ async function creator(t) {
   const app = await startWorld(t);
   const priya = await addBusiness(app, { slug: 'priya', name: 'Priya Styles', plan: 'free' });
   await addReel(priya, REEL);
+  // The creator page is the business's own to switch on (8.14): the owner names it and turns it on, as in the console.
+  const token = await signIn(app, priya);
+  need(await hit(app, '/api/v1/creator-page', { host: priya.host, method: 'PATCH', token, body: { slug: 'priya', enabled: true } }), 200, 'Turning the creator page on');
   return { app, priya, page: () => hit(app, buyerPaths.creatorPage('priya'), { host: priya.host }) };
 }
 

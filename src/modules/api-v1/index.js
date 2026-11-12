@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { APPS, APP_HEADERS, APP_PLATFORMS, isBelowMinimum } from '../../contracts/accounts.js';
-import { ApiError, IdText, isAllowed, routeList } from '../../contracts/api/index.js';
+import { ApiError, IdText, isAllowed, planRefusalReason, routeList } from '../../contracts/api/index.js';
 import { log } from '../../platform/log.js';
 import { currentTenant, tenantId, withTenant } from '../../tenancy.js';
 
@@ -17,6 +17,48 @@ function collectHandlers(ctx) {
     }
   }
   return handlers;
+}
+
+/** What every module's counters() says it counts, by name: how many of a limited thing a business has in use. */
+function collectCounters(ctx) {
+  const counters = new Map();
+  for (const module of ctx.modules) {
+    for (const [name, count] of Object.entries(module.counters?.(ctx) ?? {})) {
+      if (counters.has(name)) throw new Error(`Two modules both count "${name}"`);
+      counters.set(name, count);
+    }
+  }
+  return counters;
+}
+
+/**
+ * The plan (PRD 5.7), from the route table: `feature` must be on for this business, and `limit` must have room. Read on
+ * every call, so an upgrade or a downgrade applies to the next request with no restart (F-33). A limit whose counter no
+ * loaded module supplies is left to the handler.
+ */
+async function checkPlan(route, { repos }, counters, call) {
+  const entitlements = repos.entitlements;
+  if (!entitlements) throw new Error(`Route "${route.id}" needs the entitlements module to check its plan`);
+  if (route.feature) {
+    const names = [route.feature].flat();
+    let on = false;
+    for (const name of names) on ||= await entitlements.can(name);
+    if (!on) {
+      const plan = await entitlements.lowestPlan(names);
+      throw new ApiError('plan.feature_off', plan ? `This needs the ${plan.name} plan or higher.` : 'This is an add-on that isn’t on your plan.', { reason: planRefusalReason(route.id), feature: names[0], plan: plan?.code });
+    }
+  }
+  if (route.limit) {
+    const count = counters.get(route.limit.counts);
+    const max = count ? await entitlements.limit(route.limit.feature) : Infinity;
+    if (max !== Infinity) {
+      const used = Number(await count(call)) || 0;
+      if (used >= max) {
+        const plan = await entitlements.lowestPlan([route.limit.feature], { moreThan: max });
+        throw new ApiError('plan.limit_reached', plan ? `You have reached your plan’s limit of ${max}. The ${plan.name} plan has more.` : `You have reached your plan’s limit of ${max}.`, { reason: planRefusalReason(route.id), feature: route.limit.feature, plan: plan?.code, limit: max, used });
+      }
+    }
+  }
 }
 
 function fieldErrors(issues) {
@@ -58,7 +100,7 @@ function logRefusal(err, route, req) {
   log.warn(`api.${err.code}`, { route: route.id, userId: req.user?.id ?? null, role: req.user?.role ?? null, target });
 }
 
-function serve(route, handler) {
+function serve(route, handler, ctx, counters) {
   const receiveFile = route.upload && uploader(route.upload);
 
   async function run(req, res) {
@@ -67,6 +109,8 @@ function serve(route, handler) {
     if (!isAllowed(req.user ?? null, route.access)) throw new ApiError(req.user ? 'forbidden' : 'unauthorized', req.user ? route.access.denied : undefined);
     // Keys, credentials, roles and account deletion need a re-auth in the last few minutes (PRD 5.11): the app re-auths and repeats the call.
     if (route.fresh && !req.session?.fresh) throw new ApiError('reauth_required');
+    // The plan comes after who is asking and before what they sent: nobody learns a plan from a route they may not call.
+    if (route.feature || route.limit) await checkPlan(route, ctx, counters, { params: req.params, body: req.body ?? {}, user: req.user ?? null });
     if (route.body && !req.is('application/json')) throw new ApiError('unsupported_media_type', 'Send this as JSON.');
 
     const params = route.params ? pathParams(route.params, req.params) : {};
@@ -148,6 +192,7 @@ const routers = new WeakMap();
 export function apiRouterFor(ctx) {
   if (routers.has(ctx)) return routers.get(ctx);
   const handlers = collectHandlers(ctx);
+  const counters = collectCounters(ctx);
   const r = express.Router();
   r.use((_req, res, next) => {
     res.set('Cache-Control', 'no-store');
@@ -155,7 +200,7 @@ export function apiRouterFor(ctx) {
   });
   r.use(appVersionGate(ctx));
   r.use(switchBusiness(ctx));
-  for (const route of routeList) r[route.method.toLowerCase()](route.path, serve(route, handlers.get(route.id)));
+  for (const route of routeList) r[route.method.toLowerCase()](route.path, serve(route, handlers.get(route.id), ctx, counters));
   r.use((_req, _res, next) => next(new ApiError('not_found')));
   routers.set(ctx, r);
   return r;

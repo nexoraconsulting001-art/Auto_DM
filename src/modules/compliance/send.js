@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import os from 'node:os';
+import { DM_LIMIT_REASON, METERED_SEND_KINDS, UNMETERED_HOLD_PURPOSES, dmUsageKey } from '../../contracts/billing.js';
 import { COMPLIANCE_LIMITS, ComplianceAction } from '../../contracts/compliance.js';
 import { log as logger, reportError } from '../../platform/log.js';
 import { tenantId, withTenant } from '../../tenancy.js';
@@ -108,6 +109,50 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
   const budgets = createBudgets({ db, now, random, limits });
   const breaker = createBreaker({ db, repos, now, gate });
   const consumers = [];
+  // Metering (PRD 5.12). The usage module registers both; until it does the quota is unlimited and nobody is told.
+  let quota = null;
+  const acceptedListeners = [];
+
+  /**
+   * Whether this business has DMs left this month, asked of the usage module at the moment of sending. Only an automated
+   * private reply or DM is ever held for it: never a public reply, the owner's own reply, the confirmation of an opt-out or
+   * a test send. A provider that fails is reported and read as "yes": a fault in metering must not stop a seller's messages.
+   */
+  async function dmQuotaLeft(action, { isTest = false } = {}) {
+    if (!quota || isTest || action.isTest || !METERED_SEND_KINDS.includes(action.kind) || UNMETERED_HOLD_PURPOSES.includes(action.purpose)) return true;
+    try {
+      return (await quota.hasDmsLeft({ channel: action.channel ?? null, kind: action.kind, purpose: action.purpose, automationId: action.automationId ?? null })) !== false;
+    } catch (err) {
+      reportError(err, { msg: 'compliance.quota_failed' });
+      return true;
+    }
+  }
+
+  /** Tells the usage module that Meta accepted a send: ids only, once per job, never for a test send or a public reply. */
+  async function tellAccepted(job, action, at) {
+    if (job.is_test || action.isTest || action.purpose === 'test' || !METERED_SEND_KINDS.includes(job.kind ?? action.kind)) return;
+    const event = Object.freeze({
+      tenantId: tenantId(), jobId: Number(job.id), key: dmUsageKey(job.id), channel: action.channel, kind: job.kind ?? action.kind, purpose: action.purpose,
+      automated: action.purpose !== 'manual', automationId: action.automationId ?? null, at,
+    });
+    for (const listener of acceptedListeners) {
+      try {
+        await listener(event);
+      } catch (err) {
+        reportError(err, { msg: 'compliance.accepted_listener_failed', job: event.jobId });
+      }
+    }
+  }
+
+  /** Puts this business's jobs held for the DM limit back in the queue, while unexpired. Returns how many. */
+  async function requeueDmLimit() {
+    const rows = await db.query(
+      `UPDATE outbound_jobs SET status = 'queued', reason = '', lease_until = NULL, updated_at = $2::timestamptz
+       WHERE tenant_id = $1 AND status = 'held' AND reason = $3 AND expires_at > $2::timestamptz RETURNING id`,
+      [tenantId(), now(), DM_LIMIT_REASON],
+    );
+    return rows.length;
+  }
 
   const subjectOf = async (action) => {
     const person = action.personId ?? action.recipientId;
@@ -398,13 +443,16 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     const update = `UPDATE outbound_jobs SET status = $3, reason = $4, http_status = $5, meta_code = $6, meta_subcode = $7, message_id = COALESCE($8, message_id),
          sent_at = $9::timestamptz, run_at = COALESCE($10::timestamptz, run_at), lease_until = NULL, locked_by = NULL, updated_at = $11::timestamptz
        WHERE tenant_id = $1 AND id = $2 AND status IN ('queued', 'held', 'sending', 'unknown') RETURNING id`;
+    let moved;
     try {
-      await db.query(update, params);
+      moved = await db.query(update, params);
     } catch (err) {
       if (!/outbound_jobs_message_idx|duplicate key/i.test(String(err?.message))) throw err;
       params[7] = null; // Meta gave a message id it has given before: the row still has to say what happened.
-      await db.query(update, params);
+      moved = await db.query(update, params);
     }
+    // Only the settle that really moved the row to delivered counts the DM, so a job is counted once (PRD 5.12).
+    if (delivery && moved?.length) await tellAccepted(job, action, at);
 
     if (NOT_DELIVERED.has(outcome)) await db.query('DELETE FROM cap_claims WHERE tenant_id = $1 AND job_id = $2', [tenantId(), job.id]).catch(swallow('compliance.claim_release_failed'));
     const changed = job.status === 'sending' || job.reason !== result.reason || (outcome !== 'queued' && outcome !== 'held');
@@ -551,6 +599,8 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
       if (verdict.outcome === 'queued') return refuse(action, subject, 'held', verdict.reason || 'rate.throttled');
       return refuse(action, subject, verdict.outcome, verdict.reason);
     }
+    // A send asked for now has no job to hold, so like a throttled one it is refused as held and the caller decides (enqueue to wait).
+    if (!state.dryRun && !(await dmQuotaLeft(action))) return refuse(action, subject, 'held', DM_LIMIT_REASON);
     const budget = budgetFor(action.kind);
     if (budget && !state.dryRun && !(await budgets.take(action.channel, action.accountId, budget, budgetMultiplier(state, +at, limits)))) {
       return refuse(action, subject, 'held', 'rate.throttled');
@@ -634,6 +684,12 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     if (state.dryRun) {
       if (probe) await breaker.probeUnused(action.channel);
       await settle(job, action, { ...blank, outcome: 'would_send', reason: '', jobId: Number(job.id) });
+      return { sent: false };
+    }
+    // The month's DMs are used up (PRD 5.12): held, not dropped. It goes when a pack is added, the plan is upgraded or the month resets.
+    if (!(await dmQuotaLeft(action, { isTest: job.is_test }))) {
+      if (probe) await breaker.probeUnused(action.channel);
+      await settle(job, action, { ...blank, outcome: 'held', reason: DM_LIMIT_REASON, jobId: Number(job.id) });
       return { sent: false };
     }
     const budget = budgetFor(action.kind);
@@ -754,6 +810,7 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
       [business],
     );
     if (!flags.global_kill) await db.query(`UPDATE outbound_jobs SET ${queuedAgain} WHERE tenant_id = $1 AND status = 'held' AND reason = 'paused.global'`, [business, at]);
+    if (await dmQuotaLeft({ kind: 'dm', purpose: 'release' })) await requeueDmLimit();
     if (!flags.paused && !['paused', 'suspended', 'closed', 'killed'].includes(flags.status)) await db.query(`UPDATE outbound_jobs SET ${queuedAgain} WHERE tenant_id = $1 AND status = 'held' AND reason = 'paused.tenant'`, [business, at]);
 
     await db.query(
@@ -1042,6 +1099,34 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     release,
     expire,
     maintain,
+
+    /**
+     * Metering (PRD 5.12), registered by the usage module in setup(ctx), in the app and in the worker.
+     *
+     *   useQuota({ hasDmsLeft })   hasDmsLeft({ channel, kind, purpose, automationId }) -> boolean, asked inside the business just
+     *                              before an automated private reply or DM would go. False holds the job with held.dm_limit.
+     *                              One provider; registering again replaces it; null removes it (unlimited).
+     *   onAccepted(fn)             fn({ tenantId, jobId, key, channel, kind, purpose, automated, automationId, at }) once for each
+     *                              private reply or DM that Meta accepted, inside the business. Ids only. Never for a test send, a
+     *                              dry run or a public reply. `key` is the usage event's idempotency key.
+     *   releaseDmLimit()           inside a business, after a pack is added, the plan is upgraded or the month resets: its held
+     *                              jobs go back in the queue (unexpired ones; the rest expire as usual) and the worker is woken.
+     *                              release(), every minute, does the same for every business the provider says has DMs again.
+     */
+    useQuota(provider) {
+      if (provider !== null && typeof provider?.hasDmsLeft !== 'function') throw new Error('useQuota needs { hasDmsLeft }');
+      quota = provider;
+    },
+    onAccepted(fn) {
+      if (typeof fn !== 'function') throw new Error('onAccepted needs a function');
+      if (!acceptedListeners.includes(fn)) acceptedListeners.push(fn);
+    },
+    async releaseDmLimit() {
+      tenantId();
+      const released = await requeueDmLimit();
+      if (released) await poke();
+      return released;
+    },
 
     /** A module that acts on inbound events registers here: fn(event). Truthy means "this was mine". See inbound.js for the event. */
     onInbound: (fn) => {

@@ -44,6 +44,6 @@ export const SlugCheck = z.object({ slug: z.string(), available: z.boolean(), me
 
 export const creatorRoutes = {
   'creator.get': { method: 'GET', path: '/creator-page', access: MANAGERS, response: CreatorPage },
-  'creator.update': { method: 'PATCH', path: '/creator-page', access: MANAGERS, body: CreatorPageUpdate, response: CreatorPage },
+  'creator.update': { feature: 'creator_page', method: 'PATCH', path: '/creator-page', access: MANAGERS, body: CreatorPageUpdate, response: CreatorPage },
   'creator.checkSlug': { method: 'GET', path: '/creator-page/slug', access: MANAGERS, query: SlugCheckQuery, response: SlugCheck },
 };

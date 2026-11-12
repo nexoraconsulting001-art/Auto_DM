@@ -5,6 +5,7 @@ import { appPublishingRoutes } from './apps.js';
 import { auditRoutes } from './audit.js';
 import { authRoutes } from './auth.js';
 import { automationRoutes } from './automations.js';
+import { billingRoutes, referralRoutes, signupRoutes } from './billing.js';
 import { brandKitRoutes } from './brand-kit.js';
 import { categoryRoutes } from './categories.js';
 import { complianceRoutes } from './compliance.js';
@@ -61,12 +62,23 @@ import { trafficRoutes } from './traffic.js';
  *   noBusiness   answered with no current business, before anyone is signed in: the sign-in routes and the app's
  *                requirements, on PLATFORM_APP_HOST. The handler works through db.platform and must be PUBLIC
  *
+ * Two optional fields tie a route to the plan (Phase 7, PRD 5.7). The router checks them after access and before the handler:
+ *
+ *   feature      an entitlement name (plan_features, tenant_features): without it the answer is 403 `plan.feature_off` with the
+ *                lowest plan that includes it. A list means any one of them is enough (the two app platforms)
+ *   limit        { feature, counts }: `feature` is a limit (repos.entitlements.limit) and `counts` names the counter that says how
+ *                many are in use (a module's counters(ctx)). At the limit the answer is 403 `plan.limit_reached`
+ *
+ * Every route names a feature or a limit, or is listed in plan.js as always on, checked in its handler, or not enforced yet;
+ * a test keeps that true, so a new route cannot forget. The console and the owner app read ROUTE_FEATURES to hide screens.
+ *
  * There is no web-only flag and there never will be: a route the app cannot reach is a bug in the app. A route with
  * any field not listed here does not load (assertRouteFields), so one cannot be added by accident.
  *
  * Lists take ListQuery and answer with page(item). Failures use the format in errors.js.
  */
-export const ROUTE_FIELDS = Object.freeze(['method', 'path', 'access', 'params', 'query', 'body', 'upload', 'status', 'response', 'fresh', 'consoleOnly', 'noBusiness']);
+export const ROUTE_FIELDS = Object.freeze(['method', 'path', 'access', 'params', 'query', 'body', 'upload', 'status', 'response', 'fresh', 'consoleOnly', 'noBusiness', 'feature', 'limit']);
+const FEATURE_NAME = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/;
 const ROUTE_FLAGS = Object.freeze(['fresh', 'consoleOnly', 'noBusiness']);
 
 /** Throws for a route that carries a field the format does not have (a web-only flag, a typo), or a flag used wrongly. */
@@ -79,6 +91,15 @@ export function assertRouteFields(id, route) {
   }
   if (route.noBusiness && !route.access?.public) throw new Error(`Route "${id}" is answered with no business, so it must be PUBLIC`);
   if (route.fresh && route.access?.public) throw new Error(`Route "${id}" is PUBLIC, so there is no session to be fresh`);
+  if ('feature' in route) {
+    const names = Array.isArray(route.feature) ? route.feature : [route.feature];
+    if (!names.length || !names.every((name) => typeof name === 'string' && FEATURE_NAME.test(name))) throw new Error(`Route "${id}": feature is an entitlement name, or a list of them`);
+  }
+  if ('limit' in route) {
+    const { feature, counts, ...rest } = route.limit ?? {};
+    if (typeof feature !== 'string' || !FEATURE_NAME.test(feature) || typeof counts !== 'string' || !FEATURE_NAME.test(counts) || Object.keys(rest).length) throw new Error(`Route "${id}": limit is { feature, counts }`);
+  }
+  if ((route.feature || route.limit) && route.noBusiness) throw new Error(`Route "${id}" is answered with no business, so it has no plan to check`);
   return route;
 }
 
@@ -136,6 +157,10 @@ export const routes = Object.freeze({
   ...pushRoutes,
   // Phase 6: the branded shopper app (apps.js)
   ...appPublishingRoutes,
+  // Phase 7: the plan, billing, usage, referrals and sign-up (billing.js)
+  ...billingRoutes,
+  ...referralRoutes,
+  ...signupRoutes,
 });
 
 export const routeList = Object.freeze(Object.entries(routes).map(([id, route]) => Object.freeze({ id, ...assertRouteFields(id, route) })));
@@ -144,6 +169,9 @@ export const routeList = Object.freeze(Object.entries(routes).map(([id, route]) 
 export const CONSOLE_ONLY_ROUTES = Object.freeze(routeList.filter((route) => route.consoleOnly).map((route) => route.id));
 /** Routes that need a re-auth in the last FRESH_MINUTES. */
 export const FRESH_ROUTES = Object.freeze(routeList.filter((route) => route.fresh).map((route) => route.id));
+/** The feature (or features, any one of which is enough) each gated route needs, and the limit each limited route counts against. */
+export const ROUTE_FEATURES = Object.freeze(Object.fromEntries(routeList.filter((route) => route.feature).map((route) => [route.id, Object.freeze([route.feature].flat())])));
+export const ROUTE_LIMITS = Object.freeze(Object.fromEntries(routeList.filter((route) => route.limit).map((route) => [route.id, Object.freeze({ ...route.limit })])));
 
 export * from './access.js';
 export * from './activity.js';
@@ -153,6 +181,7 @@ export * from './apps.js';
 export * from './audit.js';
 export * from './auth.js';
 export * from './automations.js';
+export * from './billing.js';
 export * from './brand-kit.js';
 export * from './categories.js';
 export * from './common.js';
@@ -174,6 +203,7 @@ export * from './notifications.js';
 export * from './orders.js';
 export * from './pages.js';
 export * from './payments.js';
+export * from './plan.js';
 export * from './platform.js';
 export * from './provider.js';
 export * from './products.js';

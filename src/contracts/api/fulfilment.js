@@ -77,10 +77,10 @@ export const Serviceability = z.object({ pincode: z.string(), serviceable: z.boo
 
 export const shippingRoutes = {
   'shippingSettings.get': { method: 'GET', path: '/shipping-settings', access: MANAGERS, response: ShippingSettings },
-  'shippingSettings.update': { method: 'PATCH', path: '/shipping-settings', access: MANAGERS, fresh: true, body: ShippingSettingsUpdate, response: ShippingSettings },
+  'shippingSettings.update': { feature: 'store.shipping', method: 'PATCH', path: '/shipping-settings', access: MANAGERS, fresh: true, body: ShippingSettingsUpdate, response: ShippingSettings },
   'shipping.serviceability': { method: 'GET', path: '/shipping/serviceability', access: orders, query: z.object({ pincode: Pincode }), response: Serviceability },
   'shipments.forOrder': { method: 'GET', path: '/orders/:id/shipments', access: orders, params: IdParams, response: z.object({ items: z.array(Shipment) }) },
-  'shipments.create': { method: 'POST', path: '/orders/:id/shipments', access: orders, params: IdParams, body: ShipmentCreate, status: 201, response: Shipment },
+  'shipments.create': { feature: 'store.shipping', method: 'POST', path: '/orders/:id/shipments', access: orders, params: IdParams, body: ShipmentCreate, status: 201, response: Shipment },
   'shipments.get': { method: 'GET', path: '/shipments/:id', access: orders, params: IdParams, response: Shipment },
   'shipments.cancel': { method: 'POST', path: '/shipments/:id/cancel', access: orders, params: IdParams, response: Shipment },
   'shipments.label': { method: 'GET', path: '/shipments/:id/label', access: orders, params: IdParams, response: ShipmentFile },

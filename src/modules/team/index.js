@@ -64,6 +64,17 @@ const invitation = (row) => ({
  */
 export const team = {
   name: 'team',
+  /** Seats in use, for team.invite's limit (staff.seats): managers and staff still in the team, and invitations still open. */
+  counters: (ctx) => ({
+    'team.seats': async () => {
+      const [row] = await ctx.db.query(
+        `SELECT (SELECT count(*) FROM users WHERE tenant_id = $1 AND role IN ('manager', 'staff') AND removed_at IS NULL)
+              + (SELECT count(*) FROM team_invites WHERE tenant_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()) AS used`,
+        [tenantId()],
+      );
+      return Number(row.used);
+    },
+  }),
   api(ctx) {
     const secret = () => ctx.config.sessionSecret;
     const platform = () => ctx.db.platform ?? ctx.db;
