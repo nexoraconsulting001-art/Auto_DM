@@ -133,12 +133,12 @@ test('a simulator app folder is scanned the same way', () => {
 });
 
 test('P-36: a log with a private key, keystore content or the password is refused; a plain build log is not', () => {
-  const secret = 'correct-horse-battery-0123456789abcdef';
+  const secret = 'correct-horse-battery-0123456789abcdef'; // secret-scan:allow
   const keystore = `MIIK${'A1b2C3d4/+'.repeat(40)}`;
   const log = [
     '> Task :app:assembleRelease',
     'signing with the keystore',
-    '-----BEGIN PRIVATE KEY-----',
+    '-----BEGIN PRIVATE KEY-----', // secret-scan:allow
     `data ${keystore}`,
     `storePassword=${secret}`,
     'BUILD SUCCESSFUL',
@@ -171,7 +171,7 @@ test('the tool run as the jobs run it: exit codes, and never the matched text or
     assert.match(failed.stderr, /another brand is in assets\/x\.bundle/);
     assert.ok(!(failed.stdout + failed.stderr).includes(other.name), 'the matched text is not printed');
 
-    const secret = 'sup3r-secret-keystore-pass-99';
+    const secret = 'sup3r-secret-keystore-pass-99'; // secret-scan:allow
     const logFile = path.join(dir, 'build.log');
     fs.writeFileSync(logFile, `line\nthe password is ${secret}\n`);
     const leaked = run(['log', logFile, '--secret', 'KEYSTORE_PASS_FOR_TEST'], { KEYSTORE_PASS_FOR_TEST: secret });

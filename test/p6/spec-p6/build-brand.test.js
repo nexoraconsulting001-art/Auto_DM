@@ -25,7 +25,7 @@ const require = createRequire(import.meta.url);
 const BRANDS = fs.readdirSync(FIXTURES).filter((n) => fs.existsSync(path.join(FIXTURES, n, 'brand.json'))).sort();
 const brandOf = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURES, name, 'brand.json'), 'utf8'));
 const TOKEN = 'expo-build-spec-token';
-const SECRET = 'S3cretKeystorePw-9f2b7c1d';
+const SECRET = 'S3cretKeystorePw-9f2b7c1d'; // secret-scan:allow
 
 let eas;
 before(async () => { eas = await createEas({ token: TOKEN }).start(); });

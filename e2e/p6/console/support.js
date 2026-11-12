@@ -9,7 +9,7 @@ import { json } from '../../p5/console/support.js';
 
 export const AT = '2026-11-12T10:00:00.000Z';
 const PLATFORM = { entitled: true, minVersion: '', storeUrl: '', locked: false };
-export const PEM = `-----BEGIN PRIVATE KEY-----\n${'MIGTAgEAMBMGByqGSM49AgEG'.repeat(6)}\n-----END PRIVATE KEY-----`;
+export const PEM = `-----BEGIN PRIVATE KEY-----\n${'MIGTAgEAMBMGByqGSM49AgEG'.repeat(6)}\n-----END PRIVATE KEY-----`; // secret-scan:allow
 export const FINGERPRINT = Array.from({ length: 32 }, (_, i) => ((i * 7 + 16) % 256).toString(16).toUpperCase().padStart(2, '0')).join(':');
 
 export const CONFIG = {

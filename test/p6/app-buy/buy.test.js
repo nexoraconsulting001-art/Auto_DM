@@ -12,7 +12,7 @@ const PHONE = '9876543210';
 const count = async (w, table) => (await q(w.app, `SELECT count(*)::int AS n FROM ${table} WHERE tenant_id = $1`, [w.app.tenant.id]))[0].n;
 
 /** A phone's notification module that answers as set. */
-function phoneNotifications({ granted = true, token = 'fcm-token-0123456789abcdef' } = {}) {
+function phoneNotifications({ granted = true, token = 'fcm-token-0123456789abcdef' } = {}) { // secret-scan:allow
   const asked = [];
   return {
     asked,

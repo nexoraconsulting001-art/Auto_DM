@@ -17,7 +17,7 @@ const CONSOLE_DIR = 'console/src/features/app-publishing';
 const OWNER_DIR = 'apps/owner/src/features/app-publishing';
 
 const FINGERPRINT = Array.from({ length: 32 }, (_, i) => ((i * 7 + 16) % 256).toString(16).toUpperCase().padStart(2, '0')).join(':');
-const PEM = `-----BEGIN PRIVATE KEY-----\n${'MIGTAgEAMBMGByqGSM49AgEG'.repeat(6)}\n-----END PRIVATE KEY-----`;
+const PEM = `-----BEGIN PRIVATE KEY-----\n${'MIGTAgEAMBMGByqGSM49AgEG'.repeat(6)}\n-----END PRIVATE KEY-----`; // secret-scan:allow
 
 test('the console and the owner app carry the same rules file', () => {
   assert.equal(read(`${OWNER_DIR}/rules.js`), read(`${CONSOLE_DIR}/rules.js`));
@@ -185,9 +185,9 @@ test('P-60: pasted push credentials are checked without being shown back, and pa
 });
 
 test('a .p8 key pasted on one line gets its line breaks back', () => {
-  const flat = `-----BEGIN PRIVATE KEY-----${'A'.repeat(150)}-----END PRIVATE KEY-----`;
+  const flat = `-----BEGIN PRIVATE KEY-----${'A'.repeat(150)}-----END PRIVATE KEY-----`; // secret-scan:allow
   const lines = rules.normalisePem(flat).split('\n');
-  assert.equal(lines[0], '-----BEGIN PRIVATE KEY-----');
+  assert.equal(lines[0], '-----BEGIN PRIVATE KEY-----'); // secret-scan:allow
   assert.equal(lines.at(-1), '-----END PRIVATE KEY-----');
   assert.ok(lines.slice(1, -1).every((l) => l.length <= 64));
   assert.equal(rules.normalisePem(rules.normalisePem(flat)), rules.normalisePem(flat), 'normalising twice changes nothing');

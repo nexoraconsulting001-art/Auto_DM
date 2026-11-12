@@ -27,8 +27,8 @@ const CONFIG = {
   privacyUrl: 'https://kesar.in/privacy', appleTeamId: '', playAccountId: '', playSigningSha256: [], android: PLATFORM, ios: { ...PLATFORM, entitled: false }, validation: null,
 };
 const BOTH = { ...CONFIG, ios: PLATFORM };
-const PEM = `-----BEGIN PRIVATE KEY-----\n${'MIGTAgEAMBMGByqGSM49AgEG'.repeat(6)}\n-----END PRIVATE KEY-----`;
-const SECRET = 'MIGTAgEAMBMGByqGSM49AgEG';
+const PEM = `-----BEGIN PRIVATE KEY-----\n${'MIGTAgEAMBMGByqGSM49AgEG'.repeat(6)}\n-----END PRIVATE KEY-----`; // secret-scan:allow
+const SECRET = 'MIGTAgEAMBMGByqGSM49AgEG'; // secret-scan:allow
 
 const access = (platform, over = {}) => ({
   platform, accountType: 'unknown', legalName: '', dunsStatus: 'unknown', dunsLookupUrl: 'https://www.dnb.com/duns-number.html',

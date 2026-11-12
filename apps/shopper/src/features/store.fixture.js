@@ -18,7 +18,7 @@ export const brands = fs.readdirSync(FIXTURES).filter((name) => fs.existsSync(pa
 export const brandOf = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURES, name, 'brand.json'), 'utf8'));
 export const ORIGIN = 'http://localhost:4010';
 export const PRICE = 129900;
-export const TOKEN = 'tok_ABCDEFGH12345678';
+export const TOKEN = 'tok_ABCDEFGH12345678'; // secret-scan:allow
 
 function constantsFor(name) {
   const brand = brandOf(name);

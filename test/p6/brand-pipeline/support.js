@@ -10,7 +10,7 @@ import { OWNER, TEST_SIGNING_SHA256, enableApp, startApp } from '../../helpers.j
 // the EAS simulator, and businesses with app details on their own verified domain. The default business of startApp has a
 // fallback host under the test platform domain, so each business here gets a domain of its own.
 
-export const EXPO_TOKEN = 'expo-pipeline-test-token-7c1d';
+export const EXPO_TOKEN = 'expo-pipeline-test-token-7c1d'; // secret-scan:allow
 export const PLATFORM_HOST = 'admin.bhava.test';
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export const key = () => `rk-${crypto.randomBytes(9).toString('hex')}`;
@@ -51,8 +51,8 @@ export async function startWorld({ overrides = {} } = {}) {
     /** The Platform Console, signed in as a super admin. */
     async console(method, path, body) {
       if (!consoleSession) {
-        await app.platform.platformUsers.create({ email: 'ops@team.example', password: 'platform-pass-123', role: 'super_admin' });
-        const res = await fetch(`${app.base}/login`, { method: 'POST', headers: { 'x-forwarded-host': PLATFORM_HOST, 'content-type': 'application/json' }, body: JSON.stringify({ email: 'ops@team.example', password: 'platform-pass-123' }) });
+        await app.platform.platformUsers.create({ email: 'ops@team.example', password: 'platform-pass-123', role: 'super_admin' }); // secret-scan:allow
+        const res = await fetch(`${app.base}/login`, { method: 'POST', headers: { 'x-forwarded-host': PLATFORM_HOST, 'content-type': 'application/json' }, body: JSON.stringify({ email: 'ops@team.example', password: 'platform-pass-123' }) }); // secret-scan:allow
         consoleSession = { cookie: res.headers.get('set-cookie').split(';')[0], csrf: (await res.json()).csrf };
       }
       return call(method, path, body, { 'x-forwarded-host': PLATFORM_HOST, cookie: consoleSession.cookie, 'x-csrf-token': consoleSession.csrf });

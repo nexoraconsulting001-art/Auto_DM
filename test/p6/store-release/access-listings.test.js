@@ -93,7 +93,7 @@ test('a store key is stored sealed, answered as its last four characters, and op
 test('only a real .p8 key is taken: not text, not an RSA key, not on Android, and never a password or a sign-in name', async () => {
   const { shop } = await iosShop();
   const rsa = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' });
-  for (const privateKey of ['not a key', rsa, '-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----']) {
+  for (const privateKey of ['not a key', rsa, '-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----']) { // secret-scan:allow
     const res = await shop.send('PUT', '/store-access/ios', { ascKey: { keyId: 'ABCDE12345', issuerId: crypto.randomUUID(), privateKey } });
     refusedStatus(res, 'A key that is not a .p8 key', [400]);
     assert.match(res.text, /App Store Connect key/);
