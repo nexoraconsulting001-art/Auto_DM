@@ -1,14 +1,101 @@
 import CheckoutScreen from './CheckoutScreen.js';
+import { createAttempt } from './placing.js';
 
 /**
- * Guest checkout by default: address, way of paying, codes; cash on delivery asks for a WhatsApp code (P-28).
- * Not built yet: one placeholder screen. Whoever builds this replaces the screens below; the format is in ../index.js.
+ * Guest checkout by default: address, way of paying, codes; cash on delivery asks for a WhatsApp code (P-28). Its service
+ * holds the order attempt (`services.checkout.attempt`): one idempotency key per attempt, so a double tap makes one order.
  */
+function newKey() {
+  const Crypto = require('expo-crypto');
+  const id = Crypto.randomUUID?.() ?? Array.from(Crypto.getRandomBytes(16), (b) => b.toString(16).padStart(2, '0')).join('');
+  return `app-${id}`;
+}
+
 export default {
   name: 'checkout',
   screens: [
     { name: 'index', path: 'checkout', title: 'checkout.title', component: CheckoutScreen },
   ],
   nav: null,
-  strings: { en: { 'checkout.title': 'Checkout' }, hi: { 'checkout.title': 'चेकआउट' } },
+  service: (services) => ({ attempt: createAttempt({ newKey: services.newKey ?? newKey }), preferred: { addressId: null, referralCode: null } }),
+  strings: {
+    en: {
+      'checkout.title': 'Checkout',
+      'checkout.empty': 'Your cart is empty.',
+      'checkout.backToCart': 'Back to cart',
+      'checkout.deliverTo': 'Deliver to',
+      'checkout.newAddress': 'Use a different address',
+      'checkout.chosen': 'Selected',
+      'checkout.email': 'Email (optional)',
+      'checkout.emailHint': 'For your receipt.',
+      'checkout.items': 'Your order',
+      'checkout.notServiceable': 'We cannot deliver to this pincode yet.',
+      'checkout.pay': 'How would you like to pay?',
+      'checkout.mode.prepaid': 'Pay now',
+      'checkout.mode.prepaid.sub': 'UPI, cards, netbanking and wallets. The payment page opens and brings you back here.',
+      'checkout.mode.cod': 'Cash on delivery',
+      'checkout.mode.cod.sub': 'Pay when it arrives. We confirm your WhatsApp number first.',
+      'checkout.mode.part_advance': 'Part now, rest on delivery',
+      'checkout.mode.part_advance.sub': 'Pay a small part now and the rest at your door.',
+      'checkout.codWhy': 'For cash on delivery we send a code to your WhatsApp number, so the order is really yours.',
+      'checkout.sendCode': 'Send code on WhatsApp',
+      'checkout.code': '6-digit code',
+      'checkout.verify': 'Confirm number',
+      'checkout.codVerified': 'Number confirmed.',
+      'checkout.needCode': 'Confirm your WhatsApp number with the code first.',
+      'checkout.codes': 'Offers and points',
+      'checkout.coupon': 'Coupon code',
+      'checkout.apply': 'Apply',
+      'checkout.usePoints': 'Use my {points} points',
+      'checkout.referral': 'Friend’s referral code (optional)',
+      'checkout.agree': 'Before you order',
+      'checkout.terms': 'I agree to the terms, refund and shipping policies',
+      'checkout.termsSub': 'You can read them in the app’s policies.',
+      'checkout.updates': 'Send me order updates on WhatsApp',
+      'checkout.updatesSub': 'Offers and marketing are never sent unless you ask for them.',
+      'checkout.saveDetails': 'Save these details to my account',
+      'checkout.needTerms': 'Please agree to the terms to place your order.',
+      'checkout.place': 'Place order · {total}',
+      'checkout.placeShort': 'Place order',
+    },
+    hi: {
+      'checkout.title': 'चेकआउट',
+      'checkout.empty': 'आपका कार्ट खाली है।',
+      'checkout.backToCart': 'कार्ट पर लौटें',
+      'checkout.deliverTo': 'डिलीवरी का पता',
+      'checkout.newAddress': 'दूसरा पता इस्तेमाल करें',
+      'checkout.chosen': 'चुना हुआ',
+      'checkout.email': 'ईमेल (वैकल्पिक)',
+      'checkout.emailHint': 'आपकी रसीद के लिए।',
+      'checkout.items': 'आपका ऑर्डर',
+      'checkout.notServiceable': 'हम अभी इस पिनकोड पर डिलीवरी नहीं कर सकते।',
+      'checkout.pay': 'आप कैसे भुगतान करना चाहेंगे?',
+      'checkout.mode.prepaid': 'अभी भुगतान करें',
+      'checkout.mode.prepaid.sub': 'UPI, कार्ड, नेटबैंकिंग और वॉलेट। भुगतान पेज खुलेगा और आपको यहीं वापस लाएगा।',
+      'checkout.mode.cod': 'कैश ऑन डिलीवरी',
+      'checkout.mode.cod.sub': 'सामान आने पर भुगतान करें। पहले हम आपका WhatsApp नंबर पक्का करते हैं।',
+      'checkout.mode.part_advance': 'कुछ अभी, बाकी डिलीवरी पर',
+      'checkout.mode.part_advance.sub': 'थोड़ा हिस्सा अभी दें और बाकी दरवाज़े पर।',
+      'checkout.codWhy': 'कैश ऑन डिलीवरी के लिए हम आपके WhatsApp नंबर पर कोड भेजते हैं, ताकि ऑर्डर सच में आपका हो।',
+      'checkout.sendCode': 'WhatsApp पर कोड भेजें',
+      'checkout.code': '6 अंकों का कोड',
+      'checkout.verify': 'नंबर पक्का करें',
+      'checkout.codVerified': 'नंबर पक्का हो गया।',
+      'checkout.needCode': 'पहले कोड से अपना WhatsApp नंबर पक्का करें।',
+      'checkout.codes': 'ऑफ़र और पॉइंट',
+      'checkout.coupon': 'कूपन कोड',
+      'checkout.apply': 'लगाएँ',
+      'checkout.usePoints': 'मेरे {points} पॉइंट इस्तेमाल करें',
+      'checkout.referral': 'दोस्त का रेफ़रल कोड (वैकल्पिक)',
+      'checkout.agree': 'ऑर्डर देने से पहले',
+      'checkout.terms': 'मैं नियम, रिफ़ंड और शिपिंग नीतियों से सहमत हूँ',
+      'checkout.termsSub': 'इन्हें आप ऐप की नीतियों में पढ़ सकते हैं।',
+      'checkout.updates': 'ऑर्डर की जानकारी WhatsApp पर भेजें',
+      'checkout.updatesSub': 'आप कहेंगे नहीं तो ऑफ़र या मार्केटिंग कभी नहीं भेजी जाती।',
+      'checkout.saveDetails': 'ये जानकारी मेरे खाते में सहेजें',
+      'checkout.needTerms': 'ऑर्डर देने के लिए कृपया नियमों से सहमत हों।',
+      'checkout.place': 'ऑर्डर दें · {total}',
+      'checkout.placeShort': 'ऑर्डर दें',
+    },
+  },
 };
