@@ -1,4 +1,10 @@
-import { notBuilt, platformNotBuilt } from '../not-built.js';
+import { PLAYBOOKS } from '../../contracts/apps.js';
+import { reportError } from '../../platform/log.js';
+import { mountConsoleRoute } from './console.js';
+import { appSubmissionsFor } from './service.js';
+
+export { appSubmissionsFor, cleanGuideline } from './service.js';
+export { presubmitBuild, serverFacts, releaseFactsOf } from './presubmit.js';
 
 /**
  * Store review (PRD 10.14): where each brand's app stands on each store, rejections and their playbooks, the review tasks our
@@ -18,9 +24,14 @@ import { notBuilt, platformNotBuilt } from '../not-built.js';
  * app.rejected, app.build_failed).
  *
  * Schedule app-submissions.poll (config.storeReviewPollMs): reads both stores through ctx.appStores.
+ *
+ * The gate's checks are tools/presubmit/checks.mjs, the same the command runs against a built app; the server reads what the
+ * binary holds from release-facts.json (presubmit.js). Each playbook is docs/playbooks/<code>.md. submit() moves the build to
+ * 'submitted' through appBuildsFor(ctx).markStatus when app-builds has it, else with the same guarded UPDATE.
  */
 const API = ['appPublishing.submissions'];
 const PLATFORM = ['platform.appSubmissions', 'platform.setSubmissionState', 'platform.appRejections', 'platform.appPlaybooks', 'platform.appReviewTasks', 'platform.resolveAppReviewTask'];
+const POLL = 'app-submissions.poll';
 
 export const appSubmissions = {
   name: 'app-submissions',
@@ -30,10 +41,25 @@ export const appSubmissions = {
     api: API,
     store: [],
     platform: PLATFORM,
-    jobs: ['app-submissions.poll'],
+    jobs: [POLL],
   },
-  api: () => notBuilt(...API),
-  platformRoutes(router) {
-    platformNotBuilt(router, ...PLATFORM);
+  api: (ctx) => ({
+    'appPublishing.submissions': async () => ({ items: await appSubmissionsFor(ctx).list() }),
+  }),
+  platformRoutes(router, ctx) {
+    const service = () => appSubmissionsFor(ctx).console;
+    mountConsoleRoute(router, 'platform.appSubmissions', ({ query }) => service().list(query));
+    mountConsoleRoute(router, 'platform.setSubmissionState', ({ params, body, actor }) => service().move(params.id, body, actor));
+    mountConsoleRoute(router, 'platform.appRejections', ({ query }) => service().rejections(query));
+    mountConsoleRoute(router, 'platform.appPlaybooks', () => ({ items: Object.values(PLAYBOOKS).map((p) => ({ ...p })) }));
+    mountConsoleRoute(router, 'platform.appReviewTasks', ({ query }) => service().tasks(query));
+    mountConsoleRoute(router, 'platform.resolveAppReviewTask', ({ params, body, actor }) => service().resolveTask(params.id, body.resolution, actor));
+  },
+  jobs(ctx) {
+    const { queue } = ctx.platform;
+    queue.work(POLL, () => appSubmissionsFor(ctx).poll().catch((err) => reportError(err, { msg: 'app_submissions.poll_failed' })));
+    return async function schedule() {
+      await queue.every(POLL, ctx.config.storeReviewPollMs || 900_000);
+    };
   },
 };

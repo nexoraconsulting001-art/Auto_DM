@@ -1,0 +1,137 @@
+{
+  "tool": "presubmit",
+  "toolVersion": "presubmit-1",
+  "releases": {
+    "1.0.0": {
+      "appVersion": "1.0.0",
+      "expoSdk": 58,
+      "dependencies": [
+        "@react-navigation/bottom-tabs",
+        "@react-navigation/native",
+        "@react-navigation/native-stack",
+        "@shopify/flash-list",
+        "@tanstack/react-query",
+        "@tanstack/react-query-persist-client",
+        "expo",
+        "expo-apple-authentication",
+        "expo-application",
+        "expo-asset",
+        "expo-build-properties",
+        "expo-clipboard",
+        "expo-constants",
+        "expo-crypto",
+        "expo-device",
+        "expo-font",
+        "expo-haptics",
+        "expo-image",
+        "expo-image-picker",
+        "expo-linking",
+        "expo-localization",
+        "expo-network",
+        "expo-notifications",
+        "expo-secure-store",
+        "expo-splash-screen",
+        "expo-sqlite",
+        "expo-status-bar",
+        "expo-store-review",
+        "expo-system-ui",
+        "expo-updates",
+        "expo-video",
+        "expo-web-browser",
+        "lucide-react-native",
+        "react",
+        "react-dom",
+        "react-native",
+        "react-native-gesture-handler",
+        "react-native-razorpay",
+        "react-native-reanimated",
+        "react-native-safe-area-context",
+        "react-native-screens",
+        "react-native-svg",
+        "react-native-worklets",
+        "zod"
+      ],
+      "webviewImports": [],
+      "features": [
+        "account",
+        "addresses",
+        "cart",
+        "catalog",
+        "category",
+        "checkout",
+        "home",
+        "legal",
+        "notifications",
+        "orders",
+        "payment",
+        "product",
+        "reels",
+        "returns",
+        "reviews",
+        "rewards",
+        "search",
+        "sign-in",
+        "tracking",
+        "wishlist"
+      ],
+      "accountDeleteScreen": true,
+      "accountDeleteCall": true,
+      "pushAtLaunch": [],
+      "android": {
+        "targetSdkVersion": 36,
+        "permissions": [
+          "android.permission.CAMERA",
+          "android.permission.POST_NOTIFICATIONS"
+        ],
+        "blockedPermissions": [
+          "android.permission.READ_EXTERNAL_STORAGE",
+          "android.permission.RECORD_AUDIO",
+          "android.permission.SYSTEM_ALERT_WINDOW",
+          "android.permission.USE_BIOMETRIC",
+          "android.permission.USE_FINGERPRINT",
+          "android.permission.WRITE_EXTERNAL_STORAGE"
+        ]
+      },
+      "ios": {
+        "privacyManifest": {
+          "NSPrivacyTracking": false,
+          "NSPrivacyTrackingDomains": [],
+          "NSPrivacyCollectedDataTypes": [],
+          "NSPrivacyAccessedAPITypes": [
+            {
+              "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+              "NSPrivacyAccessedAPITypeReasons": [
+                "CA92.1"
+              ]
+            },
+            {
+              "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+              "NSPrivacyAccessedAPITypeReasons": [
+                "C617.1"
+              ]
+            },
+            {
+              "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+              "NSPrivacyAccessedAPITypeReasons": [
+                "35F9.1"
+              ]
+            },
+            {
+              "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
+              "NSPrivacyAccessedAPITypeReasons": [
+                "E174.1"
+              ]
+            }
+          ]
+        },
+        "entitlements": {},
+        "usesAppleSignIn": true,
+        "toolchain": {
+          "xcode": "26.0",
+          "sdk": "26.0",
+          "source": "EAS default image for Expo SDK 58"
+        }
+      }
+    }
+  }
+}

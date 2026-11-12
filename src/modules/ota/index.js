@@ -1,5 +1,11 @@
-import { APP_ROUTES } from '../../contracts/store-routes.js';
-import { platformNotBuilt, storeNotBuilt } from '../not-built.js';
+import { APP_ROUTES, AppHealthBody } from '../../contracts/store-routes.js';
+import { reportError } from '../../platform/log.js';
+import { appCall } from '../app-api/http.js';
+import { mountConsoleRoute } from '../app-submissions/console.js';
+import { parseBody } from '../storefront/http.js';
+import { otaFor } from './service.js';
+
+export { otaFor, wilsonLower, thresholdOf, PUBLISH_STALL_MS } from './service.js';
 
 /**
  * Over-the-air updates of the shopper app's JavaScript (PRD 10.10). Track store-release. Platform tables (607): one release goes
@@ -15,17 +21,44 @@ import { platformNotBuilt, storeNotBuilt } from '../not-built.js';
  * device once per hour per release and event (APP_LIMITS.healthPerDevice).
  *
  * Queue ota.publish; schedule ota.watch (every minute).
+ *
+ * publish() answers { release, created }; the console answers 201 for a new release and 200 for its request key again. The crash
+ * verdict compares the 95% lower bound of the rate with the threshold (service.js), so one crash in the minimum launches is
+ * not enough. appHealth answers 204, counted or not: an app learns nothing from it.
  */
 const STORE = ['appHealth'];
 const PLATFORM = ['platform.otaReleases', 'platform.publishOta', 'platform.advanceOta', 'platform.rollBackOta', 'platform.otaHealth'];
+const WATCH = 'ota.watch';
+const PUBLISH = 'ota.publish';
 
 export const ota = {
   name: 'ota',
-  owns: { migrations: ['607_ota.sql'], tables: ['ota_releases', 'ota_health'], api: [], store: STORE, platform: PLATFORM, jobs: ['ota.publish', 'ota.watch'] },
-  routes(app) {
-    storeNotBuilt(app, APP_ROUTES, ...STORE);
+  owns: { migrations: ['607_ota.sql'], tables: ['ota_releases', 'ota_health'], api: [], store: STORE, platform: PLATFORM, jobs: [PUBLISH, WATCH] },
+  routes(app, ctx) {
+    app.post(APP_ROUTES.appHealth.path, appCall(async (req, res) => {
+      const body = parseBody(AppHealthBody, req.body);
+      await otaFor(ctx).report({ ...body, deviceId: req.appSession?.deviceId ?? '' });
+      res.status(204).end();
+    }));
   },
-  platformRoutes(router) {
-    platformNotBuilt(router, ...PLATFORM);
+  platformRoutes(router, ctx) {
+    const service = () => otaFor(ctx);
+    mountConsoleRoute(router, 'platform.otaReleases', ({ query }) => service().list(query));
+    mountConsoleRoute(router, 'platform.publishOta', async ({ body, actor, answer }) => {
+      const { release, created } = await service().publish(body, actor);
+      if (!created) answer.status = 200;
+      return release;
+    }, { strictBody: true });
+    mountConsoleRoute(router, 'platform.advanceOta', ({ params, actor }) => service().advance(params.id, actor));
+    mountConsoleRoute(router, 'platform.rollBackOta', ({ params, body, actor }) => service().rollBack(params.id, { reason: body.reason, actor, cause: 'manual' }));
+    mountConsoleRoute(router, 'platform.otaHealth', ({ params }) => service().health(params.id));
+  },
+  jobs(ctx) {
+    const { queue } = ctx.platform;
+    queue.work(PUBLISH, (job) => otaFor(ctx).publishChannels(Number(job.payload?.releaseId)));
+    queue.work(WATCH, () => otaFor(ctx).watch().catch((err) => reportError(err, { msg: 'ota.watch_failed' })));
+    return async function schedule() {
+      await queue.every(WATCH, 60_000);
+    };
   },
 };
