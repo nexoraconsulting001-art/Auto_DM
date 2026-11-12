@@ -1,7 +1,8 @@
 /**
  * Step 2, validate: nothing is generated or built from a brand that would fail later (P-33). Every problem names its field.
  *
- *   from the database   brandFileProblems(config, kit, { platforms, hosts }) from src/contracts/apps.js
+ *   from the database   brandFileProblems(config, kit, { platforms, hosts }) from src/contracts/apps.js, then whatever
+ *                       `options.moreProblems(state, platforms)` adds (src/modules/app-builds: markup, the icon's spec)
  *   from a file         the BrandFile schema, the platforms asked for, the app version every brand shares, the link paths, and
  *                       no value that names the platform
  *
@@ -58,6 +59,12 @@ export async function run(state, { options }) {
   if (!state.brand) {
     platforms = asked ?? PLATFORMS;
     problems = brandFileProblems(state.config, state.kit, { platforms, hosts: state.hosts });
+    // The pipeline track's own checks of a business's details (markup in a name, the icon against its spec), each once.
+    if (typeof options.moreProblems === 'function') {
+      for (const p of (await options.moreProblems(state, platforms)) ?? []) {
+        if (!problems.some((q) => q.field === p.field && q.code === p.code)) problems.push(p);
+      }
+    }
   } else {
     platforms = asked ?? PLATFORMS.filter((p) => state.brand?.[p]);
     problems = brandProblems(state.brand, { platforms });

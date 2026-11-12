@@ -26,8 +26,10 @@
  *   submit       steps/submit.mjs       to the brand's own accounts
  *   report       steps/report.mjs       what happened, per platform
  *
- * The parts that need the database or the build service are passed in as options (loadBySlug, generateAssets, makeBrand,
- * easBuild, submitBuild): src/modules/app-builds supplies them, so this folder imports nothing that needs a database.
+ * The parts that need the database or the build service are passed in as options (loadBySlug, moreProblems, generateAssets,
+ * makeBrand, easBuild, submitBuild): src/modules/app-builds supplies them (pipeline.js), so this folder imports nothing that
+ * needs a database. From the command line a slug goes to src/modules/app-builds/cli.js, which opens the database, asks for the
+ * builds the plan allows and follows them; none of that is loaded for a brand file.
  */
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -130,6 +132,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(2);
   }
   const options = { ...parsed.options, signing: signingFromEnv(process.env), androidArchitectures: process.env.ANDROID_ARCHITECTURES || null, cwd: process.cwd() };
+  if (parsed.input && !load.isBrandFilePath(parsed.input)) {
+    const { runFromDatabase } = await import('../../src/modules/app-builds/cli.js');
+    const fromDb = await runFromDatabase(parsed.input, options);
+    process.exit(fromDb.ok ? 0 : 1);
+  }
   const result = await buildBrand(parsed.input, options);
   process.exit(result.ok ? 0 : 1);
 }
