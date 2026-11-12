@@ -150,7 +150,10 @@ test('a shopper token never reaches a seller route, and a seller token never act
     assert.equal((await a.fetch('/api/store/app/me')).status, 200, 'the shopper session is untouched');
     // The admin pages see nobody.
     const admin = await fetch(`${w.app.base}/admin`, { redirect: 'manual', headers: { authorization: `Shopper ${a.tokens.accessToken}` } });
-    assert.notEqual(admin.status, 200);
+    // The admin console is a static shell for everyone; the app token must not change what an anonymous visitor gets.
+    const anon = await fetch(`${w.app.base}/admin`, { redirect: 'manual' });
+    assert.equal(admin.status, anon.status);
+    assert.equal(await admin.text(), await anon.text());
 
     // The seller's token at the app's routes, in either scheme.
     const asApp = shopperApp(w.app.base, { tenantId: w.app.tenant.id });
