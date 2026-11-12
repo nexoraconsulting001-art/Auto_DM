@@ -1,16 +1,65 @@
+import UserRound from 'lucide-react-native/icons/user-round';
 import { MANAGERS } from '@bhava/app-core/access';
 import CreatorScreen from './CreatorScreen.js';
 
-/**
- * Creator page. Whoever builds this lists every API route id and console page it covers
- * in `routeIds`, adds its screens, and removes those ids from tools/parity-pending.json. The format is in ../index.js.
- */
+/** The creator page (PRD 8.14): the link-in-bio page with a shelf per category, at the business's own address. */
 export default {
   name: 'creator',
   access: MANAGERS,
   feature: 'creator_page',
-  routeIds: [],
-  screens: [{ name: 'index', path: 'creator', title: 'creator.title', component: CreatorScreen }],
-  nav: { label: 'creator.title', order: 23 },
-  strings: { en: { 'creator.title': 'Creator page' }, hi: { 'creator.title': 'क्रिएटर पेज' } },
+  routeIds: ['creator.get', 'creator.update', 'creator.checkSlug', 'console:/creator-page'],
+  screens: [{ name: 'index', path: 'creator-page', title: 'creator.title', component: CreatorScreen }],
+  nav: { label: 'creator.title', order: 23, icon: UserRound },
+  strings: {
+    en: {
+      'creator.title': 'Creator page',
+      'creator.intro': 'One page with all your reels and products, a shelf for each category. Put its link in your Instagram bio.',
+      'creator.link': 'Your page’s link',
+      'creator.linkHint': 'Copy it into your Instagram bio and list it as your website. We never change your bio.',
+      'creator.noLink': 'Choose a name for the page’s address and save to get its link.',
+      'creator.enabled': 'Page is on',
+      'creator.slug': 'Address name',
+      'creator.slugHint': '2 to 40 lower-case letters, numbers and dashes.',
+      'creator.slugBad': 'Use 2 to 40 lower-case letters, numbers and dashes',
+      'creator.check': 'Check it’s free',
+      'creator.free': 'That name is free',
+      'creator.taken': 'That name is taken',
+      'creator.displayName': 'Name on the page',
+      'creator.bio': 'A line about you',
+      'creator.photo': 'Photo',
+      'creator.website': 'Your website (optional)',
+      'creator.websiteHint': 'Starts with https://',
+      'creator.websiteBad': 'Use a web link starting with https://',
+      'creator.shelf': 'Title of the last shelf',
+      'creator.shelfRequired': 'Give the last shelf a title',
+      'creator.whatsapp': 'Show a WhatsApp button',
+      'creator.badge': 'On the Free plan a small badge shows at the foot of the page.',
+      'creator.saved': 'Saved.',
+    },
+    hi: {
+      'creator.title': 'क्रिएटर पेज',
+      'creator.intro': 'आपकी सारी रील और प्रोडक्ट एक पेज पर, हर कैटेगरी की एक शेल्फ़। इसका लिंक अपने Instagram बायो में लगाएँ।',
+      'creator.link': 'आपके पेज का लिंक',
+      'creator.linkHint': 'इसे अपने Instagram बायो में कॉपी करें और वेबसाइट के तौर पर लगाएँ। हम आपका बायो कभी नहीं बदलते।',
+      'creator.noLink': 'पेज के पते के लिए नाम चुनें और सेव करें, तब इसका लिंक मिलेगा।',
+      'creator.enabled': 'पेज चालू है',
+      'creator.slug': 'पते का नाम',
+      'creator.slugHint': '2 से 40 छोटे अक्षर, अंक और डैश।',
+      'creator.slugBad': '2 से 40 छोटे अक्षर, अंक और डैश इस्तेमाल करें',
+      'creator.check': 'देखें कि ख़ाली है',
+      'creator.free': 'यह नाम ख़ाली है',
+      'creator.taken': 'यह नाम लिया जा चुका है',
+      'creator.displayName': 'पेज पर नाम',
+      'creator.bio': 'आपके बारे में एक लाइन',
+      'creator.photo': 'फ़ोटो',
+      'creator.website': 'आपकी वेबसाइट (ज़रूरी नहीं)',
+      'creator.websiteHint': 'https:// से शुरू होती है',
+      'creator.websiteBad': 'https:// से शुरू होने वाला वेब लिंक दें',
+      'creator.shelf': 'आख़िरी शेल्फ़ का नाम',
+      'creator.shelfRequired': 'आख़िरी शेल्फ़ को नाम दें',
+      'creator.whatsapp': 'WhatsApp बटन दिखाएँ',
+      'creator.badge': 'Free प्लान में पेज के नीचे एक छोटा बैज दिखता है।',
+      'creator.saved': 'सेव हो गया।',
+    },
+  },
 };
