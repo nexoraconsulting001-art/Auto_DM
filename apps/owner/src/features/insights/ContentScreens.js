@@ -105,6 +105,7 @@ export function MediaScreen({ route }) {
             </Card>
             <Card>
               <Text variant="title">{t('insights.growth')}</Text>
+              <SourceTag code={data.source} testID="insights-growth-source" />
               {growth.length >= 2 ? <Sparkline values={growth} label={t('insights.chartLabel', { title: t('insights.growth'), values: growth.join(', ') })} /> : <Text variant="small" testID="insights-growth-state">{t('insights.figure.noData')}</Text>}
             </Card>
             <Updated at={data.lastUpdatedAt} />
