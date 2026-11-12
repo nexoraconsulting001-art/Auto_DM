@@ -1,10 +1,11 @@
 import crypto from 'node:crypto';
 import { COMPLIANCE_LIMITS as L } from '../../contracts/compliance.js';
+import { reportError } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { directLink } from '../links/rules.js';
 import { windowOpen } from './inbox.js';
 import { hasWords, isTooShort, matchesKeywords } from './match.js';
-import { chooseVariant, firstMessage, parseFaqPayload, parseTwoTapPayload, plainMessage, render, twoTapPayload } from './message.js';
+import { chooseVariant, dmReplyKey, firstMessage, parseFaqPayload, parseTwoTapPayload, plainMessage, render, twoTapPayload } from './message.js';
 import { scheduleStatus } from './schedule.js';
 
 const MEDIA_LABELS = Object.freeze({ REELS: 'reel', FEED: 'post' });
@@ -26,9 +27,11 @@ const clean = (text) => (typeof text === 'string' ? text.replaceAll('\0', '') : 
  * Every message is handed over with compliance.enqueue(), which claims the caps with the job, and its worker sends it through
  * compliance.send(). "Send test" goes through send() directly. Nothing here calls Meta to send.
  *
- * deps: { db, repos, compliance, meta, config, now }. `repos` are the unbound ones, so everything but housekeeping runs inside withTenant().
+ * A DM that no rule answered is handed to ctx.inbound (unmatched.js), which queues it for whoever registered: AI replies (PRD 6.11).
+ *
+ * deps: { db, repos, compliance, meta, inbound, config, now }. `repos` are the unbound ones, so everything but housekeeping runs inside withTenant().
  */
-export function createAutomationEngine({ db, repos, compliance, meta, config = {}, now = config.complianceNow ?? Date.now }) {
+export function createAutomationEngine({ db, repos, compliance, meta, inbound = null, config = {}, now = config.complianceNow ?? Date.now }) {
   const clock = () => new Date(now());
   const eventTime = (event) => new Date(Math.min(event.timestamp ?? now(), now()));
 
@@ -116,7 +119,7 @@ export function createAutomationEngine({ db, repos, compliance, meta, config = {
       await repos.automations.holdJob(result.jobId, clock());
       await decide(event, 'held', 'outside_hours', automation.id);
     }
-    return undefined;
+    return result;
   }
 
   const isTester = (event) => repos.testers.isTester(event.channel, event.subject);
@@ -241,14 +244,28 @@ export function createAutomationEngine({ db, repos, compliance, meta, config = {
       return;
     }
     await compliance.enqueue({
-      kind: 'dm', purpose: 'faq', channel: event.channel, accountId: event.accountId, recipientId: event.personId, personId: event.personId, idempotencyKey: `dm_reply:${keyPart(event.mid)}`,
+      kind: 'dm', purpose: 'faq', channel: event.channel, accountId: event.accountId, recipientId: event.personId, personId: event.personId, idempotencyKey: dmReplyKey(event.mid),
       expiresAt: dmWindowEnd(event), message: plainMessage({ template }), isTest: await isTester(event),
     }, { inReplyTo: event.mid });
   }
 
+  /**
+   * No rule answered this DM: queue it for whoever asked to hear (ctx.inbound.onUnmatched). Ids only, and only for a
+   * message a person typed; a failure here is reported and never fails the event.
+   */
+  async function unmatched(event) {
+    if (!inbound || event.type !== 'dm' || !event.mid || !event.threadId) return;
+    try {
+      await inbound.unmatched({ channel: event.channel, threadId: event.threadId, messageId: event.mid });
+    } catch (err) {
+      reportError(err, { msg: 'automations.unmatched_failed', thread: event.threadId });
+    }
+  }
+
   /** The highest-priority rule that matches, or else the welcome. At most one automated reply per DM (PRD 6.4). */
   async function answerDirectMessage(event, text) {
-    if (!(await repos.entitlements.can('triggers.story_dm'))) return;
+    // Without DM automations in the plan no rule runs, so none matched: an add-on may still answer.
+    if (!(await repos.entitlements.can('triggers.story_dm'))) return unmatched(event);
     const tester = await isTester(event);
     const reply = { kind: 'dm', expiresAt: dmWindowEnd(event), tester };
     let needsTester = null;
@@ -259,15 +276,18 @@ export function createAutomationEngine({ db, repos, compliance, meta, config = {
         continue;
       }
       if (stateBlock(rule)) continue;
-      await launch(rule, event, { ...reply, purpose: 'faq', key: `dm_reply:${keyPart(event.mid)}`, trigger: 'dm_keyword', inReplyTo: event.mid });
+      await launch(rule, event, { ...reply, purpose: 'faq', key: dmReplyKey(event.mid), trigger: 'dm_keyword', inReplyTo: event.mid });
       return;
     }
     const [welcome] = (await repos.automations.byType('dm_welcome', event.channel)).filter((rule) => (rule.state === 'live' || tester) && !stateBlock(rule));
     if (welcome) {
-      await launch(welcome, event, { ...reply, purpose: 'welcome', key: `welcome:${event.subject}` });
-      return;
+      const sent = await launch(welcome, event, { ...reply, purpose: 'welcome', key: `welcome:${event.subject}` });
+      // The welcome goes once per person. After that it answers nothing, so the message is still unanswered.
+      if (sent?.reason !== 'cap.welcome_once') return;
+    } else {
+      await skip(event, needsTester ? 'test_mode' : 'no_keyword', needsTester?.id);
     }
-    await skip(event, needsTester ? 'test_mode' : 'no_keyword', needsTester?.id);
+    await unmatched(event);
   }
 
   async function onDirectMessage(event) {
@@ -302,7 +322,7 @@ export function createAutomationEngine({ db, repos, compliance, meta, config = {
       if (!variant) return null;
       const finalUrl = await linkFor(automation, { channel: tester.channel, mediaId: automation.triggers[0]?.mediaId ?? '', variantLabel: variant.label });
       return compliance.send({
-        kind: 'dm', purpose: 'test', channel: tester.channel, accountId: thread.ig_user_id ?? thread.fb_page_id, recipientId: tester.recipient_id, personId: tester.recipient_id, idempotencyKey: `test:${automation.id}:${tester.id}:${crypto.randomUUID()}`,
+        kind: 'dm', purpose: 'test', channel: tester.channel, accountId: thread.ig_user_id ?? thread.fb_page_id ?? thread.wa_phone_number_id, recipientId: tester.recipient_id, personId: tester.recipient_id, idempotencyKey: `test:${automation.id}:${tester.id}:${crypto.randomUUID()}`,
         expiresAt: new Date(new Date(thread.last_user_message_at).getTime() + L.messagingWindowMs), message: firstMessage({ automation, variant, mode: 'direct', firstName: '', finalUrl }), automationId: automation.id, variantId: variant.id, isTest: true,
       });
     },
@@ -327,6 +347,8 @@ export function createAutomationEngine({ db, repos, compliance, meta, config = {
       await db.platform.query(`DELETE FROM inbox_messages WHERE created_at < now() - ${INBOX_RETENTION}`);
       await db.platform.query(`UPDATE inbox_threads SET username = '', last_message = '' WHERE last_message_at < now() - ${INBOX_RETENTION} AND (username <> '' OR last_message <> '')`);
       await db.platform.query(`UPDATE needs_human_items SET username = '', text = '' WHERE created_at < now() - ${INBOX_RETENTION} AND (username <> '' OR text <> '')`);
+      // The AI reply log keeps its ids, score and outcome; the question and the answer go with the inbox (PRD 6.11).
+      await db.platform.query(`UPDATE ai_reply_log SET question = '', answer = '' WHERE created_at < now() - ${INBOX_RETENTION} AND (question <> '' OR answer <> '')`);
       await db.platform.query(`DELETE FROM tester_codes WHERE used_at IS NULL AND expires_at < now() - interval '1 day'`);
     },
   };

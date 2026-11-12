@@ -6,6 +6,11 @@
  * There is no SMS channel and no Instagram DM here: an abandoned cart is never chased by DM, even inside an open window (S-51).
  * Everything a shopper receives is in the seller's brand: the gate refuses a message that names the platform.
  *
+ * WhatsApp has two paths and no third. A reply to what a shopper wrote, a keyword's link and any message the WhatsApp
+ * add-on starts go through the compliance gate (ctx.compliance, channel 'whatsapp': queue, budget, window, opt-out, caps,
+ * content, links, pauses). Login codes, order updates and the store's own reminders go through this gate, which asks the
+ * compliance gate for the kill switch and the business's pause before a WhatsApp send and otherwise applies its own rules.
+ *
  *   send(message) -> result          never throws for a refusal or a provider failure
  *   check(message) -> result         the same rules with nothing sent
  *
@@ -48,6 +53,9 @@ export const MESSAGE_REASONS = Object.freeze({
   /** The WhatsApp template is still waiting for review, was rejected, or is paused: the admin shows "Template pending" (S-53). */
   templatePending: 'template_pending',
   quietHours: 'quiet_hours',
+  /** WhatsApp only: the kill switch is engaged, or this business is paused. Asked of the compliance gate before every send. */
+  pausedGlobal: 'paused.global',
+  pausedBusiness: 'paused.tenant',
   /** The text names the platform. Buyer messages carry the seller's brand only. */
   platformName: 'content.platform_name',
   /** A marketing email with no unsubscribe link. */

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Channel, REASON_CODE_FAMILIES } from '../compliance.js';
+import { Channel, MetaChannel, REASON_CODE_FAMILIES } from '../compliance.js';
 import { staffWith } from './access.js';
 import { Count, Id, IdParams, IdText, ListQuery, Timestamp, page, required, text } from './common.js';
 import { LINK_TYPES, SaveWarning } from './automations.js';
@@ -14,7 +14,7 @@ export const LinkPreviewBody = z.object({
   url: required(2000, 'Paste the link'),
   automationSlug: text(80).optional(),
   mediaId: text(80).optional(),
-  channel: Channel.default('instagram'),
+  channel: MetaChannel.default('instagram'),
 });
 export const LinkPreview = z.object({ finalUrl: z.string(), linkType: z.enum(LINK_TYPES), allowed: z.boolean(), reason: LinkReason.nullable(), warnings: z.array(SaveWarning) });
 

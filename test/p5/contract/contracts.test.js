@@ -33,6 +33,8 @@ const FRESH = [
   // Phase 7 (billing): whatever changes what a business pays.
   'billing.change', 'billing.addItem', 'billing.removeItem', 'billing.paymentMethod',
   'setup.ownKeys',
+  // Phase 7 (the WhatsApp add-on): connecting and disconnecting the business's own number.
+  'whatsapp.connectStart', 'whatsapp.connectFinish', 'whatsapp.disconnect',
 ];
 const PLATFORM_TABLES = ['people', 'person_identities', 'seller_login_codes', 'token_families', 'refresh_tokens', 'auth_devices', 'auth_handoffs', 'review_logins', 'review_login_uses', 'account_deletion_requests', 'app_min_versions'];
 

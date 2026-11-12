@@ -146,7 +146,7 @@ export function automationsApi(ctx) {
       const thread = await repos.inbox.threadRow(params.id);
       if (!thread) return null;
       if (!windowOpen(thread.last_user_message_at, clock())) throw new ApiError('conflict', 'Reply in the Instagram app', { reason: 'window.closed' });
-      const accountId = thread.ig_user_id ?? thread.fb_page_id;
+      const accountId = thread.ig_user_id ?? thread.fb_page_id ?? thread.wa_phone_number_id;
       const result = await compliance.send({
         kind: 'dm', purpose: 'manual', channel: thread.channel, accountId, recipientId: thread.recipient_id, personId: thread.recipient_id, idempotencyKey: `manual:${thread.id}:${crypto.randomUUID()}`,
         expiresAt: new Date(new Date(thread.last_user_message_at).getTime() + L.messagingWindowMs), message: { text: body.text },

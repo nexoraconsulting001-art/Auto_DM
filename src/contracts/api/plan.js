@@ -31,6 +31,8 @@ export const PLAN_IN_HANDLER = Object.freeze({
   'appPublishing.submissions': Object.freeze(['app.android', 'app.ios']),
   'pushCampaigns.send': Object.freeze(['app.android', 'app.ios']),
   'pushCredentials.save': Object.freeze(['app.android', 'app.ios']),
+  // Switching AI replies on needs the add-on; switching them off, or changing the threshold, never does.
+  'aiReplies.save': Object.freeze(['ai_replies']),
 });
 
 export const PLAN_NOT_ENFORCED = Object.freeze({
@@ -137,6 +139,8 @@ export const ALWAYS_ON = Object.freeze([
   'referrals.get',
   'signup.status', 'signup.start', 'signup.firstAutomation', 'signup.finish',
   'teamFeed.list', 'teamFeed.undo', 'teamFeed.approve', 'teamFeed.reject', 'services.settings', 'services.saveSettings',
+  // The add-ons (6.11, 6.12): what a business already has stays readable and removable after the add-on ends.
+  'faq.list', 'faq.remove', 'aiReplies.settings', 'aiReplies.log', 'whatsapp.status', 'whatsapp.disconnect', 'whatsapp.keywords', 'whatsapp.optins',
   'setup.get', 'setup.check', 'setup.acceptTerms', 'setup.pickupAddress', 'setup.kycLink', 'setup.ownKeys', 'setup.openInvite',
 ]);
 

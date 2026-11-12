@@ -6,13 +6,21 @@
  *   POST /:version/:phoneId/messages                   a template outside the 24 hour window must be approved, or it is refused (132001)
  *   GET  /:version/:phoneId
  *   GET  /:version/:wabaId/message_templates           POST /:version/:wabaId/message_templates    (new ones start PENDING)
+ *   POST /:version/oauth/access_token                  embedded signup: { client_id, client_secret, code } for a token; a code works once
+ *   POST /:version/:wabaId/subscribed_apps
  *
  * Controls (under /__sim), beside the shared ones in base.mjs (faults, calls, the clock):
  *   GET  /sent                                         what went out
  *   POST /templates { name, language?, category?, status }       adds one or sets its status: APPROVED, PENDING, REJECTED, PAUSED
  *   POST /templates/enforce { on }                     off by default, so earlier tests send any template; on makes sends need an approved one
  *   POST /status { messageId, status, errorCode?, category?, hold?, duplicates?, signature? }   sends a delivery report: sent, delivered, read, failed
- *   POST /inbound { phoneId, from, text, hold?, duplicates?, signature? }                       a shopper's reply
+ *   POST /inbound { phoneId, from, text, name?, messageId?, at?, hold?, duplicates?, signature? }   a shopper's message, signed, with
+ *        the business it is for named only by phoneId (metadata.phone_number_id): any id works, so a webhook for another business's
+ *        number is this with that number's id. messageId repeats an id (a duplicate that is a new delivery); `at` (ms) sets its timestamp.
+ *   POST /window/enforce { on }                        off by default; on makes free-form text need a message from that person in
+ *                                                      the last 24 hours on the controlled clock, or it is refused with 131047
+ *   POST /numbers { phoneId, displayName?, displayNumber? }   what GET /:version/:phoneId answers for that number
+ *   POST /signup/codes { code, token? }                a code embedded signup would hand the browser, and the token it buys
  *   POST /webhooks/url { url }    POST /webhooks/flush { order? }    POST /webhooks/redeliver { id, times? }    GET /webhooks
  *
  * Webhooks are signed with the app secret in X-Hub-Signature-256, as Meta signs them. duplicates repeats one; hold and
@@ -28,10 +36,17 @@ export function createWhatsApp({ token = 'sim-whatsapp-token', appSecret = 'sim-
   let sent = [];
   let templates = [];
   let enforce = false;
+  let enforceWindow = false;
   let seq = 0;
+  let numbers = new Map();
+  let codes = new Map();
+  let issued = new Set();
+  let lastInbound = new Map();
+  const DAY_MS = 24 * 60 * 60 * 1000;
 
   function requireToken(req) {
-    if (req.headers.authorization !== `Bearer ${token}`) throw whatsappError(401, 190, 'Invalid OAuth access token.');
+    const given = String(req.headers.authorization ?? '').replace(/^Bearer /, '');
+    if (given !== token && !issued.has(given)) throw whatsappError(401, 190, 'Invalid OAuth access token.');
   }
 
   let sim = null;
@@ -49,7 +64,12 @@ export function createWhatsApp({ token = 'sim-whatsapp-token', appSecret = 'sim-
       sent = [];
       templates = [];
       enforce = false;
+      enforceWindow = false;
       seq = 0;
+      numbers = new Map();
+      codes = new Map();
+      issued = new Set();
+      lastInbound = new Map();
       hooks.reset();
     },
     routes: (on) => {
@@ -63,6 +83,11 @@ export function createWhatsApp({ token = 'sim-whatsapp-token', appSecret = 'sim-
           const template = templates.find((t) => t.name === req.body.template?.name && t.language === (req.body.template?.language?.code ?? 'en'));
           if (!template) throw whatsappError(404, 132001, 'Template name does not exist in the translation.');
           if (template.status !== 'APPROVED') throw whatsappError(400, 132015, 'Template is paused or not approved.');
+        }
+        if (type === 'text' && (typeof req.body.text?.body !== 'string' || !req.body.text.body)) throw whatsappError(400, 100, 'text.body is required.');
+        if (enforceWindow && type !== 'template') {
+          const last = lastInbound.get(`${req.params.phoneId}:${to}`);
+          if (last === undefined || sim.clock.now() - last >= DAY_MS) throw whatsappError(400, 131047, 'Re-engagement message: more than 24 hours have passed since the customer last replied.');
         }
         const id = `wamid.sim${++seq}`;
         sent.push({ id, phoneId: req.params.phoneId, to, type, body: req.body, at: sim.clock.now() });
@@ -82,9 +107,23 @@ export function createWhatsApp({ token = 'sim-whatsapp-token', appSecret = 'sim-
         templates.push(template);
         return { id: template.id, status: template.status, category };
       });
+      on('POST', '/:version/oauth/access_token', (req) => {
+        const { client_id: clientId, client_secret: clientSecret, code } = req.body ?? {};
+        if (!clientId || clientSecret !== appSecret) throw whatsappError(400, 101, 'Error validating client secret.');
+        if (!codes.has(code)) throw whatsappError(400, 100, 'This authorization code has been used or has expired.');
+        const bought = codes.get(code);
+        codes.delete(code);
+        issued.add(bought);
+        return { access_token: bought, token_type: 'bearer' };
+      });
+      on('POST', '/:version/:wabaId/subscribed_apps', (req) => {
+        requireToken(req);
+        return { success: true };
+      });
       on('GET', '/:version/:phoneId', (req) => {
         requireToken(req);
-        return { id: req.params.phoneId, display_phone_number: '+91 90000 00000', verified_name: 'Simulated sender', quality_rating: 'GREEN' };
+        const number = numbers.get(req.params.phoneId) ?? {};
+        return { id: req.params.phoneId, display_phone_number: number.displayNumber ?? '+91 90000 00000', verified_name: number.displayName ?? 'Simulated sender', quality_rating: 'GREEN' };
       });
     },
     controls: (on) => {
@@ -100,6 +139,21 @@ export function createWhatsApp({ token = 'sim-whatsapp-token', appSecret = 'sim-
         if (body.status) template.status = String(body.status).toUpperCase();
         if (body.category) template.category = String(body.category).toUpperCase();
         return template;
+      });
+      on('POST', '/window/enforce', ({ body }) => {
+        enforceWindow = body.on !== false;
+        return { enforce: enforceWindow };
+      });
+      on('POST', '/numbers', ({ body }) => {
+        if (!body.phoneId) throw new SimError(400, { error: 'phoneId is required.' });
+        numbers.set(String(body.phoneId), { displayName: body.displayName, displayNumber: body.displayNumber });
+        return { phoneId: String(body.phoneId), ...numbers.get(String(body.phoneId)) };
+      });
+      on('POST', '/signup/codes', ({ body }) => {
+        if (!body.code) throw new SimError(400, { error: 'code is required.' });
+        const bought = body.token ?? `sim-wa-token-${++seq}`;
+        codes.set(String(body.code), bought);
+        return { code: String(body.code), token: bought };
       });
       on('POST', '/templates/enforce', ({ body }) => {
         enforce = body.on !== false;
@@ -117,8 +171,11 @@ export function createWhatsApp({ token = 'sim-whatsapp-token', appSecret = 'sim-
       });
       on('POST', '/inbound', ({ body }) => {
         if (!body.phoneId || !/^\d{8,15}$/.test(String(body.from ?? ''))) throw new SimError(400, { error: 'phoneId and from (digits) are required.' });
-        const message = { from: String(body.from), id: `wamid.in${++seq}`, timestamp: String(Math.floor(sim.clock.now() / 1000)), type: 'text', text: { body: String(body.text ?? '') } };
-        return hooks.send(envelope(body.phoneId, { contacts: [{ wa_id: message.from }], messages: [message] }), { duplicates: body.duplicates, hold: body.hold, signature: body.signature });
+        const at = Number.isFinite(body.at) ? body.at : sim.clock.now();
+        const message = { from: String(body.from), id: body.messageId ? String(body.messageId) : `wamid.in${++seq}`, timestamp: String(Math.floor(at / 1000)), type: 'text', text: { body: String(body.text ?? '') } };
+        const key = `${body.phoneId}:${message.from}`;
+        lastInbound.set(key, Math.max(lastInbound.get(key) ?? 0, at));
+        return hooks.send(envelope(body.phoneId, { contacts: [{ wa_id: message.from, ...(body.name ? { profile: { name: String(body.name) } } : {}) }], messages: [message] }), { duplicates: body.duplicates, hold: body.hold, signature: body.signature });
       });
     },
   });

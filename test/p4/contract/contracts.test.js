@@ -323,7 +323,8 @@ test('nothing but the gate sends to WhatsApp or by email, and the app wires the 
       if (entry.isDirectory()) walk(full);
       else if (entry.name.endsWith('.js') && !rel.startsWith('src/modules/shopper-messages/') && !rel.startsWith('src/adapters/whatsapp/') && !rel.startsWith('src/adapters/email/')) {
         const source = fs.readFileSync(full, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
-        if (/\.sendTemplate\(|providers\??\.email\??\.send\(|\bemail\.send\(|adapters\/whatsapp|adapters\/email/.test(source) && rel !== 'src/adapters/store.js') offenders.push(rel);
+        // Phase 7: WhatsApp has a second path, the compliance gate's own channel (PRD 6.12). That one file may send; test/p7/contract holds it to the gate.
+        if (/\.sendTemplate\(|\.sendText\(|providers\??\.email\??\.send\(|\bemail\.send\(|adapters\/whatsapp|adapters\/email/.test(source) && rel !== 'src/adapters/store.js' && rel !== 'src/modules/whatsapp-automation/channel.js') offenders.push(rel);
       }
     }
   };
@@ -337,7 +338,8 @@ test('nothing but the gate sends to WhatsApp or by email, and the app wires the 
     assert.equal(typeof ctx.orderEvents.on, 'function');
     assert.equal(typeof ctx.platform.rateLimit.hit, 'function');
     assert.equal(typeof ctx.platform.consent.use, 'function');
-    assert.deepEqual(Object.keys(ctx.providers).sort(), ['email', 'razorpay', 'shiprocket', 'shopify', 'whatsapp']);
+    // Phase 7 adds the model provider behind AI replies: 'none' until one is chosen, and it sends nothing to a shopper.
+    assert.deepEqual(Object.keys(ctx.providers).sort(), ['ai', 'email', 'razorpay', 'shiprocket', 'shopify', 'whatsapp']);
     assert.equal(ctx.providers.razorpay.default.kind, 'route', 'Bhava-managed is the default');
     assert.equal(ctx.platform.consent.built, false, 'until the consent track registers');
   } finally {

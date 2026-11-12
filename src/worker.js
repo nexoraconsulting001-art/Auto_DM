@@ -8,6 +8,7 @@ import { createMetaAdapters } from './adapters/meta/index.js';
 import { createStoreAdapters } from './adapters/store.js';
 import { openRuntimeDb, ownerDatabaseUrl } from './db/index.js';
 import { createInstagram } from './instagram.js';
+import { createInboundHooks } from './modules/automations/unmatched.js';
 import { createCompliance } from './modules/compliance/index.js';
 import { MODULES } from './modules/index.js';
 import { createMetaCallObserver } from './modules/meta-calls.js';
@@ -59,9 +60,10 @@ export function registerJobs({ db, platform, config, modules = MODULES, metaCall
   const appStores = createAppStores(config);
   const compliance = createCompliance({ db, repos, ig, meta, config, platform });
   const providers = createStoreAdapters(config);
-  const shopperMessages = createShopperMessages({ db, platform, providers, config });
+  const shopperMessages = createShopperMessages({ db, platform, providers, config, compliance });
+  const inbound = createInboundHooks({ platform });
   const notify = createNotify({ db, providers, config });
-  const jobContext = { db, repos, platform, config, ig, meta, google, eas, appStores, providers, compliance, shopperMessages, notify, modules };
+  const jobContext = { db, repos, platform, config, ig, meta, google, eas, appStores, providers, compliance, shopperMessages, inbound, notify, modules };
   metaCalls.bind(jobContext);
   // The order event bus: listeners register in each module's setup, and this worker is what delivers.
   const orderEvents = wireOrderEvents(jobContext);

@@ -1,3 +1,4 @@
+import { META_CHANNELS } from '../../contracts/compliance.js';
 import { reportError } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { linkProblem } from '../links/rules.js';
@@ -52,7 +53,8 @@ export function budgetMultiplier(state, at, limits) {
 /** The message as it will really be sent: with the seller's note, on automated DMs only (PRD 4.10). */
 export function finalMessage(action, state) {
   const automated = action.purpose !== 'manual' && action.kind !== 'public_reply';
-  if (!automated || !state.disclosureEnabled) return action.message;
+  // An approved template is sent as approved. An AI reply always carries the note (PRD 6.11), whatever the setting.
+  if (!automated || action.message.template || (!state.disclosureEnabled && action.purpose !== 'ai_reply')) return action.message;
   return { ...action.message, text: withDisclosure(action.message.text) };
 }
 
@@ -100,7 +102,10 @@ export function evaluate(action, s, { at, limits, trigger = '' }) {
     const ourDm = s.lastAutomationDmAt ? +s.lastAutomationDmAt : null;
     if (!lastUser || !ourDm || lastUser <= ourDm) return deny('skipped', 'followup.no_response');
   }
-  if (action.kind === 'dm' && (lastUser === null || at - lastUser >= limits.messagingWindowMs)) {
+  if (action.message.template) {
+    // A message the business starts (PRD 6.12): only to someone who said yes, and then no window is needed.
+    if (!s.optedIn) return deny('skipped', 'wa.no_optin');
+  } else if (action.kind === 'dm' && (lastUser === null || at - lastUser >= limits.messagingWindowMs)) {
     return deny('skipped', trigger === 'mention' ? 'mention.no_window' : 'window.closed');
   }
   if (action.purpose === 'followup' && at < lastUser + limits.followupMinDelayMs) {
@@ -169,7 +174,7 @@ export function evaluateCreation(action, s, { at, limits }) {
 }
 
 /** Builds the snapshot evaluate() reads. Switches come from a cache of at most COMPLIANCE_LIMITS.switchCacheMs (PRD 4.12). */
-export function createGate({ db, repos, config, now, limits }) {
+export function createGate({ db, repos, config, now, limits, channels }) {
   const switchCache = new Map();
   let blockedHosts = { at: 0, map: new Map() };
 
@@ -208,6 +213,18 @@ export function createGate({ db, repos, config, now, limits }) {
   const invalidate = () => switchCache.clear();
 
   async function findAccount(action, known) {
+    const registered = channels?.get(action.channel);
+    if (registered) {
+      try {
+        const account = known ?? (await registered.account(action));
+        return account ? { tokenVersion: null, ...account } : null;
+      } catch (err) {
+        reportError(err, { msg: 'compliance.account_unreadable', account: action.accountId });
+        return { token: '', status: 'reconnect', tokenVersion: null };
+      }
+    }
+    // A channel nobody registered has no account here, so nothing goes out on it.
+    if (!META_CHANNELS.includes(action.channel)) return null;
     const facebook = action.channel === 'facebook';
     let account = known ?? null;
     if (!account) {
@@ -303,6 +320,12 @@ export function createGate({ db, repos, config, now, limits }) {
       await automationState(action.automationId),
     ];
     const state = { ...sw, breakerBlocks, account, ...person, rate, automation, ownDomain: config.platformDomain ?? '' };
+    const registered = channels?.get(action.channel);
+    if (registered) {
+      const known = (await registered.windowState({ action, subject, thread: person.thread })) ?? {};
+      state.optedIn = known.optedIn === true;
+      if (known.lastUserMessageAt !== undefined) state.thread = { id: null, pausedUntil: null, pauseReason: '', ...person.thread, lastUserMessageAt: known.lastUserMessageAt };
+    }
     state.dryRun = sw.dryRun || Boolean(automation?.dry_run);
     state.isTest = action.isTest;
     if (action.purpose === 'followup') state.lastAutomationDmAt = await lastDmAt(action.channel, subject, action.automationId);
@@ -315,5 +338,17 @@ export function createGate({ db, repos, config, now, limits }) {
     return state;
   }
 
-  return { load, findAccount, invalidate, rateState, switches };
+  /**
+   * Why nothing may go out on this channel right now, or '': the kill switch, then the business's own pause. For a
+   * sender that is not a job of this queue (ctx.shopperMessages on WhatsApp). The breaker is asked only with
+   * { breaker: true }: it reopens on a probe from this queue, which such a sender never makes.
+   */
+  async function sendingPaused(channel, { breaker = false } = {}) {
+    const sw = await switches(channel);
+    if (sw.globalKill) return 'paused.global';
+    if (sw.tenantPaused) return 'paused.tenant';
+    return breaker && sw.breaker.state !== 'closed' ? 'paused.breaker' : '';
+  }
+
+  return { load, findAccount, invalidate, rateState, switches, sendingPaused };
 }

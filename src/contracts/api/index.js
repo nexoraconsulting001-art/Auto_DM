@@ -1,4 +1,5 @@
 import { activityRoutes } from './activity.js';
+import { aiReplyRoutes, whatsappRoutes } from './addons.js';
 import { alertRoutes } from './alerts.js';
 import { appRoutes } from './app.js';
 import { appPublishingRoutes } from './apps.js';
@@ -183,6 +184,9 @@ export const routes = Object.freeze(withServices({
   // Phase 7: what a seller sees of Bhava's team (ops.js)
   ...teamFeedRoutes,
   ...setupRoutes,
+  // Phase 7: the AI replies and WhatsApp add-ons (addons.js)
+  ...aiReplyRoutes,
+  ...whatsappRoutes,
 }));
 
 export const routeList = Object.freeze(Object.entries(routes).map(([id, route]) => Object.freeze({ id, ...assertRouteFields(id, route) })));

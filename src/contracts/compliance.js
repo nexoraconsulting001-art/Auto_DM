@@ -19,7 +19,7 @@ export const REASON_CODE_FAMILIES = Object.freeze({
   token: Object.freeze(['token.refreshed', 'token.refresh_failed', 'token.rejected', 'token.deauthorized']),
   gate: Object.freeze(['gate.access_level', 'gate.scope_missing', 'gate.privacy_url', 'gate.deletion_callback', 'gate.passed']),
   data: Object.freeze(['deletion.requested', 'deletion.completed']),
-  addon: Object.freeze(['ai.low_confidence', 'ai.ungrounded', 'wa.no_optin']),
+  addon: Object.freeze(['ai.low_confidence', 'ai.ungrounded', 'ai.handoff', 'ai.provider_failed', 'wa.no_optin']),
 });
 export const OUTCOMES = REASON_CODE_FAMILIES.outcome;
 export const REASON_CODES = Object.freeze(Object.values(REASON_CODE_FAMILIES).flat());
@@ -71,9 +71,19 @@ export const SLOW_MODE_TRIGGERS = Object.freeze(['reach_drop', 'buc_80002', 'ins
 /** Calls to Meta that aren't messages, highest priority first (PRD 4.3). callAllowed() decides whether one may run. */
 export const CALL_CLASSES = Object.freeze(['token_refresh', 'subscribed_apps', 'comment_timestamp', 'public_reply', 'story_insights', 'insights', 'media_list']);
 
-export const Channel = z.enum(['instagram', 'facebook']);
+/** The channels a seller connects through Meta login: the only ones an automation, a tester or a tracked link is made for. */
+export const META_CHANNELS = Object.freeze(['instagram', 'facebook']);
+export const MetaChannel = z.enum(META_CHANNELS);
+/** Every channel the gate sends on. whatsapp (PRD 6.12) works once its module has registered it: src/modules/compliance/channels.js. */
+export const CHANNELS = Object.freeze([...META_CHANNELS, 'whatsapp']);
+export const Channel = z.enum(CHANNELS);
+/** The column that names the account of a job or an inbox thread, per channel. Exactly one of the three is set on a row. */
+export const ACCOUNT_COLUMNS = Object.freeze({ instagram: 'ig_user_id', facebook: 'fb_page_id', whatsapp: 'wa_phone_number_id' });
 export const SEND_KINDS = Object.freeze(['private_reply', 'dm', 'public_reply']);
-export const SEND_PURPOSES = Object.freeze(['trigger', 'link', 'followup', 'welcome', 'faq', 'optout_confirm', 'manual', 'test']);
+/** ai_reply (PRD 6.11) is the one automated reply to the inbound DM it answers, as faq is: the same key and the same cap. */
+export const SEND_PURPOSES = Object.freeze(['trigger', 'link', 'followup', 'welcome', 'faq', 'optout_confirm', 'manual', 'test', 'ai_reply']);
+/** What someone said yes to on WhatsApp (whatsapp_optins.purpose), and what a template is sent for. */
+export const WHATSAPP_OPTIN_PURPOSES = Object.freeze(['marketing', 'order_updates']);
 
 /** { url, title } opens a page, { payload, title } comes back as a postback (the two-tap flow, PRD 6.13). */
 export const ComplianceButton = z.union([
@@ -85,10 +95,21 @@ export const ComplianceMessage = z.object({
   text: z.string().min(1),
   button: ComplianceButton.optional(),
   quickReplies: z.array(z.object({ title: z.string().min(1), payload: z.string().min(1) })).optional(),
+  /**
+   * WhatsApp only: a message the business starts, as one of its approved templates. `text` is still the body as the person
+   * will read it, for the content and link checks. It goes only to someone who opted in to `purpose` (wa.no_optin), and
+   * needs no open window. Without `template` a WhatsApp message is free-form and needs the window (window.closed).
+   */
+  template: z.object({
+    name: z.string().regex(/^[a-z0-9_]{1,512}$/),
+    language: z.string().regex(/^[a-z]{2}(_[A-Z]{2})?$/).default('en'),
+    params: z.array(z.string()).max(20).default([]),
+    purpose: z.enum(WHATSAPP_OPTIN_PURPOSES).default('marketing'),
+  }).optional(),
 });
 
 /**
- * One thing to send. `accountId` is the ig_user_id or Page id it goes out from. commentId is required for a private or
+ * One thing to send. `accountId` is the ig_user_id, Page id or WhatsApp phone number id it goes out from (on WhatsApp recipientId is the person's wa_id). commentId is required for a private or
  * public reply, recipientId (the IGSID or PSID) for a dm. personId is whose hash goes in the log; it is the same as
  * recipientId on a dm and the commenter on a reply. `expiresAt` is when it stops being allowed, whatever the reason it waited.
  */
@@ -110,6 +131,8 @@ export const ComplianceAction = z.object({
 }).superRefine((action, issues) => {
   if (action.kind !== 'dm' && !action.commentId) issues.addIssue({ code: 'custom', path: ['commentId'], message: 'A reply needs the comment it answers' });
   if (action.kind === 'dm' && !action.recipientId) issues.addIssue({ code: 'custom', path: ['recipientId'], message: 'A DM needs a recipient' });
+  if (action.channel === 'whatsapp' && action.kind !== 'dm') issues.addIssue({ code: 'custom', path: ['kind'], message: 'WhatsApp has messages only' });
+  if (action.channel !== 'whatsapp' && action.message.template) issues.addIssue({ code: 'custom', path: ['message', 'template'], message: 'Only WhatsApp has templates' });
 });
 
 /**

@@ -14,6 +14,21 @@ import { DEFAULT_TIMEOUT_MS, ProviderError, createHttp, hmac, providerUrl, sameB
  *   createTemplate(account, { name, language, category, components }) -> { id, status }
  *   phoneNumber(account)                                        -> { id, displayNumber, verifiedName, quality }
  *
+ * The WhatsApp add-on (PRD 6.12). NOTHING calls sendText except the WhatsApp channel of the compliance gate
+ * (src/modules/whatsapp-automation/channel.js, registered with ctx.compliance.registerChannel), so every free-form message
+ * has passed the queue, the window, opt-outs, caps, content and link checks and the pauses. A test keeps it so.
+ *
+ *   sendText(account, { to, text, previewUrl? })                -> { messageId }
+ *       Free-form text, allowed only inside the 24 hour window. Outside it Meta answers 131047, which is ProviderError
+ *       kind 'rejected', code '131047', delivery 'none'. `to` and `text` are never logged.
+ *   exchangeCode({ code })                                      -> { accessToken }
+ *       Embedded signup: the code Meta's dialog hands the browser, for the business's own token (WHATSAPP_APP_ID and
+ *       WHATSAPP_APP_SECRET). A code works once. Not configured: ProviderError kind 'rejected', code 'not_configured'.
+ *   displayName(account)                                        -> the number's verified name, '' when Meta has none
+ *   subscribe(account)                                          -> true once this app receives the account's webhooks
+ *   parseMessages(body) -> [{ phoneNumberId, messageId, from, text, type, at, name }]   every inbound message, for the
+ *       inbox: `from` is a phone number and `name` a person's profile name: never log either.
+ *
  * A send whose answer was lost is ProviderError with delivery 'unknown': it is never sent again on a guess. Every call has a
  * 10 s timeout. WHATSAPP_BASE_URL points at tools/sim/whatsapp, refused when NODE_ENV=production.
  *
@@ -59,6 +74,22 @@ export function parseInbound(body) {
   }))).filter((m) => m.from);
 }
 
+/** Every inbound message of a delivery, routed by value.metadata.phone_number_id. Reactions and receipts carry no text. */
+export function parseMessages(body) {
+  return changes(body).flatMap((value) => {
+    const names = new Map((Array.isArray(value.contacts) ? value.contacts : []).map((c) => [String(c?.wa_id ?? ''), String(c?.profile?.name ?? '')]));
+    return (Array.isArray(value.messages) ? value.messages : []).map((m) => ({
+      phoneNumberId: String(value.metadata?.phone_number_id ?? ''),
+      messageId: String(m.id ?? ''),
+      from: String(m.from ?? ''),
+      text: String(m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? ''),
+      type: String(m.type ?? 'text'),
+      at: new Date(Number(m.timestamp) * 1000 || Date.now()),
+      name: names.get(String(m.from ?? '')) ?? '',
+    }));
+  }).filter((m) => m.from && m.messageId && m.phoneNumberId);
+}
+
 export function createWhatsApp(config = {}, { env = process.env } = {}) {
   const baseUrl = providerUrl({ value: config.whatsappBaseUrl, real: WHATSAPP_HOST, name: 'WHATSAPP_BASE_URL', env });
   const version = config.whatsappGraphVersion || config.graphVersion || 'v23.0';
@@ -90,9 +121,38 @@ export function createWhatsApp(config = {}, { env = process.env } = {}) {
       const { body } = await request('GET', `/${encodeURIComponent(account.phoneNumberId)}`, { headers: auth(account), retries: 2 });
       return { id: String(body.id), displayNumber: body.display_phone_number ?? '', verifiedName: body.verified_name ?? '', quality: body.quality_rating ?? '' };
     },
+    async sendText(account, { to, text, previewUrl = true }) {
+      if (!/^[1-9][0-9]{7,14}$/.test(String(to))) throw new Error('WhatsApp needs the number in international format, digits only');
+      if (typeof text !== 'string' || !text.trim()) throw new Error('A WhatsApp message needs text');
+      // No retry: a message that may have gone out is not repeated.
+      const { body } = await request('POST', `/${encodeURIComponent(account.phoneNumberId)}/messages`, {
+        headers: auth(account),
+        json: { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to), type: 'text', text: { body: text, preview_url: Boolean(previewUrl) } },
+      });
+      return { messageId: body?.messages?.[0]?.id ?? '' };
+    },
+    async exchangeCode({ code }) {
+      const appId = String(config.whatsappAppId ?? '');
+      const appSecret = String(config.whatsappAppSecret ?? '');
+      if (!appId || !appSecret) throw new ProviderError({ provider: 'whatsapp', kind: 'rejected', code: 'not_configured', delivery: 'none' });
+      if (typeof code !== 'string' || !code) throw new Error('Embedded signup hands back a code');
+      // In the body, never in the address: a secret in a query string ends up in logs.
+      const { body } = await request('POST', '/oauth/access_token', { json: { client_id: appId, client_secret: appSecret, code } });
+      if (typeof body?.access_token !== 'string' || !body.access_token) throw new ProviderError({ provider: 'whatsapp', kind: 'malformed', delivery: 'none' });
+      return { accessToken: body.access_token };
+    },
+    async displayName(account) {
+      const { body } = await request('GET', `/${encodeURIComponent(account.phoneNumberId)}`, { headers: auth(account), query: { fields: 'verified_name,display_phone_number' }, retries: 2 });
+      return String(body?.verified_name ?? '');
+    },
+    async subscribe(account) {
+      const { body } = await request('POST', `/${encodeURIComponent(account.wabaId)}/subscribed_apps`, { headers: auth(account) });
+      return body?.success === true;
+    },
     verifyWebhook,
     parseStatuses,
     parseInbound,
+    parseMessages,
     platform: platformSender(config, request),
   };
 }

@@ -13,6 +13,7 @@ import { createStoreAdapters } from './adapters/store.js';
 import { createAuth } from './auth.js';
 import { handleComment } from './handler.js';
 import { createInstagram } from './instagram.js';
+import { createInboundHooks } from './modules/automations/unmatched.js';
 import { createCompliance } from './modules/compliance/index.js';
 import { adminConsole } from './modules/admin-console/index.js';
 import { apiRouterFor } from './modules/api-v1/index.js';
@@ -61,10 +62,12 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
   const appStores = createAppStores(config);
   const compliance = createCompliance({ db, repos, ig, meta, config, platform });
   const providers = createStoreAdapters(config);
-  const shopperMessages = createShopperMessages({ db, platform, providers, config });
+  const shopperMessages = createShopperMessages({ db, platform, providers, config, compliance });
+  // Where a module asks to hear about DMs no rule answered (AI replies). The worker runs the handlers.
+  const inbound = createInboundHooks({ platform });
   // Everything a seller is told goes through notify; everything a shopper is told goes through shopperMessages.
   const notify = createNotify({ db, providers, config });
-  const ctx = { db, repos, ig, meta, google, apple, eas, appStores, providers, compliance, shopperMessages, notify, auth, config, platform, modules, tenantResolver: tenants };
+  const ctx = { db, repos, ig, meta, google, apple, eas, appStores, providers, compliance, shopperMessages, inbound, notify, auth, config, platform, modules, tenantResolver: tenants };
   metaCalls.bind(ctx);
   // The order event bus, then each module's own start-up: its listeners on the bus, the consent provider.
   wireOrderEvents(ctx);

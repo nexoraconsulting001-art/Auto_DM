@@ -2,6 +2,14 @@ import crypto from 'node:crypto';
 import { fillTemplate } from '../compliance/content.js';
 
 const VARIABLE = /\{[^{}\n]{1,40}\}/g;
+const MAX_KEY_PART = 150;
+
+/**
+ * The idempotency key of the one automated reply to an inbound DM (PRD 4.7, 6.4): a keyword rule's answer, an ice
+ * breaker's and an AI reply (6.11) all use it, with { inReplyTo: mid }, so whichever comes second is refused. Message
+ * ids run long and a key stops at 200 characters, so a long one is hashed.
+ */
+export const dmReplyKey = (mid) => `dm_reply:${String(mid).length > MAX_KEY_PART ? crypto.createHash('sha256').update(String(mid)).digest('hex').slice(0, 40) : String(mid)}`;
 const KNOWN_VARIABLES = new Set(['{first_name}', '{url}']);
 
 /** Variables a template uses that don't exist (PRD 4.10). */

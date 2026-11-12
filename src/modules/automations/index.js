@@ -2,6 +2,7 @@ import { automationsApi } from './api.js';
 import { createAutomationEngine, engineFor } from './engine.js';
 import { inboxRepo } from './inbox.js';
 import { automationsRepo } from './repo.js';
+import { UNMATCHED_QUEUE } from './unmatched.js';
 import { iceBreakersRepo, testersRepo } from './testers.js';
 
 export { createAutomationEngine };
@@ -19,6 +20,8 @@ export const automations = {
 
   jobs(ctx) {
     const engine = engineFor(ctx);
+    // DMs no rule answered, for the handlers registered with ctx.inbound.onUnmatched: here, on the queue, never in the webhook request.
+    if (ctx.inbound) ctx.platform.queue.work(UNMATCHED_QUEUE, (job) => ctx.inbound.run(job));
     let nextRetention = 0;
     return async function schedule() {
       const retention = Date.now() >= nextRetention;

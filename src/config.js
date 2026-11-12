@@ -156,6 +156,16 @@ export const config = {
   whatsappBaseUrl: process.env.WHATSAPP_BASE_URL || '',
   whatsappAppSecret: process.env.WHATSAPP_APP_SECRET || '',
   whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN || '',
+  // The WhatsApp add-on (PRD 6.12): Meta's embedded signup, by which a business connects its own number. The app id and the
+  // signup configuration id go to the browser; the code it hands back is exchanged with WHATSAPP_APP_SECRET.
+  whatsappAppId: process.env.WHATSAPP_APP_ID || '',
+  whatsappSignupConfigId: process.env.WHATSAPP_SIGNUP_CONFIG_ID || '',
+  // AI replies (PRD 6.11): 'none' until a model provider is chosen, and then nothing is sent to any provider. Otherwise the
+  // wire format ('chat_completions'; 'http' means the same), with the provider's base URL (https), key and model.
+  aiDriver: process.env.AI_DRIVER || 'none',
+  aiBaseUrl: process.env.AI_BASE_URL || '',
+  aiApiKey: process.env.AI_API_KEY || '',
+  aiModel: process.env.AI_MODEL || '',
   // Email to shoppers: 'none' until a provider is chosen (PRD 5.4), or 'http'. EMAIL_HOSTS lists the provider origins allowed.
   emailDriver: process.env.EMAIL_DRIVER || 'none',
   emailBaseUrl: process.env.EMAIL_BASE_URL || '',

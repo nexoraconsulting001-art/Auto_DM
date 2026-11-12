@@ -853,6 +853,39 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, getTenantId, ap
       /** On the host that belongs to no business, after signing in there. @param body { token } */
       openInvite: (body) => post('/setup/invite', body),
     },
+    // The AI replies add-on (6.11): the FAQ it answers from, its switch and threshold, a test question and the log.
+    faq: {
+      /** @param query { cursor?, limit? } */
+      list: (query) => get('/faq', query),
+      /** @param body { question, answer, active? } */
+      create: (body) => post('/faq', body),
+      update: (entryId, body) => patch(`/faq/${id(entryId)}`, body),
+      remove: (entryId) => del(`/faq/${id(entryId)}`),
+    },
+    aiReplies: {
+      settings: () => get('/ai-replies'),
+      /** @param body { enabled?, threshold? } */
+      save: (body) => patch('/ai-replies', body),
+      /** Sends nothing. @param body { question } @returns { answer, sources, score, threshold, wouldSend, reason } */
+      testQuestion: (body) => post('/ai-replies/test', body),
+      /** @param query { outcome?, cursor?, limit? } */
+      log: (query) => get('/ai-replies/log', query),
+    },
+    // The WhatsApp add-on (6.12): the business's own number through Meta's embedded signup, keyword replies and opt-ins.
+    whatsapp: {
+      status: () => get('/whatsapp'),
+      /** Needs a fresh session. @returns { appId, configId, state } for Meta's sign-up dialog. */
+      connectStart: () => post('/whatsapp/connect'),
+      /** Needs a fresh session. @param body { code, state, wabaId, phoneNumberId } */
+      connectFinish: (body) => post('/whatsapp/connect/finish', body),
+      /** Needs a fresh session. */
+      disconnect: () => del('/whatsapp'),
+      keywords: () => get('/whatsapp/keywords'),
+      /** The whole list, in priority order. @param body { items: [{ id?, keywords, reelId, linkUrl, message?, active? }] } */
+      saveKeywords: (body) => put('/whatsapp/keywords', body),
+      /** @param query { purpose?, cursor?, limit? } */
+      optins: (query) => get('/whatsapp/optins', query),
+    },
   };
 }
 

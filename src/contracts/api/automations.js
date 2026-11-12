@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { COMPLIANCE_LIMITS, Channel } from '../compliance.js';
+import { COMPLIANCE_LIMITS, Channel, MetaChannel } from '../compliance.js';
 import { MANAGERS, staffWith } from './access.js';
 import { Count, Id, IdParams, ListQuery, Timestamp, page, required, text } from './common.js';
 
@@ -18,7 +18,7 @@ const When = z.iso.datetime({ offset: true });
 export const SaveWarning = z.object({ code: z.string(), message: z.string() });
 
 export const TriggerInput = z.object({
-  channel: Channel.default('instagram'),
+  channel: MetaChannel.default('instagram'),
   targetType: z.enum(['reel', 'post', 'story', 'any_story', 'dm']),
   mediaId: text(80).default(''),
   permalink: text(1000).default(''),

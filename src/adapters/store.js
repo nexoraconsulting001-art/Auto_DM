@@ -1,3 +1,4 @@
+import { createAi } from './ai/index.js';
 import { createEmail } from './email/index.js';
 import { createRazorpay } from './razorpay/index.js';
 import { createShiprocket } from './shiprocket/index.js';
@@ -15,6 +16,8 @@ import { createWhatsApp } from './whatsapp/index.js';
  *   shopify     Admin API per connected shop
  *   whatsapp    templates, account details and webhook parsing. Its sendTemplate is the gate's alone. whatsapp.platform is
  *               Bhava's own number, for sellers: the notifications service's alone
+ *               Its sendText is the WhatsApp channel's of the compliance gate alone (PRD 6.12)
+ *   ai          the model provider behind AI replies (PRD 6.11): answer() and nothing else. 'none' until one is chosen
  *   email       its send is the gate's alone. email.platform is Bhava's own sender, for sellers: the notifications service's alone
  *
  * A message to a shopper goes through ctx.shopperMessages and nowhere else; one to a seller through ctx.notify and nowhere else.
@@ -26,5 +29,6 @@ export function createStoreAdapters(config = {}, options = {}) {
     shopify: createShopify(config, options),
     whatsapp: createWhatsApp(config, options),
     email: createEmail(config, options),
+    ai: createAi(config, options),
   };
 }

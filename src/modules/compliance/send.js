@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
 import os from 'node:os';
 import { DM_LIMIT_REASON, METERED_SEND_KINDS, UNMETERED_HOLD_PURPOSES, dmUsageKey } from '../../contracts/billing.js';
-import { COMPLIANCE_LIMITS, ComplianceAction } from '../../contracts/compliance.js';
+import { ACCOUNT_COLUMNS, COMPLIANCE_LIMITS, ComplianceAction } from '../../contracts/compliance.js';
 import { log as logger, reportError } from '../../platform/log.js';
 import { tenantId, withTenant } from '../../tenancy.js';
 import { createBreaker } from './breaker.js';
 import { createBudgets } from './budgets.js';
+import { createChannels } from './channels.js';
 import { budgetMultiplier, callAllowed, createGate, evaluate, evaluateCreation, expiryReason, finalMessage, triggerOf } from './gate.js';
 import { createInbound } from './inbound.js';
 import { complianceRepo } from './repo.js';
@@ -71,7 +72,7 @@ function capsFor(action, { trigger, inReplyTo }, subject, limits) {
   if (purpose === 'welcome') return subject ? [{ cap: 'cap.welcome_once', subject, scope: 'welcome' }] : [];
   // The second message of the two-tap flow counts with the first; only a repeat tap's resend is limited (PRD 6.13).
   if (purpose === 'link') return dmReplies;
-  if (purpose === 'faq') return [...perMessage, ...dmReplies];
+  if (purpose === 'faq' || purpose === 'ai_reply') return [...perMessage, ...dmReplies];
   if (trigger === 'mention') return subject ? [rolling('cap.mention_7d', 1, 7 * DAY), ...perPerson] : [];
   if (mediaId || trigger === 'story_reply') return [...perMedia, ...perMessage, ...perPerson];
   return [...perMessage, ...dmReplies];
@@ -105,7 +106,11 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
   const limits = { ...COMPLIANCE_LIMITS, ...config.complianceLimits };
   const workerId = `${os.hostname()}:${process.pid}:${crypto.randomUUID().slice(0, 8)}`;
 
-  const gate = createGate({ db, repos, config, now, limits });
+  const channels = createChannels();
+  const gate = createGate({ db, repos, config, now, limits, channels });
+  /** What an account's token bucket is counted under: the channel's own key, or the account id. */
+  const budgetKeyOf = (action) => channels.get(action.channel)?.budgetKey(action) ?? action.accountId;
+  const ACCOUNT_ID = `COALESCE(${Object.values(ACCOUNT_COLUMNS).join(', ')})`;
   const budgets = createBudgets({ db, now, random, limits });
   const breaker = createBreaker({ db, repos, now, gate });
   const consumers = [];
@@ -162,6 +167,8 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
   /** sendMessage answers with the receipt, usage header included, and cuts nothing. The older two calls are for the reels bridge and clientFor. */
   function dispatch(action, account, { legacy = false } = {}) {
     const { kind, commentId, recipientId, message } = action;
+    const registered = channels.get(action.channel);
+    if (registered) return registered.send(action, account, { legacy });
     if (kind === 'public_reply') return ig.replyToComment(account, commentId, message.text);
     if (kind === 'dm') return ig.sendMessage(account, { id: recipientId }, message);
     if (legacy && message.button?.url && !message.quickReplies) return ig.sendPrivateReplyButton(account, commentId, message.text, message.button.url, message.button.title);
@@ -236,14 +243,14 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
 
   /** Inside a transaction. Null when this idempotency key has been used. */
   async function insertJob(t, { action, status, reason = '', subject, runAt, at, payload, isTest, lockedBy = null, leaseUntil = null, attempts = 0, tokenVersion = null }) {
-    const instagram = action.channel === 'instagram';
+    const account = (channel) => (action.channel === channel ? action.accountId : null);
     const [row] = await t.query(
-      `INSERT INTO outbound_jobs (tenant_id, channel, ig_user_id, fb_page_id, kind, purpose, idempotency_key, status, reason, automation_id, variant_id, media_id, comment_id, recipient_id,
+      `INSERT INTO outbound_jobs (tenant_id, channel, ig_user_id, fb_page_id, wa_phone_number_id, kind, purpose, idempotency_key, status, reason, automation_id, variant_id, media_id, comment_id, recipient_id,
          subject_hash, payload, expires_at, run_at, is_test, locked_by, lease_until, attempts, token_version, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::timestamptz, $18::timestamptz, $19, $20, $21::timestamptz, $22, $23, $24::timestamptz, $24::timestamptz)
+       VALUES ($1, $2, $3, $4, $25, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::timestamptz, $18::timestamptz, $19, $20, $21::timestamptz, $22, $23, $24::timestamptz, $24::timestamptz)
        ON CONFLICT (tenant_id, idempotency_key) DO NOTHING RETURNING *`,
-      [tenantId(), action.channel, instagram ? action.accountId : null, instagram ? null : action.accountId, action.kind, action.purpose, action.idempotencyKey, status, reason,
-        action.automationId ?? null, action.variantId ?? null, action.mediaId ?? '', action.commentId ?? '', action.recipientId ?? '', subject, JSON.stringify(payload), action.expiresAt, runAt, isTest, lockedBy, leaseUntil, attempts, tokenVersion, at],
+      [tenantId(), action.channel, account('instagram'), account('facebook'), action.kind, action.purpose, action.idempotencyKey, status, reason,
+        action.automationId ?? null, action.variantId ?? null, action.mediaId ?? '', action.commentId ?? '', action.recipientId ?? '', subject, JSON.stringify(payload), action.expiresAt, runAt, isTest, lockedBy, leaseUntil, attempts, tokenVersion, at, account('whatsapp')],
     );
     return row ?? null;
   }
@@ -345,7 +352,10 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
   /** Marks the account for reconnecting and raises the alert (PRD 4.2). One token version is reported once. */
   async function tokenRejected(action, account, err) {
     const facebook = action.channel === 'facebook';
-    await db.query(
+    const registered = channels.get(action.channel);
+    const label = registered ? `${action.channel[0].toUpperCase()}${action.channel.slice(1)}` : facebook ? 'Facebook' : 'Instagram';
+    if (registered) await Promise.resolve().then(() => registered.tokenRejected?.(action)).catch(swallow('compliance.reconnect_mark_failed'));
+    else await db.query(
       `UPDATE ${facebook ? 'fb_pages' : 'ig_accounts'} SET status = 'reconnect_needed', status_reason = 'token.rejected', status_changed_at = $3::timestamptz
        WHERE tenant_id = $1 AND ${facebook ? 'page_id' : 'ig_user_id'} = $2 AND status = 'active'`,
       [tenantId(), action.accountId, now()],
@@ -353,7 +363,7 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     await writeLog({ ...action, kind: 'token' }, { outcome: 'held', reason: 'token.rejected', status: intOrNull(err.status), metaCode: intOrNull(err.code), metaSubcode: intOrNull(err.subcode) });
     await repos.alerts?.raise({
       kind: 'token.rejected', severity: 'critical', target: action.accountId,
-      message: `${facebook ? 'Facebook' : 'Instagram'} stopped accepting this account's connection. Reconnect it to start sending again.`,
+      message: `${label === 'Whatsapp' ? 'WhatsApp' : label} stopped accepting this account's connection. Reconnect it to start sending again.`,
       dedupeKey: `token.rejected:${action.channel}:${action.accountId}:${account?.tokenVersion ?? 0}`,
     }).catch(swallow('compliance.token_alert_failed'));
     await breaker.trip(action.channel, 'token.rejected').catch(swallow('compliance.breaker_failed'));
@@ -602,7 +612,7 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     // A send asked for now has no job to hold, so like a throttled one it is refused as held and the caller decides (enqueue to wait).
     if (!state.dryRun && !(await dmQuotaLeft(action))) return refuse(action, subject, 'held', DM_LIMIT_REASON);
     const budget = budgetFor(action.kind);
-    if (budget && !state.dryRun && !(await budgets.take(action.channel, action.accountId, budget, budgetMultiplier(state, +at, limits)))) {
+    if (budget && !state.dryRun && !(await budgets.take(action.channel, budgetKeyOf(action), budget, budgetMultiplier(state, +at, limits)))) {
       return refuse(action, subject, 'held', 'rate.throttled');
     }
 
@@ -634,7 +644,7 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     kind: job.kind,
     purpose: job.purpose,
     channel: job.channel,
-    accountId: job.ig_user_id ?? job.fb_page_id,
+    accountId: job[ACCOUNT_COLUMNS[job.channel]],
     idempotencyKey: job.idempotency_key,
     expiresAt: new Date(job.expires_at),
     message: job.payload?.message ?? { text: '' },
@@ -652,7 +662,7 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
       `UPDATE outbound_jobs SET locked_by = $5, lease_until = $6::timestamptz, updated_at = $7::timestamptz
        WHERE tenant_id = $1 AND id = (
          SELECT id FROM outbound_jobs
-         WHERE tenant_id = $1 AND channel = $2 AND COALESCE(ig_user_id, fb_page_id) = $3 AND kind = $4 AND status = 'queued'
+         WHERE tenant_id = $1 AND channel = $2 AND ${ACCOUNT_ID} = $3 AND kind = $4 AND status = 'queued'
            AND run_at <= $7::timestamptz AND (lease_until IS NULL OR lease_until <= $7::timestamptz)
          ORDER BY run_at, id FOR UPDATE SKIP LOCKED LIMIT 1
        ) RETURNING *`,
@@ -693,7 +703,7 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
       return { sent: false };
     }
     const budget = budgetFor(action.kind);
-    if (budget && !(await budgets.take(action.channel, action.accountId, budget, budgetMultiplier(state, +at, limits)))) {
+    if (budget && !(await budgets.take(action.channel, budgetKeyOf(action), budget, budgetMultiplier(state, +at, limits)))) {
       if (probe) await breaker.probeUnused(action.channel);
       await unlease(job);
       return { stop: true };
@@ -732,9 +742,9 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
   async function drainOutbound({ perStream = STREAM_SENDS_PER_TICK, concurrency = FAIRNESS_TENANTS_AT_ONCE } = {}) {
     const at = now();
     const rows = await db.platform.query(
-      `SELECT tenant_id, channel, COALESCE(ig_user_id, fb_page_id) AS account_id, kind FROM outbound_jobs
+      `SELECT tenant_id, channel, ${ACCOUNT_ID} AS account_id, kind FROM outbound_jobs
        WHERE status = 'queued' AND run_at <= $1::timestamptz AND (lease_until IS NULL OR lease_until <= $1::timestamptz)
-       GROUP BY tenant_id, channel, COALESCE(ig_user_id, fb_page_id), kind`,
+       GROUP BY tenant_id, channel, ${ACCOUNT_ID}, kind`,
       [at],
     );
     const byTenant = new Map();
@@ -833,6 +843,12 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
       [business, at],
     );
     await db.query(
+      `UPDATE outbound_jobs j SET ${queuedAgain} FROM whatsapp_accounts a
+       WHERE j.tenant_id = $1 AND j.status = 'held' AND j.reason = 'paused.reconnect' AND j.channel = 'whatsapp'
+         AND a.tenant_id = j.tenant_id AND a.phone_number_id = j.wa_phone_number_id AND a.status = 'active' AND a.access_token_enc <> ''`,
+      [business, at],
+    );
+    await db.query(
       `UPDATE outbound_jobs j SET ${queuedAgain}
        WHERE j.tenant_id = $1 AND j.status = 'held' AND j.reason = 'paused.breaker'
          AND NOT EXISTS (SELECT 1 FROM breakers b WHERE b.tenant_id = j.tenant_id AND b.channel = j.channel AND b.state <> 'closed')`,
@@ -866,7 +882,7 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
       `UPDATE outbound_jobs j SET ${queuedAgain}
        WHERE j.tenant_id = $1 AND j.status = 'held' AND j.reason IN ('held.review', 'rate.slow_mode')
          AND NOT EXISTS (
-           SELECT 1 FROM account_rate_state r WHERE r.tenant_id = j.tenant_id AND r.channel = j.channel AND r.account_id = COALESCE(j.ig_user_id, j.fb_page_id)
+           SELECT 1 FROM account_rate_state r WHERE r.tenant_id = j.tenant_id AND r.channel = j.channel AND r.account_id = COALESCE(j.ig_user_id, j.fb_page_id, j.wa_phone_number_id)
              AND r.slow_mode_until > $2::timestamptz AND (r.slow_mode_override_at IS NULL OR r.slow_mode_override_at < r.slow_mode_started_at)
          )`,
       [business, at],
@@ -1069,6 +1085,15 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     send,
     enqueue,
     check,
+
+    /** Another channel for the gate (PRD 6.12: WhatsApp), registered by its module in setup(ctx). The definition is in channels.js. */
+    registerChannel: (name, definition) => channels.register(name, definition),
+    channels: () => channels.names(),
+    /** '' or the reason nothing may go out on this channel now (paused.global, paused.tenant): what ctx.shopperMessages asks before a WhatsApp send. */
+    async sendingPaused(channel, options) {
+      tenantId();
+      return gate.sendingPaused(channel, options);
+    },
 
     /** Failures are thrown here, because that is what src/handler.js is written against. Nothing in production calls it any more. */
     clientFor(account) {

@@ -1,6 +1,7 @@
 import { abandonedCart } from './abandoned-cart/index.js';
 import { accounts } from './accounts/index.js';
 import { adminApi } from './admin-api/index.js';
+import { aiReplies } from './ai-replies/index.js';
 import { adminConsole } from './admin-console/index.js';
 import { alerts } from './alerts/index.js';
 import { apiAuth } from './api-auth/index.js';
@@ -65,6 +66,7 @@ import { tenantHealth } from './tenant-health/index.js';
 import { themes } from './themes/index.js';
 import { traffic } from './traffic/index.js';
 import { usage } from './usage/index.js';
+import { whatsappAutomation } from './whatsapp-automation/index.js';
 import { wishlist } from './wishlist/index.js';
 
 /**
@@ -130,9 +132,14 @@ import { wishlist } from './wishlist/index.js';
  * console routes are OPS_PLATFORM_OWNERS in src/contracts/api/platform-ops.js. The first two also supply what the API router
  * reads on every request of a session Bhava's team opened: repos.impersonation.live, repos.serviceSessions.live and
  * repos.serviceChanges.record.
+ *
+ * Phase 7's two add-ons (PRD 6.11, 6.12) are ai-replies and whatsapp-automation, directly after facebook: after compliance, which
+ * they send through, and after automations, whose keyword rules always run before an AI reply. ctx.inbound (automations/unmatched.js)
+ * is where ai-replies registers for DMs no rule answered, and whatsapp-automation's setup registers WhatsApp as a channel of the gate.
+ * ctx.providers.ai is the model provider (src/adapters/ai).
  */
 export const MODULES = [
-  brand, entitlements, billing, usage, signup, referrals, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, impersonation, managedServices, onboarding, tenantHealth, igConnect, compliance, automations, links, facebook, domains,
+  brand, entitlements, billing, usage, signup, referrals, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, impersonation, managedServices, onboarding, tenantHealth, igConnect, compliance, automations, links, facebook, aiReplies, whatsappAutomation, domains,
   insights, reachGuard, traffic, reports,
   appLinks,
   catalog, imports, categories, pages, themes, creator, leads,

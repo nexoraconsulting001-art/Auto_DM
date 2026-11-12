@@ -10,7 +10,8 @@ import { tenantId } from '../../tenancy.js';
  * all call send(); none of them calls an adapter.
  *
  * In order, a message is refused when: its shape is wrong; its text names the platform; a marketing email has no
- * unsubscribe link; the shopper has not said yes to that purpose on that channel (a login code needs no yes); it is
+ * unsubscribe link; it is for WhatsApp and the compliance gate says the kill switch is engaged or the business is paused
+ * (compliance.sendingPaused('whatsapp'): a login code and an order update stop with everything else); the shopper has not said yes to that purpose on that channel (a login code needs no yes); it is
  * marketing inside quiet hours (deferred, not dropped); there is no address; the business has no account for the channel;
  * the WhatsApp template isn't approved. Only then is the provider called, once: a send whose answer was lost is reported
  * as failed with reason 'unknown_delivery' and retryable false, so nobody sends it twice on a guess.
@@ -20,7 +21,7 @@ import { tenantId } from '../../tenancy.js';
 const digits = (phone) => String(phone ?? '').replace(/[^0-9]/g, '');
 const result = (outcome, reason, extra = {}) => ({ outcome, reason, ...extra });
 
-export function createShopperMessages({ db, platform, providers, config = {} }) {
+export function createShopperMessages({ db, platform, providers, config = {}, compliance = null }) {
   const textOf = (message) => (message.channel === 'email' ? [message.email?.subject, message.email?.html, message.email?.text] : (message.template?.params ?? [])).map((v) => String(v ?? '')).join('\n');
 
   function shapeProblem(message) {
@@ -63,6 +64,10 @@ export function createShopperMessages({ db, platform, providers, config = {} }) 
     tenantId();
     const problem = shapeProblem(message);
     if (problem) return { verdict: result('skipped', problem) };
+    if (message.channel === 'whatsapp' && compliance) {
+      const paused = await compliance.sendingPaused('whatsapp');
+      if (paused) return { verdict: result('skipped', paused === 'paused.global' ? R.pausedGlobal : R.pausedBusiness) };
+    }
     const to = message.to ?? {};
     const address = message.channel === 'whatsapp' ? digits(to.phone) : String(to.email ?? '').trim();
 
