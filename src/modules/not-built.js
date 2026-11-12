@@ -35,7 +35,8 @@ export function platformNotBuilt(router, ...ids) {
   for (const id of ids) {
     const route = platformRoutes[id];
     if (!route) throw new Error(`"${id}" is not a Platform Console route`);
-    router[route.method.toLowerCase()](route.path, requirePlatformRole(...route.platformRoles), (_req, res) => {
+    const guard = route.public ? (_req, _res, next) => next() : requirePlatformRole(...route.platformRoles);
+    router[route.method.toLowerCase()](route.path, guard, (_req, res) => {
       res.set('Cache-Control', 'no-store').status(501).json(NOT_BUILT);
     });
   }

@@ -27,6 +27,7 @@ import { domains } from './domains/index.js';
 import { entitlements } from './entitlements/index.js';
 import { facebook } from './facebook/index.js';
 import { gatewayKeys } from './gateway-keys/index.js';
+import { impersonation } from './impersonation/index.js';
 import { igAccounts } from './ig-accounts/index.js';
 import { igConnect } from './ig-connect/index.js';
 import { imports } from './imports/index.js';
@@ -36,7 +37,9 @@ import { invoices } from './invoices/index.js';
 import { leads } from './leads/index.js';
 import { links } from './links/index.js';
 import { loyalty } from './loyalty/index.js';
+import { managedServices } from './managed-services/index.js';
 import { notifications } from './notifications/index.js';
+import { onboarding } from './onboarding/index.js';
 import { orderAlerts } from './order-alerts/index.js';
 import { orders } from './orders/index.js';
 import { ota } from './ota/index.js';
@@ -58,6 +61,7 @@ import { storeAccess } from './store-access/index.js';
 import { storeListings } from './store-listings/index.js';
 import { storefront } from './storefront/index.js';
 import { team } from './team/index.js';
+import { tenantHealth } from './tenant-health/index.js';
 import { themes } from './themes/index.js';
 import { traffic } from './traffic/index.js';
 import { usage } from './usage/index.js';
@@ -120,9 +124,15 @@ import { wishlist } from './wishlist/index.js';
  * price list, invoices, the provider's webhooks, statements), usage (the meters, registered with compliance in setup), signup
  * (the PUBLIC sign-up routes on the host that belongs to no business) and referrals. They come before compliance and the
  * automations, so a webhook address or a setup() of theirs is in place before anything sends.
+ *
+ * Phase 7's Platform Console work (PRD 5.6, 5.8, 5.9, 5.10, 5.17) adds four folders directly after platform-console, which keeps
+ * sign-in (an emailed code plus TOTP) and the switches: impersonation, managed-services, onboarding and tenant-health. Their
+ * console routes are OPS_PLATFORM_OWNERS in src/contracts/api/platform-ops.js. The first two also supply what the API router
+ * reads on every request of a session Bhava's team opened: repos.impersonation.live, repos.serviceSessions.live and
+ * repos.serviceChanges.record.
  */
 export const MODULES = [
-  brand, entitlements, billing, usage, signup, referrals, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, igConnect, compliance, automations, links, facebook, domains,
+  brand, entitlements, billing, usage, signup, referrals, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, impersonation, managedServices, onboarding, tenantHealth, igConnect, compliance, automations, links, facebook, domains,
   insights, reachGuard, traffic, reports,
   appLinks,
   catalog, imports, categories, pages, themes, creator, leads,

@@ -1,0 +1,60 @@
+/* The Platform Console's own few rules. Everything else is the shared design system (../design). */
+.pc-signin {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: #F6F5F1;
+}
+.pc-signin-card {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 16px;
+}
+.pc-signin-logo {
+  width: 104px;
+  height: 26px;
+}
+.pc-signin-title {
+  font-family: 'Unbounded Variable', sans-serif;
+  font-size: 1.375rem;
+  line-height: 1.25;
+  color: #16152B;
+  margin: 0;
+}
+.pc-secret {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9375rem;
+  letter-spacing: 0.08em;
+  word-break: break-all;
+  padding: 12px;
+  border: 1px solid #DDDBD2;
+  border-radius: 10px;
+  background: #fff;
+  user-select: all;
+}
+.pc-codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pc-role {
+  display: block;
+  font-size: 0.75rem;
+  opacity: 0.72;
+}
+.pc-link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: #3B2FC9;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  min-height: 44px;
+  text-align: left;
+}

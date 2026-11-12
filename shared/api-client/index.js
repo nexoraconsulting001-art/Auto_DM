@@ -823,6 +823,36 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, getTenantId, ap
       /** @param body { runToken } */
       finish: (body) => post('/signup/finish', body),
     },
+    // What a seller sees of Bhava's team (5.6, 5.17). An operator's own write on "approve first" answers 202 { draft: true, changeId }.
+    teamFeed: {
+      /** @param query { service?, state?, cursor?, limit? } */
+      list: (query) => get('/team-feed', query),
+      /** Writes the change's old value back. 409 `service.cannot_undo` when there is nothing to write back. */
+      undo: (changeId) => post(`/team-feed/${id(changeId)}/undo`),
+      approve: (changeId) => post(`/team-feed/${id(changeId)}/approve`),
+      reject: (changeId) => post(`/team-feed/${id(changeId)}/reject`),
+    },
+    services: {
+      settings: () => get('/services'),
+      /** @param body { service, mode: 'direct' | 'approve_first' } */
+      saveSettings: (body) => put('/services', body),
+    },
+    // The done-for-you checklist (5.6). Each step's state is what its live check found.
+    setup: {
+      get: () => get('/setup'),
+      /** @param body { step? }: runs the live checks now, for one step or all. */
+      check: (body) => post('/setup/check', body ?? {}),
+      /** @param body { version } */
+      acceptTerms: (body) => post('/setup/terms', body),
+      /** @param body { name, phone, email?, line1, line2?, city, state, pincode } */
+      pickupAddress: (body) => put('/setup/pickup-address', body),
+      /** @returns { url, status, reason }: the provider's own KYC page. */
+      kycLink: () => post('/setup/kyc-link'),
+      /** Needs a fresh session. @param body { provider, keyId, keySecret }: saved only if the test call passes. */
+      ownKeys: (body) => put('/setup/own-keys', body),
+      /** On the host that belongs to no business, after signing in there. @param body { token } */
+      openInvite: (body) => post('/setup/invite', body),
+    },
   };
 }
 

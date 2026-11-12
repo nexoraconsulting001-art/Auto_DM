@@ -30,7 +30,11 @@ import { DEFAULT_TIMEOUT_MS, createHttp, hmac, providerUrl, sameBytes } from '..
  * amountRefundedPaise, transfers? }.
  *
  * route only: createLinkedAccount({ email, phone, legalName, businessType, contactName, reference }) -> { id, status },
- *             fetchLinkedAccount(id) -> { id, status }, fetchTransfer(id) -> { id, status, amountPaise, amountReversedPaise }.
+ *             fetchLinkedAccount(id) -> { id, status, reason }: the account's KYC state (KYC_STATES in src/contracts/onboarding.js:
+ *             created, under_review, needs_clarification, activated, rejected, suspended) and, for needs_clarification and
+ *             rejected, Razorpay's own reason. kycLink(id) -> { url }: Razorpay's hosted page where the owner completes KYC, so no
+ *             KYC detail passes through Bhava. Status names, the reason's field and the hosted link are to confirm against the live API.
+ *             fetchTransfer(id) -> { id, status, amountPaise, amountReversedPaise }.
  * partner only: authorizeUrl({ state, redirectUri }) and exchangeCode({ code, redirectUri }) -> { accessToken, refreshToken, expiresAt, accountId },
  *               refreshToken(refreshToken) -> the same.
  *
@@ -144,6 +148,13 @@ function need(value, what) {
 }
 
 /** Bhava's account with Route. */
+/** A linked account as the onboarding checklist reads it. An unknown status is kept as it came, so a new one is seen and not guessed. */
+const toLinkedAccount = (body) => ({
+  id: body.id,
+  status: String(body.status ?? 'created'),
+  reason: String(body.status_details?.description ?? body.status_details?.reason ?? body.requirements?.[0]?.description ?? '').slice(0, 300),
+});
+
 function createRoute(config, request) {
   const auth = () => ({ authorization: basic(need(config.razorpayKeyId, 'RAZORPAY_KEY_ID'), need(config.razorpayKeySecret, 'RAZORPAY_KEY_SECRET')) });
   const linked = (account) => need(account?.linkedAccountId, 'the seller’s linked account');
@@ -172,11 +183,15 @@ function createRoute(config, request) {
         headers: auth(),
         json: { email, phone, type: 'route', reference_id: reference, legal_business_name: legalName, business_type: businessType, contact_name: contactName },
       });
-      return { id: body.id, status: body.status };
+      return toLinkedAccount(body);
     },
     async fetchLinkedAccount(id) {
       const { body } = await request('GET', `/v2/accounts/${encodeURIComponent(id)}`, { headers: auth(), retries: 2 });
-      return { id: body.id, status: body.status };
+      return toLinkedAccount(body);
+    },
+    async kycLink(id) {
+      const { body } = await request('POST', `/v2/accounts/${encodeURIComponent(id)}/onboarding_links`, { headers: auth(), json: {} });
+      return { url: String(body?.short_url ?? body?.url ?? '') };
     },
     async settlementReport(account, { year, month }) {
       const { body } = await request('GET', '/v1/settlements/recon/combined', { headers: { ...auth(), 'x-razorpay-account': linked(account) }, query: { year: Number(year), month: Number(month) }, retries: 2 });

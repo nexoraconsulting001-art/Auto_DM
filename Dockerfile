@@ -5,7 +5,7 @@
 # server's workspaces only, so React Native and Expo are never downloaded here, and .dockerignore keeps the apps'
 # source out of the image.
 
-# The seller console is built here; only its static files reach the final image.
+# The seller console and the Platform Console are built here (two builds, two folders); only their static files reach the final image.
 FROM node:22-slim AS console
 WORKDIR /app
 COPY package*.json ./
@@ -31,6 +31,7 @@ COPY shared/api-client/package.json shared/api-client/
 RUN npm ci --omit=dev --workspace @bhava/console --workspace @bhava/api-client --include-workspace-root
 COPY . .
 COPY --from=console /app/console/dist console/dist
+COPY --from=console /app/console/dist-platform console/dist-platform
 RUN test ! -e node_modules/react-native && test ! -e node_modules/expo && test ! -e apps && test ! -e packages
 ENV NODE_ENV=production
 ENV STORAGE_DIR=/data/files

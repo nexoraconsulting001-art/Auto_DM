@@ -2,11 +2,14 @@
   "name": "@bhava/console",
   "version": "0.1.0",
   "private": true,
-  "description": "Seller console: React and Vite, built to console/dist and served at /admin on each business's address",
+  "description": "Seller console (console/dist, at /admin on each business's address) and the Platform Console (console/dist-platform, at /console on the platform host only): React and Vite",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.platform.config.js",
+    "build:seller": "vite build",
+    "build:platform": "vite build --config vite.platform.config.js",
+    "dev:platform": "vite --config vite.platform.config.js",
     "preview": "vite preview"
   },
   "devDependencies": {

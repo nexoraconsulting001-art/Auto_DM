@@ -20,6 +20,7 @@
     "worker": "node src/worker.js",
     "tenant": "node scripts/tenant.js",
     "platform-user": "node scripts/platform-user.js",
+    "gen:platform-routes": "node scripts/gen-platform-routes.mjs",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/restore.js",
     "seed": "node scripts/seed.js",

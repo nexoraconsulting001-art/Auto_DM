@@ -12,6 +12,12 @@
  *                          lowest plan that includes it (absent when only an add-on or an override can turn it on).
  *   `plan.limit_reached`   the plan has the feature and its limit is used up. `feature`, `limit` and `used` say where it
  *                          stands, and `plan` is the lowest plan with more.
+ * Five are for Bhava's own team inside a business (PRD 5.10, 5.17), all from the router before the handler runs:
+ *   `impersonation.blocked`, `impersonation.read_only`   see IMPERSONATION_BLOCKED and operatorRefusal in access.js
+ *   `service.out_of_scope`, `service.ended`              the route is not the operator's service's, or the service lapsed
+ *   `service.cannot_undo` (409)                          a change with no before or after, or one already undone
+ * A session of theirs that has ended is simply `unauthorized`, as any ended session is.
+ *
  * Both also carry `reason` (`plan`, or `plan.not_included` on the Phase 3 routes), as the handlers' own refusals did.
  *
  * Two codes ask the client to do something and then repeat the request: `reauth_required` (403: prove it is you again with
@@ -25,6 +31,11 @@ export const ERROR_STATUS = Object.freeze({
   reauth_required: 403,
   'plan.feature_off': 403,
   'plan.limit_reached': 403,
+  'impersonation.blocked': 403,
+  'impersonation.read_only': 403,
+  'service.out_of_scope': 403,
+  'service.ended': 403,
+  'service.cannot_undo': 409,
   not_found: 404,
   conflict: 409,
   payload_too_large: 413,
@@ -44,6 +55,11 @@ const DEFAULT_MESSAGE = {
   reauth_required: 'Confirm it’s you to continue.',
   'plan.feature_off': 'This isn’t on your plan.',
   'plan.limit_reached': 'You have reached your plan’s limit.',
+  'impersonation.blocked': 'Support can’t do this for an owner.',
+  'impersonation.read_only': 'This session is read-only.',
+  'service.out_of_scope': 'This isn’t part of the service you are working on.',
+  'service.ended': 'This service isn’t active for the business any more.',
+  'service.cannot_undo': 'This change can’t be undone from here.',
   not_found: 'We couldn’t find that.',
   conflict: 'That can’t be done right now.',
   payload_too_large: 'That is too large to upload.',

@@ -5,6 +5,7 @@
  * API (what src/adapters/shiprocket calls), all under /v1/external with a Bearer session token except login:
  *   POST auth/login                            GET  courier/serviceability?pickup_postcode=&delivery_postcode=&cod=
  *   POST settings/company/addpickup            POST orders/create/adhoc          POST orders/create/return
+ *   GET  settings/company/pickup               the account's pickup locations
  *   POST courier/assign/awb                    POST courier/generate/pickup      POST courier/generate/label
  *   GET  courier/track/awb/:awb                GET  courier/track/shipment/:id   POST orders/cancel/shipment/awbs
  *
@@ -102,6 +103,11 @@ export function createShiprocket({ email = 'sim@bhava.test', password = 'sim-shi
         if (pickups.has(`${owner}:${code}`)) throw shiprocketError(422, 'Address nick name already in use');
         pickups.set(`${owner}:${code}`, { code, name, address, city: city ?? '', state: state ?? '', pin_code: String(pin), phone: phone ?? '' });
         return { success: true, address: { pickup_code: code } };
+      });
+      on('GET', '/v1/external/settings/company/pickup', (req) => {
+        const owner = requireSession(req);
+        const mine = [...pickups.entries()].filter(([key]) => key.startsWith(`${owner}:`)).map(([, p], i) => ({ id: i + 1, pickup_location: p.code, name: p.name, address: p.address, city: p.city, state: p.state, pin_code: p.pin_code, phone: p.phone, status: 2 }));
+        return { data: { shipping_address: mine } };
       });
       on('POST', '/v1/external/orders/create/adhoc', (req) => create(req, 'forward'));
       on('POST', '/v1/external/orders/create/return', (req) => create(req, 'reverse'));

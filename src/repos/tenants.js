@@ -1,6 +1,6 @@
 import { ValidationError, slugify } from '../util.js';
 import { normalizeHost } from '../tenancy.js';
-import { hashSessionToken } from './sessions.js';
+import { hashSessionToken, operatorRef } from './sessions.js';
 
 const COLS = 'id, slug, name, status, plan, created_at';
 /** The verified primary domain goes with the business, because the links a DM carries are built on it. */
@@ -71,7 +71,7 @@ export function tenantsRepo(handle) {
     async findSession(token, kinds) {
       if (typeof token !== 'string' || !token || token.length > 100 || !kinds?.length) return null;
       const [row] = await db.query(
-        `SELECT s.user_id, s.kind AS session_kind, s.family_id, s.device_id, s.fresh_until, COALESCE(s.fresh_until > now(), false) AS fresh, ${WITH_PRIMARY}
+        `SELECT s.user_id, s.kind AS session_kind, s.family_id, s.device_id, s.fresh_until, COALESCE(s.fresh_until > now(), false) AS fresh, s.impersonation_id, s.service_session_id, ${WITH_PRIMARY}
          FROM sessions s
          JOIN tenants t ON t.id = s.tenant_id
          JOIN users u ON u.tenant_id = s.tenant_id AND u.id = s.user_id
@@ -81,8 +81,8 @@ export function tenantsRepo(handle) {
         [hashSessionToken(token), kinds],
       );
       if (!row) return null;
-      const { user_id: userId, session_kind: kind, family_id: familyId, device_id: deviceId, fresh, fresh_until: freshUntil, ...tenant } = row;
-      return { tenant, userId, kind, familyId, deviceId, fresh, freshUntil };
+      const { user_id: userId, session_kind: kind, family_id: familyId, device_id: deviceId, fresh, fresh_until: freshUntil, impersonation_id, service_session_id, ...tenant } = row;
+      return { tenant, userId, kind, familyId, deviceId, fresh, freshUntil, ...operatorRef({ impersonation_id, service_session_id }) };
     },
     /** A live Phase 0 bearer session's business and user id, or null. */
     async findBearerSession(token) {

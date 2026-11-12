@@ -23,7 +23,9 @@
  *       With webhook true (the default when a webhook URL is set) it also sends payment.captured or payment.failed (and
  *       order.paid), signed with the webhook secret. `amount` pays a different amount than the order's, for the mismatch case.
  *   POST /capture { paymentId }                 an authorized payment is captured
- *   POST /accounts/kyc { id, status }           moves a linked account: created, under_review, activated, rejected
+ *   POST /accounts/kyc { id, status, reason? }  moves a linked account: created, under_review, needs_clarification, activated,
+ *       rejected, suspended. `reason` is what Razorpay says is wrong (needs_clarification, rejected): the account then carries it
+ *       in status_details, and POST /v2/accounts/:id/onboarding_links answers the hosted page where the owner puts it right
  *   POST /transfers/settle { id } | /transfers/fail { id }                sends transfer.processed / transfer.failed
  *   POST /oauth/code { accountId }              -> { code }: what the seller's consent screen would send back
  *   POST /webhooks/send { event, payload?, accountId?, ...delivery }     any event by hand, signed like the rest
@@ -195,6 +197,13 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
         const account = { id: nextId('acc'), entity: 'account', type: 'route', status: 'created', email, phone: phone ?? '', legal_business_name: name, reference_id: reference ?? '', created_at: seconds(sim.clock.now()) };
         accounts.set(account.id, account);
         return account;
+      });
+      on('POST', '/v2/accounts/:id/onboarding_links', (req) => {
+        if (caller(req) !== 'platform') throw razorpayError(400, 'Route is not enabled for this account.');
+        const account = accounts.get(req.params.id);
+        if (!account) throw razorpayError(400, 'The id provided does not exist');
+        if (account.status === 'activated') throw razorpayError(400, 'The account is already activated.');
+        return { entity: 'onboarding_link', account_id: account.id, short_url: `https://rzp.sim.test/kyc/${account.id}` };
       });
       on('GET', '/v2/accounts/:id', (req) => {
         if (caller(req) !== 'platform') throw razorpayError(400, 'Route is not enabled for this account.');
@@ -425,6 +434,8 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
         if (!account) throw new SimError(404, { error: 'No such linked account.' });
         if (!['created', 'under_review', 'needs_clarification', 'activated', 'rejected', 'suspended'].includes(body.status)) throw new SimError(400, { error: 'Unknown account status.' });
         account.status = body.status;
+        if (['needs_clarification', 'rejected', 'suspended'].includes(body.status)) account.status_details = { reason: body.status, description: String(body.reason ?? 'The details given could not be verified.') };
+        else delete account.status_details;
         const webhook = await sendEvent(`account.${body.status}`, { account: { entity: account } }, 'platform', body);
         return { account, webhook };
       });

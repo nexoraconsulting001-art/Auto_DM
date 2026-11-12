@@ -136,6 +136,8 @@ export const ALWAYS_ON = Object.freeze([
   'billing.plan', 'billing.catalog', 'billing.change', 'billing.addItem', 'billing.removeItem', 'billing.usage', 'billing.invoices', 'billing.invoiceFile', 'billing.statements', 'billing.statementFile', 'billing.paymentMethod', 'billing.features',
   'referrals.get',
   'signup.status', 'signup.start', 'signup.firstAutomation', 'signup.finish',
+  'teamFeed.list', 'teamFeed.undo', 'teamFeed.approve', 'teamFeed.reject', 'services.settings', 'services.saveSettings',
+  'setup.get', 'setup.check', 'setup.acceptTerms', 'setup.pickupAddress', 'setup.kycLink', 'setup.ownKeys', 'setup.openInvite',
 ]);
 
 /**

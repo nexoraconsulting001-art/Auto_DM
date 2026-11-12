@@ -39,6 +39,16 @@ export async function insertSession(runner, { tenantId: business, userId, kind, 
  * A cookie session opened by a sign-in without a password belongs to a refresh family too, so revoking a device or a
  * person's families ends the console's session as well as the app's.
  */
+/**
+ * What a session opened for Bhava's team names (PRD 5.10, 5.17; migration 730): the impersonation or the service session
+ * it stands for. Such a session is never fresh, whatever fresh_until says: an operator cannot re-auth as the owner.
+ */
+export const operatorRef = (row) => {
+  const impersonationId = row.impersonation_id === null || row.impersonation_id === undefined ? null : Number(row.impersonation_id);
+  const serviceSessionId = row.service_session_id === null || row.service_session_id === undefined ? null : Number(row.service_session_id);
+  return impersonationId === null && serviceSessionId === null ? {} : { impersonationId, serviceSessionId, fresh: false, freshUntil: null };
+};
+
 export function sessionsRepo(db) {
   // A refresh family is about a person, not one business, so it is only reachable on the platform path.
   const platform = db.platform ?? db;
@@ -66,7 +76,7 @@ export function sessionsRepo(db) {
     async find(token) {
       if (!readable(token)) return null;
       const [row] = await platform.query(
-        `SELECT s.user_id, s.family_id, s.device_id, s.fresh_until, COALESCE(s.fresh_until > now(), false) AS fresh
+        `SELECT s.user_id, s.family_id, s.device_id, s.fresh_until, COALESCE(s.fresh_until > now(), false) AS fresh, s.impersonation_id, s.service_session_id
          FROM sessions s
          JOIN users u ON u.tenant_id = s.tenant_id AND u.id = s.user_id
          LEFT JOIN token_families f ON f.id = s.family_id
@@ -74,7 +84,7 @@ export function sessionsRepo(db) {
            AND u.removed_at IS NULL AND (s.family_id IS NULL OR f.revoked_at IS NULL)`,
         [hash(token), tenantId()],
       );
-      return row ? { userId: row.user_id, familyId: row.family_id ?? null, deviceId: row.device_id ?? null, fresh: row.fresh, freshUntil: row.fresh_until } : null;
+      return row ? { userId: row.user_id, familyId: row.family_id ?? null, deviceId: row.device_id ?? null, fresh: row.fresh, freshUntil: row.fresh_until, ...operatorRef(row) } : null;
     },
     /** The user id for a live cookie session in the current business, or null. */
     async userIdFor(token) {

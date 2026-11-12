@@ -9,6 +9,10 @@ import { DEFAULT_TIMEOUT_MS, ProviderError, createHttp, providerUrl, sameBytes }
  *
  *   serviceability({ pickupPincode, deliveryPincode, weightGrams, cod }) -> { serviceable, cod, couriers: [{ id, name, ratePaise, days, cod }] }
  *   addPickupLocation({ code, name, phone, email, line1, line2, city, state, pincode })   -> { code }
+ *       On the managed account this is how a seller's pickup address joins Bhava's master account (PRD 5.6): `code` is the
+ *       business's own (unique on the account), and a code already there with the same pincode is answered as added.
+ *   pickupLocations()                                 -> [{ code, name, city, state, pincode, phone }]: what the account holds now,
+ *       which is what the onboarding checklist's shipping step reads
  *   createOrder({ orderNumber, pickupLocation, shipTo, items, weightGrams, lengthCm, breadthCm, heightCm, codPaise, subTotalPaise })
  *       -> { providerOrderId, providerShipmentId }
  *       shipTo is the order's address snapshot. codPaise is what the courier collects: the order's balance, 0 for prepaid (S-21).
@@ -104,8 +108,19 @@ export function createShiprocket(config = {}, { env = process.env, now = () => D
         return { serviceable: couriers.length > 0, cod: couriers.some((c) => c.cod), couriers };
       },
       async addPickupLocation({ code, name, phone, email, line1, line2 = '', city, state, pincode }) {
-        await call('POST', '/v1/external/settings/company/addpickup', { json: { pickup_location: code, name, email, phone, address: line1, address_2: line2, city, state, country: 'India', pin_code: pincode } });
+        try {
+          await call('POST', '/v1/external/settings/company/addpickup', { json: { pickup_location: code, name, email, phone, address: line1, address_2: line2, city, state, country: 'India', pin_code: pincode } });
+        } catch (err) {
+          // Asked twice (a retry, a second tab): the location is there already, which is what was wanted. A different address under the same code is still refused.
+          const existing = (await this.pickupLocations().catch(() => [])).find((location) => location.code === code);
+          if (!existing || existing.pincode !== String(pincode)) throw err;
+        }
         return { code };
+      },
+      async pickupLocations() {
+        const { body } = await call('GET', '/v1/external/settings/company/pickup', { retries: 2 });
+        const list = body?.data?.shipping_address ?? [];
+        return list.map((a) => ({ code: String(a.pickup_location ?? ''), name: String(a.name ?? ''), city: String(a.city ?? ''), state: String(a.state ?? ''), pincode: String(a.pin_code ?? ''), phone: String(a.phone ?? '') }));
       },
       async createOrder(input) {
         const { body } = await call('POST', '/v1/external/orders/create/adhoc', { json: orderBody(input) });

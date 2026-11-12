@@ -1,9 +1,10 @@
 import crypto from 'node:crypto';
+import { PLATFORM_ROLES } from '../../contracts/api/access.js';
 import { checkPassword, hashPassword, validatePassword } from '../../repos/users.js';
 import { hashSessionToken } from '../../repos/sessions.js';
 import { ValidationError } from '../../util.js';
 
-export const PLATFORM_ROLES = ['super_admin', 'support'];
+export { PLATFORM_ROLES };
 const PUBLIC = 'id, email, name, role, created_at';
 const cleanEmail = (email) => String(email ?? '').trim().toLowerCase();
 
@@ -14,7 +15,7 @@ export function platformUsersRepo(handle) {
     async create({ email, password, role, name = '' }) {
       const address = cleanEmail(email);
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) throw new ValidationError('Enter a valid email');
-      if (!PLATFORM_ROLES.includes(role)) throw new ValidationError('Role must be super_admin or support');
+      if (!PLATFORM_ROLES.includes(role)) throw new ValidationError(`Role must be one of ${PLATFORM_ROLES.join(', ')}`);
       validatePassword(password);
       const rows = await db.query(
         `INSERT INTO platform_users (email, name, password_hash, role) VALUES ($1, $2, $3, $4)
@@ -27,7 +28,7 @@ export function platformUsersRepo(handle) {
     /** Returns the user when email + password match, otherwise null. */
     async verify(email, password) {
       const [row] = await db.query('SELECT * FROM platform_users WHERE email = $1', [cleanEmail(email)]);
-      if (!row || !(await checkPassword(password, row.password_hash))) return null;
+      if (!row || row.disabled_at || !row.password_hash || !(await checkPassword(password, row.password_hash))) return null;
       delete row.password_hash;
       return row;
     },
@@ -48,7 +49,7 @@ export function platformUsersRepo(handle) {
       if (!token || token.length > 100) return null;
       const [row] = await db.query(
         `SELECT u.id, u.email, u.name, u.role, u.created_at FROM platform_sessions s JOIN platform_users u ON u.id = s.platform_user_id
-         WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > now()`,
+         WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.disabled_at IS NULL`,
         [hashSessionToken(token)],
       );
       return row ?? null;

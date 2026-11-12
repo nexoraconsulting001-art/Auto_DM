@@ -1,5 +1,6 @@
 node_modules/
 console/dist/
+console/dist-platform/
 .env
 data/
 .gate/

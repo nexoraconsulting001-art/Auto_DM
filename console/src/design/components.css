@@ -669,3 +669,45 @@ textarea.field-control {
     border-radius: var(--radius-card);
   }
 }
+
+/* Shown while Bhava's team is inside a business (shell/OperatorBanner.jsx). Accent for read-only, ink once changes are on. */
+.operator-banner {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #F5B83D;
+  color: #16152B;
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+.operator-banner-write {
+  background: #16152B;
+  color: #fff;
+}
+.operator-banner-text {
+  margin: 0;
+  min-width: 0;
+}
+.operator-banner-end {
+  flex: none;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+@media (max-width: 480px) {
+  .operator-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

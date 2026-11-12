@@ -4,5 +4,8 @@
   "private": true,
   "description": "Client for the seller API at /api/v1, shared by the seller console and the owner app",
   "type": "module",
-  "exports": "./index.js"
+  "exports": {
+    ".": "./index.js",
+    "./platform": "./platform.js"
+  }
 }

@@ -1,9 +1,10 @@
 import express from 'express';
 import multer from 'multer';
 import { APPS, APP_HEADERS, APP_PLATFORMS, isBelowMinimum } from '../../contracts/accounts.js';
-import { ApiError, IdText, isAllowed, planRefusalReason, routeList } from '../../contracts/api/index.js';
+import { ApiError, IdText, isAllowed, maskShopperContacts, planRefusalReason, routeList, routes } from '../../contracts/api/index.js';
 import { log } from '../../platform/log.js';
 import { currentTenant, tenantId, withTenant } from '../../tenancy.js';
+import { auditImpersonated, checkOperator, isOperatorWrite, operatorSession, serviceWrite } from './operator.js';
 
 /** What every module's api() says it answers, checked against the contract. */
 function collectHandlers(ctx) {
@@ -100,12 +101,14 @@ function logRefusal(err, route, req) {
   log.warn(`api.${err.code}`, { route: route.id, userId: req.user?.id ?? null, role: req.user?.role ?? null, target });
 }
 
-function serve(route, handler, ctx, counters) {
+function serve(route, handler, ctx, counters, handlers) {
   const receiveFile = route.upload && uploader(route.upload);
 
   async function run(req, res) {
     // On the host that belongs to no business, only the routes that need none are answered before sign-in.
     if (!route.noBusiness && !currentTenant()) throw new ApiError('unauthorized');
+    // A session Bhava's team opened is held to its own rules first (PRD 5.10, 5.17): read-only, what is blocked, the route's service.
+    await checkOperator(route, req, ctx);
     if (!isAllowed(req.user ?? null, route.access)) throw new ApiError(req.user ? 'forbidden' : 'unauthorized', req.user ? route.access.denied : undefined);
     // Keys, credentials, roles and account deletion need a re-auth in the last few minutes (PRD 5.11): the app re-auths and repeats the call.
     if (route.fresh && !req.session?.fresh) throw new ApiError('reauth_required');
@@ -122,22 +125,41 @@ function serve(route, handler, ctx, counters) {
     const body = route.body ? validated(route.body, req.body ?? {}) : {};
     if (!handler) throw new ApiError('not_implemented');
 
-    const result = await handler({ params, query, body, file: req.file, user: req.user ?? null, req, res });
-    if (route.response === null) return res.status(route.status ?? 204).end();
-    if (result === null || result === undefined) throw new ApiError('not_found');
-    const output = route.response.safeParse(result);
-    if (!output.success) {
-      log.error('api.bad_response', { route: route.id, issues: output.error.issues.slice(0, 10).map((i) => i.path.join('.')) });
-      throw new ApiError('internal');
+    const call = { params, query, body, file: req.file, user: req.user ?? null, req, res };
+    /** Runs the handler and answers its result as the response schema allows it out; undefined for a route with no body. */
+    const apply = async () => {
+      const result = await handler(call);
+      if (route.response === null) return undefined;
+      if (result === null || result === undefined) throw new ApiError('not_found');
+      const output = route.response.safeParse(result);
+      if (!output.success) {
+        log.error('api.bad_response', { route: route.id, issues: output.error.issues.slice(0, 10).map((i) => i.path.join('.')) });
+        throw new ApiError('internal');
+      }
+      return output.data;
+    };
+
+    let data;
+    if (isOperatorWrite(route, req)) {
+      // A service operator's write is recorded with before and after, or kept as a draft for the seller (PRD 5.17).
+      const written = await serviceWrite(route, handlers, ctx, call, apply);
+      if (written.draft) return res.status(202).json({ draft: true, changeId: written.changeId });
+      data = written.output;
+    } else {
+      data = await apply();
     }
-    res.status(route.status ?? 200).json(output.data);
+    if (route.response === null) return res.status(route.status ?? 204).end();
+    // Shopper contact details are masked for support outside order detail (PRD 5.10).
+    res.status(route.status ?? 200).json(req.session?.operator?.kind === 'impersonation' ? maskShopperContacts(route.id, data) : data);
   }
 
   return async (req, res) => {
     try {
       await run(req, res);
+      await auditImpersonated(route, req, res.statusCode, ctx);
     } catch (err) {
       logRefusal(err, route, req);
+      await auditImpersonated(route, req, err?.status ?? 500, ctx);
       throw err;
     }
   };
@@ -187,11 +209,16 @@ function appVersionGate({ repos }) {
 }
 
 const routers = new WeakMap();
+const handlerMaps = new WeakMap();
+function apiHandlersFor(ctx) {
+  if (!handlerMaps.has(ctx)) handlerMaps.set(ctx, collectHandlers(ctx));
+  return handlerMaps.get(ctx);
+}
 
 /** The router for ctx, built once: mounted at /api/v1 inside a business, and by the server on the host that belongs to none. */
 export function apiRouterFor(ctx) {
   if (routers.has(ctx)) return routers.get(ctx);
-  const handlers = collectHandlers(ctx);
+  const handlers = apiHandlersFor(ctx);
   const counters = collectCounters(ctx);
   const r = express.Router();
   r.use((_req, res, next) => {
@@ -199,11 +226,32 @@ export function apiRouterFor(ctx) {
     next();
   });
   r.use(appVersionGate(ctx));
+  r.use(operatorSession(ctx));
   r.use(switchBusiness(ctx));
-  for (const route of routeList) r[route.method.toLowerCase()](route.path, serve(route, handlers.get(route.id), ctx, counters));
+  for (const route of routeList) r[route.method.toLowerCase()](route.path, serve(route, handlers.get(route.id), ctx, counters, handlers));
   r.use((_req, _res, next) => next(new ApiError('not_found')));
   routers.set(ctx, r);
   return r;
+}
+
+/**
+ * Runs one route's handler from inside another handler, as `user`, with the input checked by the route's own schemas and
+ * the answer by its response schema: what the seller's "Done by Bhava team" feed uses to apply a draft and to write a
+ * change's `before` back (PRD 5.17), so every check the route makes runs again. No access or plan check is made here:
+ * the caller's own route has passed both for the person asking. Throws ApiError as the route would.
+ */
+export async function runRoute(ctx, id, { params = {}, query = {}, body = {}, user, req, res }) {
+  const route = routes[id];
+  const handler = apiHandlersFor(ctx).get(id);
+  if (!route) throw new Error(`"${id}" is not a route`);
+  if (!handler) throw new ApiError('not_implemented');
+  const input = { params: route.params ? pathParams(route.params, params) : {}, query: route.query ? validated(route.query, query) : {}, body: route.body ? validated(route.body, body) : {} };
+  const result = await handler({ ...input, user, req, res });
+  if (route.response === null) return null;
+  if (result === null || result === undefined) throw new ApiError('not_found');
+  const output = route.response.safeParse(result);
+  if (!output.success) throw new ApiError('internal');
+  return output.data;
 }
 
 /**

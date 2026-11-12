@@ -23,7 +23,7 @@ const ACCOUNTS = ['auth.start', 'auth.verify', 'auth.exchange', 'auth.apple', 'a
 const TEAM = ['team.list', 'team.invite', 'team.update', 'team.remove'];
 const PHASE0_AUTH = ['auth.login', 'auth.me', 'auth.logout', 'auth.businesses'];
 // Phase 7 adds self-serve sign-up: the person has signed in on this host and has no business yet.
-const NO_BUSINESS = ['auth.start', 'auth.verify', 'auth.exchange', 'auth.apple', 'auth.refresh', 'app.requirements', 'signup.status', 'signup.start', 'signup.firstAutomation', 'signup.finish'];
+const NO_BUSINESS = ['auth.start', 'auth.verify', 'auth.exchange', 'auth.apple', 'auth.refresh', 'app.requirements', 'signup.status', 'signup.start', 'signup.firstAutomation', 'signup.finish', 'setup.openInvite'];
 const FRESH = [
   'auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.deleteAccount', 'team.invite', 'team.update', 'team.remove',
   'settings.updatePayment', 'paymentAccount.startLinked', 'paymentAccount.connectUrl', 'paymentAccount.setMode', 'paymentAccount.disconnect',
@@ -32,6 +32,7 @@ const FRESH = [
   'storeAccess.save', 'pushCredentials.save',
   // Phase 7 (billing): whatever changes what a business pays.
   'billing.change', 'billing.addItem', 'billing.removeItem', 'billing.paymentMethod',
+  'setup.ownKeys',
 ];
 const PLATFORM_TABLES = ['people', 'person_identities', 'seller_login_codes', 'token_families', 'refresh_tokens', 'auth_devices', 'auth_handoffs', 'review_logins', 'review_login_uses', 'account_deletion_requests', 'app_min_versions'];
 

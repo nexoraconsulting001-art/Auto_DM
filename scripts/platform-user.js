@@ -1,12 +1,12 @@
 // Manages Bhava's own team, who sign in on the platform host. The password comes from the environment, never the command line.
 //   npm run platform-user -- list
-//   PLATFORM_PASSWORD=... npm run platform-user -- add <email> <super_admin|support> ["Name"]
+//   PLATFORM_PASSWORD=... npm run platform-user -- add <email> <super_admin|support|onboarding|service_operator> ["Name"]
 import { pathToFileURL } from 'node:url';
 import { config } from '../src/config.js';
 import { openRuntimeDb } from '../src/db/index.js';
 import { createRepos } from '../src/repos/index.js';
 
-const USAGE = 'Usage: npm run platform-user -- list | add <email> <super_admin|support> ["Name"]';
+const USAGE = 'Usage: npm run platform-user -- list | add <email> <super_admin|support|onboarding|service_operator> ["Name"]';
 
 /** Runs one command and returns the message to print. */
 export async function platformUserCommand(repos, [command, email, role, name], { password = '' } = {}) {

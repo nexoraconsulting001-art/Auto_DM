@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SessionOperator } from './ops.js';
 import { ACCOUNT_TYPES, APPS, DEVICE_ID, DEVICE_PLATFORMS, IDENTITY_KINDS, PKCE_VERIFIER } from '../accounts.js';
 import { PERMISSIONS, PUBLIC, SIGNED_IN } from './access.js';
 import { Id, IdParams, Timestamp, text } from './common.js';
@@ -56,6 +57,8 @@ export const CurrentSession = z.object({
   business: SessionBusiness,
   csrf: z.string().optional(),
   freshUntil: Timestamp.nullable().optional(),
+  /** Set when Bhava's team opened this session (PRD 5.10, 5.17): the console shows its banner. See SessionOperator in ops.js. */
+  operator: SessionOperator.nullable().optional(),
 });
 
 /** `token` and `expiresInDays` are present for transport "bearer". */

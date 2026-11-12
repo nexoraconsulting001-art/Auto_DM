@@ -6,6 +6,7 @@ import { AppBuild, AppBuildRequest, AppSubmission } from './apps.js';
 import { BILLING_CYCLES, SIGNUP_MODES, SUBSCRIPTION_STATUSES } from '../billing.js';
 import { BhavaInvoice, BillingItem } from './billing.js';
 import { PresetSlots } from '../themes.js';
+import { ImpersonationStarted, opsPlatformRoutes } from './platform-ops.js';
 import { Count, Id, IdParams, IdText, ListQuery, Paise, PaiseInput, Timestamp, page, required, text } from './common.js';
 
 /**
@@ -14,6 +15,8 @@ import { Count, Id, IdParams, IdText, ListQuery, Paise, PaiseInput, Timestamp, p
  */
 const anyone = Object.freeze(['super_admin', 'support']);
 const superAdmin = Object.freeze(['super_admin']);
+/** Creating a business and reading it back is also the onboarding team's work (5.5, 5.6). */
+const onboardingTeam = Object.freeze(['super_admin', 'support', 'onboarding']);
 
 const Reason = required(500, 'Give a reason');
 export const TIERS = Object.freeze(['free', 't1', 't2', 't3', 't4', 't5']);
@@ -274,15 +277,15 @@ export const SignupInviteCreate = z.object({ note: text(200).default(''), maxUse
 export const SignupInviteCreated = z.object({ invite: SignupInvite, code: z.string() });
 
 export const platformRoutes = {
-  'platform.businesses': { method: 'GET', path: '/tenants', platformRoles: anyone, query: ListQuery, response: page(BusinessSummary) },
-  'platform.createBusiness': { method: 'POST', path: '/tenants', platformRoles: anyone, body: BusinessCreate, status: 201, response: BusinessCreated },
-  'platform.business': { method: 'GET', path: '/tenants/:id', platformRoles: anyone, params: IdParams, response: BusinessDetail },
+  'platform.businesses': { method: 'GET', path: '/tenants', platformRoles: onboardingTeam, query: ListQuery, response: page(BusinessSummary) },
+  'platform.createBusiness': { method: 'POST', path: '/tenants', platformRoles: onboardingTeam, body: BusinessCreate, status: 201, response: BusinessCreated },
+  'platform.business': { method: 'GET', path: '/tenants/:id', platformRoles: onboardingTeam, params: IdParams, response: BusinessDetail },
   'platform.pauseBusiness': { method: 'POST', path: '/tenants/:id/pause', platformRoles: anyone, params: IdParams, body: PauseBusiness, response: BusinessDetail },
   'platform.resumeBusiness': { method: 'POST', path: '/tenants/:id/resume', platformRoles: anyone, params: IdParams, body: ResumeBusiness, response: BusinessDetail },
   'platform.setMetaAccess': { method: 'POST', path: '/tenants/:id/meta-access', platformRoles: superAdmin, params: IdParams, body: MetaAccess, response: BusinessDetail },
   'platform.unblockPerson': { method: 'POST', path: '/tenants/:id/unblock', platformRoles: anyone, params: IdParams, body: UnblockPerson, status: 204, response: null },
-  'platform.retryImport': { method: 'POST', path: '/tenants/:id/import/retry', platformRoles: anyone, params: IdParams, status: 202, response: null },
-  'platform.impersonate': { method: 'POST', path: '/tenants/:id/impersonate', platformRoles: anyone, params: IdParams, body: Impersonate, response: z.object({ url: z.string() }) },
+  'platform.retryImport': { method: 'POST', path: '/tenants/:id/import/retry', platformRoles: onboardingTeam, params: IdParams, status: 202, response: null },
+  'platform.impersonate': { method: 'POST', path: '/tenants/:id/impersonate', platformRoles: anyone, params: IdParams, body: Impersonate, response: ImpersonationStarted },
   'platform.switches': { method: 'GET', path: '/switches', platformRoles: anyone, response: PlatformSwitches },
   'platform.engageKill': { method: 'POST', path: '/kill-switch', platformRoles: anyone, body: KillSwitchEngage, response: KillSwitchResult },
   'platform.requestRelease': { method: 'POST', path: '/kill-switch/release', platformRoles: anyone, body: KillSwitchRelease, response: KillSwitchResult },
@@ -340,6 +343,9 @@ export const platformRoutes = {
 };
 
 /** Which module answers each Phase 7 Platform Console route. */
+/** Phase 7: sign-in, pauses, health, impersonation, onboarding and managed services (platform-ops.js). */
+Object.assign(platformRoutes, opsPlatformRoutes);
+
 export const BILLING_PLATFORM_OWNERS = Object.freeze({
   billing: Object.freeze(['platform.billing', 'platform.overridePlan', 'platform.createCreditNote', 'platform.suspendBilling', 'platform.resumeBilling', 'platform.billingSettings', 'platform.saveBillingSettings']),
   entitlements: Object.freeze(['platform.flags', 'platform.saveFlag', 'platform.tenantFlags', 'platform.setTenantFlag']),

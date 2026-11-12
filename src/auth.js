@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { ApiError, isApiV1Url } from './contracts/api/index.js';
+import { ApiError, isApiV1Url, isContractRoute } from './contracts/api/index.js';
 import { sendApiError } from './modules/api-v1/respond.js';
 import { withTenant } from './tenancy.js';
 
@@ -89,6 +89,8 @@ function loginLimiter(cache, prefix) {
  * Sign-in methods (Google, WhatsApp code, Sign in with Apple) plug in by verifying the person and then
  * calling login(); nothing else here depends on how they proved who they are.
  */
+const opensForOperator = (found) => Boolean(found) && (found.impersonationId != null || found.serviceSessionId != null);
+
 export function createAuth({ secret, users, sessions, tenants, cache, passwordLogin = false }) {
   const limiter = loginLimiter(cache, 'login-attempts');
   const notLoggedIn = (res) => res.status(401).json({ error: 'Please log in again.', code: 'unauthorized' });
@@ -96,7 +98,13 @@ export function createAuth({ secret, users, sessions, tenants, cache, passwordLo
   const bearerKinds = passwordLogin ? ['access', 'bearer'] : ['access'];
   const csrfFor = (token) => hmac(secret, `csrf:${token}`);
   /** What the router reads for routes marked fresh, and what a handler needs to end or refresh this session. */
-  const describe = (kind, found) => ({ kind, familyId: found.familyId ?? null, deviceId: found.deviceId ?? null, fresh: Boolean(found.fresh), freshUntil: found.freshUntil ?? null });
+  const describe = (kind, found) => ({ kind, familyId: found.familyId ?? null, deviceId: found.deviceId ?? null, fresh: Boolean(found.fresh), freshUntil: found.freshUntil ?? null, ...(opensForOperator(found) ? { operatorRef: { impersonationId: found.impersonationId ?? null, serviceSessionId: found.serviceSessionId ?? null } } : {}) });
+  /**
+   * A session Bhava's team opened (PRD 5.10, 5.17) exists only for the routes of the API contract, where the router applies
+   * its rules to every request. Anywhere else it is nobody's session: no page, download or upload outside the API is
+   * reachable with it, and neither is an address under /api/v1 that a module answers outside the route table.
+   */
+  const usable = (found, req) => Boolean(found) && (!opensForOperator(found) || isContractRoute(req.method, req.originalUrl));
 
   return {
     ...limiter,
@@ -133,11 +141,11 @@ export function createAuth({ secret, users, sessions, tenants, cache, passwordLo
       // On the host that belongs to no business (PLATFORM_APP_HOST) the cookie session names its own business, as a token does.
       if (req.appHost) {
         const found = token ? await tenants.findSession(token, ['cookie']) : null;
-        if (!found) return signedIn(null);
+        if (!usable(found, req)) return signedIn(null);
         return withTenant(found.tenant, async () => signedIn(await users.get(found.userId), found));
       }
       const found = token ? await sessions.find(token) : null;
-      signedIn(found ? await users.get(found.userId) : null, found);
+      signedIn(usable(found, req) ? await users.get(found.userId) : null, found);
     },
 
     /** Rejects POSTs from a cookie session that lack the session's CSRF token. */

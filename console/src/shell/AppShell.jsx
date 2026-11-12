@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { NavLink } from 'react-router-dom';
 import { LogOut, Menu } from 'lucide-react';
@@ -7,6 +7,7 @@ import { Avatar, Sheet } from '../design/index.jsx';
 import { features } from '../features/index.js';
 import { api } from '../lib/api/index.js';
 import { useSession } from '../lib/session.jsx';
+import { OperatorBanner } from './OperatorBanner.jsx';
 
 const asset = (name) => `${import.meta.env.BASE_URL}${name}`;
 const MAX_TABS = 4;
@@ -92,6 +93,12 @@ function TabBar({ items, onSignOut }) {
 
 export function AppShell({ children }) {
   const { session, signOut } = useSession();
+  // A session Bhava's team opened (PRD 5.10, 5.17) ends by signing out here and going back to the Platform Console.
+  const endOperatorSession = useCallback(async () => {
+    const back = session.operator?.consoleUrl;
+    await signOut();
+    if (back) window.location.assign(back);
+  }, [session.operator?.consoleUrl, signOut]);
   // The menu's counts come from the dashboard numbers. Without them, or without access to them, there are simply no counts.
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats.dashboard, enabled: isAllowed(session.user, staffWith('analytics')) });
   const items = features
@@ -102,6 +109,8 @@ export function AppShell({ children }) {
     <div className="shell">
       <SideNav items={items} business={session.business} onSignOut={signOut} />
       <div className="shell-body">
+        {/* The impersonation and managed-service banner: one slot, read from the session, so no feature has to add its own. */}
+        <OperatorBanner operator={session.operator ?? null} business={session.business} onEnd={endOperatorSession} />
         <header className="shell-top">
           <Workspace business={session.business} plan={false} />
           <img className="shell-mark" src={asset('favicon.svg')} alt="Bhava" width="32" height="32" />

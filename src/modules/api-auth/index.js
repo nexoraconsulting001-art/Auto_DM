@@ -1,6 +1,15 @@
 import { ApiError } from '../../contracts/api/index.js';
 import { businessesOf, describeSession } from '../accounts/describe.js';
 import { dropPushDevices } from '../accounts/tokens.js';
+import { platformHostOf } from '../platform-console/host.js';
+
+/** Who is behind a session Bhava's team opened (PRD 5.10, 5.17), for the console's banner. Nothing for anyone else's. */
+function operatorOf(req, config) {
+  const operator = req.session?.operator;
+  if (!operator) return {};
+  const host = platformHostOf(config ?? {});
+  return { operator: { kind: operator.kind, operatorName: operator.operatorName ?? '', mode: operator.mode, service: operator.service ?? null, taskRef: operator.taskRef ?? null, expiresAt: operator.expiresAt, consoleUrl: host ? `https://${host}/console/` : '' } };
+}
 
 const SESSION_DAYS = 30;
 
@@ -32,7 +41,7 @@ export const apiAuth = {
         return { token, expiresInDays: SESSION_DAYS, ...(await describe(user)) };
       },
 
-      'auth.me': async ({ user, req }) => ({ ...(await describe(user)), ...(req.csrf ? { csrf: req.csrf } : {}), freshUntil: req.session?.freshUntil ?? null }),
+      'auth.me': async ({ user, req }) => ({ ...(await describe(user)), ...(req.csrf ? { csrf: req.csrf } : {}), freshUntil: req.session?.freshUntil ?? null, ...operatorOf(req, ctx.config) }),
 
       'auth.logout': async ({ user, req, res }) => {
         if (req.bearer) await ctx.repos.sessions.revoke(req.sessionToken);
