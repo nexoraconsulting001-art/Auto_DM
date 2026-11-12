@@ -17,6 +17,7 @@
 import { APP_NAME, AUTH_SCHEME, HEADERS, PAGES, ROUTES } from './routes.js';
 
 export { APP_NAME, AUTH_SCHEME, HEADERS, PAGES, ROUTES, STORE_APP_CALLS } from './routes.js';
+export { cardOf, categoryOf, createBrowse, formatPaise, percentOff, pinnedFirst, plainText, reelOf, safeUrl } from './browse.js';
 
 const FALLBACK = 'Something went wrong. Please try again.';
 const OFFLINE = 'You seem to be offline. Check your connection and try again.';

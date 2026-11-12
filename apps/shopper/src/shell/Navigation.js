@@ -7,7 +7,12 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useStrings } from '@bhava/app-core/strings';
-import { useTheme } from '@bhava/ui';
+import { Loading, useTheme } from '@bhava/ui';
+import { View } from 'react-native';
+import { useServices } from '../services.js';
+import { useUpdateRequired } from './gate.js';
+import { OfflineBanner, UpdateRequiredScreen } from './Gates.js';
+import { useOfflineCache } from './offline.js';
 import { TABS, linkingOf, screenName, tabsOf } from './menu.js';
 
 const Stack = createNativeStackNavigator();
@@ -51,10 +56,17 @@ function Tabs({ features }) {
 export function Navigation({ features, brand, linking = true }) {
   const { t } = useStrings();
   const theme = useTheme();
+  const services = useServices();
+  const { ready } = useOfflineCache(services);
+  const updateRequired = useUpdateRequired();
   const tabNames = useMemo(() => new Set(tabsOf(features).map((feature) => screenName(feature, feature.screens[0]))), [features]);
-  const links = useMemo(() => (linking ? linkingOf(features, brand) : undefined), [features, brand, linking]);
+  const links = useMemo(() => (linking === false ? undefined : linking && typeof linking === 'object' ? linking : linkingOf(features, brand)), [features, brand, linking]);
   const TabsScreen = useMemo(() => () => <Tabs features={features} />, [features]);
+  if (updateRequired) return <UpdateRequiredScreen storeUrl={updateRequired.storeUrl} />;
+  if (!ready) return <Loading label={t('home.common.loading')} testID="starting" />;
   return (
+    <View style={{ flex: 1, backgroundColor: theme.color.ground }}>
+      <OfflineBanner />
     <NavigationContainer linking={links}>
       <Stack.Navigator
         screenOptions={{
@@ -71,5 +83,6 @@ export function Navigation({ features, brand, linking = true }) {
           .map((screen) => <Stack.Screen key={screenName(feature, screen)} name={screenName(feature, screen)} component={screen.component} options={{ title: t(screen.title) }} />))}
       </Stack.Navigator>
     </NavigationContainer>
+    </View>
   );
 }
