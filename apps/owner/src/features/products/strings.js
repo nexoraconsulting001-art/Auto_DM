@@ -127,6 +127,9 @@ export default {
     'products.settings.last': 'Last check {when}',
     'products.settings.never': 'Not checked yet',
     'products.settings.attention': '{count} need attention',
+    'products.address.copy': 'Copy link',
+    'products.address.copied': 'Copied',
+    'products.address.open': 'Open',
   },
   hi: {
     'products.title': 'प्रोडक्ट',
@@ -255,5 +258,8 @@ export default {
     'products.settings.last': 'आख़िरी जाँच {when}',
     'products.settings.never': 'अभी जाँच नहीं हुई',
     'products.settings.attention': '{count} पर ध्यान चाहिए',
+    'products.address.copy': 'लिंक कॉपी करें',
+    'products.address.copied': 'कॉपी हो गया',
+    'products.address.open': 'खोलें',
   },
 };

@@ -64,3 +64,7 @@ export const PAGE_SLUG = /^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$/;
 export const HEX_COLOUR = /^#[0-9a-fA-F]{6}$/;
 /** The theme's seal and ticker (themes.js): SEAL_TEXT_MAX, TICKER_ITEMS_MAX, TICKER_ITEM_LENGTH. */
 export const THEME_TEXT = Object.freeze({ sealMax: 60, tickerItems: 8, tickerItemLength: 40 });
+
+/** Imports (8.3 to 8.8): what a job and each of its lines can be. */
+export const IMPORT_JOB_STATUSES = Object.freeze(['queued', 'running', 'done', 'failed']);
+export const IMPORT_ITEM_STATUSES = Object.freeze(['pending', 'draft', 'created', 'updated', 'unchanged', 'existing', 'refused', 'failed', 'archived']);

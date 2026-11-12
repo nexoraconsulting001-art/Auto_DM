@@ -1,16 +1,55 @@
+import SwatchBook from 'lucide-react-native/icons/swatch-book';
 import { MANAGERS } from '@bhava/app-core/access';
 import BrandKitScreen from './BrandKitScreen.js';
 
-/**
- * Brand kit. Whoever builds this lists every API route id and console page it covers
- * in `routeIds`, adds its screens, and removes those ids from tools/parity-pending.json. The format is in ../index.js.
- */
+/** The brand kit (PRD 5.3): logos, colours, fonts and public replies, which every buyer page and DM wears. */
 export default {
   name: 'brand-kit',
   access: MANAGERS,
   feature: 'brand_kit',
-  routeIds: [],
+  routeIds: ['brandKit.get', 'brandKit.update', 'brandKit.presets', 'console:/brand-kit'],
   screens: [{ name: 'index', path: 'brand-kit', title: 'brand-kit.title', component: BrandKitScreen }],
-  nav: { label: 'brand-kit.title', order: 80 },
-  strings: { en: { 'brand-kit.title': 'Brand kit' }, hi: { 'brand-kit.title': 'ब्रांड किट' } },
+  nav: { label: 'brand-kit.title', order: 80, icon: SwatchBook },
+  strings: {
+    en: {
+      'brand-kit.title': 'Brand kit',
+      'brand-kit.intro': 'What shoppers see on your pages and in your replies: your logo, colours and fonts.',
+      'brand-kit.preset': 'Starting look',
+      'brand-kit.logo': 'Logo',
+      'brand-kit.logoDark': 'Logo for dark backgrounds',
+      'brand-kit.favicon': 'Browser tab icon',
+      'brand-kit.colors': 'Colours',
+      'brand-kit.colorsHint': 'Like #234D33. Empty goes back to the look’s own colour.',
+      'brand-kit.colorSlot': 'Colour: {slot}',
+      'brand-kit.colorBad': 'Use a colour like #234D33',
+      'brand-kit.headingFont': 'Heading font',
+      'brand-kit.bodyFont': 'Body font',
+      'brand-kit.fontLong': 'Use 80 characters or fewer',
+      'brand-kit.replies': 'Public replies to comments',
+      'brand-kit.repliesHint': 'One per line, up to 10. Automations pick one, so replies don’t all look the same.',
+      'brand-kit.repliesMany': 'Use at most 10 replies',
+      'brand-kit.replyLong': 'Keep each reply to 150 characters',
+      'brand-kit.saved': 'Saved.',
+    },
+    hi: {
+      'brand-kit.title': 'ब्रांड किट',
+      'brand-kit.intro': 'ग्राहक आपके पेजों और जवाबों में क्या देखते हैं: आपका लोगो, रंग और फ़ॉन्ट।',
+      'brand-kit.preset': 'शुरुआती लुक',
+      'brand-kit.logo': 'लोगो',
+      'brand-kit.logoDark': 'गहरे बैकग्राउंड के लिए लोगो',
+      'brand-kit.favicon': 'ब्राउज़र टैब आइकन',
+      'brand-kit.colors': 'रंग',
+      'brand-kit.colorsHint': 'जैसे #234D33। ख़ाली छोड़ें तो लुक का अपना रंग।',
+      'brand-kit.colorSlot': 'रंग: {slot}',
+      'brand-kit.colorBad': '#234D33 जैसा रंग लिखें',
+      'brand-kit.headingFont': 'हेडिंग फ़ॉन्ट',
+      'brand-kit.bodyFont': 'बॉडी फ़ॉन्ट',
+      'brand-kit.fontLong': '80 अक्षर या कम रखें',
+      'brand-kit.replies': 'कमेंट के सार्वजनिक जवाब',
+      'brand-kit.repliesHint': 'हर लाइन में एक, 10 तक। ऑटोमेशन इनमें से एक चुनता है, ताकि सब जवाब एक जैसे न दिखें।',
+      'brand-kit.repliesMany': 'ज़्यादा से ज़्यादा 10 जवाब',
+      'brand-kit.replyLong': 'हर जवाब 150 अक्षर तक रखें',
+      'brand-kit.saved': 'सेव हो गया।',
+    },
+  },
 };

@@ -303,5 +303,33 @@ export function FileButton({ url, label, testID }) {
   );
 }
 
+/**
+ * A web address the owner copies (a landing page's DM link, the creator page for the Instagram bio), shown in full so
+ * they can see it is their own address with no redirect, with Copy and Open. `clipboard` is expo-clipboard.
+ */
+export function AddressRow({ url, testID, clipboard }) {
+  const { t } = useStrings();
+  const theme = useTheme();
+  const [copied, setCopied] = useState(false);
+  if (!url) return null;
+  async function copy() {
+    try {
+      await (clipboard ?? require('expo-clipboard')).setStringAsync(url);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+  return (
+    <View style={{ gap: theme.space[1] }}>
+      <Text variant="small" testID={testID} selectable>{url}</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] }}>
+        <Button testID={testID ? `${testID}-copy` : undefined} kind="secondary" label={t(copied ? 'products.address.copied' : 'products.address.copy')} onPress={copy} />
+        <Button testID={testID ? `${testID}-open` : undefined} kind="quiet" label={t('products.address.open')} onPress={() => openAddress(url).catch(() => {})} />
+      </View>
+    </View>
+  );
+}
+
 /** A small "Sample" or status badge beside a title. */
 export { Badge, IconButton, Pressable };
