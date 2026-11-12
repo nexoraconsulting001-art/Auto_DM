@@ -12,7 +12,7 @@ export default {
   name: 'account',
   access: SIGNED_IN,
   feature: null,
-  routeIds: ['auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.reauthStart', 'auth.reauthVerify', 'auth.deleteAccount'],
+  routeIds: ['auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.reauthStart', 'auth.reauthVerify', 'auth.deleteAccount', 'console:/settings/account'],
   screens: [
     { name: 'index', path: 'settings/account', title: 'account.title', component: AccountScreen },
     { name: 'delete', path: 'settings/account/delete', title: 'account.delete.title', component: DeleteAccountScreen },

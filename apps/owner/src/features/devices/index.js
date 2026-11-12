@@ -11,7 +11,7 @@ export default {
   name: 'devices',
   access: SIGNED_IN,
   feature: null,
-  routeIds: ['auth.devices', 'auth.revokeDevice'],
+  routeIds: ['auth.devices', 'auth.revokeDevice', 'console:/settings/devices'],
   screens: [{ name: 'index', path: 'settings/devices', title: 'devices.title', component: DevicesScreen }],
   nav: { label: 'devices.title', order: 77, icon: Smartphone },
   strings: {

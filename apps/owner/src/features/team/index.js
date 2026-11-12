@@ -7,7 +7,7 @@ export default {
   name: 'team',
   access: OWNER_ONLY,
   feature: null,
-  routeIds: ['team.list', 'team.invite', 'team.update', 'team.remove'],
+  routeIds: ['team.list', 'team.invite', 'team.update', 'team.remove', 'console:/settings/team'],
   screens: [{ name: 'index', path: 'team', title: 'team.title', component: TeamScreen }],
   nav: { label: 'team.title', order: 76, icon: UsersRound },
   strings: {

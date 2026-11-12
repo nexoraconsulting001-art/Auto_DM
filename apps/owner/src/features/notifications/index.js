@@ -11,7 +11,7 @@ export default {
   name: 'notifications',
   access: SIGNED_IN,
   feature: null,
-  routeIds: ['notifications.list', 'notifications.markRead', 'notifications.prefs', 'notifications.savePrefs'],
+  routeIds: ['notifications.list', 'notifications.markRead', 'notifications.prefs', 'notifications.savePrefs', 'console:/notifications', 'console:/notifications/settings'],
   screens: [
     { name: 'index', path: 'notifications', title: 'notifications.title', component: NotificationsScreen },
     { name: 'settings', path: 'notifications/settings', title: 'notifications.settings', component: NotificationSettingsScreen },
