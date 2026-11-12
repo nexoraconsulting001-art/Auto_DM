@@ -14,8 +14,9 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const { withEntitlementsPlist } = require('expo/config-plugins');
 const pkg = require('./package.json');
+// The privacy manifest and the store answers come from one file (store/collection.json): see store/answers.cjs.
+const { privacyManifest } = require('./store/answers.cjs');
 
 const DEFAULT_APP_ID = 'com.bhava.business';
 /** The link scheme the server writes into pushes, emails and the browser sign-in (OWNER_APP_SCHEME). A test keeps them equal. */
@@ -36,8 +37,9 @@ const googleServices = [env.GOOGLE_SERVICES_JSON, './google-services.json'].find
 const apnsEnv = ['development', 'production'].includes(env.APNS_ENV) ? env.APNS_ENV : null;
 
 /** With no push setting, the iOS build asks for no push entitlement, so it signs and runs with any profile or none. */
+// expo/config-plugins is loaded when prebuild runs the plugin, so the config itself reads with no Expo installed.
 const withoutPushEntitlement = (config) =>
-  withEntitlementsPlist(config, (mod) => {
+  require('expo/config-plugins').withEntitlementsPlist(config, (mod) => {
     delete mod.modResults['aps-environment'];
     return mod;
   });
@@ -76,25 +78,10 @@ module.exports = () => ({
       CFBundleAllowMixedLocalizations: true,
       ...(plainHttp ? { NSAppTransportSecurity: { NSAllowsLocalNetworking: true } } : {}),
     },
-    // The privacy manifest Apple requires (PRD: iOS ready from day one). No tracking; what is collected is what an
-    // account needs. Keep in step with the App Privacy answers when a feature starts collecting something new.
-    privacyManifests: {
-      NSPrivacyTracking: false,
-      NSPrivacyTrackingDomains: [],
-      NSPrivacyCollectedDataTypes: [
-        { NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypePhoneNumber', NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'] },
-        { NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeEmailAddress', NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'] },
-        { NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeName', NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'] },
-        { NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeDeviceID', NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'] },
-        { NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypePhotosorVideos', NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'] },
-      ],
-      NSPrivacyAccessedAPITypes: [
-        { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryUserDefaults', NSPrivacyAccessedAPITypeReasons: ['CA92.1'] },
-        { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryFileTimestamp', NSPrivacyAccessedAPITypeReasons: ['C617.1'] },
-        { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategorySystemBootTime', NSPrivacyAccessedAPITypeReasons: ['35F9.1'] },
-        { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryDiskSpace', NSPrivacyAccessedAPITypeReasons: ['E174.1'] },
-      ],
-    },
+    // The privacy manifest Apple requires (PRD: iOS ready from day one): no tracking; the data types are what
+    // store/collection.json says the app collects, and the required-reason APIs are store/privacy-manifest.json's.
+    // store/check.mjs fails when the app starts collecting something those files do not list.
+    privacyManifests: privacyManifest(),
   },
   updates: env.UPDATES_URL ? { url: env.UPDATES_URL, checkAutomatically: 'ON_LOAD', fallbackToCacheTimeout: 0 } : { enabled: false },
   plugins: [

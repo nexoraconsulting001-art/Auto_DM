@@ -1,0 +1,21 @@
+# Shared steps: opens FEATURE (an app feature's folder name) from the More tab.
+appId: ${APP_ID}
+name: Open a feature from More (shared steps)
+---
+- tapOn:
+    id: tab-more
+- extendedWaitUntil:
+    visible:
+      id: more
+    timeout: 30000
+- scrollUntilVisible:
+    element:
+      id: more-${FEATURE}
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: more-${FEATURE}
+- extendedWaitUntil:
+    visible:
+      id: screen-${FEATURE}
+    timeout: 30000

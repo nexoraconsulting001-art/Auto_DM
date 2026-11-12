@@ -1,0 +1,76 @@
+# Business a takes money in its own gateway account. The key typed here is made up and short enough that it can never
+# be a real one; the server stores it without calling the gateway.
+appId: ${APP_ID}
+name: 'P-17: Replace the payment key in the app: a fresh WhatsApp code is asked for, and the secret is never shown back'
+---
+- runFlow:
+    file: common/sign-in-with-code.yaml
+    env:
+      PHONE: ${PHONE_PAYMENTS}
+# A sign-in counts as a fresh check for five minutes. Opening the app again resumes on a refreshed session, which does
+# not, so the change below has to ask for one.
+- stopApp
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: top-bar
+    timeout: 60000
+- runFlow:
+    file: common/open-more.yaml
+    env:
+      FEATURE: payments
+- scrollUntilVisible:
+    element:
+      id: payments-use-keys
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: payments-use-keys
+- scrollUntilVisible:
+    element:
+      id: payments-keys-razorpayKeyId
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: payments-keys-razorpayKeyId
+- inputText: rzp_test_e2eflow
+- hideKeyboard
+- tapOn:
+    id: payments-keys-razorpayKeySecret
+- inputText: flow-secret-not-real
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: payments-keys-save
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: payments-keys-save
+- extendedWaitUntil:
+    visible:
+      id: reauth-send
+    timeout: 30000
+- tapOn:
+    id: reauth-send
+- extendedWaitUntil:
+    visible:
+      id: reauth-code
+    timeout: 30000
+- runScript:
+    file: support/code.js
+    env:
+      PHONE: ${PHONE_PAYMENTS}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+- tapOn:
+    id: reauth-code
+- inputText: ${output.code}
+- hideKeyboard
+- tapOn:
+    id: reauth-verify
+- extendedWaitUntil:
+    visible:
+      id: payments-keys-done
+    timeout: 30000
+- assertNotVisible: flow-secret-not-real
+- assertNotVisible: .*flow-secret.*

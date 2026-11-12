@@ -1,0 +1,31 @@
+{
+  "note": "The iOS privacy manifest's own part (PrivacyInfo.xcprivacy): no tracking, and the reason for each required-reason API the app's code reaches. The collected data types come from collection.json. Each SDK ships its own manifest as well; usedBy names the packages in this app that reach the API, and check.mjs fails when one is no longer a dependency or a reason code is not one Apple allows for that API.",
+  "tracking": false,
+  "trackingDomains": [],
+  "accessedApis": [
+    {
+      "type": "NSPrivacyAccessedAPICategoryUserDefaults",
+      "reasons": ["CA92.1"],
+      "why": "React Native and Expo keep the app's own settings (language, update state, launch flags) in its own UserDefaults. Only this app reads them.",
+      "usedBy": ["react-native", "expo-constants", "expo-localization"]
+    },
+    {
+      "type": "NSPrivacyAccessedAPICategoryFileTimestamp",
+      "reasons": ["C617.1"],
+      "why": "The offline cache, the image cache and the files the app writes are inside its own container; their timestamps decide what is fresh. No file outside the container is read.",
+      "usedBy": ["expo-file-system", "expo-sqlite", "expo-image"]
+    },
+    {
+      "type": "NSPrivacyAccessedAPICategorySystemBootTime",
+      "reasons": ["35F9.1"],
+      "why": "React Native measures time between events in the app (timers, animations, the session heartbeat) from the system's uptime. It is never sent anywhere.",
+      "usedBy": ["react-native"]
+    },
+    {
+      "type": "NSPrivacyAccessedAPICategoryDiskSpace",
+      "reasons": ["E174.1"],
+      "why": "Before a download or the offline cache is written, the free space is checked so the write does not fail part way.",
+      "usedBy": ["expo-file-system"]
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+# The builder with the one trigger every plan has (a DM keyword), so the flow needs no Instagram connection.
+appId: ${APP_ID}
+name: 'Create an automation in the app: a DM keyword reply, saved and listed'
+---
+- runFlow:
+    file: common/sign-in-with-code.yaml
+    env:
+      PHONE: ${PHONE_AUTOMATION}
+- runFlow:
+    file: common/open-more.yaml
+    env:
+      FEATURE: automations
+- tapOn:
+    id: automations-new
+- extendedWaitUntil:
+    visible:
+      id: builder-name
+    timeout: 30000
+- tapOn:
+    id: builder-name
+- inputText: E2E price reply
+- hideKeyboard
+- tapOn:
+    id: builder-trigger-dm_keyword
+- scrollUntilVisible:
+    element:
+      id: builder-keywords-draft
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: builder-keywords-draft
+- inputText: 'price,'
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: builder-body
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: builder-body
+- inputText: Thanks for asking. Here is the price list.
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: builder-save
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: builder-save
+- extendedWaitUntil:
+    visible:
+      id: builder-done
+    timeout: 30000
+- assertNotVisible:
+    id: builder-refusal
+- back
+- extendedWaitUntil:
+    visible: E2E price reply
+    timeout: 30000

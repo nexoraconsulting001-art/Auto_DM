@@ -1,0 +1,61 @@
+# A seller with accounts in businesses a and b, and none in c. Each business has one cash on delivery order.
+appId: ${APP_ID}
+name: 'P-10: Switch business on Orders: exactly the seller''s two businesses are listed, and only the chosen one''s orders show'
+---
+- runFlow:
+    file: common/sign-in-with-code.yaml
+    env:
+      PHONE: ${PHONE_SWITCHER}
+# Into business a first, whichever one the sign-in opened.
+- tapOn:
+    id: tab-orders
+- tapOn:
+    id: open-switcher
+- extendedWaitUntil:
+    visible:
+      id: switcher
+    timeout: 30000
+- assertVisible:
+    id: switcher-business-${BUSINESS_A_ID}
+- assertVisible:
+    id: switcher-business-${BUSINESS_B_ID}
+- assertNotVisible:
+    id: switcher-business-${BUSINESS_C_ID}
+- assertNotVisible: .*${BUSINESS_C_NAME}.*
+- tapOn:
+    id: switcher-business-${BUSINESS_A_ID}
+- extendedWaitUntil:
+    visible:
+      id: top-bar
+    timeout: 60000
+- tapOn:
+    id: tab-orders
+- extendedWaitUntil:
+    visible:
+      id: order-${ORDER_A_ID}
+    timeout: 60000
+- assertNotVisible:
+    id: order-${ORDER_B_ID}
+# Then to business b: a's order is gone at once, not shown until a reload.
+- tapOn:
+    id: open-switcher
+- extendedWaitUntil:
+    visible:
+      id: switcher-business-${BUSINESS_B_ID}
+    timeout: 30000
+- tapOn:
+    id: switcher-business-${BUSINESS_B_ID}
+- extendedWaitUntil:
+    visible:
+      id: top-bar
+    timeout: 60000
+- assertVisible: .*${BUSINESS_B_NAME}.*
+- tapOn:
+    id: tab-orders
+- extendedWaitUntil:
+    visible:
+      id: order-${ORDER_B_ID}
+    timeout: 60000
+- assertNotVisible:
+    id: order-${ORDER_A_ID}
+- assertNotVisible: ${ORDER_A_NUMBER}

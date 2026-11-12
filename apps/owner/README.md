@@ -28,14 +28,15 @@ Things that are settled, so tracks need not revisit them:
 ```
 apps/owner
   app.config.js      name, ids, permissions, privacy manifest, plugins; reads the build settings below
-  eas.json           development, preview and production profiles; no project id (EAS is not used in CI)
+  eas.json           development, preview and production profiles; nothing account-specific (EAS is not used in CI)
   index.js, App.js   entry: fonts, then src/App.js
   src/App.js         the shell: update required, lock, sign-in, or the navigation
   src/services.js    createServices() and useServices(): session, api, queryClient, lock, config, strings
   src/shell          sign-in, the business switcher, the navigation built from the registry
   src/features       one folder per feature, and index.js listing them (see below)
   src/strings.js     the shell's words in English and Hindi, merged with each feature's
-  .maestro           flows run on an emulator in CI
+  .maestro           flows run on an emulator in CI; common/ shared steps, support/ the job's server and scripts
+  store              store listings, privacy answers and the check that keeps them true (see Releasing)
 packages/theme       design tokens: sellerTheme (Neel and Haldi) and fromBrandKit(kit)
 packages/ui          cross-platform components that read the theme
 packages/app-core    session and token storage, silent refresh, lock, push, deep links, offline cache, shared screens, strings
@@ -48,7 +49,7 @@ A feature is a folder in `src/features` whose `index.js` default-exports `{ name
 
 1. Add screens to `screens` (`{ name, path, title, component }`). `path` is what a push or a link opens, such as `orders/:id`.
 2. List every API route id the screens call, and every console page they stand in for (`'console:/orders/:id'`), in `routeIds`, written out as quoted strings.
-3. Delete those ids from `tools/parity-pending.json`, and run `npm run parity`.
+3. Run `npm run parity`. It is strict: a seller route or console page with no app screen fails it, by name. `tools/parity-pending.json` stays empty, and there is no web-only flag of any spelling; the one exemption is a route flagged `consoleOnly` in the contract, an ops function in the Platform Console.
 4. Put the feature's words in `strings` under keys that start with its name, in English and Hindi.
 5. Inside a screen: `const { api, session } = useServices()`, data through react-query, components from `@bhava/ui`, words through `useStrings()`. Show `<OfflineBanner offline={...} />` over cached lists and disable buttons that write while offline.
 
@@ -85,11 +86,39 @@ API_BASE_URL=http://localhost:3000 npx expo run:ios        # on a Mac
 ## Tests
 
 ```
-npm run test:apps        # jest over apps/* and packages/*; tests sit beside the code as *.test.js
-npm run parity           # every seller route and console page has an app screen
-npm run app:export       # the JavaScript bundles for Android and iOS
+npm run test:apps                  # jest over apps/* and packages/*; tests sit beside the code as *.test.js
+npm run parity                     # every seller route and console page has an app screen (strict)
+node apps/owner/store/check.mjs    # the listings explain every permission; the privacy answers match the app
+npm run app:export                 # the JavaScript bundles for Android and iOS
 ```
 
-A jest test can reach `localhost` and nothing else (`tools/jest/net-guard.cjs`). A test or a Maestro flow whose name starts with a requirement id, such as `P-19 ...`, counts for that requirement in `npm run gate`. Maestro flows in `.maestro` run on an emulator in the `android-e2e` job, against `tools/app-e2e-server.mjs`.
+A jest test can reach `localhost` and nothing else (`tools/jest/net-guard.cjs`). A test or a Maestro flow whose name starts with a requirement id, such as `P-19 ...`, counts for that requirement in `npm run gate`; the gate does not run flows.
 
-CI (`.github/workflows/apps.yml`) builds a signed release APK and an iOS simulator app on every push, with no secret; a change that breaks either build fails the workflow.
+### The Maestro flows
+
+The flows at the top of `.maestro` (sign in with a WhatsApp code, switch business, create an automation, confirm a cash on delivery order and see the console agree, replace the payment key after a fresh code, revoke a device and be signed out) run on an Android emulator in the `android-e2e` job. `support/server.mjs` is the job's own server: it seeds a made-up world (`support/world.mjs`) into a new built-in database, starts every simulator from `tools/sim` and the server, and writes the ids and invented numbers the flows need to a file that `support/run-flows.sh` passes to Maestro. The flows read sign-in codes from the WhatsApp simulator's outbox (`support/code.js`) and check the server side with `support/console-order.js` and `support/api-device.js`. To run them at a desk against an emulator:
+
+```
+PORT=3000 APP_HOST=10.0.2.2 node apps/owner/.maestro/support/server.mjs --out flows.env
+APP_ID=com.bhava.business bash apps/owner/.maestro/support/run-flows.sh flows.env app-release.apk report.xml
+```
+
+`test/p5/app-release` checks every flow without a device: each element it touches is a testID the app renders, each value is one the server hands it, and each script works against the real server and simulators.
+
+## Releasing
+
+CI (`.github/workflows/apps.yml`) builds a signed release APK and an iOS simulator app on every push, with no secret and no account; either failing fails the run, and the last job, "Apps ready", passes only when every job did, so it is the one check a branch rule needs. The APK's `targetSdkVersion` (36 or higher) and the Xcode and iOS SDK versions (26 or newer) are checked in the jobs that build them (`tools/build-check.mjs`). The Android signing key is made in the job, masked and deleted; keystores, `.p8` and `.p12` files and the Firebase files are never committed (`.gitignore`, `npm run secret-scan`) and the APK is checked to carry none.
+
+`store/` holds what the store consoles ask for:
+
+| File | What it is |
+|---|---|
+| `listing.json` | The Play and App Store text for Bhava for Business, and the sentence that explains each permission the app asks for |
+| `collection.json` | What the app collects, why, and the files that collect it. The one source for the answers below |
+| `privacy-manifest.json` | The required-reason APIs the app reaches, Apple's reason code for each, and why |
+| `play/data-safety.json`, `app-store/app-privacy.json` | The Data safety and App Privacy answers, generated from `collection.json` (`node apps/owner/store/check.mjs --write`); enter them in each console |
+| `answers.cjs` | Works the answers and the iOS privacy manifest out of those files; `app.config.js` builds `ios.privacyManifests` with it |
+
+`store/check.mjs` fails when the app config asks for a permission the listing does not explain, when a field, picker or SDK collects something `collection.json` does not list, when a reason code is not one Apple allows, or when the committed answers are stale. Account-specific details (developer name, contact email, privacy policy address, EAS project, signing credentials) are entered in each console when the accounts exist, never in this repository.
+
+`eas.json` is ready for EAS Build later: `development` and `preview` make an internal APK and a simulator build, `production` an app bundle and a device build, each on its own update channel. A production build needs `API_BASE_URL` set to an https address (as an EAS environment variable); push needs the google-services file and `APNS_ENV`, supplied from outside the repository.

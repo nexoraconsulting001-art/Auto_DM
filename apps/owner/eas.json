@@ -3,17 +3,20 @@
   "build": {
     "development": {
       "distribution": "internal",
+      "channel": "development",
       "env": { "APP_ENV": "development" },
       "android": { "buildType": "apk", "gradleCommand": ":app:assembleDebug" },
       "ios": { "simulator": true }
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "env": { "APP_ENV": "preview" },
       "android": { "buildType": "apk" },
       "ios": { "simulator": true }
     },
     "production": {
+      "channel": "production",
       "env": { "APP_ENV": "production" },
       "android": { "buildType": "app-bundle" },
       "ios": { "simulator": false }
