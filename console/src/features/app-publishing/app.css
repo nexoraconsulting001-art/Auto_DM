@@ -1,0 +1,29 @@
+/* My app (PRD 10.7 to 10.14): Neel and Haldi tokens only, phone first from 360 px. */
+.myapp-stack { display: grid; gap: var(--space-4); }
+.myapp-form { display: grid; gap: var(--space-3); min-width: 0; }
+.myapp-upgrade { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px dashed var(--haldi); border-radius: var(--radius-card); background: var(--haldi-tint); color: var(--ink); }
+.myapp-upgrade p { margin: 0; font-size: var(--text-small); }
+.myapp-promise { margin: 0; }
+.myapp-counter { font-size: var(--text-meta); color: var(--ink-3); }
+.myapp-counter[data-over='true'] { color: var(--bad-text); font-weight: 600; }
+textarea.secret-text { -webkit-text-security: disc; text-security: disc; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.myapp-row { display: grid; gap: var(--space-1); padding: var(--space-3) 0; border-top: 1px solid var(--line-soft); min-width: 0; }
+.myapp-row:first-child { border-top: 0; }
+.myapp-row-head { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; justify-content: space-between; }
+.myapp-row p { margin: 0; overflow-wrap: anywhere; }
+.myapp-meta { font-size: var(--text-meta); color: var(--ink-2); }
+.myapp-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.myapp-steps li { display: grid; gap: var(--space-1); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-field); background: var(--surface); }
+.myapp-steps li[data-done='true'] { border-color: var(--good-text); background: var(--good-tint); }
+.myapp-steps .warning { color: var(--ink); font-size: var(--text-small); }
+.myapp-check { display: flex; gap: var(--space-2); align-items: center; min-height: var(--tap); }
+.myapp-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.myapp-radio { display: flex; flex-wrap: wrap; gap: var(--space-2); border: 0; margin: 0; padding: 0; min-width: 0; }
+.myapp-radio legend { font-weight: 600; font-size: var(--text-small); margin-bottom: var(--space-1); padding: 0; }
+.myapp-radio label { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--tap); }
+.myapp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+.myapp-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: var(--space-2); }
+.myapp-shot { display: grid; gap: var(--space-1); font-size: var(--text-meta); min-width: 0; }
+.myapp-shot img { width: 100%; height: auto; border-radius: var(--radius-small); background: var(--surface-sunken); }
+.myapp-quote { margin: 0; padding: var(--space-3); border-left: 3px solid var(--bad-text); background: var(--bad-tint); border-radius: var(--radius-small); overflow-wrap: anywhere; }
+.myapp-problems { margin: var(--space-2) 0 0; padding-left: var(--space-4); }
