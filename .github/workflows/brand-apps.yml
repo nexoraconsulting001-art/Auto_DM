@@ -67,6 +67,8 @@ jobs:
         run: npm run test:apps -- --ci --selectProjects shopper store-client pay
       - name: The store client against the contract, the build tool and the brand rules (node:test)
         run: node --import ./tools/net-guard.mjs --test --test-force-exit --test-concurrency=1 "test/p6/shopper-app-workspace/*.test.js"
+      - name: The flows, the capture tools and the build checks (node:test)
+        run: node --import ./tools/net-guard.mjs --test --test-force-exit --test-concurrency=1 "test/p6/brand-ci/*.test.js"
       - name: Every fixture brand validates, its images pass the stores' specs, and the app bundles for both platforms
         env:
           BRANDS: ${{ needs.brands.outputs.brands }}
@@ -106,7 +108,12 @@ jobs:
           keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$RUNNER_TEMP/ci.keystore" -alias ci \
             -keyalg RSA -keysize 2048 -validity 2 -storepass "$KEY_PASS" -keypass "$KEY_PASS" -dname "CN=CI build, O=CI" > /dev/null
       - name: Build the brand's APK with the local driver
-        run: npm run build-brand -- "$FIXTURES/$BRAND/brand.json" --platform android --driver local --profile preview --out "$RUNNER_TEMP/brands" --report "$RUNNER_TEMP/report.json"
+        run: npm run build-brand -- "$FIXTURES/$BRAND/brand.json" --platform android --driver local --profile preview --out "$RUNNER_TEMP/brands" --report "$RUNNER_TEMP/report.json" 2>&1 | tee "$RUNNER_TEMP/build.log"
+      - name: The build log holds no key, keystore content or password (P-36)
+        if: always()
+        run: |
+          test -f "$RUNNER_TEMP/build.log" || exit 0
+          node apps/shopper/.maestro/support/scan-binary.mjs log "$RUNNER_TEMP/build.log" --secret ANDROID_KEYSTORE_PASSWORD
       - name: Throw the signing key away
         if: always()
         run: rm -f "$RUNNER_TEMP/ci.keystore"
@@ -121,6 +128,13 @@ jobs:
             --package "$(node -p "require('./$FIXTURES/$BRAND/brand.json').android.package")" \
             --label "$(node -p "require('./$FIXTURES/$BRAND/brand.json').shortName")" < "$RUNNER_TEMP/badging.txt"
           test "$(sed -n "s/^package: .* versionCode='\([0-9]*\)'.*/\1/p" "$RUNNER_TEMP/badging.txt")" = "$(node -p "require('./$FIXTURES/$BRAND/brand.json').android.versionCode")"
+      - name: The APK's manifest, strings and bundled files hold no platform name and no other brand's name (P-01, P-31)
+        run: |
+          OTHERS=()
+          for FILE in "$FIXTURES"/*/brand.json; do
+            if [ "$FILE" != "$FIXTURES/$BRAND/brand.json" ]; then OTHERS+=(--other "$FILE"); fi
+          done
+          node apps/shopper/.maestro/support/scan-binary.mjs binary "$APK" --brand "$FIXTURES/$BRAND/brand.json" "${OTHERS[@]}"
       - name: The APK is signed with this job's key, not a debug key
         run: |
           APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
@@ -147,13 +161,15 @@ jobs:
     name: iOS simulator build (${{ matrix.brand }})
     needs: brands
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         brand: ${{ fromJSON(needs.brands.outputs.brands) }}
     env:
       BRAND: ${{ matrix.brand }}
+      API_PORT: '3000'
+      MAESTRO_VERSION: '1.41.0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -167,6 +183,9 @@ jobs:
           node tools/build-check.mjs xcode < "$RUNNER_TEMP/xcode.txt"
       - run: npm ci
       - name: Compile the brand for the simulator with the local driver, signing off
+        env:
+          # The simulator reaches this machine by its own name; the listing shots below are taken against the job's own server.
+          API_BASE_URL: http://localhost:${{ env.API_PORT }}
         run: |
           npm run build-brand -- "$FIXTURES/$BRAND/brand.json" --platform ios --driver local --profile simulator --out "$RUNNER_TEMP/brands" --report "$RUNNER_TEMP/report.json" > "$RUNNER_TEMP/build.log" 2>&1 \
             || { tail -n 300 "$RUNNER_TEMP/build.log"; exit 1; }
@@ -184,11 +203,55 @@ jobs:
           plutil -lint "$APP/PrivacyInfo.xcprivacy"
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSPrivacyTracking' "$APP/PrivacyInfo.xcprivacy")" = false
           (cd "$(dirname "$APP")" && zip -qry "$RUNNER_TEMP/shopper-ios-simulator.zip" "$(basename "$APP")")
+      - name: The app's bundle holds no platform name and no other brand's name (P-01, P-31), and its build log no key
+        run: |
+          APP="$(node -p "require('$RUNNER_TEMP/report.json').builds[0].artifact")"
+          OTHERS=()
+          for FILE in "$FIXTURES"/*/brand.json; do
+            if [ "$FILE" != "$FIXTURES/$BRAND/brand.json" ]; then OTHERS+=(--other "$FILE"); fi
+          done
+          node apps/shopper/.maestro/support/scan-binary.mjs binary "$APP" --brand "$FIXTURES/$BRAND/brand.json" "${OTHERS[@]}"
+          node apps/shopper/.maestro/support/scan-binary.mjs log "$RUNNER_TEMP/build.log"
       - uses: actions/upload-artifact@v4
         with:
           name: shopper-ios-simulator-app-${{ matrix.brand }}
           path: ${{ runner.temp }}/shopper-ios-simulator.zip
           if-no-files-found: error
+          retention-days: 14
+      - name: Start the server on a new built-in database, with a store seeded for this brand and every simulator
+        env:
+          PORT: ${{ env.API_PORT }}
+          APP_HOST: localhost
+        run: |
+          nohup node apps/shopper/.maestro/support/server.mjs --brand "$FIXTURES/$BRAND/brand.json" --out "$RUNNER_TEMP/flows.env" > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+          for i in $(seq 1 240); do test -s "$RUNNER_TEMP/flows.env" && break; sleep 1; done
+          test -s "$RUNNER_TEMP/flows.env" || { tail -n 100 "$RUNNER_TEMP/server.log"; exit 1; }
+          curl -fs "http://127.0.0.1:$API_PORT/healthz" > /dev/null
+      - name: Boot a 6.9 inch iPhone simulator and install Maestro
+        run: |
+          UDID="$(xcrun simctl list devices available -j | node tools/listing-shots/pick-simulator.mjs)"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Take the listing screenshots from the simulator app, fit them to the App Store sizes and check them (P-55)
+        run: |
+          bash tools/listing-shots/capture-ios.sh "$RUNNER_TEMP/flows.env" "$RUNNER_TEMP/shopper-ios-simulator.zip" "$RUNNER_TEMP/shots"
+          node tools/listing-shots/index.mjs fit --platform ios --captures "$RUNNER_TEMP/shots" --build "$RUNNER_TEMP/shopper-ios-simulator.zip" --out "$RUNNER_TEMP/listing-shots"
+      - name: Stop the server
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/server.pid" ]; then kill "$(cat "$RUNNER_TEMP/server.pid")" || true; fi
+          tail -n 100 "$RUNNER_TEMP/server.log" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: listing-shots-ios-${{ matrix.brand }}
+          path: |
+            ${{ runner.temp }}/listing-shots
+            ${{ runner.temp }}/shots
+          if-no-files-found: ignore
           retention-days: 14
 
   android-e2e:
@@ -232,8 +295,13 @@ jobs:
           API_BASE_URL: http://10.0.2.2:${{ env.API_PORT }}
           ANDROID_ARCHITECTURES: x86_64
         run: |
-          npm run build-brand -- "$FIXTURES/$BRAND/brand.json" --platform android --driver local --profile preview --out "$RUNNER_TEMP/brands" --report "$RUNNER_TEMP/report.json"
+          npm run build-brand -- "$FIXTURES/$BRAND/brand.json" --platform android --driver local --profile preview --out "$RUNNER_TEMP/brands" --report "$RUNNER_TEMP/report.json" 2>&1 | tee "$RUNNER_TEMP/build.log"
           echo "APK=$(node -p "require('$RUNNER_TEMP/report.json').builds[0].artifact")" >> "$GITHUB_ENV"
+      - name: The build log holds no key, keystore content or password (P-36)
+        if: always()
+        run: |
+          test -f "$RUNNER_TEMP/build.log" || exit 0
+          node apps/shopper/.maestro/support/scan-binary.mjs log "$RUNNER_TEMP/build.log" --secret ANDROID_KEYSTORE_PASSWORD
       - name: Throw the signing key away
         if: always()
         run: rm -f "$RUNNER_TEMP/e2e.keystore"
@@ -251,7 +319,7 @@ jobs:
         run: |
           curl -fsSL "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-      - name: Install the APK and run the flows in apps/shopper/.maestro
+      - name: Install the APK, run the flows in apps/shopper/.maestro, then take the listing screenshots from the same build
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -260,7 +328,11 @@ jobs:
           profile: pixel_7
           disable-animations: true
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: bash apps/shopper/.maestro/support/run-flows.sh "$RUNNER_TEMP/flows.env" "$APK" "$RUNNER_TEMP/maestro.xml"
+          script: |
+            bash apps/shopper/.maestro/support/run-flows.sh "$RUNNER_TEMP/flows.env" "$APK" "$RUNNER_TEMP/maestro.xml"
+            bash tools/listing-shots/capture-android.sh "$RUNNER_TEMP/flows.env" "$APK" "$RUNNER_TEMP/shots"
+      - name: Fit the shots to the Play sizes and check them against the spec (P-55)
+        run: node tools/listing-shots/index.mjs fit --platform android --captures "$RUNNER_TEMP/shots" --build "$APK" --out "$RUNNER_TEMP/listing-shots"
       - name: Stop the server
         if: always()
         run: |
@@ -272,6 +344,8 @@ jobs:
           name: shopper-android-e2e-${{ matrix.brand }}
           path: |
             ${{ runner.temp }}/maestro.xml
+            ${{ runner.temp }}/listing-shots
+            ${{ runner.temp }}/shots
             ~/.maestro/tests
           if-no-files-found: ignore
           retention-days: 14

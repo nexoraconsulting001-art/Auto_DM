@@ -1,0 +1,75 @@
+# One tap on a past order puts its items back in the cart at today's price.
+appId: ${APP_ID}
+name: 'P-64: Reorder a past order with one tap and find its items in the cart'
+---
+- runFlow:
+    file: common/sign-in.yaml
+    env:
+      SHOPPER_PHONE: ${SHOPPER_PHONE}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+- tapOn:
+    id: tab-catalog
+- runFlow:
+    file: common/to-checkout.yaml
+    env:
+      PRODUCT_SLUG: ${PRODUCT_SLUG}
+      PRODUCT_NAME: ${PRODUCT_NAME}
+      SHOPPER_NAME: ${SHOPPER_NAME}
+      SHOPPER_PHONE: ${SHOPPER_PHONE}
+      SHOPPER_LINE1: ${SHOPPER_LINE1}
+      SHOPPER_CITY: ${SHOPPER_CITY}
+      SHOPPER_PINCODE: ${SHOPPER_PINCODE}
+      SHOPPER_STATE_CODE: ${SHOPPER_STATE_CODE}
+      SHOPPER_EMAIL: ${SHOPPER_EMAIL}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+      SIM_RAZORPAY_URL: ${SIM_RAZORPAY_URL}
+- runFlow:
+    when:
+      visible:
+        id: addr-name
+    file: common/address.yaml
+    env:
+      PRODUCT_SLUG: ${PRODUCT_SLUG}
+      PRODUCT_NAME: ${PRODUCT_NAME}
+      SHOPPER_NAME: ${SHOPPER_NAME}
+      SHOPPER_PHONE: ${SHOPPER_PHONE}
+      SHOPPER_LINE1: ${SHOPPER_LINE1}
+      SHOPPER_CITY: ${SHOPPER_CITY}
+      SHOPPER_PINCODE: ${SHOPPER_PINCODE}
+      SHOPPER_STATE_CODE: ${SHOPPER_STATE_CODE}
+      SHOPPER_EMAIL: ${SHOPPER_EMAIL}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+      SIM_RAZORPAY_URL: ${SIM_RAZORPAY_URL}
+- runFlow:
+    file: common/place-cod.yaml
+    env:
+      PRODUCT_SLUG: ${PRODUCT_SLUG}
+      PRODUCT_NAME: ${PRODUCT_NAME}
+      SHOPPER_NAME: ${SHOPPER_NAME}
+      SHOPPER_PHONE: ${SHOPPER_PHONE}
+      SHOPPER_LINE1: ${SHOPPER_LINE1}
+      SHOPPER_CITY: ${SHOPPER_CITY}
+      SHOPPER_PINCODE: ${SHOPPER_PINCODE}
+      SHOPPER_STATE_CODE: ${SHOPPER_STATE_CODE}
+      SHOPPER_EMAIL: ${SHOPPER_EMAIL}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+      SIM_RAZORPAY_URL: ${SIM_RAZORPAY_URL}
+- tapOn:
+    id: status-order
+- extendedWaitUntil:
+    visible:
+      id: order-reorder
+    timeout: 30000
+- tapOn:
+    id: order-reorder
+- extendedWaitUntil:
+    visible:
+      id: reorder-cart
+    timeout: 30000
+- tapOn:
+    id: reorder-cart
+- extendedWaitUntil:
+    visible:
+      id: go-checkout
+    timeout: 30000
+- assertVisible: ${PRODUCT_NAME}

@@ -1,0 +1,31 @@
+# Shared steps. From the home page: open the shop, open the seeded product, add it to the cart and go to checkout.
+appId: ${APP_ID}
+name: Add the seeded product to the cart and open checkout (shared steps)
+---
+- tapOn:
+    id: tab-catalog
+- extendedWaitUntil:
+    visible:
+      id: product-${PRODUCT_SLUG}
+    timeout: 60000
+- tapOn:
+    id: product-${PRODUCT_SLUG}
+- extendedWaitUntil:
+    visible:
+      id: add-to-cart
+    timeout: 30000
+- tapOn:
+    id: add-to-cart
+- tapOn:
+    id: tab-cart
+- extendedWaitUntil:
+    visible:
+      id: go-checkout
+    timeout: 30000
+- assertVisible: ${PRODUCT_NAME}
+- tapOn:
+    id: go-checkout
+- extendedWaitUntil:
+    visible:
+      id: screen-checkout
+    timeout: 30000

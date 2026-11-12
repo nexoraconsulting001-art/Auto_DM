@@ -1,0 +1,34 @@
+# Catalog and Reels show with nothing asked of the shopper, and a product opens from the shop.
+appId: ${APP_ID}
+name: 'P-27: Browse the shop, the reels and a product without signing in'
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: tab-catalog
+    timeout: 120000
+- tapOn:
+    id: tab-catalog
+- extendedWaitUntil:
+    visible:
+      id: product-${PRODUCT_SLUG}
+    timeout: 60000
+- assertVisible: ${PRODUCT_NAME}
+- tapOn:
+    id: tab-reels
+- assertVisible:
+    id: screen-reels
+- tapOn:
+    id: tab-catalog
+- tapOn:
+    id: product-${PRODUCT_SLUG}
+- extendedWaitUntil:
+    visible:
+      id: product-name
+    timeout: 30000
+- assertVisible: ${PRODUCT_NAME}
+- assertVisible:
+    id: add-to-cart
+- assertNotVisible:
+    id: screen-sign-in

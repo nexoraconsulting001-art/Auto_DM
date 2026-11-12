@@ -1,0 +1,43 @@
+# Shared steps, run from a flow with runFlow (Maestro runs only the flows at the top of .maestro). Opens the app with
+# nothing stored, signs SHOPPER_PHONE in from the Account tab with the WhatsApp code the job's server sent to the WhatsApp
+# simulator, and waits for the signed-in account page. Nothing here names a brand.
+appId: ${APP_ID}
+name: Sign in with a WhatsApp code (shared steps)
+---
+- launchApp:
+    clearState: true
+    permissions:
+      notifications: allow
+- extendedWaitUntil:
+    visible:
+      id: tab-account
+    timeout: 120000
+- tapOn:
+    id: tab-account
+- tapOn:
+    id: account-sign-in
+- tapOn:
+    id: sign-in-phone
+- inputText: ${SHOPPER_PHONE}
+- hideKeyboard
+- tapOn:
+    id: sign-in-send
+- extendedWaitUntil:
+    visible:
+      id: sign-in-code
+    timeout: 30000
+- runScript:
+    file: ../support/code.js
+    env:
+      PHONE: ${SHOPPER_PHONE}
+      SIM_WHATSAPP_URL: ${SIM_WHATSAPP_URL}
+- tapOn:
+    id: sign-in-code
+- inputText: ${output.code}
+- hideKeyboard
+- tapOn:
+    id: sign-in-verify
+- extendedWaitUntil:
+    visible:
+      id: account-sign-out
+    timeout: 60000
