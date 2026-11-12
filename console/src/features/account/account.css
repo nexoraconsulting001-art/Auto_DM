@@ -1,0 +1,281 @@
+/* Sign-in, your account, the team, devices and notifications. Phone first, Neel and Haldi tokens only. */
+
+/* ---- Sign-in ---- */
+.acct-intro {
+  color: var(--ink-2);
+}
+.acct-or {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+.acct-or::before,
+.acct-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.acct-google {
+  gap: var(--space-2);
+}
+.acct-google svg {
+  flex: none;
+}
+.acct-sent {
+  color: var(--ink-2);
+  font-size: var(--text-small);
+  line-height: 20px;
+}
+.acct-sent strong {
+  color: var(--ink);
+}
+.acct-help {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink-2);
+  font-size: var(--text-small);
+  line-height: 20px;
+}
+.acct-link-button {
+  align-self: flex-start;
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--neel);
+  font-weight: 600;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.acct-link-button:disabled {
+  color: var(--ink-3);
+  text-decoration: none;
+  cursor: default;
+}
+.acct-footnote {
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  line-height: 18px;
+}
+
+/* ---- Rows: people, devices, businesses, notifications ---- */
+.acct-rows {
+  display: flex;
+  flex-direction: column;
+}
+.acct-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+}
+.acct-row + .acct-row {
+  border-top: 1px solid var(--line-soft);
+}
+.acct-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-pill);
+  background: var(--neel-tint);
+  color: var(--neel-deep);
+}
+.acct-row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.acct-row-title {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.acct-row-meta {
+  color: var(--ink-2);
+  font-size: var(--text-small);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.acct-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+.acct-row-actions {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+/* A notification: the whole row opens what it is about. */
+.acct-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.acct-note + .acct-note {
+  border-top: 1px solid var(--line-soft);
+}
+.acct-note-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--neel);
+}
+.acct-note-dot-read {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--dots);
+}
+.acct-note-when {
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  line-height: 18px;
+}
+
+/* ---- Forms ---- */
+.acct-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.acct-fieldset legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-weight: 700;
+}
+.acct-two {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.acct-two .field + .field {
+  border-top: 0;
+  border-left: 1px solid var(--line);
+}
+
+/* ---- Notification choices ---- */
+.acct-kinds {
+  display: flex;
+  flex-direction: column;
+}
+.acct-kind {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+}
+.acct-kind + .acct-kind {
+  border-top: 1px solid var(--line-soft);
+}
+.acct-kind-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.acct-kind-name {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  font-weight: 700;
+}
+.acct-kind .toggle {
+  min-height: var(--tap);
+}
+
+/* ---- Your account ---- */
+.acct-facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+.acct-facts div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.acct-facts dt {
+  color: var(--ink-2);
+}
+.acct-facts dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.acct-danger {
+  border-color: var(--bad-tint);
+}
+
+/* The steps after "Delete my account". */
+.acct-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.acct-timeline li {
+  display: flex;
+  gap: var(--space-3);
+}
+.acct-timeline-mark {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--neel);
+}
+.acct-timeline-later .acct-timeline-mark {
+  background: var(--haldi);
+}
+.acct-timeline-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.acct-timeline-text strong {
+  font-weight: 700;
+}
+.acct-timeline-text span {
+  color: var(--ink-2);
+  font-size: var(--text-small);
+  line-height: 20px;
+}
+
+@media (min-width: 620px) {
+  .acct-row-actions {
+    flex-direction: row;
+    align-items: center;
+  }
+}
