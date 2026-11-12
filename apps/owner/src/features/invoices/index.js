@@ -1,16 +1,77 @@
+import FileText from 'lucide-react-native/icons/file-text';
 import { staffWith } from '@bhava/app-core/access';
-import InvoicesScreen from './InvoicesScreen.js';
+import InvoicesScreen, { InvoiceScreen, InvoiceSettingsScreen } from './InvoicesScreen.js';
 
-/**
- * Invoices. Whoever builds this lists every API route id and console page it covers
- * in `routeIds`, adds its screens, and removes those ids from tools/parity-pending.json. The format is in ../index.js.
- */
+/** Invoices (PRD 9.13): the list, one invoice with its PDF, and the GST details printed on them. */
 export default {
   name: 'invoices',
   access: staffWith('orders'),
   feature: 'store.invoices',
-  routeIds: [],
-  screens: [{ name: 'index', path: 'invoices', title: 'invoices.title', component: InvoicesScreen }],
-  nav: { label: 'invoices.title', order: 13 },
-  strings: { en: { 'invoices.title': 'Invoices' }, hi: { 'invoices.title': 'इनवॉइस' } },
+  routeIds: ['invoices.list', 'invoices.get', 'invoiceSettings.get', 'invoiceSettings.update', 'console:/invoices', 'console:/invoices/settings'],
+  screens: [
+    { name: 'index', path: 'invoices', title: 'invoices.title', component: InvoicesScreen },
+    { name: 'settings', path: 'invoices/settings', title: 'invoices.settings', component: InvoiceSettingsScreen },
+    { name: 'detail', path: 'invoices/:id', title: 'invoices.one', component: InvoiceScreen },
+  ],
+  nav: { label: 'invoices.title', order: 13, icon: FileText },
+  strings: {
+    en: {
+      'invoices.title': 'Invoices',
+      'invoices.one': 'Invoice',
+      'invoices.empty': 'No invoices yet. One is made for each paid order.',
+      'invoices.taxable': 'Taxable value',
+      'invoices.cgst': 'CGST',
+      'invoices.sgst': 'SGST',
+      'invoices.igst': 'IGST',
+      'invoices.total': 'Total',
+      'invoices.advance': 'Advance paid',
+      'invoices.balance': 'Balance',
+      'invoices.open': 'Open the PDF',
+      'invoices.making': 'The PDF is being made. Check again in a minute.',
+      'invoices.order': 'Open the order',
+      'invoices.settings': 'GST details',
+      'invoices.settingsIntro': 'Printed on every invoice. The state decides whether GST is split into CGST and SGST or charged as IGST.',
+      'invoices.legalName': 'Legal name',
+      'invoices.gstin': 'GSTIN',
+      'invoices.gstinHint': 'Leave it empty if you aren’t registered: you then issue bills of supply.',
+      'invoices.state': 'State',
+      'invoices.address': 'Address on invoices',
+      'invoices.prefix': 'Invoice number prefix',
+      'invoices.prefixHint': 'Up to 4 capital letters or digits.',
+      'invoices.saved': 'GST details saved.',
+      'invoices.ownerOnly': 'Only the owner changes these.',
+      'invoices.problem.gstin': 'Enter a 15-character GSTIN',
+      'invoices.problem.state': 'The state must match the first two digits of the GSTIN',
+      'invoices.problem.prefix': 'Use up to 4 capital letters or digits',
+    },
+    hi: {
+      'invoices.title': 'इनवॉइस',
+      'invoices.one': 'इनवॉइस',
+      'invoices.empty': 'अभी कोई इनवॉइस नहीं। हर पेड ऑर्डर के लिए एक बनता है।',
+      'invoices.taxable': 'टैक्स योग्य मूल्य',
+      'invoices.cgst': 'CGST',
+      'invoices.sgst': 'SGST',
+      'invoices.igst': 'IGST',
+      'invoices.total': 'कुल',
+      'invoices.advance': 'दिया गया एडवांस',
+      'invoices.balance': 'बाकी',
+      'invoices.open': 'PDF खोलें',
+      'invoices.making': 'PDF बन रहा है। एक मिनट बाद फिर देखें।',
+      'invoices.order': 'ऑर्डर खोलें',
+      'invoices.settings': 'GST की जानकारी',
+      'invoices.settingsIntro': 'हर इनवॉइस पर छपती है। राज्य से तय होता है कि GST, CGST और SGST में बँटेगा या IGST लगेगा।',
+      'invoices.legalName': 'कानूनी नाम',
+      'invoices.gstin': 'GSTIN',
+      'invoices.gstinHint': 'अगर आप रजिस्टर्ड नहीं हैं तो खाली छोड़ें: तब आप बिल ऑफ़ सप्लाई देंगे।',
+      'invoices.state': 'राज्य',
+      'invoices.address': 'इनवॉइस पर पता',
+      'invoices.prefix': 'इनवॉइस नंबर का प्रीफ़िक्स',
+      'invoices.prefixHint': 'ज़्यादा से ज़्यादा 4 बड़े अक्षर या अंक।',
+      'invoices.saved': 'GST की जानकारी सेव हो गई।',
+      'invoices.ownerOnly': 'इन्हें सिर्फ़ मालिक बदलते हैं।',
+      'invoices.problem.gstin': '15 अक्षरों का GSTIN डालें',
+      'invoices.problem.state': 'राज्य GSTIN के पहले दो अंकों से मेल खाना चाहिए',
+      'invoices.problem.prefix': 'ज़्यादा से ज़्यादा 4 बड़े अक्षर या अंक इस्तेमाल करें',
+    },
+  },
 };
