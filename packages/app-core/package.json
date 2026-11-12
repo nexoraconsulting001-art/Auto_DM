@@ -7,7 +7,15 @@
   "exports": {
     ".": "./src/index.js",
     "./access": "./src/access.js",
-    "./strings": "./src/strings/index.js"
+    "./strings": "./src/strings/index.js",
+    "./cache": "./src/cache.js",
+    "./links": "./src/links.js",
+    "./lock": "./src/lock.js",
+    "./push": "./src/push.js",
+    "./routing": "./src/routing.js",
+    "./screens": "./src/screens.js",
+    "./storage": "./src/storage.js",
+    "./time": "./src/time.js"
   },
   "scripts": {
     "test": "jest"

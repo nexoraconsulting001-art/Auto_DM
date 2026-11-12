@@ -1,0 +1,293 @@
+name: Brand apps
+
+# The shopper app, one source tree for every brand (PRD 10.1, 10.7, 10.8, "iOS ready from day one"). For each fixture
+# brand in tools/build-brand/fixtures this builds a release APK with the local driver of `npm run build-brand`, checks
+# its manifest, runs the Maestro flows on an emulator against the job's own server with a store seeded for that brand,
+# and compiles the brand for the iOS simulator with signing off. No secret and no account: no EAS, no Apple or Google
+# login, no Firebase project. The last job, "Brand apps ready", fails unless every job here passed.
+#
+# Nothing secret is in the repository or in a log: the Android signing key is made in the job, masked and deleted, and
+# the build tool never prints it. The owner app's jobs are in apps.yml; the server's are in ci.yml.
+
+on:
+  push:
+    branches: [main, '**'] # every branch: main by name, so the merge to main is never filtered out
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brand-apps-${{ github.ref }}
+  # A newer push to a branch replaces its run; a merge to main always gets its own verdict.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    # Named explicitly, so every step runs with -e and pipefail: a tool failing inside a pipe fails the step.
+    shell: bash
+
+env:
+  FIXTURES: tools/build-brand/fixtures
+  EXPO_NO_TELEMETRY: '1'
+  CI: '1'
+
+jobs:
+  brands:
+    name: The fixture brands
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      brands: ${{ steps.list.outputs.brands }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: List every folder with a brand file
+        id: list
+        run: |
+          BRANDS="$(node -e 'const fs=require("fs");const d=process.env.FIXTURES;console.log(JSON.stringify(fs.readdirSync(d).filter((n)=>fs.existsSync(`${d}/${n}/brand.json`)).sort()))')"
+          echo "brands=$BRANDS" >> "$GITHUB_OUTPUT"
+          echo "Fixture brands: $BRANDS"
+          test "$(node -p "JSON.parse(process.argv[1]).length" "$BRANDS")" -ge 2
+
+  app-tests:
+    name: Shopper app tests, the brand rules and a bundle per brand
+    needs: brands
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: No signing key, store key, Firebase file or brand file where none may be
+        run: npm run secret-scan
+      - name: No brand, no colour and no platform name in the shopper app's source (P-01, P-03, P-31)
+        run: npm run policy-check
+      - name: Tests of the shopper app and its packages (jest)
+        run: npm run test:apps -- --ci --selectProjects shopper store-client pay
+      - name: The store client against the contract, the build tool and the brand rules (node:test)
+        run: node --import ./tools/net-guard.mjs --test --test-force-exit --test-concurrency=1 "test/p6/shopper-app-workspace/*.test.js"
+      - name: Every fixture brand validates, its images pass the stores' specs, and the app bundles for both platforms
+        env:
+          BRANDS: ${{ needs.brands.outputs.brands }}
+          APP_ENV: preview
+        run: |
+          for BRAND in $(node -p "JSON.parse(process.env.BRANDS).join(' ')"); do
+            npm run build-brand -- "$FIXTURES/$BRAND/brand.json" --no-build --out "$RUNNER_TEMP/brands" --report "$RUNNER_TEMP/brands/$BRAND.json"
+            BRAND_FILE="$(node -p "require(process.argv[1]).brandFile" "$RUNNER_TEMP/brands/$BRAND.json")" npm run shopper:export
+          done
+
+  android:
+    name: Android release APK (${{ matrix.brand }})
+    needs: brands
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        brand: ${{ fromJSON(needs.brands.outputs.brands) }}
+    env:
+      BRAND: ${{ matrix.brand }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Make a signing key for this job only
+        run: |
+          KEY_PASS="$(openssl rand -hex 24)"
+          echo "::add-mask::$KEY_PASS"
+          echo "ANDROID_KEYSTORE_PASSWORD=$KEY_PASS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/ci.keystore" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=ci" >> "$GITHUB_ENV"
+          keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$RUNNER_TEMP/ci.keystore" -alias ci \
+            -keyalg RSA -keysize 2048 -validity 2 -storepass "$KEY_PASS" -keypass "$KEY_PASS" -dname "CN=CI build, O=CI" > /dev/null
+      - name: Build the brand's APK with the local driver
+        run: npm run build-brand -- "$FIXTURES/$BRAND/brand.json" --platform android --driver local --profile preview --out "$RUNNER_TEMP/brands" --report "$RUNNER_TEMP/report.json"
+      - name: Throw the signing key away
+        if: always()
+        run: rm -f "$RUNNER_TEMP/ci.keystore"
+      - name: The APK is this brand's package, under this brand's name, and targets API 36 or higher (P-01, P-02)
+        run: |
+          APK="$(node -p "require('$RUNNER_TEMP/report.json').builds[0].artifact")"
+          echo "APK=$APK" >> "$GITHUB_ENV"
+          AAPT2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)"
+          "$AAPT2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
+          grep -E "^(package|sdkVersion|targetSdkVersion|application-label:)" "$RUNNER_TEMP/badging.txt"
+          node tools/build-check.mjs apk \
+            --package "$(node -p "require('./$FIXTURES/$BRAND/brand.json').android.package")" \
+            --label "$(node -p "require('./$FIXTURES/$BRAND/brand.json').shortName")" < "$RUNNER_TEMP/badging.txt"
+          test "$(sed -n "s/^package: .* versionCode='\([0-9]*\)'.*/\1/p" "$RUNNER_TEMP/badging.txt")" = "$(node -p "require('./$FIXTURES/$BRAND/brand.json').android.versionCode")"
+      - name: The APK is signed with this job's key, not a debug key
+        run: |
+          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
+          "$APKSIGNER" verify --print-certs "$APK" > "$RUNNER_TEMP/signer.txt"
+          grep -q "CN=CI build" "$RUNNER_TEMP/signer.txt"
+          echo "Signed with the key made in this job"
+      - name: The APK holds no keystore, Apple key or Firebase file, and no payment SDK it was not asked for
+        run: |
+          if unzip -Z1 "$APK" | grep -iE '(google-services\.json|GoogleService-Info\.plist|\.(keystore|jks|p8|p12|mobileprovision))$'; then
+            echo "The APK carries a signing or Firebase file"; exit 1
+          fi
+          AAPT2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)"
+          if "$AAPT2" dump xmltree --file AndroidManifest.xml "$APK" | grep -i "com.razorpay"; then
+            echo "The hosted build carries the gateway's SDK"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shopper-android-apk-${{ matrix.brand }}
+          path: ${{ env.APK }}
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: iOS simulator build (${{ matrix.brand }})
+    needs: brands
+    runs-on: macos-26
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        brand: ${{ fromJSON(needs.brands.outputs.brands) }}
+    env:
+      BRAND: ${{ matrix.brand }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Use Xcode 26 and check what the build runs on (P-02)
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE/Contents/Developer"; fi
+          { xcodebuild -version; xcodebuild -showsdks; } > "$RUNNER_TEMP/xcode.txt"
+          cat "$RUNNER_TEMP/xcode.txt"
+          node tools/build-check.mjs xcode < "$RUNNER_TEMP/xcode.txt"
+      - run: npm ci
+      - name: Compile the brand for the simulator with the local driver, signing off
+        run: |
+          npm run build-brand -- "$FIXTURES/$BRAND/brand.json" --platform ios --driver local --profile simulator --out "$RUNNER_TEMP/brands" --report "$RUNNER_TEMP/report.json" > "$RUNNER_TEMP/build.log" 2>&1 \
+            || { tail -n 300 "$RUNNER_TEMP/build.log"; exit 1; }
+          tail -n 40 "$RUNNER_TEMP/build.log"
+      - name: The app is this brand's bundle, under this brand's name, built with the iOS 26 SDK, with its privacy manifest (P-01, P-02)
+        run: |
+          APP="$(node -p "require('$RUNNER_TEMP/report.json').builds[0].artifact")"
+          plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Info.plist"; }
+          echo "Bundle $(plist CFBundleIdentifier), name $(plist CFBundleDisplayName), SDK $(plist DTSDKName)"
+          test "$(plist CFBundleIdentifier)" = "$(node -p "require('./$FIXTURES/$BRAND/brand.json').ios.bundleId")"
+          test "$(plist CFBundleDisplayName)" = "$(node -p "require('./$FIXTURES/$BRAND/brand.json').shortName")"
+          test "$(plist CFBundleVersion)" = "$(node -p "require('./$FIXTURES/$BRAND/brand.json').ios.buildNumber")"
+          printf 'Xcode %s\n\t-sdk %s\n' "$(xcodebuild -version | sed -n 's/^Xcode //p')" "$(plist DTSDKName)" | node tools/build-check.mjs xcode
+          test -f "$APP/PrivacyInfo.xcprivacy"
+          plutil -lint "$APP/PrivacyInfo.xcprivacy"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSPrivacyTracking' "$APP/PrivacyInfo.xcprivacy")" = false
+          (cd "$(dirname "$APP")" && zip -qry "$RUNNER_TEMP/shopper-ios-simulator.zip" "$(basename "$APP")")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shopper-ios-simulator-app-${{ matrix.brand }}
+          path: ${{ runner.temp }}/shopper-ios-simulator.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  android-e2e:
+    name: Android flows on an emulator (${{ matrix.brand }})
+    needs: brands
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        brand: ${{ fromJSON(needs.brands.outputs.brands) }}
+    env:
+      BRAND: ${{ matrix.brand }}
+      API_PORT: '3000'
+      # Read by Maestro's installer. The same version as apps.yml; change it here, never to "latest".
+      MAESTRO_VERSION: '1.41.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Let the emulator use hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Make a signing key for this job only
+        run: |
+          KEY_PASS="$(openssl rand -hex 24)"
+          echo "::add-mask::$KEY_PASS"
+          echo "ANDROID_KEYSTORE_PASSWORD=$KEY_PASS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/e2e.keystore" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=ci" >> "$GITHUB_ENV"
+          keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$RUNNER_TEMP/e2e.keystore" -alias ci \
+            -keyalg RSA -keysize 2048 -validity 2 -storepass "$KEY_PASS" -keypass "$KEY_PASS" -dname "CN=CI build, O=CI" > /dev/null
+      - name: Build the brand's APK for the emulator, talking to this job's server
+        env:
+          API_BASE_URL: http://10.0.2.2:${{ env.API_PORT }}
+          ANDROID_ARCHITECTURES: x86_64
+        run: |
+          npm run build-brand -- "$FIXTURES/$BRAND/brand.json" --platform android --driver local --profile preview --out "$RUNNER_TEMP/brands" --report "$RUNNER_TEMP/report.json"
+          echo "APK=$(node -p "require('$RUNNER_TEMP/report.json').builds[0].artifact")" >> "$GITHUB_ENV"
+      - name: Throw the signing key away
+        if: always()
+        run: rm -f "$RUNNER_TEMP/e2e.keystore"
+      - name: Start the server on a new built-in database, with a store seeded for this brand and every simulator
+        env:
+          PORT: ${{ env.API_PORT }}
+          APP_HOST: 10.0.2.2
+        run: |
+          nohup node apps/shopper/.maestro/support/server.mjs --brand "$FIXTURES/$BRAND/brand.json" --out "$RUNNER_TEMP/flows.env" > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+          for i in $(seq 1 240); do test -s "$RUNNER_TEMP/flows.env" && break; sleep 1; done
+          test -s "$RUNNER_TEMP/flows.env" || { tail -n 100 "$RUNNER_TEMP/server.log"; exit 1; }
+          curl -fs "http://127.0.0.1:$API_PORT/healthz" > /dev/null
+      - name: Install Maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Install the APK and run the flows in apps/shopper/.maestro
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash apps/shopper/.maestro/support/run-flows.sh "$RUNNER_TEMP/flows.env" "$APK" "$RUNNER_TEMP/maestro.xml"
+      - name: Stop the server
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/server.pid" ]; then kill "$(cat "$RUNNER_TEMP/server.pid")" || true; fi
+          tail -n 100 "$RUNNER_TEMP/server.log" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shopper-android-e2e-${{ matrix.brand }}
+          path: |
+            ${{ runner.temp }}/maestro.xml
+            ~/.maestro/tests
+          if-no-files-found: ignore
+          retention-days: 14
+
+  ready:
+    name: Brand apps ready
+    if: always()
+    needs: [brands, app-tests, android, ios, android-e2e]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed for every fixture brand, so each has an APK and an iOS simulator app (P-01, I-01)
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node -e '
+            const failed = Object.entries(JSON.parse(process.env.RESULTS)).filter(([, job]) => job.result !== "success");
+            for (const [name, job] of failed) console.log(`${name}: ${job.result}`);
+            process.exit(failed.length ? 1 : 0);'

@@ -12,3 +12,5 @@ apps/*/android/
 apps/*/ios/
 apps/*/dist/
 .expo/
+# One folder per brand build (tools/build-brand): brand files, images and what was built
+.brand-builds/

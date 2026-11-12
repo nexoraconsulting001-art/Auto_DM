@@ -1,0 +1,14 @@
+{
+  "name": "@bhava/store-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The client for a store's own API at /api/store, written from src/contracts/store-routes.js and kept in step with it by a test",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./routes": "./src/routes.js"
+  },
+  "scripts": {
+    "test": "jest"
+  }
+}

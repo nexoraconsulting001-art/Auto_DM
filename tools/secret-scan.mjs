@@ -7,7 +7,9 @@
  *
  * Some files are refused by name, whatever they hold (the apps, PRD 10.8): Android keystores, Apple keys and
  * certificates (.p8, .p12, provisioning profiles) and the Firebase files (google-services.json,
- * GoogleService-Info.plist). They are supplied to a build from outside the repository and never committed.
+ * GoogleService-Info.plist). They are supplied to a build from outside the repository and never committed. So are a build
+ * service's local credentials file and every brand's own files: a brand build's folder (.brand-builds/), and a brand file
+ * anywhere under apps/ or packages/, where no brand may live (the two invented fixture brands are in tools/build-brand).
  */
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -40,6 +42,9 @@ const FORBIDDEN_FILES = [
   ['Apple key or certificate', /\.(p8|p12|pfx|cer|mobileprovision|provisionprofile)$/i],
   ['Firebase services file', /(^|\/)(google-services[^/]*\.json|GoogleService-Info[^/]*\.plist)$/i],
   ['service account key', /(^|\/)[^/]*service[-_]?account[^/]*\.json$/i],
+  ['build service credentials', /(^|\/)credentials\.json$/i],
+  ['brand build folder', /(^|\/)\.brand-builds\//],
+  ['brand file in the apps', /^(apps|packages)\/(.*\/)?brand\.json$/i],
 ];
 
 /** A finding for a file that may not be tracked at all, by its name; or null. */

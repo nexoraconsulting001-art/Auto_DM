@@ -1,0 +1,23 @@
+{
+  "name": "@bhava/pay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Paying for an order in the shopper app: pay(order) answers paid, failed or cancelled, through the hosted page or the gateway's SDK",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./hosted": "./src/hosted.js",
+    "./native": "./src/native.js"
+  },
+  "scripts": {
+    "test": "jest"
+  },
+  "peerDependencies": {
+    "expo-linking": "*",
+    "expo-web-browser": "*",
+    "react-native-razorpay": "*"
+  },
+  "peerDependenciesMeta": {
+    "react-native-razorpay": { "optional": true }
+  }
+}

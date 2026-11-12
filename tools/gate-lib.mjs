@@ -11,6 +11,7 @@
  *   apps/<app>/.maestro/**           Maestro flows (*.yaml), by the `name:` in their header. The gate does not boot an
  *                                    emulator: flows run in .github/workflows/apps.yml, and here their names are counted
  *   apps/owner and the shared packages belong to phase 5; apps/shopper, packages/store-client and packages/pay to phase 6
+ *   tools/build-brand                its tests are test/p6/**; its fixture brands are locked with phase 6
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -29,6 +30,9 @@ const IS_FLOW = /\.ya?ml$/;
 const APP_ROOTS = ['apps', 'packages'];
 const APP_SKIP = new Set(['node_modules', 'android', 'ios', 'dist', 'build', '.expo']);
 export const APP_JEST_CONFIG = 'jest.apps.config.cjs';
+/** tools/build-brand's own tests are node:test files under test/p6; its fixture brands are locked with that phase. */
+export const BRAND_FIXTURES = 'tools/build-brand/fixtures';
+export const BRAND_FIXTURES_PHASE = 6;
 
 export const range = (n) => Array.from({ length: n + 1 }, (_, k) => k);
 const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
@@ -167,6 +171,8 @@ export function phaseFileHashes(root, k) {
     ...e2eDirs(k).flatMap((d) => walk(root, d)),
     ...appTestFiles(root, [k]),
     ...maestroFlows(root, [k]).map((flow) => flow.file),
+    // The fixture brands the shopper app's tests and CI build from.
+    ...(k === BRAND_FIXTURES_PHASE ? walk(root, BRAND_FIXTURES) : []),
     ...(fs.existsSync(path.join(root, `requirements/p${k}.json`)) ? [`requirements/p${k}.json`] : []),
   ];
   return Object.fromEntries(files.sort().map((f) => [f, hashFile(path.join(root, f))]));

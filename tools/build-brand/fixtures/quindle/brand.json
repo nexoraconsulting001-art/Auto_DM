@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "tenantId": 7102,
+  "name": "Quindle Threads",
+  "shortName": "Quindle",
+  "scheme": "quindle",
+  "appVersion": "1.0.0",
+  "runtimeVersion": "1.0.0",
+  "shopDomain": "www.quindle.example",
+  "apiBaseUrl": "https://www.quindle.example",
+  "supportEmail": "help@quindle.example",
+  "privacyUrl": "https://www.quindle.example/policies/privacy",
+  "android": {
+    "package": "example.quindle.app",
+    "versionCode": 12
+  },
+  "ios": {
+    "bundleId": "example.quindle.app",
+    "buildNumber": 12,
+    "teamId": "QNDL0TEAM2"
+  },
+  "associatedDomains": [
+    "applinks:www.quindle.example"
+  ],
+  "linkHosts": [
+    "www.quindle.example"
+  ],
+  "linkPaths": {
+    "open": [
+      "/",
+      "/shop",
+      "/reels",
+      "/cart",
+      "/r/*",
+      "/p/*",
+      "/c/*",
+      "/order/*",
+      "/track/*",
+      "/account/orders/*",
+      "/refer/*"
+    ],
+    "exclude": [
+      "/auth/*",
+      "/login",
+      "/logout",
+      "/checkout",
+      "/policies/*",
+      "/unsubscribe/*",
+      "/cart/restore/*",
+      "/account/shared-profile",
+      "/admin",
+      "/admin/*",
+      "/api/*",
+      "/media/*",
+      "/webhooks/*",
+      "/.well-known/*",
+      "/lead",
+      "/lead/*"
+    ]
+  },
+  "colors": {
+    "primary": "#7A1F3D",
+    "on_primary": "#FFFFFF",
+    "accent": "#2F6FDB",
+    "ground": "#FFFFFF",
+    "card": "#F7F3F5",
+    "ink": "#20141A",
+    "muted": "#6A5A62",
+    "line": "#E9DFE4"
+  },
+  "fonts": {
+    "heading": "Poppins",
+    "body": "Poppins"
+  },
+  "splashBackground": "#FFFFFF",
+  "assets": {
+    "icon": "icon.png",
+    "adaptiveForeground": "adaptive-foreground.png",
+    "adaptiveBackground": "adaptive-background.png",
+    "notificationIcon": "notification.png",
+    "splash": "splash.png"
+  },
+  "payDriver": "hosted",
+  "push": {
+    "android": false,
+    "ios": false
+  },
+  "updates": {
+    "channel": "t7102"
+  }
+}

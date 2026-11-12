@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "tenantId": 7101,
+  "name": "Zarvelo Home",
+  "shortName": "Zarvelo",
+  "scheme": "zarvelo",
+  "appVersion": "1.0.0",
+  "runtimeVersion": "1.0.0",
+  "shopDomain": "shop.zarvelo.example",
+  "apiBaseUrl": "https://shop.zarvelo.example",
+  "supportEmail": "help@zarvelo.example",
+  "privacyUrl": "https://shop.zarvelo.example/policies/privacy",
+  "android": {
+    "package": "example.zarvelo.shop",
+    "versionCode": 3
+  },
+  "ios": {
+    "bundleId": "example.zarvelo.shop",
+    "buildNumber": 3,
+    "teamId": "ZRVL0TEAM1"
+  },
+  "associatedDomains": [
+    "applinks:shop.zarvelo.example"
+  ],
+  "linkHosts": [
+    "shop.zarvelo.example"
+  ],
+  "linkPaths": {
+    "open": [
+      "/",
+      "/shop",
+      "/reels",
+      "/cart",
+      "/r/*",
+      "/p/*",
+      "/c/*",
+      "/order/*",
+      "/track/*",
+      "/account/orders/*",
+      "/refer/*"
+    ],
+    "exclude": [
+      "/auth/*",
+      "/login",
+      "/logout",
+      "/checkout",
+      "/policies/*",
+      "/unsubscribe/*",
+      "/cart/restore/*",
+      "/account/shared-profile",
+      "/admin",
+      "/admin/*",
+      "/api/*",
+      "/media/*",
+      "/webhooks/*",
+      "/.well-known/*",
+      "/lead",
+      "/lead/*"
+    ]
+  },
+  "colors": {
+    "primary": "#0E6B5C",
+    "on_primary": "#FFFFFF",
+    "accent": "#E8A33D",
+    "ground": "#FAF7F2",
+    "card": "#FFFFFF",
+    "ink": "#1C2321",
+    "muted": "#5F6B67",
+    "line": "#E4DED3"
+  },
+  "fonts": {
+    "heading": "Fraunces",
+    "body": "Inter"
+  },
+  "splashBackground": "#0E6B5C",
+  "assets": {
+    "icon": "icon.png",
+    "adaptiveForeground": "adaptive-foreground.png",
+    "adaptiveBackground": "adaptive-background.png",
+    "notificationIcon": "notification.png",
+    "splash": "splash.png"
+  },
+  "payDriver": "hosted",
+  "push": {
+    "android": false,
+    "ios": false
+  },
+  "updates": {
+    "channel": "t7101"
+  }
+}

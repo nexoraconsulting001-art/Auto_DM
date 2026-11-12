@@ -35,6 +35,8 @@
     "test:apps": "jest --config jest.apps.config.cjs",
     "parity": "node tools/parity-check.mjs",
     "app:export": "npm run export --workspace @bhava/owner-app",
+    "shopper:export": "npm run export --workspace @bhava/shopper-app",
+    "build-brand": "node tools/build-brand/index.mjs",
     "app:server": "node tools/app-e2e-server.mjs",
     "sim": "node tools/sim/index.mjs"
   },

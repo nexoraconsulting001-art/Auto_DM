@@ -1,0 +1,37 @@
+# Runs on an emulator in .github/workflows/brand-apps.yml, once per fixture brand, against the job's own server and
+# simulators (support/server.mjs) with a store seeded for that brand. A flow's `name` counts toward a requirement when
+# it starts with that requirement's id (tools/gate-lib.mjs); the gate does not run flows, CI does.
+# Every value a flow looks for comes from the brand file the build was made from: no flow names a brand.
+appId: ${APP_ID}
+name: 'The app opens on its tabs with no sign-in: home, shop, reels, cart and account are one tap away'
+tags:
+  - smoke
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: tab-home
+    timeout: 120000
+- assertVisible:
+    id: screen-home
+- assertNotVisible:
+    id: screen-sign-in
+- assertNotVisible:
+    id: no-brand
+- tapOn:
+    id: tab-catalog
+- assertVisible:
+    id: screen-catalog
+- tapOn:
+    id: tab-reels
+- assertVisible:
+    id: screen-reels
+- tapOn:
+    id: tab-cart
+- assertVisible:
+    id: screen-cart
+- tapOn:
+    id: tab-account
+- assertVisible:
+    id: screen-account

@@ -1,8 +1,9 @@
 /**
  * Checks on what the app builds produced (PRD 10.1, P-02), run by .github/workflows/apps.yml on the tools' own output:
  *
- *   aapt2 dump badging app.apk | node tools/build-check.mjs apk [--package com.example.app]
- *       the APK targets API 36 or higher (Google Play's minimum from 31 Aug 2026), and is the package it should be
+ *   aapt2 dump badging app.apk | node tools/build-check.mjs apk [--package com.example.app] [--label "Name"]
+ *       the APK targets API 36 or higher (Google Play's minimum from 31 Aug 2026), and is the package it should be, under
+ *       the name it should show (a brand's app, built by .github/workflows/brand-apps.yml)
  *   (xcodebuild -version; xcodebuild -showsdks) | node tools/build-check.mjs xcode
  *       the build ran on Xcode 26 or newer with an iOS 26 simulator SDK or newer (App Store's minimum from 28 Apr 2026)
  *
@@ -15,7 +16,7 @@ export const MIN_XCODE = 26;
 export const MIN_IOS_SDK = 26;
 
 /** From `aapt2 dump badging`: { ok, targetSdk, minSdk, packageName, problems }. */
-export function checkApkBadging(text, { minTarget = MIN_TARGET_SDK, packageName } = {}) {
+export function checkApkBadging(text, { minTarget = MIN_TARGET_SDK, packageName, label } = {}) {
   const pick = (pattern) => pattern.exec(String(text))?.[1];
   const found = {
     packageName: pick(/^package: name='([^']+)'/m),
@@ -23,11 +24,14 @@ export function checkApkBadging(text, { minTarget = MIN_TARGET_SDK, packageName 
     minSdk: Number(pick(/^(?:sdkVersion|minSdkVersion):'(\d+)'/m)),
     debuggable: /^application-debuggable/m.test(String(text)),
   };
+  // The name is read and answered only when a name is asked for (a brand's build), so the answer's shape stays as it was.
+  if (label) found.label = pick(/^application-label:'(.*)'$/m) ?? null;
   const problems = [];
   if (!found.packageName) problems.push('This is not the output of aapt2 dump badging: no package line');
   if (!Number.isInteger(found.targetSdk)) problems.push('No targetSdkVersion in the APK');
   else if (found.targetSdk < minTarget) problems.push(`targetSdkVersion is ${found.targetSdk}; it must be ${minTarget} or higher`);
   if (packageName && found.packageName && found.packageName !== packageName) problems.push(`The APK is ${found.packageName}, not ${packageName}`);
+  if (label && found.label !== label) problems.push(`The APK is named ${found.label ?? 'nothing'}, not ${label}`);
   if (found.debuggable) problems.push('The APK is debuggable: this is not a release build');
   return { ok: problems.length === 0, ...found, problems };
 }
@@ -58,13 +62,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const text = await stdin();
   let result;
   if (kind === 'apk') {
-    result = checkApkBadging(text, { packageName: option('--package') });
-    console.log(`build-check: package ${result.packageName}, targetSdkVersion ${result.targetSdk}, minSdkVersion ${result.minSdk}`);
+    result = checkApkBadging(text, { packageName: option('--package'), label: option('--label') });
+    console.log(`build-check: package ${result.packageName}${result.label === undefined ? "" : `, name ${result.label}`}, targetSdkVersion ${result.targetSdk}, minSdkVersion ${result.minSdk}`);
   } else if (kind === 'xcode') {
     result = checkXcode(text);
     console.log(`build-check: Xcode ${result.xcode}, iOS simulator SDK ${result.iosSdk}`);
   } else {
-    console.error('Usage: node tools/build-check.mjs apk [--package id] | xcode   (reads the tool output on stdin)');
+    console.error('Usage: node tools/build-check.mjs apk [--package id] [--label name] | xcode   (reads the tool output on stdin)');
     process.exit(2);
   }
   for (const problem of result.problems) console.error(`build-check: ${problem}`);
