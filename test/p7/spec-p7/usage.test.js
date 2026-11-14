@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { usageMonthOf } from '../../../src/contracts/billing.js';
-import { change, dmMeter, impersonate, json, key, need, one, opCall, consoleUser, setDmUsed, shopOn, sql, subscribe, authorize, charge, useBillingWorld, unique } from './support.js';
+import { addStaff, change, dmMeter, hit, impersonate, json, key, need, one, consoleUser, setDmUsed, shopOn, sql, authorize, charge, useBillingWorld, unique } from './support.js';
 
 const world = useBillingWorld();
 
@@ -50,9 +50,24 @@ test('F-86: reaching 100% alerts once more, a pack lifts it, and crossing 80% ag
   await world.quiet(600);
   assert.equal((await alerts(shop, 'dm.usage_100')).length, 1);
   assert.equal((await alerts(shop, 'dm.usage_80')).length, 1, 'the 80% alert was due on the way and goes once');
+  // One over: held, not sent, and no second 100% alert.
+  const sentAtLimit = (await shop.dms()).length;
   await comments(shop, auto, 2);
   await shop.settle();
   await world.quiet(500);
+  assert.equal((await shop.dms()).length, sentAtLimit, 'nothing goes past the allowance');
+  assert.equal((await alerts(shop, 'dm.usage_100')).length, 1);
+  // A pack lifts the limit: the held DMs go, and passing 80% of the new allowance is not a second 80% alert this month.
+  need(await shop.send('POST', '/billing/items', { code: 'dm_pack', quantity: 1, requestKey: key() }), 201, 'Buying a pack');
+  const meter = await dmMeter(shop);
+  assert.equal(meter.over, false, 'the pack lifts the hold');
+  assert.ok(meter.allowance > 5000);
+  await world.until(async () => (await shop.dms()).length >= sentAtLimit + 2);
+  await sql(world, `UPDATE usage_months SET used = $2 WHERE tenant_id = $1 AND meter = 'dms' AND month = $3`, [shop.tenantId, Math.ceil(meter.allowance * 0.8) - 1, usageMonthOf()]);
+  await comments(shop, auto, 2);
+  await shop.settle();
+  await world.quiet(500);
+  assert.equal((await alerts(shop, 'dm.usage_80')).length, 1, 'one 80% alert a month');
   assert.equal((await alerts(shop, 'dm.usage_100')).length, 1);
 });
 
@@ -178,5 +193,13 @@ test('F-81: the meter is the owner\'s own: usage, and the pack option, are not r
   assert.equal((await dmMeter(other)).used, 4321);
   const claimed = await shop.send('GET', `/billing/usage?tenantId=${other.tenantId}`);
   assert.equal(json(claimed).meters.find((m) => m.meter === 'dms').used, 10, 'a tenant id in the query changes nothing');
-  void subscribe, opCall;
+  const asOther = await shop.send('GET', '/billing/usage', undefined, { headers: { 'x-tenant-id': String(other.tenantId) } });
+  assert.ok(asOther.status === 403 || json(asOther)?.meters?.find((m) => m.meter === 'dms')?.used === 10, `naming another business in X-Tenant-Id: ${asOther.status}`);
+  // Staff, even with every other permission, and a manager do not see the meter or buy packs: billing is the owner's.
+  const staff = await addStaff(world, shop, { permissions: ['orders', 'catalog', 'automations', 'analytics', 'customers', 'inbox'] });
+  for (const [method, path, body] of [['GET', '/billing/usage'], ['POST', '/billing/items', { code: 'dm_pack', quantity: 1, requestKey: key() }]]) {
+    const res = await hit(world, `/api/v1${path}`, { host: shop.host, token: staff.token, method, ...(body ? { body } : {}) });
+    assert.equal(res.status, 403, `staff ${method} ${path}`);
+  }
+  assert.equal((await sql(world, `SELECT 1 FROM subscription_items WHERE tenant_id = $1 AND addon_code = 'dm_pack'`, [shop.tenantId])).length, 0, 'no pack was bought');
 });

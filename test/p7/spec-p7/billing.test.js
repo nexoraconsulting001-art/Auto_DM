@@ -3,10 +3,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { taxFor, offerDiscountPaise } from '../../../src/contracts/billing.js';
+import { taxFor } from '../../../src/contracts/billing.js';
 import {
   BILLING_SECRET, billingHook, change, charge, chargedEntities, invoicesOf, issueInvoice, json, key, linesOf, need, one, paymentsOf, planOf, refusal, setSetting, shopOn, sql,
-  subscribe, subscriptionOf, tenantStatus, unique, useBillingWorld, authorize, ownGateway, hit, setDmUsed, DAY, pause, buyer, addStaff, consoleUser, opCall,
+  subscribe, subscriptionOf, tenantStatus, unique, useBillingWorld, authorize, ownGateway, hit, setDmUsed, DAY, pause, buyer, addStaff, consoleUser, opCall, clearFaults,
 } from './support.js';
 
 const world = useBillingWorld();
@@ -85,12 +85,20 @@ test('F-51: a failure delivered after a later charge does not undo it, and a lat
   const { sub } = await subscribe(world, shop, 't1');
   const old = Math.floor(Date.now() / 1000) - 3600;
   const failed = { subscription: { entity: { id: sub.provider_subscription_id, status: 'pending' } }, payment: { entity: { id: `pay_late_${unique()}`, amount: 1, status: 'failed', method: 'card', created_at: old } } };
-  const first = await billingHook(world, 'subscription.pending', failed, { createdAt: old });
+  const eventId = `evt_late_${unique()}`;
+  const first = await billingHook(world, 'subscription.pending', failed, { createdAt: old, eventId });
   assert.ok(first.status < 300);
   await world.quiet(500);
   const now = await subscriptionOf(world, shop);
   assert.equal(now.status, 'active', 'an older failure leaves an active subscription active');
   assert.equal(now.grace_until, null);
+  // The same failure delivered again, with the same event id and with a new one, still changes nothing.
+  for (const options of [{ createdAt: old, eventId }, { createdAt: old }]) assert.ok((await billingHook(world, 'subscription.pending', failed, options)).status < 300);
+  await world.quiet(500);
+  const later = await subscriptionOf(world, shop);
+  assert.deepEqual([later.status, later.grace_until], ['active', null], 'a repeated old failure is still old');
+  assert.notEqual(await tenantStatus(world, shop), 'suspended');
+  assert.equal((await planOf(world, shop)).plan, 't1');
 });
 
 test('F-53: a failed renewal starts 7 days of grace; at 7 days less a second the business runs, a second past it is suspended with its data', async () => {
@@ -245,8 +253,8 @@ test('F-34: downgrading from tier 3 to tier 2 with an open order keeps the order
   const shop = await shopOn(world, 't3');
   const b = buyer(world, shop);
   const product = await shop.product({ pricePaise: 49900, stock: 10 });
-  const placed = await b.orderCod({ lines: [line(product)] });
-  assert.ok(placed.order?.number ?? placed.number ?? placed.orderNumber, 'an order is open');
+  const paid = await b.buy({ lines: [line(product)] });
+  assert.ok(paid.placed.orderNumber, 'an order is open');
   await sql(world, `UPDATE tenants SET plan = 't2' WHERE id = $1`, [shop.tenantId]);
   const list = json(need(await shop.send('GET', '/orders'), 200, 'Orders after the downgrade'));
   assert.ok(list.items.length >= 1, 'the open order is still listed');
@@ -458,17 +466,27 @@ test('F-114: WhatsApp messages and AI usage are billed at cost with counts on se
   assert.ok(charges.every((c) => c.invoice_id !== null), 'each charge is tied to the invoice that billed it');
 });
 
-test('F-113: a 10,000 rupee sale on the default path takes no Bhava commission, and the database refuses one', async () => {
+test('F-113: a 10,000 rupee sale on the default path takes no Bhava commission: the seller is sent the sale less at most the gateway fee, and the database refuses one', async () => {
   const shop = await shopOn(world, 't3');
   const b = buyer(world, shop);
   const product = await shop.product({ pricePaise: 1_000_000, stock: 5 });
-  const placed = await b.order({ lines: [line(product)] });
-  await b.pay(placed);
-  const state = await world.rzp.get('/state');
-  const transfers = (state.transfers ?? []).filter((t) => t.amount);
-  if (transfers.length) assert.ok(transfers.every((t) => t.amount === Math.max(...transfers.map((x) => x.amount))), 'one transfer, the whole sale');
+  const row = await b.buy({ lines: [line(product)] });
+  const payment = row.paid.payment;
+  assert.ok(payment?.id, 'the sale was paid at the gateway');
+  // Route splits the captured payment to the seller's linked account. What stays with Bhava is the gateway fee, at cost, or less.
+  const transfers = await world.until(async () => {
+    const list = ((await world.rzp.get('/state')).transfers ?? []).filter((t) => t.source === payment.id || t.source === payment.order_id || t.source === row.placed.gateway?.gatewayOrderId);
+    return list.length ? list : null;
+  });
+  assert.ok(transfers?.length, 'the sale reached the seller by a Route transfer');
+  const sent = transfers.reduce((s, t) => s + Number(t.amount), 0);
+  const fee = Number(payment.fee ?? 0);
+  assert.ok(fee > 0, "the gateway charged a fee for the sale");
+  const kept = Number(payment.amount) - sent;
+  assert.ok(kept >= 0, `more was sent than was paid: ${sent} of ${payment.amount}`);
+  assert.ok(kept <= fee, `Bhava kept ${kept} paise of a ${payment.amount} paise sale; the gateway fee was ${fee}: anything over it is a commission`);
   const orderRow = await one(world, 'SELECT total_paise FROM orders WHERE tenant_id = $1 ORDER BY id DESC LIMIT 1', [shop.tenantId]);
-  if (transfers.length) assert.equal(transfers[0].amount, Number(orderRow.total_paise), 'the business is sent the sale, not the sale less a share');
+  assert.equal(Number(orderRow.total_paise), Number(payment.amount), 'the shopper paid the order total');
   await assert.rejects(sql(world, `INSERT INTO settlement_statements (tenant_id, month, sales_paise, commission_paise, closing_balance_paise) VALUES ($1, '2030-01-01', 1000000, 50000, 950000)`, [shop.tenantId]), /check|violates/i);
 });
 
@@ -514,12 +532,23 @@ test('F-51: a charge made for a business whose subscription was cancelled is rec
   assert.ok(cancelled.status < 300);
   await world.quiet(500);
   assert.equal((await subscriptionOf(world, shop)).status, 'cancelled');
-  assert.equal(Number((await one(world, 'SELECT count(*) AS n FROM products WHERE tenant_id = $1', [shop.tenantId])).n) >= 0, true);
-  await pause(50);
+  assert.equal((await planOf(world, shop)).plan, 't1', 'a cancelled plan runs to the end of the paid period');
+  assert.notEqual(await tenantStatus(world, shop), 'suspended', 'cancelling is not a lapse');
+  // The same cancellation again, and a charge event for the cancelled subscription, make no second invoice.
+  assert.ok((await billingHook(world, 'subscription.cancelled', { subscription: { entity: { id: sub.provider_subscription_id, status: 'cancelled' } } })).status < 300);
+  const [payment] = await paymentsOf(world, shop);
+  assert.ok((await billingHook(world, 'subscription.charged', chargedEntities(sub.provider_subscription_id, payment.provider_payment_id, Number(payment.amount_paise)))).status < 300);
+  await world.quiet(500);
   assert.equal((await invoicesOf(world, shop)).length, 1);
+  assert.equal((await paymentsOf(world, shop)).length, 1);
+  // At the period end the plan falls back to Free, with the data kept.
+  await sql(world, `UPDATE subscriptions SET current_period_start = now() - interval '31 days', current_period_end = now() - interval '1 second' WHERE tenant_id = $1`, [shop.tenantId]);
+  const fell = await world.until(async () => (await planOf(world, shop)).plan === 'free', 6000);
+  assert.ok(fell, 'after the paid period the business is on Free');
+  await pause(10);
 });
 
-test('F-85: the grace length, tax rate and proration are settings read at the time, not at start-up', async () => {
+test('F-54: the tax rate is a setting read when the invoice is made, not at start-up, and each line is taxed to the paisa', async () => {
   const shop = await freeShop();
   await setSetting(world, 'tax_rate_bp', 1200);
   try {
@@ -531,5 +560,47 @@ test('F-85: the grace length, tax rate and proration are settings read at the ti
   } finally {
     await setSetting(world, 'tax_rate_bp', 1800);
   }
-  assert.equal(offerDiscountPaise(49_900, 30), 14_970);
+});
+
+test('F-33: a billing provider that hangs, answers junk or fails while a plan is chosen leaves the plan as it was, answers clearly and in time, and makes no half subscription', async () => {
+  const shop = await freeShop();
+  const before = await planOf(world, shop);
+  for (const fault of [{ kind: 'timeout' }, { kind: 'malformed', mode: 'garbage' }, { kind: 'malformed', mode: 'truncated' }, { kind: 'server_error', status: 503 }, { kind: 'drop' }]) {
+    await world.rzp.post('/faults', { ...fault, times: 'forever' });
+    try {
+      const started = Date.now();
+      const res = await change(shop, 't1', 'monthly');
+      const took = Date.now() - started;
+      assert.ok(took < 15_000, `${fault.kind}: the owner waited ${took} ms`);
+      assert.ok(res.status >= 400 && res.status !== 500 && res.status !== 501, `${fault.kind} ${fault.mode ?? ''}: a clear refusal, not ${res.status}: ${res.text.slice(0, 160)}`);
+      assert.doesNotMatch(res.text, /razorpay|rzp_|sim-key|stack|at \w+ \(/i, 'no provider detail or stack in the answer');
+    } finally {
+      await clearFaults(world.rzp);
+    }
+    assert.deepEqual(await planOf(world, shop), before, `${fault.kind}: the plan is unchanged`);
+    const sub = await subscriptionOf(world, shop);
+    assert.ok(!sub || !['active', 'grace'].includes(sub.status), `${fault.kind}: no live subscription was made without the provider`);
+  }
+  // Once the provider answers again, the same choice works.
+  need(await change(shop, 't1', 'monthly'), 200, 'Choosing tier 1 once the provider is back');
+});
+
+test('F-51: a webhook for a business\'s subscription that answers junk, an unknown event and a body that is not JSON are refused or ignored without a change', async () => {
+  const shop = await freeShop();
+  need(await change(shop, 't1', 'monthly'), 200, 'Choosing tier 1');
+  const sub = await authorize(world, shop);
+  const raw = (body) => {
+    const sig = crypto.createHmac('sha256', BILLING_SECRET).update(body).digest('hex');
+    return hit(world, '/webhooks/billing/razorpay', { method: 'POST', headers: { 'content-type': 'application/json', 'x-razorpay-signature': sig, 'x-razorpay-event-id': `evt_raw_${unique()}` }, body });
+  };
+  for (const body of ['not json', '{"event":', '[]', '{}', JSON.stringify({ event: 'subscription.charged', payload: {} }), JSON.stringify({ event: 'subscription.charged', payload: { payment: { entity: { id: 'pay_x', amount: -5 } } } })]) {
+    const res = await raw(body);
+    assert.ok(res.status < 500, `${body.slice(0, 30)}: ${res.status}`);
+  }
+  const unknown = await billingHook(world, 'subscription.teleported', { subscription: { entity: { id: sub.provider_subscription_id, status: 'active' } } });
+  assert.ok(unknown.status < 500);
+  await world.quiet(500);
+  assert.equal((await paymentsOf(world, shop)).length, 0, 'no payment from junk');
+  assert.equal((await invoicesOf(world, shop)).length, 0, 'no invoice from junk');
+  assert.notEqual((await planOf(world, shop)).plan, 't1', 'junk does not start a plan');
 });

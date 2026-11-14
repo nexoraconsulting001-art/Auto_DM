@@ -232,6 +232,34 @@ export function assertSellerBrand(value, what) {
   assert.doesNotMatch(text, /bhava/i, `${what} carries the platform's name`);
 }
 
+/**
+ * RFC 6238 TOTP (HMAC-SHA1, 6 digits, 30 second steps) from a base32 secret, as any authenticator app computes it from an
+ * otpauth:// address with no parameters. Written here from the RFC, so the console's second factor is checked against the
+ * standard rather than against its own code.
+ */
+export function totp(secret, ms = Date.now()) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const ch of String(secret).toUpperCase().replace(/[\s=-]/g, '')) {
+    const v = alphabet.indexOf(ch);
+    assert.ok(v >= 0, 'The enrolment secret is not base32');
+    bits += v.toString(2).padStart(5, '0');
+  }
+  const keyBytes = Buffer.from((bits.match(/.{8}/g) ?? []).map((b) => parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(ms / 30_000)));
+  const mac = crypto.createHmac('sha1', keyBytes).update(counter).digest();
+  const offset = mac[mac.length - 1] & 15;
+  return String((mac.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, '0');
+}
+
+/** A Razorpay payment entity for a subscription charge, as a hand-signed billing webhook carries it, paid with one card. */
+export const cardCharge = (subscriptionId, cardId, amount = 59_882) => {
+  const entities = chargedEntities(subscriptionId, `pay_card_${unique()}`, amount);
+  Object.assign(entities.payment.entity, { card_id: cardId, token_id: `token_${cardId}`, card: { id: cardId, last4: '1111', network: 'Visa', type: 'credit' } });
+  return entities;
+};
+
 /** Removes every fault a test put on a simulator, through its control address. */
 export async function clearFaults(sim) {
   const res = await fetch(sim.url + '/__sim/faults', { method: 'DELETE' });

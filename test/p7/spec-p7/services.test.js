@@ -119,12 +119,19 @@ test('F-92: a service that lapses a second ago and a write that races it never a
   const writes = Array.from({ length: 6 }, (_, i) => s.call('PATCH', `/products/${product.id}`, { pricePaise: 60_000 + i }));
   await pause(5);
   await grantService(shop, 'catalog_management', false);
+  // The moment the lapse is committed: no write may be recorded as applied after it.
+  const lapsedAt = (await one(world, 'SELECT clock_timestamp() AS t')).t;
   const results = await Promise.all(writes);
   for (const r of results) assert.ok(r.status === 200 || [401, 403].includes(r.status), `${r.status}`);
-  const lapsedAt = (await one(world, 'SELECT now() AS t')).t;
-  const after = await sql(world, `SELECT id FROM service_changes WHERE tenant_id = $1 AND created_at > $2`, [shop.tenantId, lapsedAt]);
-  assert.equal(after.length, 0);
-  assert.ok((await s.call('PATCH', `/products/${product.id}`, { pricePaise: 7 })).status >= 400);
+  const late = await sql(world, `SELECT id FROM service_changes WHERE tenant_id = $1 AND created_at > $2`, [shop.tenantId, lapsedAt]);
+  assert.deepEqual(late, [], 'a change recorded after the service lapsed');
+  const applied = results.filter((r) => r.status === 200).length;
+  assert.equal((await changesOf(shop)).length, applied, 'every write that answered 200 is recorded, and only those');
+  // A second after the lapse, a read and a write are both refused.
+  await pause(1000);
+  const second = await s.call('PATCH', `/products/${product.id}`, { pricePaise: 7 });
+  assert.ok([401, 403].includes(second.status), `a write a second after the lapse: ${second.status}`);
+  assert.notEqual((await shop.getProduct(product.id)).pricePaise, 7);
 });
 
 async function categoryOf(shop, n = 3) {

@@ -397,8 +397,9 @@ test('A-62: a marketing message to a number with no opt-in, a withdrawn one, an 
   const app = await startApp({ overrides: { whatsappBaseUrl: wa.url, whatsappAppSecret: wa.appSecret } });
   try {
     const { tenant, ctx } = app;
-    const phoneId = `ph${unique()}`;
-    await app.db.platform.query(`INSERT INTO whatsapp_accounts (tenant_id, waba_id, phone_number_id, display_number, access_token_enc, status, display_name) VALUES ($1, 'waba1', $2, '+919800000000', $3, 'active', 'Test store')`, [tenant.id, phoneId, 'x']);
+    const phoneId = `7${crypto.randomInt(100_000_000, 999_999_999)}`;
+    await app.db.platform.query(`INSERT INTO whatsapp_accounts (tenant_id, waba_id, phone_number_id, display_number, access_token_enc, status, display_name) VALUES ($1, 'waba1', $2, '+919800000000', $3, 'active', 'Test store')`, [tenant.id, phoneId, app.platform.secrets.encrypt('sim-whatsapp-token')]);
+    await wa.post('/numbers', { phoneId, displayName: 'Test store', displayNumber: '+919800000000' });
     await app.db.platform.query(`INSERT INTO tenant_features (tenant_id, feature, enabled, limit_value) VALUES ($1, 'whatsapp_automation', true, NULL) ON CONFLICT (tenant_id, feature) DO UPDATE SET enabled = true`, [tenant.id]);
     const to = '919811122233';
     const action = (id, purpose = 'marketing') => ({ channel: 'whatsapp', kind: 'dm', accountId: phoneId, recipientId: id, personId: id, idempotencyKey: `wa:${unique()}`, expiresAt: new Date(Date.now() + 3_600_000), message: { text: 'Big sale this week', template: { name: 'bhava_sale', language: 'en', params: [], purpose } } });

@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { SIGNUP_STEPS } from '../../../src/contracts/billing.js';
 import {
-  APP, appSignIn, assertSellerBrand, charge, change, authorize, consoleUser, json, key, linksIn, need, newInvite, newPhone, one, opCall, setSetting, setSignup, shopOn, sql, subscribe,
-  unique, useBillingWorld, hit, pause,
+  APP, appSignIn, assertSellerBrand, billingHook, cardCharge, charge, change, authorize, consoleUser, json, key, linksIn, need, newInvite, newPhone, one, opCall, setSetting, setSignup, shopOn, sql,
+  subscribe, unique, useBillingWorld, hit, pause,
 } from './support.js';
 
 const world = useBillingWorld();
@@ -27,7 +27,6 @@ test('F-122: sign-up with a WhatsApp code makes an account with no password, and
   const { tenantId, host } = started.data;
   assert.ok(tenantId && host);
   assert.ok((await world.whatsappTo(phone)).length >= 1, 'the code arrived on WhatsApp');
-  assert.equal((await world.emailsTo('')).length >= 0, true);
   const owner = await one(world, `SELECT password_hash FROM users WHERE tenant_id = $1 AND role = 'owner'`, [tenantId]);
   assert.ok(owner, 'an owner exists');
   assert.ok(!owner.password_hash, 'no password was set');
@@ -222,18 +221,23 @@ test('F-125: a Free account is offered only two-tap, and the server rejects one-
 test('F-126: a Free account sees no insights older than 7 days, however it asks, and an upgrade shows them', async () => {
   const shop = await shopOn(world, 'free');
   const day = (d) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10);
+  // Every day an answer carries: its range and each metric's and the follower series' days.
+  const daysIn = (data) => [data.from, ...(data.metrics ?? []).flatMap((m) => (m.days ?? []).map((d) => d.day)), ...(data.followers ?? []).map((d) => d.day)].filter(Boolean).map((d) => String(d).slice(0, 10));
+  const free = await shop.send('GET', '/insights/account?range=7');
+  assert.equal(free.status, 200, `the last 7 days are a Free account's: ${free.status}`);
   for (const path of ['/insights/account?range=28', '/insights/account?range=90', `/insights/account?range=custom&from=${day(30)}&to=${day(0)}`, `/insights/account?range=custom&from=${day(20)}&to=${day(10)}`]) {
     const res = await shop.send('GET', path);
     if (res.status === 200) {
       const data = json(res);
-      const days = (data.series ?? data.points ?? data.days ?? []).map((p) => p.day ?? p.date ?? p.at);
-      assert.ok(days.every((d) => String(d).slice(0, 10) >= day(7)), `${path} shows only the last 7 days`);
+      assert.ok(data?.from, `${path}: an answer with no range`);
+      const old = daysIn(data).filter((d) => d < day(7));
+      assert.deepEqual(old, [], `${path} shows days older than 7 days`);
     } else assert.ok([402, 403].includes(res.status), `${path} answered ${res.status}`);
   }
-  const limited = await shop.send('GET', `/insights/account?range=custom&from=${day(20)}&to=${day(10)}`);
-  assert.ok(limited.status === 403 || (limited.status === 200 && JSON.stringify(json(limited)).includes('upgrade')) || limited.status === 200, 'refused or empty, never the old numbers');
   await sql(world, `UPDATE tenants SET plan = 't1' WHERE id = $1`, [shop.tenantId]);
-  assert.equal((await shop.send('GET', '/insights/account?range=90')).status, 200);
+  const paid = await shop.send('GET', '/insights/account?range=90');
+  assert.equal(paid.status, 200);
+  assert.ok(String(json(paid).from) < day(7), 'after the upgrade the 90 day range reaches back');
 });
 
 test('F-127: a Free account\'s DM carries no platform name, link or badge, and its creator page shows "Made with Bhava"', async () => {
@@ -335,6 +339,82 @@ test('F-129: a self-referral is blocked by the same phone, by the same Instagram
   const other = await appSignIn(world, newPhone());
   const bogus = await other.call('POST', '/signup', { accountType: 'creator', name: 'Other', referralCode: 'nosuchcode1' });
   assert.ok(bogus.status === 201 || bogus.status === 400, 'a code nobody has is ignored or refused, never a crash');
+});
+
+/** Connects Instagram account `igUserId` to the business a sign-up made, as its owner on its own address. The answer to the return. */
+async function connectIg(run, igUserId) {
+  const owner = await appSignIn(world, run.phone, run.started.data.host);
+  await world.meta.post('/oauth/next', { igUserId });
+  const start = need(await owner.call('POST', '/instagram/connect', {}), 200, 'Starting Instagram');
+  const consent = await fetch(start.data.authorizeUrl, { redirect: 'manual' });
+  const back = new URL(consent.headers.get('location'));
+  return hit(world, `${back.pathname}${back.search}`, { host: run.started.data.host });
+}
+
+test('F-129: a self-referral by the same Instagram account is never credited, even when the referred account starts paying', async () => {
+  await setSetting(world, 'referral_reward_paise', 25_000);
+  try {
+    const referrer = await signUp();
+    need(referrer.started, 201, 'The referrer signs up');
+    const igUserId = numericId();
+    await world.meta.post('/accounts', { igUserId, username: `self_${unique()}`, subscribedFields: ['comments', 'messages'], appRole: true });
+    need(await connectIg(referrer, igUserId), [200, 302, 303], 'The referrer connects Instagram');
+    const owner = await appSignIn(world, referrer.phone, referrer.started.data.host);
+    const code = need(await owner.call('GET', '/referrals'), 200, 'Referrals').data.code;
+    // Another phone, the referrer's own code, and the referrer's own Instagram account.
+    const twin = await signUp({ mode: null, referralCode: code });
+    need(twin.started, 201, 'The second sign-up');
+    await connectIg(twin, igUserId);
+    const twinOwner = await appSignIn(world, twin.phone, twin.started.data.host);
+    const twinShop = { tenantId: twin.started.data.tenantId, send: (method, path, body) => twinOwner.call(method, path, body) };
+    need(await twinShop.send('POST', '/billing/change', { plan: 't1', cycle: 'monthly', requestKey: key() }), 200, 'The second account chooses tier 1');
+    const sub = await one(world, 'SELECT provider_subscription_id FROM subscriptions WHERE tenant_id = $1', [twinShop.tenantId]);
+    await world.rzp.post('/subscriptions/authorize', { id: sub.provider_subscription_id });
+    await world.rzp.post('/subscriptions/charge', { id: sub.provider_subscription_id });
+    await world.quiet(800);
+    const rows = await sql(world, 'SELECT state, block_reason FROM seller_referrals WHERE referred_tenant_id = $1', [twinShop.tenantId]);
+    assert.ok(rows.every((r) => r.state !== 'credited'), `a referral of the same Instagram account was credited: ${JSON.stringify(rows)}`);
+    if (rows.length) assert.deepEqual(rows.map((r) => [r.state, r.block_reason]), [['blocked', 'same_instagram']]);
+    const counts = need(await owner.call('GET', '/referrals'), 200, 'Referrals').data;
+    assert.deepEqual([counts.counts.credited, counts.creditedPaise], [0, 0]);
+  } finally {
+    await setSetting(world, 'referral_reward_paise', 0);
+  }
+});
+
+test('F-129: a self-referral paid with the referrer\'s own card is blocked at the first charge and never credited', async () => {
+  await setSetting(world, 'referral_reward_paise', 25_000);
+  try {
+    const referrer = await shopOn(world, 'free');
+    const referred = await shopOn(world, 'free');
+    const card = `card_${unique()}`;
+    // The referrer pays for tier 1 with a card.
+    need(await change(referrer, 't1', 'monthly'), 200, 'The referrer chooses tier 1');
+    const subA = await authorize(world, referrer);
+    assert.ok((await billingHook(world, 'subscription.charged', cardCharge(subA.provider_subscription_id, card))).status < 300);
+    await world.until(async () => (await sql(world, 'SELECT 1 FROM billing_payments WHERE tenant_id = $1', [referrer.tenantId])).length > 0);
+    await sql(world, `INSERT INTO seller_referrals (tenant_id, referred_tenant_id) VALUES ($1, $2)`, [referrer.tenantId, referred.tenantId]);
+    // The referred account starts paying with the very same card.
+    need(await change(referred, 't1', 'monthly'), 200, 'The referred account chooses tier 1');
+    const subB = await authorize(world, referred);
+    assert.ok((await billingHook(world, 'subscription.charged', cardCharge(subB.provider_subscription_id, card))).status < 300);
+    await world.until(async () => (await sql(world, 'SELECT 1 FROM billing_payments WHERE tenant_id = $1', [referred.tenantId])).length > 0);
+    await world.quiet(800);
+    const row = await one(world, 'SELECT state, block_reason, credited_at FROM seller_referrals WHERE referred_tenant_id = $1', [referred.tenantId]);
+    assert.deepEqual([row.state, row.block_reason, row.credited_at], ['blocked', 'same_payment_method', null]);
+    const mine = json(need(await referrer.send('GET', '/referrals'), 200, 'Referrals'));
+    assert.deepEqual([mine.counts.credited, mine.creditedPaise], [0, 0]);
+    // A different card on a third account is credited as normal, which shows the block was the card's.
+    const honest = await shopOn(world, 'free');
+    await sql(world, `INSERT INTO seller_referrals (tenant_id, referred_tenant_id) VALUES ($1, $2)`, [referrer.tenantId, honest.tenantId]);
+    need(await change(honest, 't1', 'monthly'), 200, 'A third account chooses tier 1');
+    const subC = await authorize(world, honest);
+    assert.ok((await billingHook(world, 'subscription.charged', cardCharge(subC.provider_subscription_id, `card_${unique()}`))).status < 300);
+    const credited = await world.until(async () => (await one(world, 'SELECT state FROM seller_referrals WHERE referred_tenant_id = $1', [honest.tenantId])).state === 'credited');
+    assert.ok(credited, 'a referral paid with another card is credited');
+  } finally {
+    await setSetting(world, 'referral_reward_paise', 0);
+  }
 });
 
 test('F-129: the referral code in the sign-up link is read from the address, and the referral is never put in a DM', async () => {

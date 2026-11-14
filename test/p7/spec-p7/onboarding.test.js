@@ -60,40 +60,51 @@ test('F-26: a valid invite, a WhatsApp code and Instagram connected: the token a
 test('F-27: an invite opened on day 8 asks for a new link, a second use fails, and after a resend only the new link works', async () => {
   const shop = await freshShop('t1');
   const op = await consoleUser(world, 'onboarding');
+  // Ages the newest link so that it was sent `ms` ago and lasts its full 7 days from then.
+  const sentAgo = (ms) => sql(world, `UPDATE onboarding_invites SET created_at = now() - $2::interval, expires_at = now() - $2::interval + interval '7 days'
+    WHERE id = (SELECT max(id) FROM onboarding_invites WHERE tenant_id = $1)`, [shop.tenantId, `${ms} milliseconds`]);
+  // Day 7, three seconds before the end: it opens.
   const first = await invite(shop, op);
-  // Just inside 7 days.
-  await sql(world, `UPDATE onboarding_invites SET expires_at = now() + interval '1500 milliseconds' WHERE tenant_id = $1 AND revoked_at IS NULL`, [shop.tenantId]);
+  await sentAgo(7 * DAY - 3000);
   need(await openInvite(first.token), 200, 'Day 7, a moment before the end');
-  await pause(1700);
-  const late = await openInvite(first.token);
+  // Day 8, one second past the end: it asks for a new link.
+  const second = await invite(shop, op);
+  await sentAgo(7 * DAY + 1000);
+  const late = await openInvite(second.token);
   assert.ok(late.status >= 400 && late.status < 500, `day 8: ${late.status}`);
   assert.match(late.text, new RegExp(INVITE_EXPIRED_MESSAGE.replace(/[.]/g, '\\.')));
-  const live = await sql(world, `SELECT * FROM onboarding_invites WHERE tenant_id = $1 AND revoked_at IS NULL AND expires_at > now()`, [shop.tenantId]);
-  assert.equal(live.length, 0);
+  assert.equal(json(late)?.tenantId, undefined, 'an expired link names no business');
   // A resend revokes the old link: the old one fails, the new one works, and there is one live link.
-  const second = await invite(shop, op);
+  const resent = await invite(shop, op);
   const third = await invite(shop, op);
-  assert.notEqual(second.token, third.token);
-  assert.ok((await openInvite(second.token)).status >= 400, 'the revoked link');
+  assert.notEqual(resent.token, third.token);
+  assert.ok((await openInvite(resent.token)).status >= 400, 'the revoked link');
   need(await openInvite(third.token), 200, 'The new link');
   assert.equal((await sql(world, `SELECT 1 FROM onboarding_invites WHERE tenant_id = $1 AND revoked_at IS NULL AND expires_at > now()`, [shop.tenantId])).length, 1);
   // A link's expiry is never more than 7 days.
   const row = await one(world, `SELECT created_at, expires_at FROM onboarding_invites WHERE tenant_id = $1 AND revoked_at IS NULL`, [shop.tenantId]);
   assert.ok(new Date(row.expires_at) - new Date(row.created_at) <= 7 * DAY);
   // Garbage and another business's token do nothing.
-  for (const token of ['short', 'x'.repeat(40), `${third.token}x`, third.token.toUpperCase()]) assert.ok((await openInvite(token)).status >= 400, token);
+  const garbage = ['short', 'x'.repeat(40), `${third.token}x`, third.token.toUpperCase()].filter((t) => t !== third.token);
+  for (const token of garbage) assert.ok((await openInvite(token)).status >= 400, token);
   assert.ok((await hit(world, '/api/v1/setup/invite', { host: shop.host, method: 'POST', body: { token: third.token } })).status >= 400, 'an invite is opened on the sign-in host, not a business address');
 });
 
-test('F-27: a used invite cannot be used again, also when two people open it at once', async () => {
+test('F-27: an invite works once: reused afterwards, or opened by two people at the same moment, only one gets in', async () => {
   const shop = await freshShop('t1');
   const op = await consoleUser(world, 'onboarding');
   const sent = await invite(shop, op);
-  const owner = await appSignIn(world, shop.owner.phone, shop.host);
-  await sql(world, `UPDATE onboarding_invites SET used_at = now() WHERE tenant_id = $1 AND revoked_at IS NULL`, [shop.tenantId]);
+  need(await openInvite(sent.token), 200, 'The first use');
   const again = await openInvite(sent.token);
   assert.ok(again.status >= 400 && again.status < 500, `a used link: ${again.status}`);
-  void owner;
+  assert.equal(json(again)?.tenantId, undefined, 'a used link names no business');
+  const row = await one(world, 'SELECT used_at FROM onboarding_invites WHERE tenant_id = $1 ORDER BY id DESC LIMIT 1', [shop.tenantId]);
+  assert.ok(row.used_at, 'the use is recorded');
+  // A fresh link opened twice at once.
+  const raced = await invite(shop, op);
+  const both = await Promise.all([openInvite(raced.token), openInvite(raced.token), openInvite(raced.token)]);
+  assert.equal(both.filter((r) => r.status === 200).length, 1, `one use: ${both.map((r) => r.status)}`);
+  assert.ok(both.every((r) => r.status < 500));
 });
 
 test('F-28: a tier 1 checklist needs Instagram and the terms, offers the domain as optional, and shows no payments or shipping', async () => {
@@ -253,7 +264,7 @@ test('F-78: a Route KYC rejected for a bank name mismatch keeps the step open wi
 test('F-79: invalid own Razorpay keys fail the test call, are not saved, are not echoed, and the default path stays active', async () => {
   const shop = await freshShop('t3');
   const before = await checklist(shop);
-  await world.rzp.post('/faults', { kind: 'server_error', status: 401, times: 3, body: { error: { code: 'BAD_REQUEST_ERROR', description: 'Authentication failed' } } });
+  await world.rzp.post('/faults', { kind: 'rate_limit', status: 401, times: 3, body: { error: { code: 'BAD_REQUEST_ERROR', description: 'Authentication failed' } } });
   const secret = `sec_${unique()}_not_valid`;
   const res = await shop.send('PUT', '/setup/own-keys', { provider: 'razorpay', keyId: 'rzp_test_invalid000', keySecret: secret });
   assert.ok(res.status >= 400 && res.status < 500, `invalid keys: ${res.status} ${res.text.slice(0, 160)}`);

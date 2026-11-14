@@ -4,9 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compareHealth, HEALTH_STATUSES } from '../../../src/contracts/health.js';
 import { IMPERSONATION_BLOCKED, impersonationBlocked, routeList } from '../../../src/contracts/api/index.js';
-import { totpAt } from '../../../src/modules/platform-console/totp.js';
 import {
-  CONSOLE_HOST, buyer, consoleUser, hit, impersonate, json, need, one, onConsole, opCall, ownGateway, pause, shopOn, sql, unique, useBillingWorld, addStaff, newPhone, clearFaults,
+  CONSOLE_HOST, buyer, consoleUser, hit, impersonate, json, need, one, onConsole, opCall, ownGateway, pause, shopOn, sql, totp, unique, useBillingWorld, addStaff, clearFaults,
 } from './support.js';
 
 const world = useBillingWorld();
@@ -187,7 +186,7 @@ test('F-41: revoked own payment keys turn the payments check red and the owner g
   need(await opCall(world, op, 'POST', `/tenants/${biz.tenantId}/health/run`), 200, 'Run on good keys');
   assert.equal(json(need(await opCall(world, op, 'GET', `/tenants/${biz.tenantId}/health`), 200, 'Health')).checks.find((c) => c.check === 'keys.payments').status, 'ok');
   await sql(world, `UPDATE tenant_health_checks SET last_ran_at = now() - interval '11 minutes' WHERE tenant_id = $1`, [biz.tenantId]).catch(() => {});
-  await world.rzp.post('/faults', { kind: 'server_error', status: 401, times: 'forever', body: { error: { code: 'BAD_REQUEST_ERROR', description: 'The API key provided is invalid.' } } });
+  await world.rzp.post('/faults', { kind: 'rate_limit', status: 401, times: 'forever', body: { error: { code: 'BAD_REQUEST_ERROR', description: 'The API key provided is invalid.' } } });
   try {
     const res = need(await opCall(world, op, 'POST', `/tenants/${biz.tenantId}/health/run`), 200, 'Run on revoked keys');
     assert.equal(json(res).checks.find((c) => c.check === 'keys.payments').status, 'bad');
@@ -280,8 +279,9 @@ test('F-43: write mode needs a second confirmation with the business name and a 
   need(await s.call('PATCH', `/products/${product.id}`, { pricePaise: 5000 }), 200, 'A write after confirming');
   assert.equal((await shop.getProduct(product.id)).pricePaise, 5000);
   const mine = await opCall(world, await consoleUser(world, 'support'), 'POST', `/impersonations/${sessionRow.id}/write`, { confirm: shop.name, reason: 'someone else\'s session' });
-  assert.ok([403, 404].includes(mine.status) || mine.status === 200, 'another operator may be allowed or not, never a crash');
-  const blocked = routeList.filter((r) => impersonationBlocked(r) && !['auth.logout'].includes(r.id) && !IMPERSONATION_BLOCKED.routes.includes('x'));
+  assert.ok(mine.status < 500, `another operator confirming this session: never a crash, got ${mine.status}`);
+  assert.ok(IMPERSONATION_BLOCKED, 'the contract names the blocked routes');
+  const blocked = routeList.filter((r) => impersonationBlocked(r) && r.id !== 'auth.logout');
   assert.ok(blocked.length >= 20, 'there are routes to try');
   for (const r of blocked) {
     const path = r.path.replace(/:[a-zA-Z]+/g, '1');
@@ -335,7 +335,7 @@ test('F-42: shopper contacts are masked everywhere in a support session except o
   const shop = await shopOn(world, 't3');
   const b = buyer(world, shop);
   const product = await shop.product({ pricePaise: 49_900, stock: 5 });
-  const placed = await b.orderCod({ lines: [line(product)] });
+  const { placed } = await b.buy({ lines: [line(product)] });
   const phone = placed.body.address.phone;
   const op = await consoleUser(world, 'support');
   const s = await impersonate(world, shop, op, 'ticket 12');
@@ -391,9 +391,11 @@ test('F-42: console sign-in is an emailed code and then an authenticator code: s
   assert.ok((await hit(world, '/sign-in/verify', { host: CONSOLE_HOST, method: 'POST', body: { email, code: emailed } })).status >= 400, 'the emailed code works once');
   const secret = ticket.enrol.secret;
   const now = Date.now();
-  const right = totpAt(secret, now);
+  const right = totp(secret, now);
   const guess = right === '000000' ? '000001' : '000000';
   assert.ok((await hit(world, '/sign-in/totp', { host: CONSOLE_HOST, method: 'POST', body: { ticket: ticket.ticket, code: guess } })).status >= 400, 'a guessed code');
+  const stale = totp(secret, now - 10 * 60_000);
+  if (stale !== right) assert.ok((await hit(world, '/sign-in/totp', { host: CONSOLE_HOST, method: 'POST', body: { ticket: ticket.ticket, code: stale } })).status >= 400, 'a code from ten minutes ago');
   assert.ok((await hit(world, '/sign-in/totp', { host: CONSOLE_HOST, method: 'POST', body: { ticket: 'forged-ticket-value', code: right } })).status >= 400, 'a made-up ticket');
   const signedIn = need(await hit(world, '/sign-in/totp', { host: CONSOLE_HOST, method: 'POST', body: { ticket: ticket.ticket, code: right } }), 200, 'The right code');
   assert.ok(signedIn.headers['set-cookie']);
@@ -407,7 +409,6 @@ test('F-42: console sign-in is an emailed code and then an authenticator code: s
   assert.ok(replay.status >= 400, 'a TOTP code is not accepted twice');
   // Never on a business's address.
   assert.equal((await hit(world, '/sign-in/code', { host: shop.host, method: 'POST', body: { email } })).status, 404);
-  void newPhone;
 });
 
 test('F-42: a disabled operator is signed out at once, and five wrong emailed codes lock that code', async () => {
@@ -417,9 +418,11 @@ test('F-42: a disabled operator is signed out at once, and five wrong emailed co
   assert.equal((await onConsole(world, op, '/me')).status, 200);
   await sql(world, 'UPDATE platform_users SET disabled_at = now() WHERE email = $1', [op.email]);
   assert.equal((await onConsole(world, op, '/me')).status, 401);
-  await hit(world, '/sign-in/code', { host: CONSOLE_HOST, method: 'POST', body: { email } });
+  assert.equal((await hit(world, '/sign-in/code', { host: CONSOLE_HOST, method: 'POST', body: { email } })).status, 204, 'Asking for an emailed code');
   const mail = (await world.mail.get('/sent')).sent.filter((m) => m.to.includes(email)).at(-1);
-  const real = /(?<!\d)(\d{6})(?!\d)/.exec(`${mail.text}${mail.html}`)[1];
+  assert.ok(mail, 'No sign-in code was emailed');
+  const real = /(?<!\d)(\d{6})(?!\d)/.exec(`${mail.text}${mail.html}`)?.[1];
+  assert.ok(real, 'The email carries no six-digit code');
   const wrong = real === '000000' ? '111111' : '000000';
   for (let i = 0; i < 6; i++) await hit(world, '/sign-in/verify', { host: CONSOLE_HOST, method: 'POST', body: { email, code: wrong } });
   assert.ok((await hit(world, '/sign-in/verify', { host: CONSOLE_HOST, method: 'POST', body: { email, code: real } })).status >= 400, 'after five misses even the right code is refused');
