@@ -1,0 +1,27 @@
+/* Phase 7 screens: plans, usage, invoices, sign-up, checklist. Names come from tokens.css only. */
+.p7-stack { display: grid; gap: var(--space-4); }
+.p7-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.p7-row > .grow { flex: 1 1 160px; min-width: 0; }
+.p7-plan { display: grid; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-tile); background: var(--surface); }
+.p7-plan[data-current='true'] { border-color: var(--neel); background: var(--neel-tint); }
+.p7-plan h3 { margin: 0; font-family: var(--font-display); font-size: var(--text-title); }
+.p7-price { font-size: var(--text-title); font-weight: 700; color: var(--ink); }
+.p7-meta { color: var(--ink-2); font-size: var(--text-small); margin: 0; }
+.p7-cycle { display: flex; gap: var(--space-2); }
+.p7-meter { display: grid; gap: var(--space-1); }
+.p7-meter-bar { height: 10px; border-radius: var(--radius-pill); background: var(--surface-sunken); overflow: hidden; border: 1px solid var(--line); }
+.p7-meter-fill { height: 100%; background: var(--neel); }
+.p7-meter-fill[data-tone='warn'] { background: var(--haldi); }
+.p7-meter-fill[data-tone='bad'] { background: var(--bad-text); }
+.p7-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.p7-item { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-tile); background: var(--surface); }
+.p7-item > .grow { flex: 1 1 180px; min-width: 0; display: grid; gap: 2px; }
+.p7-upgrade { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-tile); background: var(--haldi-tint); color: var(--haldi-text); flex-wrap: wrap; }
+.p7-upgrade-text { display: grid; gap: 2px; flex: 1 1 200px; }
+.p7-upgrade-bar { position: fixed; left: var(--space-4); right: var(--space-4); bottom: calc(var(--space-4) + 64px); z-index: 40; max-width: 560px; margin: 0 auto; }
+.p7-upgrade-bar-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.p7-code { font-family: ui-monospace, monospace; word-break: break-all; }
+.p7-two { display: grid; gap: var(--space-3); grid-template-columns: 1fr; }
+@media (min-width: 720px) { .p7-two { grid-template-columns: 1fr 1fr; } }
+.p7-qa { white-space: pre-wrap; }
+.p7-step-title { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
