@@ -9,7 +9,7 @@ import { Screen } from '../catalog/shared/ui.jsx';
 import '../billing/billing.css';
 import { ACCOUNT_TYPES, STEP_LABELS, TYPE_COPY, checkAutomation, checkStart, minutes, problemsByField, screenFor } from './model.js';
 
-const RETURN_TO = '/admin/signup';
+const returnTo = (run) => `/admin/signup${run ? `?run=${encodeURIComponent(run)}` : ''}`;
 
 function Progress({ screen }) {
   const at = STEP_LABELS.findIndex(([name]) => name === screen);
@@ -65,10 +65,10 @@ function StartForm({ status, onStarted, initial }) {
   );
 }
 
-function InstagramStep({ refresh }) {
+function InstagramStep({ onContinue, run }) {
   const connection = useQuery({ queryKey: ['signup', 'instagram'], queryFn: () => api.instagram.connection() });
   const connect = useMutation({
-    mutationFn: () => api.instagram.connect({ returnTo: RETURN_TO }),
+    mutationFn: () => api.instagram.connect({ returnTo: returnTo(run) }),
     onSuccess: ({ authorizeUrl }) => window.location.assign(authorizeUrl),
   });
   return (
@@ -81,7 +81,7 @@ function InstagramStep({ refresh }) {
               : <p className="p7-meta">Use Meta’s official login. We never ask for your Instagram password and we never post for you.</p>}
             {connect.isError && <Banner tone="bad">{connect.error.message}</Banner>}
             {data.status === 'active'
-              ? <Button size="large" block onClick={refresh}>Continue</Button>
+              ? <Button size="large" block onClick={onContinue}>Continue</Button>
               : <Button size="large" block loading={connect.isPending} onClick={() => connect.mutate()}><Link2 size={18} aria-hidden="true" /> Connect Instagram</Button>}
           </div>
         )}
@@ -165,13 +165,16 @@ function Done({ finished }) {
 }
 
 export default function SignupPage() {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const queries = useQueryClient();
   const initial = { invite: params.get('invite') ?? '', ref: params.get('ref') ?? '' };
+  // The run the server opened for this person stays in the address, so a reload or a return from Instagram resumes it.
+  const run = params.get('run') ?? '';
   const [finished, setFinished] = useState(null);
+  const [instagramDone, setInstagramDone] = useState(false);
   const status = useQuery({
-    queryKey: ['signup', 'status'],
-    queryFn: () => api.signup.status({ ...(initial.invite ? { inviteCode: initial.invite } : {}), ...(initial.ref ? { ref: initial.ref } : {}) }),
+    queryKey: ['signup', 'status', run],
+    queryFn: () => api.signup.status({ ...(run ? { runToken: run } : {}), ...(initial.invite ? { inviteCode: initial.invite } : {}), ...(initial.ref ? { ref: initial.ref } : {}) }),
   });
   const refresh = () => queries.invalidateQueries({ queryKey: ['signup'] });
   return (
@@ -179,14 +182,14 @@ export default function SignupPage() {
       <PageHeader eyebrow="Welcome" title="Set up Bhava" />
       <Screen query={status} label="Opening sign-up" errorTitle="We couldn’t open sign-up">
         {(data) => {
-          const screen = finished ? 'done' : screenFor(data);
+          const screen = finished ? 'done' : instagramDone && screenFor(data) === 'instagram' ? 'automation' : screenFor(data);
           return (
             <>
               <Progress screen={screen} />
               {screen === 'signin' && <EmptyState title="Sign in first">Sign in with your WhatsApp number or Google, then come back here.</EmptyState>}
               {screen === 'closed' && <EmptyState title="Sign-up is closed right now">{data.mode === 'invite' ? 'Sign-up is by invite. Ask the Bhava team for your invite code.' : 'Please check back soon.'}</EmptyState>}
-              {screen === 'type' && <StartForm status={data} initial={initial} onStarted={refresh} />}
-              {screen === 'instagram' && <InstagramStep refresh={refresh} />}
+              {screen === 'type' && <StartForm status={data} initial={initial} onStarted={(started) => { setParams((current) => { const next = new URLSearchParams(current); next.set('run', started.runToken); return next; }, { replace: true }); refresh(); }} />}
+              {screen === 'instagram' && <InstagramStep run={run} onContinue={() => setInstagramDone(true)} />}
               {screen === 'automation' && <AutomationStep runToken={data.runToken} onDone={refresh} />}
               {screen === 'finish' && <FinishStep runToken={data.runToken} onDone={(result) => { setFinished(result); refresh(); }} />}
               {screen === 'done' && <Done finished={finished} />}

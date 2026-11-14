@@ -231,7 +231,8 @@ function Invoices() {
           {list.items.map((invoice) => (
             <li key={invoice.id} className="p7-item" data-testid="invoice">
               <span className="grow"><strong>{invoice.docType === 'credit_note' ? 'Credit note' : 'Invoice'} {invoice.number}</strong><span className="p7-meta">{formatDate(invoice.issuedAt)} · {formatPaise(invoice.totalPaise)} with tax · {invoice.paid ? 'Paid' : 'Not paid'}</span></span>
-              {invoice.hasFile ? <Button variant="outline" aria-label={`Download ${invoice.number}`} onClick={() => openFile(() => api.billing.invoiceFile(invoice.id), toast)}>Download</Button> : <Badge>Getting ready</Badge>}
+              {/* The file is made the first time it is asked for (hasFile only says it is already kept), so the button is always there. */}
+              <Button variant="outline" aria-label={`Download ${invoice.number}`} onClick={() => openFile(() => api.billing.invoiceFile(invoice.id), toast)}>Download</Button>
             </li>
           ))}
         </ul>
@@ -255,8 +256,8 @@ function Statements() {
           {list.items.map((statement) => (
             <li key={statement.id} className="p7-item" data-testid="statement">
               <span className="grow"><strong>{formatDate(statement.month)}</strong><span className="p7-meta">Closing balance {formatPaise(statement.closingBalance.amountPaise)} {statement.closingBalance.amountPaise === 0 ? '' : statement.closingBalance.owedTo === 'business' ? 'owed to you' : 'owed to Bhava'}</span></span>
-              {statement.hasPdf && <Button variant="outline" aria-label={`Download statement ${statement.month} as PDF`} onClick={() => openFile(() => api.billing.statementFile(statement.id, { format: 'pdf' }), toast)}>PDF</Button>}
-              {statement.hasCsv && <Button variant="outline" aria-label={`Download statement ${statement.month} as CSV`} onClick={() => openFile(() => api.billing.statementFile(statement.id, { format: 'csv' }), toast)}>CSV</Button>}
+              {<Button variant="outline" aria-label={`Download statement ${statement.month} as PDF`} onClick={() => openFile(() => api.billing.statementFile(statement.id, { format: 'pdf' }), toast)}>PDF</Button>}
+              {<Button variant="outline" aria-label={`Download statement ${statement.month} as CSV`} onClick={() => openFile(() => api.billing.statementFile(statement.id, { format: 'csv' }), toast)}>CSV</Button>}
             </li>
           ))}
         </ul>
