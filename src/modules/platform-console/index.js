@@ -4,18 +4,19 @@ import { createPlatformAuth, requirePlatformRole, sameOriginOnly } from '../../a
 import { PLATFORM_ROLES } from '../../contracts/api/access.js';
 import { OPS_PLATFORM_OWNERS } from '../../contracts/api/platform-ops.js';
 import { reportError } from '../../platform/log.js';
-import { platformNotBuilt } from '../not-built.js';
 import { normalizeHost } from '../../tenancy.js';
 import { registerBusinessRoutes } from './businesses.js';
 import { platformHostOf } from './host.js';
+import { auditConsoleWrites, registerOversight } from './oversight.js';
 import { sweepRawExports } from './raw-export.js';
 import { platformUsersRepo } from './repo.js';
+import { registerSignIn } from './signin.js';
 
 export { platformHostOf };
 
 const HOUR = 3_600_000;
-const ANSWERED_HERE = ['platform.me', 'platform.signOut'];
-const NOT_BUILT = OPS_PLATFORM_OWNERS['platform-console'].filter((id) => !ANSWERED_HERE.includes(id));
+/** Answered here: sign-in, me and sign-out in beforeTenant, the rest (team, pauses, audit log) in platformRoutes. */
+export const PLATFORM_CONSOLE_ROUTES = OPS_PLATFORM_OWNERS['platform-console'];
 
 const describe = (user) => ({ id: user.id, email: user.email, name: user.name, role: user.role });
 
@@ -58,10 +59,12 @@ export const platformConsole = {
     const { repos, config, platform, modules } = ctx;
     const auth = createPlatformAuth({ secret: config.sessionSecret, platformUsers: repos.platformUsers, cache: platform.cache });
     const r = express.Router();
-    r.use(auth.load, auth.checkCsrf);
+    r.use(auth.load, auth.checkCsrf, auditConsoleWrites(ctx.db));
 
-    // The Phase 0 email and password sign-in, kept only behind PASSWORD_LOGIN (tests and local work). The console signs in
-    // with an emailed code plus TOTP: platform.signInStart, signInVerify and signInTotp (PRD 5.5).
+    // The console signs in with an emailed code plus TOTP (PRD 5.5): platform.signInStart, signInVerify and signInTotp.
+    registerSignIn(r, ctx, auth);
+
+    // The Phase 0 email and password sign-in, kept only behind PASSWORD_LOGIN (tests and local work).
     r.post('/login', sameOriginOnly, async (req, res) => {
       if (!config.passwordLogin) return res.status(404).type('text').send('Not found.');
       if (await auth.tooManyAttempts(req)) return res.status(429).json({ error: 'Too many tries. Wait 15 minutes and try again.' });
@@ -92,8 +95,8 @@ export const platformConsole = {
 
   platformRoutes(router, ctx) {
     registerBusinessRoutes(router, ctx);
-    // platform.me and platform.signOut are answered above, before any module's routes.
-    platformNotBuilt(router, ...NOT_BUILT);
+    // platform.me, platform.signOut and the three sign-in routes are answered above, before any module's routes.
+    registerOversight(router, ctx);
   },
 
   jobs({ db, platform }) {
