@@ -1,10 +1,14 @@
+import { platformSiteUrlOf } from '../../config.js';
+import { referralLink } from '../../contracts/billing.js';
 import { BUYER_ROUTES, DEFAULT_BLOCKS, isReservedPath } from '../../contracts/buyer-pages.js';
 import { whatsappDigits } from '../../contracts/catalog.js';
-import { buyerPage, icon, initials, loadBuyerLayout, notFoundPage, safeHref, section, sendBuyerPage, ticker } from '../../views/buyer/index.js';
+import { buyerPage, gzipOnEnd, loadBuyerLayout, notFoundPage, safeHref, section, sendBuyerPage, ticker } from '../../views/buyer/index.js';
 import { html, raw } from '../../views/html.js';
 import { absolute, categoryProducts, chipRow, likeText, nowOf, pageBase, productList, reelTile, searchProducts, searchTerms, tileStyles } from '../categories/buyer.js';
 import { tileImage } from '../categories/repo.js';
 import { leadFormFor } from '../leads/form.js';
+import { sized } from '../pages/variants.js';
+import { CREATOR_BODY, creatorCss, linkBlock, madeWithBadge, profileHead, searchBox } from './look.js';
 import { CREATOR_SLUG } from './repo.js';
 
 /**
@@ -15,7 +19,8 @@ import { CREATOR_SLUG } from './repo.js';
  *
  * Every link is direct: a tile opens its landing page with the bio UTM, so the visit counts as source bio (K-51), and a
  * product opens its own page or the seller's site (K-63). The page is indexable, unlike the others. It wears the seller's
- * brand only; the one exception is the small badge in the footer of a Free plan page (K-64).
+ * brand only; the one exception is the small badge in the footer of a Free plan page (K-64), which opens the sign-up page
+ * with this business's referral code (5.20). How it all looks is look.js.
  *
  * /<slug> is a wildcard, so anything that isn't this business's saved, switched-on page goes on to the next route untouched.
  */
@@ -24,24 +29,6 @@ const ALL_TILES = 120;
 const MORE_SHELF = '_more';
 const CATEGORY_SLUG = /^[a-z0-9-]{1,80}$/;
 const MAX_OFFSET = 5000;
-
-// Static, built from the theme's variables: nothing a seller types reaches it.
-const CREATOR_CSS = [
-  '.creator-head{padding:8px 20px 0;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center}',
-  '.creator-photo{width:96px;height:96px;border-radius:999px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--primary);color:var(--on-primary);font-family:var(--display);font-weight:var(--display-weight);font-size:30px;border:3px solid var(--card);box-shadow:0 0 0 2px var(--primary)}',
-  '.creator-photo img{width:100%;height:100%;object-fit:cover}',
-  '.creator-head h1{font-family:var(--display);font-weight:var(--display-weight);font-size:clamp(28px,8vw,36px);line-height:1.08;letter-spacing:-.02em}',
-  '.creator-head p{margin:0;color:var(--muted);max-width:44ch}',
-  '.creator-links{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}',
-  '.creator-links .btn,.creator-links .outline-btn{align-self:auto;padding:0 18px;min-height:44px}',
-  '.creator-search{display:flex;gap:8px;padding:20px 20px 4px}',
-  '.creator-search input{flex:1;min-width:0;min-height:44px;padding:0 12px;border:1.5px solid var(--line-strong);border-radius:8px;background:var(--card);color:var(--ink);font:inherit}',
-  '.creator-search button{flex:none;border:0}',
-  '.creator-banner{display:block;margin:20px 20px 0;padding:14px 16px;border-radius:12px;background:var(--primary);color:var(--on-primary);font-weight:700;text-decoration:none;text-align:center}',
-  '.creator-banner img{width:100%;border-radius:8px;margin-bottom:8px}',
-  '.shelf-link{font-size:14px;font-weight:600}',
-  '.made-with{font-size:12px;text-align:center}',
-].join('');
 
 // Loads the tiles after the first 12 as each shelf's end scrolls into view. Without it, each shelf's own link shows them.
 const TILES_SCRIPT = `(function(){var io='IntersectionObserver' in window;document.querySelectorAll('[data-more]').forEach(function(el){var busy=false,ob=null;function stop(){if(ob)ob.disconnect();}function load(){if(busy)return;busy=true;fetch(el.getAttribute('data-more'),{credentials:'same-origin'}).then(function(r){if(!r.ok)throw 0;var next=r.headers.get('x-next');return r.text().then(function(t){var grid=document.getElementById(el.getAttribute('data-grid'));if(grid)grid.insertAdjacentHTML('beforeend',t);if(next&&next.charAt(0)==='/'&&next.charAt(1)!=='/'){el.setAttribute('data-more',next);busy=false;if(ob){ob.unobserve(el);ob.observe(el);}}else{stop();el.remove();}});}).catch(function(){busy=false;stop();});}if(io){ob=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting)load();});},{rootMargin:'300px'});ob.observe(el);}var a=el.querySelector('a');if(a)a.addEventListener('click',function(ev){ev.preventDefault();load();});});})();`;
@@ -61,7 +48,7 @@ export function registerCreatorPages(app, ctx) {
     return page;
   }
 
-  const tiles = (rows, now, { eagerFirst = false } = {}) => rows.map((row, i) => reelTile(row, { now, bio: true, eager: eagerFirst && i < 3 }));
+  const tiles = (rows, now, { eagerFirst = false } = {}) => rows.map((row, i) => reelTile(row, { now, bio: true, eager: eagerFirst && i < 3, first: eagerFirst && i === 0, variant: 'hero' }));
 
   /** A grid of tiles and, when the shelf has more, the place the rest load into. `fallback` is the link that works with no script. */
   function shelfGrid({ id, rows, now, more = null, eagerFirst = false }) {
@@ -83,44 +70,35 @@ ${more ? html`<div class="more-tiles" data-more="${more.url}" data-grid="${id}">
     const digits = page.show_whatsapp && whatsappAllowed ? whatsappDigits(settings.support_whatsapp) : null;
     const placed = blocks ?? DEFAULT_BLOCKS.creator.map((block) => ({ block, settings: {} }));
     const shows = (block) => placed.some((b) => b.block === block);
-    const head = html`<section class="creator-head" aria-labelledby="creator-name">
-<span class="creator-photo">${photo ? html`<img src="${photo}" alt="" width="96" height="96" fetchpriority="high" decoding="async">` : html`<span aria-hidden="true">${initials(name)}</span>`}</span>
-<h1 id="creator-name">${name}</h1>
-${page.bio ? html`<p>${page.bio}</p>` : ''}
-${website || (digits && shows('whatsapp')) ? html`<div class="creator-links">
-${website ? html`<a class="btn" href="${website}" rel="noopener">Visit website</a>` : ''}
-${digits && shows('whatsapp') ? html`<a class="outline-btn" href="https://wa.me/${digits}" rel="noopener">${icon('chat', 18)}WhatsApp</a>` : ''}
-</div>` : ''}
-</section>`;
+    const head = profileHead({ name, bio: page.bio, photo: sized(photo, 'card'), website, whatsapp: digits && shows('whatsapp') ? `https://wa.me/${digits}` : '' });
     const leadForm = shows('lead_form') ? await leadFormFor(ctx, req, { theme, surface: 'creator', pageSlug: page.slug, back: `/${page.slug}` }) : '';
-
-    function banner(s) {
-      const text = one(s?.text).slice(0, 160);
-      const image = safeHref(one(s?.imageUrl));
-      const link = safeHref(one(s?.linkUrl));
-      if (!text && !image) return '';
-      const inner = html`${image ? html`<img src="${image}" alt="" loading="lazy" decoding="async">` : ''}${text}`;
-      return link ? html`<a class="creator-banner" href="${link}"${/^https?:/i.test(link) ? raw(' rel="noopener"') : ''}>${inner}</a>` : html`<div class="creator-banner">${inner}</div>`;
-    }
 
     /** The page's sections in the business's block order, with `shelves` as the shelves block. */
     function body(shelves) {
       const parts = { hero: () => head, shelves: () => shelves, lead_form: () => leadForm, ticker: () => ticker(theme), whatsapp: () => '' };
       const hasShelves = shows('shelves');
-      const out = placed.map((b) => (b.block === 'banner' ? banner(b.settings) : Object.hasOwn(parts, b.block) ? parts[b.block]() : ''));
+      const out = placed.map((b) => (b.block === 'banner' ? linkBlock({ text: one(b.settings?.text), imageUrl: one(b.settings?.imageUrl), linkUrl: one(b.settings?.linkUrl) }) : Object.hasOwn(parts, b.block) ? parts[b.block]() : ''));
       // The shelves are the page: a layout that left them out still shows them, last.
       if (!hasShelves) out.push(shelves);
-      return html`<style>${raw(CREATOR_CSS)}</style>${tileStyles()}${out}`;
+      return html`${tileStyles()}<style>${raw(creatorCss(theme))}</style>${out}`;
     }
 
-    const footer = badge ? { extra: html`<span class="made-with">Made with Bhava</span>` } : {};
+    const footer = badge ? { extra: madeWithBadge(await badgeLink()) } : {};
     return { theme, business, name, photo, body, footer, base: pageBase(req) };
   }
 
-  function searchBox(slug, q = '') {
-    return html`<form class="creator-search" method="get" action="/${slug}" role="search">
-<input type="search" name="q" value="${q}" maxlength="80" placeholder="Search reels and products" aria-label="Search reels and products">
-<button class="btn" type="submit" aria-label="Search">${icon('search', 18)}</button></form>`;
+  /**
+   * Where the Free plan's badge goes: the sign-up page with this business's referral code. The badge never breaks the page, so
+   * a code that can't be read leaves the plain address, and no address leaves the badge as words.
+   */
+  async function badgeLink() {
+    const site = platformSiteUrlOf(config);
+    if (!site) return '';
+    try {
+      return referralLink(site, await repos.referralCodes.code()) || site;
+    } catch {
+      return site;
+    }
   }
 
   async function preview(target, fallbacks, base) {
@@ -182,7 +160,9 @@ ${!reels.length && !products.length ? section({ theme, id: 'found-none-h', kicke
           meta: { title: `Search · ${name}`, description: `Search the reels and products of ${name}`, url: `${base}/${page.slug}`, indexable: false },
           main: view.body(results),
           footer: view.footer,
+          bodyClass: CREATOR_BODY,
         });
+        gzipOnEnd(req, res);
         return sendBuyerPage(res, doc, { page: { kind: 'creator', ref: page.slug } });
       }
 
@@ -235,7 +215,9 @@ ${sections.length ? sections : section({ theme, id: 'shelf-none-h', kicker: 'Ree
         },
         main: view.body(shelvesBlock),
         footer: view.footer,
+          bodyClass: CREATOR_BODY,
       });
+      gzipOnEnd(req, res);
       return sendBuyerPage(res, doc, { page: { kind: 'creator', ref: page.slug } });
     } catch (err) {
       return next(err);
@@ -285,7 +267,9 @@ ${more ? html`<script>${raw(TILES_SCRIPT)}</script>` : ''}`;
         },
         main: view.body(shelfBlock),
         footer: view.footer,
+          bodyClass: CREATOR_BODY,
       });
+      gzipOnEnd(req, res);
       return sendBuyerPage(res, doc, { page: { kind: 'creator', ref: `${page.slug}/${category.slug}` } });
     } catch (err) {
       return next(err);

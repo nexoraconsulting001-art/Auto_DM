@@ -150,6 +150,17 @@ export const REFERRAL_STATES = Object.freeze(['pending', 'credited', 'blocked'])
 export const REFERRAL_BLOCKS = Object.freeze(['same_instagram', 'same_phone', 'same_payment_method']);
 /** The query parameter a referral link carries to the sign-up page. A referral link never goes inside a DM (4.10). */
 export const REFERRAL_PARAM = 'ref';
+/** A seller's own referral code, as seller_referral_codes keeps it. */
+export const REFERRAL_CODE = /^[a-z0-9]{6,20}$/;
+/**
+ * The link an account shares: the sign-up page's address with its code (5.20). Shown in the console and behind the Free
+ * plan's badge on the creator page (8.14); never put inside a DM. '' when either part is missing or malformed.
+ */
+export function referralLink(signupUrl, code) {
+  const base = String(signupUrl ?? '').trim();
+  if (!/^https:\/\/[^\s"'<>\\?#]+$/i.test(base) || !REFERRAL_CODE.test(String(code ?? ''))) return '';
+  return `${base}?${REFERRAL_PARAM}=${code}`;
+}
 
 /**
  * Whether a flag is on for a business: its own tenant_flags row, else the flag's default, else the percentage, which is

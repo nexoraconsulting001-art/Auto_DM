@@ -59,7 +59,7 @@ test('the page is saved with a name the store doesn’t use, and answers nothing
   assert.equal((await w.api('/creator-page', { method: 'PATCH', body: { photoUrl: '/media/2f1c1c5e-8a0e-4a4e-9a51-0d7f4e1b2a3c' } })).status, 400, 'no such file');
   const media = await addMedia(w);
   assert.equal((await save(w, { photoUrl: `/media/${media}` })).photoUrl, `/media/${media}`);
-  assert.match((await w.page('/priya')).text, new RegExp(`<img src="/media/${media}"`));
+  assert.match((await w.page('/priya')).text, new RegExp(`<img src="/media/${media}/card"`)); // the photo at a phone's size (pages/variants.js)
 
   // The store's own pages still answer: /<slug> takes nothing that isn't the page.
   assert.notEqual((await w.page('/login')).status, 404);
@@ -191,7 +191,8 @@ test('K-52, K-64: the Free plan page carries the badge; a paid page names the se
   assert.equal(saved.badge, true);
   const free = await w.page('/zari', { headers: BROWSER });
   assert.equal(free.status, 200);
-  assert.match(free.text, /<span class="made-with">Made with Bhava<\/span>/);
+  // The badge opens the sign-up page with this business's referral code (5.20).
+  assert.match(free.text, /<a class="made-with" href="https:\/\/app\.bhava\.test\/signup\?ref=[a-z0-9]{6,20}" rel="noopener">(<svg.*?<\/svg>)?Made with Bhava<\/a>/);
 
   await setPlan(w, 't1');
   assert.equal((await w.api('/creator-page')).body.badge, false);

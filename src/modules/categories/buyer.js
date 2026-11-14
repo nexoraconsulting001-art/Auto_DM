@@ -3,6 +3,7 @@ import { BIO_UTM } from '../../contracts/buyer-pages.js';
 import { priceText, productCard, safeHref } from '../../views/buyer/index.js';
 import { html, raw } from '../../views/html.js';
 import { currentTenant, tenantId } from '../../tenancy.js';
+import { sized } from '../pages/variants.js';
 import { LIVE_PRODUCT_SQL, tileImage, tileTitle } from './repo.js';
 
 /**
@@ -50,10 +51,13 @@ export const TILE_CSS = [
 
 export const tileStyles = () => html`<style>${raw(TILE_CSS)}</style>`;
 
-/** One reel tile. `row` is a page row from the categories repo. */
-export function reelTile(row, { now = new Date(), bio = false, eager = false } = {}) {
-  const image = safeHref(tileImage(row, now));
-  return html`<a class="reel-tile" href="${pageHref(row.slug, { bio })}" data-page="${Number(row.page_id)}">${image ? html`<img src="${image}" alt="" width="180" height="320"${eager ? '' : raw(' loading="lazy"')} decoding="async">` : ''}${row.pinned ? html`<b>Top</b>` : ''}<span>${tileTitle(row)}</span></a>`;
+/**
+ * One reel tile. `row` is a page row from the categories repo. `variant` asks for the business's own picture at a phone's size
+ * (pages/variants.js; a picture kept elsewhere is unchanged), and `first` marks the tile the page should fetch before the rest.
+ */
+export function reelTile(row, { now = new Date(), bio = false, eager = false, variant = '', first = false } = {}) {
+  const image = safeHref(variant ? sized(tileImage(row, now), variant) : tileImage(row, now));
+  return html`<a class="reel-tile" href="${pageHref(row.slug, { bio })}" data-page="${Number(row.page_id)}">${image ? html`<img src="${image}" alt="" width="180" height="320"${eager ? '' : raw(' loading="lazy"')}${first ? raw(' fetchpriority="high"') : ''} decoding="async">` : ''}${row.pinned ? html`<b>Top</b>` : ''}<span>${tileTitle(row)}</span></a>`;
 }
 
 export const reelGrid = (rows, options = {}) => html`<div class="reel-grid">${rows.map((row, i) => reelTile(row, { ...options, eager: options.eagerFirst ? i < 3 : false }))}</div>`;

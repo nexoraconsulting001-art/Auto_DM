@@ -1,7 +1,6 @@
-import zlib from 'node:zlib';
 import { BUYER_ROUTES, PREVIEW_CRAWLERS } from '../../contracts/buyer-pages.js';
 import { reportError } from '../../platform/log.js';
-import { loadBuyerLayout, notFoundPage, sendBuyerPage } from '../../views/buyer/index.js';
+import { gzipOnEnd, loadBuyerLayout, notFoundPage, sendBuyerPage } from '../../views/buyer/index.js';
 import { storeBaseUrl } from '../admin-api/urls.js';
 import { createMediaRefresher } from './media.js';
 import { createSharePreviews } from './share.js';
@@ -30,26 +29,6 @@ export const ROBOTS_TXT = [
   'Allow: /',
   '',
 ].join('\n');
-
-/**
- * Compresses the page as it leaves (8.12), after the traffic module has added its script. Only a whole body handed to end()
- * is compressed, which is how res.send writes a page.
- */
-function gzipOnEnd(req, res) {
-  if (!/\bgzip\b/i.test(req.get('accept-encoding') ?? '')) return;
-  const end = res.end.bind(res);
-  res.end = (chunk, encoding, done) => {
-    res.end = end;
-    const body = typeof chunk === 'string' ? Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8') : chunk;
-    if (!Buffer.isBuffer(body) || body.length < 1024 || res.headersSent || res.getHeader('Content-Encoding')) return end(chunk, encoding, done);
-    const packed = zlib.gzipSync(body, { level: 6 });
-    res.setHeader('Content-Encoding', 'gzip');
-    res.setHeader('Content-Length', packed.length);
-    res.vary('Accept-Encoding');
-    res.removeHeader('ETag');
-    return end(packed, typeof encoding === 'function' ? encoding : done);
-  };
-}
 
 export function mountBuyerRoutes(app, ctx) {
   const { repos, config, ig } = ctx;

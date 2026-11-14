@@ -73,6 +73,9 @@ export const config = {
   // Where sellers sign in: the owner app and the web sign-in page talk to /api/v1 here. It belongs to no business.
   // Empty means app.PLATFORM_DOMAIN (see platformAppHostOf).
   platformAppHost: (process.env.PLATFORM_APP_HOST || '').toLowerCase(),
+  // Bhava's own website, where a new seller signs up: the Free plan's creator page badge links here with the business's
+  // referral code (PRD 5.20, 8.14). Empty means https://<the sellers' host>/signup (see platformSiteUrlOf).
+  platformSiteUrl: (process.env.PLATFORM_SITE_URL || '').trim().replace(/[?#].*$/, '').replace(/\/+$/, ''),
   // Seller sign-in (PRD 5.11, 10.2). There are no passwords: PASSWORD_LOGIN keeps the Phase 0 phone-and-password login for
   // tests and local runs only. It defaults to on under test and off otherwise, and the server refuses to start with it in production.
   passwordLogin: passwordLoginFrom(process.env),
@@ -243,6 +246,14 @@ export const config = {
 export function platformAppHostOf(cfg = config) {
   if (cfg.platformAppHost) return String(cfg.platformAppHost).toLowerCase();
   return cfg.platformDomain ? `app.${String(cfg.platformDomain).toLowerCase()}` : '';
+}
+
+/** The https address of the sign-up page that referral links point at: PLATFORM_SITE_URL, or /signup on the sellers' host. '' when unknown. */
+export function platformSiteUrlOf(cfg = config) {
+  const set = String(cfg.platformSiteUrl ?? '');
+  if (/^https:\/\/[^\s"'<>\\?#]+$/i.test(set)) return set;
+  const host = platformAppHostOf(cfg);
+  return /^[a-z0-9.-]+(:\d+)?$/.test(host) ? `https://${host}/signup` : '';
 }
 
 /** Settings a production server must not start with. Throws with the name of the setting. */
