@@ -1,14 +1,14 @@
 import { Wrench } from 'lucide-react';
-import { NotBuilt } from '../../NotBuilt.jsx';
+import { screen } from '../../lazy.js';
 
-/** Managed services: engagements, sessions with a task reference, and the changes made (PRD 5.17). Routes: platform.services, serviceSessions, startServiceSession, endServiceSession, serviceChanges. */
-function ServicesPage() {
-  return <NotBuilt title="Services">Managed services: engagements, sessions with a task reference, and the changes made (PRD 5.17).</NotBuilt>;
-}
+const load = () => import('./pages.jsx');
+const ServicesPage = screen(load, 'ServicesPage');
 
 export default {
   name: 'services',
   roles: ['super_admin', 'service_operator'],
   nav: { to: '/services', label: 'Services', icon: Wrench, order: 60 },
-  routes: [{ path: 'services', element: <ServicesPage /> }],
+  routes: [
+    { path: 'services', element: <ServicesPage /> },
+  ],
 };

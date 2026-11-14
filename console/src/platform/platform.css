@@ -58,3 +58,68 @@
   min-height: 44px;
   text-align: left;
 }
+
+.pc-h2 {
+  font-family: 'Unbounded Variable', sans-serif;
+  font-size: 1rem;
+  line-height: 1.3;
+  margin: 8px 0 0;
+  color: #16152B;
+}
+.pc-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.pc-secret-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.pc-masked,
+.pc-link-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+  user-select: none;
+}
+.pc-countdown {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.pc-fieldset {
+  border: 0;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.pc-fieldset legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+.list-row.pc-pause,
+.list-row.pc-engagement,
+.list-row.pc-session,
+.list-row.pc-submission,
+.list-row.pc-release {
+  flex-wrap: wrap;
+}
+.list-row-main {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+a.btn {
+  text-decoration: none;
+}
+.stack > .field {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  background: var(--ground);
+}
+.stack > .field:focus-within {
+  border-color: var(--neel);
+}

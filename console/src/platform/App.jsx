@@ -2,6 +2,7 @@ import { Component, Suspense } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Navigate, Outlet, RouterProvider, createBrowserRouter, useLocation } from 'react-router-dom';
 import { Button, EmptyState, Spinner } from '../design/index.jsx';
+import { FeedbackProvider } from '../components/feedback.jsx';
 import { queryClient } from './api.js';
 import { featureAllowed, features } from './features/index.js';
 import { PlatformSessionProvider, usePlatformSession } from './session.jsx';
@@ -88,7 +89,9 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <PlatformSessionProvider>
-        <RouterProvider router={router} />
+        <FeedbackProvider>
+          <RouterProvider router={router} />
+        </FeedbackProvider>
       </PlatformSessionProvider>
     </QueryClientProvider>
   );

@@ -1,14 +1,14 @@
 import { Flag } from 'lucide-react';
-import { NotBuilt } from '../../NotBuilt.jsx';
+import { screen } from '../../lazy.js';
 
-/** Feature flags, for all and per business (PRD 5.7). Routes: platform.flags, saveFlag, tenantFlags, setTenantFlag. */
-function FlagsPage() {
-  return <NotBuilt title="Flags">Feature flags, for all and per business (PRD 5.7).</NotBuilt>;
-}
+const load = () => import('./pages.jsx');
+const FlagsPage = screen(load, 'FlagsPage');
 
 export default {
   name: 'flags',
   roles: ['super_admin', 'support'],
   nav: { to: '/flags', label: 'Flags', icon: Flag, order: 80 },
-  routes: [{ path: 'flags', element: <FlagsPage /> }],
+  routes: [
+    { path: 'flags', element: <FlagsPage /> },
+  ],
 };

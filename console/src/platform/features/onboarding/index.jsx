@@ -1,14 +1,16 @@
 import { ClipboardCheck } from 'lucide-react';
-import { NotBuilt } from '../../NotBuilt.jsx';
+import { screen } from '../../lazy.js';
 
-/** The done-for-you workspace: the checklist, the invite and the operator timings (PRD 5.6). Routes: platform.onboardingList, onboarding, checkOnboarding, sendOnboardingInvite. */
-function OnboardingPage() {
-  return <NotBuilt title="Onboarding">The done-for-you workspace: the checklist, the invite and the operator timings (PRD 5.6).</NotBuilt>;
-}
+const load = () => import('./pages.jsx');
+const OnboardingPage = screen(load, 'OnboardingPage');
+const OnboardingWorkspacePage = screen(load, 'OnboardingWorkspacePage');
 
 export default {
   name: 'onboarding',
   roles: ['super_admin', 'support', 'onboarding'],
   nav: { to: '/onboarding', label: 'Onboarding', icon: ClipboardCheck, order: 20 },
-  routes: [{ path: 'onboarding', element: <OnboardingPage /> }],
+  routes: [
+    { path: 'onboarding', element: <OnboardingPage /> },
+    { path: 'onboarding/:id', element: <OnboardingWorkspacePage /> },
+  ],
 };
