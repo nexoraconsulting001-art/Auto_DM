@@ -133,5 +133,5 @@ test('a question over the limit cannot be typed', async () => {
 });
 
 test('it lists all its routes', () => {
-  expect(aiReplies.routeIds).toHaveLength(8);
+  expect(aiReplies.routeIds).toHaveLength(9);
 });

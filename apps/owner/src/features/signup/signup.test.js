@@ -173,5 +173,5 @@ test('rules: the stage follows the server’s record, and the first call is chec
 });
 
 test('it lists every route', () => {
-  expect(signup.routeIds).toEqual(['signup.status', 'signup.start', 'signup.firstAutomation', 'signup.finish', 'setup.openInvite']);
+  expect(signup.routeIds).toEqual(['signup.status', 'signup.start', 'signup.firstAutomation', 'signup.finish', 'setup.openInvite', 'console:/signup']);
 });

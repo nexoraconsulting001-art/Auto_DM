@@ -117,5 +117,5 @@ test('the summary shows plain fields only and is short', () => {
 });
 
 test('it lists all its routes', () => {
-  expect(teamFeed.routeIds).toEqual(['teamFeed.list', 'teamFeed.undo', 'teamFeed.approve', 'teamFeed.reject', 'services.settings', 'services.saveSettings']);
+  expect(teamFeed.routeIds).toEqual(['teamFeed.list', 'teamFeed.undo', 'teamFeed.approve', 'teamFeed.reject', 'services.settings', 'services.saveSettings', 'console:/team-feed']);
 });

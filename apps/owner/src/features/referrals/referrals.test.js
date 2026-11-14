@@ -51,5 +51,5 @@ test('only the owner gets the screen', async () => {
 });
 
 test('it lists its one route', () => {
-  expect(referrals.routeIds).toEqual(['referrals.get']);
+  expect(referrals.routeIds).toEqual(['referrals.get', 'console:/referrals']);
 });
