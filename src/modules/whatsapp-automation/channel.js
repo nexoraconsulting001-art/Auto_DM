@@ -1,4 +1,4 @@
-import { WHATSAPP_CHANNEL, WHATSAPP_WINDOW_CLOSED_CODE } from '../../contracts/addons.js';
+import { ADDON_FEATURES, WHATSAPP_CHANNEL, WHATSAPP_WINDOW_CLOSED_CODE } from '../../contracts/addons.js';
 import { ProviderError } from '../../adapters/http.js';
 import { tenantId } from '../../tenancy.js';
 
@@ -12,6 +12,9 @@ import { tenantId } from '../../tenancy.js';
  *
  * Meta's refusals are handed to the engine in its own words: 131047 is 'window_closed' (window.closed), a rejected token
  * 'token_invalid' (the account is marked for reconnecting and its jobs wait), a throttle 'throttled'.
+ *
+ * With the add-on off (no whatsapp_automation entitlement) the account reads as 'disabled', so the gate holds anything
+ * already queued (paused.reconnect) and nothing goes out until the add-on is back; expiry then ends what waited too long.
  */
 const KIND = Object.freeze({ auth: 'token_invalid', throttled: 'throttled' });
 
@@ -21,7 +24,7 @@ function refusal(err) {
   return Object.assign(new Error(err.message), { kind: windowClosed ? 'window_closed' : KIND[err.kind] ?? err.kind, status: err.status, code: Number(err.code) || undefined, delivery: err.delivery });
 }
 
-export function whatsappChannel({ db, platform, providers }) {
+export function whatsappChannel({ db, platform, providers, repos }) {
   const accountRow = async (phoneNumberId) => (await db.query(
     'SELECT waba_id, phone_number_id, access_token_enc, status FROM whatsapp_accounts WHERE tenant_id = $1 AND phone_number_id = $2',
     [tenantId(), phoneNumberId],
@@ -31,8 +34,14 @@ export function whatsappChannel({ db, platform, providers }) {
     async account(action) {
       const row = await accountRow(action.accountId);
       if (!row) return null;
-      const token = row.access_token_enc ? platform.secrets.decrypt(row.access_token_enc) : '';
-      return { token, status: row.status, tokenVersion: null, phoneNumberId: row.phone_number_id, wabaId: row.waba_id, accessToken: token };
+      let token = '';
+      try {
+        token = row.access_token_enc ? platform.secrets.decrypt(row.access_token_enc) : '';
+      } catch {
+        token = ''; // a token that no longer decrypts (the key changed) reads as needing a reconnect
+      }
+      const entitled = repos?.entitlements ? await repos.entitlements.can(ADDON_FEATURES.whatsapp) : true;
+      return { token, status: entitled ? row.status : 'disabled', tokenVersion: null, phoneNumberId: row.phone_number_id, wabaId: row.waba_id, accessToken: token };
     },
 
     /** The inbox thread already says when the person last wrote; this adds whether they said yes to what a template is for. */
