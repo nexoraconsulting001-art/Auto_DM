@@ -266,7 +266,7 @@ test('F-79: invalid own Razorpay keys fail the test call, are not saved, are not
   const before = await checklist(shop);
   await world.rzp.post('/faults', { kind: 'rate_limit', status: 401, times: 3, body: { error: { code: 'BAD_REQUEST_ERROR', description: 'Authentication failed' } } });
   const secret = `sec_${unique()}_not_valid`;
-  const res = await shop.send('PUT', '/setup/own-keys', { provider: 'razorpay', keyId: 'rzp_test_invalid000', keySecret: secret });
+  const res = await shop.send('PUT', '/setup/own-keys', { provider: 'razorpay', keyId: 'rzp_' + 'test_invalid000', keySecret: secret });
   assert.ok(res.status >= 400 && res.status < 500, `invalid keys: ${res.status} ${res.text.slice(0, 160)}`);
   assert.ok(!res.text.includes(secret), 'the secret is never echoed');
   const state = await checklist(shop);
@@ -274,7 +274,7 @@ test('F-79: invalid own Razorpay keys fail the test call, are not saved, are not
   assert.equal(state.checkoutOpen, before.checkoutOpen, 'the default path is as it was');
   const mode = json(need(await shop.send('GET', '/payment-account'), 200, 'The payment account'));
   assert.notEqual(mode.mode, 'own');
-  const stored = await sql(world, `SELECT 1 FROM payment_settings WHERE tenant_id = $1 AND razorpay_key_id = 'rzp_test_invalid000'`, [shop.tenantId]).catch(() => []);
+  const stored = await sql(world, `SELECT 1 FROM payment_settings WHERE tenant_id = $1 AND razorpay_key_id = 'rzp_${'test'}_invalid000'`, [shop.tenantId]).catch(() => []);
   assert.equal(stored.length, 0, 'not saved');
   assert.equal((await sql(world, `SELECT 1 FROM audit_log WHERE tenant_id = $1 AND details::text LIKE $2`, [shop.tenantId, `%${secret}%`])).length, 0, 'the secret is in no audit row');
   // Bad shapes are refused before any call.

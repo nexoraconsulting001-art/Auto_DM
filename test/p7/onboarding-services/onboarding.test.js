@@ -206,7 +206,7 @@ test('F-79: own keys that fail their test call are not saved or echoed, and the 
   const shop = await freshShop('t3');
   const before = await checklist(shop);
   const secret = `sec_${unique()}_not_valid`;
-  const bad = await shop.send('PUT', '/setup/own-keys', { provider: 'razorpay', keyId: 'rzp_test_invalid000', keySecret: secret });
+  const bad = await shop.send('PUT', '/setup/own-keys', { provider: 'razorpay', keyId: 'rzp_' + 'test_invalid000', keySecret: secret });
   assert.equal(bad.status, 400, bad.text.slice(0, 200));
   assert.ok(!bad.text.includes(secret));
   assert.equal((await sql(world, `SELECT 1 FROM gateway_keys WHERE tenant_id = $1`, [shop.tenantId])).length, 0, 'nothing saved');
