@@ -4,7 +4,7 @@ import { platformRoutes as ROUTES } from '../../contracts/api/platform.js';
 import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { ValidationError, normalizePhone, slugify } from '../../util.js';
-import { RESERVED_LABELS, fallbackHost } from '../domains/rules.js';
+import { RESERVED_LABELS } from '../domains/rules.js';
 import { createRawExport } from './raw-export.js';
 import { BlockedAddressError } from './safe-fetch.js';
 import { brandFrom, cleanWebsite, productsFrom, readSite, websiteKey } from './site-read.js';
@@ -185,14 +185,7 @@ export function registerBusinessRoutes(router, ctx) {
     }
   });
 
-  // PRD 2, U-04: opening a business to help is on the record. This only records it; the read-only session of PRD 5.10 is a later phase.
-  mount(router, 'platform.impersonate', async ({ params, body, actor }) => {
-    const tenant = await repos.tenants.get(params.id);
-    if (!tenant) throw new Refusal(404, 'Not found.');
-    await withTenant(tenant, () => repos.audit.record({ actor, action: 'impersonation.open', target: String(tenant.id), details: { reason: body.reason } }));
-    const [primary] = await db.platform.query('SELECT domain FROM tenant_domains WHERE tenant_id = $1 AND is_primary', [tenant.id]);
-    return { url: `https://${primary?.domain ?? fallbackHost(tenant, config)}/admin` };
-  });
+  // platform.impersonate (PRD 5.10) is the impersonation module's: it opens the read-only session and its one-time address.
 
   mount(router, 'platform.rawExport', ({ body, actor }) => createRawExport({ db, storage: platform.storage }, body, actor));
 }
