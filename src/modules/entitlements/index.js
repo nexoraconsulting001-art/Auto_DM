@@ -1,7 +1,10 @@
 import { BILLING_PLATFORM_OWNERS } from '../../contracts/api/platform.js';
 import { APP_ENTITLEMENTS } from '../../contracts/apps.js';
-import { platformNotBuilt } from '../not-built.js';
 import { tenantId } from '../../tenancy.js';
+import { automationLimitHook } from './plan-changes.js';
+import { flagsRepo, flagRoutes } from './flags.js';
+
+export { flagsRepo } from './flags.js';
 
 /**
  * What the current business may use: its plan's rows in plan_features, with any row in tenant_features
@@ -25,10 +28,15 @@ import { tenantId } from '../../tenancy.js';
  * check cannot be forgotten. Jobs and buyer routes have no route table and keep asking here themselves (JOB_ENTITLEMENTS in
  * src/contracts/billing.js lists which).
  *
- * Still to build, by the entitlements track, in this folder: what a plan change does to what exists (a downgrade keeps all
- * data, closes checkout, and pauses the automations above the new limit, newest first; an upgrade resumes what it paused), run
- * from the plan_changes row; the audit entry and the owner's notification for each change; and feature flags
- * (repos.flags.on(key), with flagOn from the contract) and their Platform Console routes.
+ * What a plan change does to what exists is held by the database (migration 740, run from the plan_changes row whoever
+ * writes it): a downgrade keeps all data and pauses the live and test automations above the new limit, newest first; an
+ * upgrade resumes what a plan change paused; each change but a direct one is audited and the owner is told (an alert,
+ * kind plan.changed). Checkout, one tap, story triggers and the creator page's badge follow tenants.plan on the next
+ * request. plan-changes.js has the friendly refusal for switching on an automation above the limit; the database holds
+ * the same limit when two requests race (automations_within_plan).
+ *
+ * Feature flags (flags.js): repos.flags.on(key) with flagOn from the contract (the business's own row, else the
+ * default, else a stable percentage bucket), and their four Platform Console routes.
  */
 export function entitlementsRepo(db) {
   async function lookup(feature) {
@@ -100,12 +108,14 @@ export function entitlementsRepo(db) {
 
 export const entitlements = {
   name: 'entitlements',
-  owns: { migrations: [], tables: ['plans', 'plan_features', 'tenant_features', 'feature_flags', 'tenant_flags'], api: ['billing.features'], store: [], platform: BILLING_PLATFORM_OWNERS.entitlements, jobs: [] },
-  repos: (db) => ({ entitlements: entitlementsRepo(db) }),
+  owns: { migrations: ['740_plan_effects.sql'], tables: ['plans', 'plan_features', 'tenant_features', 'feature_flags', 'tenant_flags'], api: ['billing.features'], store: [], platform: BILLING_PLATFORM_OWNERS.entitlements, jobs: [] },
+  repos: (db) => ({ entitlements: entitlementsRepo(db), flags: flagsRepo(db) }),
   api: (ctx) => ({
     'billing.features': () => ctx.repos.entitlements.all(),
   }),
-  platformRoutes(router) {
-    platformNotBuilt(router, ...BILLING_PLATFORM_OWNERS.entitlements);
+  /** Switching an automation on (Test or Live) counts against the plan's automations limit (F-35, F-123). */
+  beforeAutomationLaunch: automationLimitHook,
+  platformRoutes(router, ctx) {
+    flagRoutes(router, ctx);
   },
 };

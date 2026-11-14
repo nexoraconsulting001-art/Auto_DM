@@ -1,24 +1,32 @@
 import { BILLING_ROUTE_OWNERS } from '../../contracts/api/billing.js';
 import { BILLING_PLATFORM_OWNERS } from '../../contracts/api/platform.js';
-import { notBuilt, platformNotBuilt } from '../not-built.js';
+import { signupApi } from './api.js';
+import { signupConsoleRoutes } from './console.js';
+
+export { SIGNUP_LIMITS, businessHost, inviteHash, newInviteCode, slugCandidates } from './rules.js';
 
 /**
- * Self-serve sign-up and the free plan (PRD 5.20). Track signup. Contract only so far: every route answers 501.
+ * Self-serve sign-up and the free plan (PRD 5.20). Track signup-plans.
  *
  * Owns signup_settings, signup_invites, signup_runs and signup_steps (700): platform tables, reached through db.platform,
- * because a run starts before there is a business. What the track builds here:
+ * because a run starts before there is a business; and instagram_tenants with the Free-claim trigger (741).
  *
- * - The four PUBLIC routes on PLATFORM_APP_HOST, answered with no business. The person has signed in there with Google or a
- *   WhatsApp code (the accounts module: no password, no card); each handler finds that session itself and answers 401
- *   without one.
- * - signup.status: the mode (closed, invite or public: a row, set in the Platform Console, 'invite' until Advanced Access),
- *   whether this person may start, and the run's steps so far. signup.start: checks the mode and the invite (hash only, uses
- *   counted in the database), makes the business on the Free plan with the chosen account type, the owner's account and
- *   membership, and its referral row when a code came with it. One Free business per Instagram account
- *   (signup_settings.free_per_instagram) is checked when Instagram is connected.
- * - signup.firstAutomation: a reel, a keyword and a link, through the automations module's own rules, so the link passes 4.11
- *   and the template 4.10 before it goes live, and Free gets the two-tap flow only. signup.finish closes the run.
- * - Every step's time in signup_steps, once per run (F-121): SIGNUP_STEPS, SIGNUP_TARGET_MS.
+ * - The four PUBLIC routes on PLATFORM_APP_HOST (api.js), answered with no business. The person has signed in there with
+ *   Google or a WhatsApp code (the accounts module: no password, no card); each handler finds that person from the
+ *   session and answers 401 without one.
+ * - signup.status: the mode, whether this person may start, and the run's steps so far; it opens a run (rate limited per
+ *   address) and keeps a referral code that came with the page. signup.start: the mode on the server (closed refuses;
+ *   invite takes one use of a code in the same transaction that makes the business, so a single-use code works once);
+ *   rate limited per person and per address; makes the business on Free with an address that is not reserved, its
+ *   owner and membership, and its referral row (the referrals module). The empty Free business a first sign-in made
+ *   (F-109) becomes this business rather than leaving the person with two.
+ * - One Free plan per Instagram account (signup_settings.free_per_instagram) is held by the database when the account is
+ *   connected (migration 741), under a lock on that account, so two sign-ups at once cannot both take it.
+ * - signup.firstAutomation: a reel, a keyword and a link, through the automations module's own handlers, so the template
+ *   passes 4.10 and the link 4.11 before it goes live, Free gets the two-tap flow only, and the plan's limit applies.
+ *   signup.finish closes the run.
+ * - Every step's time in signup_steps, once per run (F-121), logged with ids and milliseconds only.
+ * - The Platform Console's mode and invites (console.js).
  * - Everything a person sees here is Bhava-branded: sign-up is a seller surface.
  */
 const API = BILLING_ROUTE_OWNERS.signup;
@@ -26,9 +34,9 @@ const PLATFORM = BILLING_PLATFORM_OWNERS.signup;
 
 export const signup = {
   name: 'signup',
-  owns: { migrations: [], tables: ['signup_settings', 'signup_invites', 'signup_runs', 'signup_steps'], api: API, store: [], platform: PLATFORM, jobs: [] },
-  api: () => notBuilt(...API),
-  platformRoutes(router) {
-    platformNotBuilt(router, ...PLATFORM);
+  owns: { migrations: ['741_signup_referrals.sql'], tables: ['signup_settings', 'signup_invites', 'signup_runs', 'signup_steps', 'instagram_tenants'], api: API, store: [], platform: PLATFORM, jobs: [] },
+  api: (ctx) => signupApi(ctx),
+  platformRoutes(router, ctx) {
+    signupConsoleRoutes(router, ctx);
   },
 };
