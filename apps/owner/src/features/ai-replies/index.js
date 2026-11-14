@@ -10,7 +10,7 @@ export default {
   name: 'ai-replies',
   access: staffWith('automations'),
   feature: null,
-  routeIds: ['faq.list', 'faq.create', 'faq.update', 'faq.remove', 'aiReplies.settings', 'aiReplies.save', 'aiReplies.testQuestion', 'aiReplies.log'],
+  routeIds: ['faq.list', 'faq.create', 'faq.update', 'faq.remove', 'aiReplies.settings', 'aiReplies.save', 'aiReplies.testQuestion', 'aiReplies.log', 'console:/ai-replies'],
   screens: [{ name: 'index', path: 'ai-replies', title: 'ai-replies.title', component: AiRepliesScreen }],
   nav: { label: 'ai-replies.title', order: 37, icon: Bot },
   strings: {

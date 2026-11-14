@@ -10,7 +10,7 @@ export default {
   name: 'team-feed',
   access: MANAGERS,
   feature: null,
-  routeIds: ['teamFeed.list', 'teamFeed.undo', 'teamFeed.approve', 'teamFeed.reject', 'services.settings', 'services.saveSettings'],
+  routeIds: ['teamFeed.list', 'teamFeed.undo', 'teamFeed.approve', 'teamFeed.reject', 'services.settings', 'services.saveSettings', 'console:/team-feed'],
   screens: [{ name: 'index', path: 'team-feed', title: 'team-feed.title', component: TeamFeedScreen }],
   nav: { label: 'team-feed.title', order: 93, icon: History, accountTypes: ['seller'] },
   strings: {

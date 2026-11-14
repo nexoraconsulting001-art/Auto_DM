@@ -10,7 +10,7 @@ export default {
   name: 'setup',
   access: MANAGERS,
   feature: null,
-  routeIds: ['setup.get', 'setup.check', 'setup.acceptTerms', 'setup.pickupAddress', 'setup.kycLink', 'setup.ownKeys'],
+  routeIds: ['setup.get', 'setup.check', 'setup.acceptTerms', 'setup.pickupAddress', 'setup.kycLink', 'setup.ownKeys', 'console:/setup'],
   screens: [{ name: 'index', path: 'setup', title: 'setup.title', component: SetupScreen }],
   nav: { label: 'setup.title', order: 92, icon: ListChecks, accountTypes: ['seller'] },
   strings: {

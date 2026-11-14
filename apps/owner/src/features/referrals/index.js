@@ -7,7 +7,7 @@ export default {
   name: 'referrals',
   access: OWNER_ONLY,
   feature: null,
-  routeIds: ['referrals.get'],
+  routeIds: ['referrals.get', 'console:/referrals'],
   screens: [{ name: 'index', path: 'referrals', title: 'referrals.title', component: ReferralsScreen }],
   nav: { label: 'referrals.title', order: 91, icon: Gift },
   strings: {

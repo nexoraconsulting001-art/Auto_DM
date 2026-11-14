@@ -10,7 +10,7 @@ export default {
   name: 'whatsapp',
   access: staffWith('automations'),
   feature: null,
-  routeIds: ['whatsapp.status', 'whatsapp.connectStart', 'whatsapp.connectFinish', 'whatsapp.disconnect', 'whatsapp.keywords', 'whatsapp.saveKeywords', 'whatsapp.optins'],
+  routeIds: ['whatsapp.status', 'whatsapp.connectStart', 'whatsapp.connectFinish', 'whatsapp.disconnect', 'whatsapp.keywords', 'whatsapp.saveKeywords', 'whatsapp.optins', 'console:/whatsapp'],
   screens: [{ name: 'index', path: 'whatsapp', title: 'whatsapp.title', component: WhatsappScreen }],
   nav: { label: 'whatsapp.title', order: 38, icon: MessageCircle },
   strings: {

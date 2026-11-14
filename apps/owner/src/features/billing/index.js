@@ -16,7 +16,7 @@ export default {
   feature: null,
   routeIds: [
     'billing.plan', 'billing.catalog', 'billing.change', 'billing.addItem', 'billing.removeItem', 'billing.usage', 'billing.invoices', 'billing.invoiceFile',
-    'billing.statements', 'billing.statementFile', 'billing.paymentMethod', 'billing.features',
+    'billing.statements', 'billing.statementFile', 'billing.paymentMethod', 'billing.features', 'console:/billing',
   ],
   screens: [
     { name: 'index', path: 'billing', title: 'billing.title', component: BillingScreen },

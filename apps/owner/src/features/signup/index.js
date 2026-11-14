@@ -11,7 +11,7 @@ export default {
   name: 'signup',
   access: PUBLIC,
   feature: null,
-  routeIds: ['signup.status', 'signup.start', 'signup.firstAutomation', 'signup.finish', 'setup.openInvite'],
+  routeIds: ['signup.status', 'signup.start', 'signup.firstAutomation', 'signup.finish', 'setup.openInvite', 'console:/signup'],
   screens: [
     { name: 'index', path: 'signup', title: 'signup.title', component: SignupScreen },
     { name: 'invite', path: 'invite/:token', title: 'signup.invite.title', component: InviteScreen },
