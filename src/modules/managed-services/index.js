@@ -2,7 +2,9 @@ import { OPS_ROUTE_OWNERS } from '../../contracts/api/ops.js';
 import { OPS_PLATFORM_OWNERS } from '../../contracts/api/platform-ops.js';
 import { maskSecrets } from '../../contracts/services.js';
 import { tenantId } from '../../tenancy.js';
-import { notBuilt, platformNotBuilt } from '../not-built.js';
+import { serviceConsoleRoutes } from './console.js';
+import { serviceEntryRoutes } from './entry.js';
+import { teamFeedApi } from './feed.js';
 
 const API = OPS_ROUTE_OWNERS['managed-services'];
 const PLATFORM = OPS_PLATFORM_OWNERS['managed-services'];
@@ -12,7 +14,9 @@ export function serviceSessionsRepo(db) {
   return {
     /**
      * The live session with this id in the current business, as req.session.operator, or null: ended, timed out, or the
-     * business no longer has the service active (F-92: access ends at once, because this is read on every request).
+     * business no longer has the service active (F-92: access ends at once, because this is read on every request). A
+     * session started before the service's current period began belongs to an older purchase: buying the service again
+     * never revives it.
      */
     async live(id) {
       const [row] = await db.query(
@@ -20,7 +24,7 @@ export function serviceSessionsRepo(db) {
          FROM service_sessions s
          JOIN service_engagements e ON e.tenant_id = s.tenant_id AND e.service = s.service
          WHERE s.tenant_id = $1 AND s.id = $2 AND s.ended_at IS NULL AND s.expires_at > now()
-           AND e.active_from <= now() AND (e.active_to IS NULL OR e.active_to > now())`,
+           AND e.active_from <= now() AND (e.active_to IS NULL OR e.active_to > now()) AND s.started_at >= e.active_from`,
         [tenantId(), Number(id)],
       );
       if (!row) return null;
@@ -55,7 +59,8 @@ export function serviceChangesRepo(db) {
  * monthly report, worked by service operators from the Platform Console. Which seller routes each service may call is
  * the route table's `service` field (SERVICE_ROUTES in src/contracts/api/ops.js); the API router refuses the rest and
  * records every write through serviceChanges. This module owns the engagements, sessions and changes, the seller's
- * "Done by Bhava team" feed with undo and approve, and the console's workspace.
+ * "Done by Bhava team" feed with undo and approve (feed.js), the console's workspace (console.js) and the one-time
+ * address that opens an operator's session on the business's own host (entry.js).
  */
 export const managedServices = {
   name: 'managed-services',
@@ -68,6 +73,7 @@ export const managedServices = {
     jobs: [],
   },
   repos: (db) => ({ serviceSessions: serviceSessionsRepo(db), serviceChanges: serviceChangesRepo(db) }),
-  api: () => notBuilt(...API),
-  platformRoutes: (router) => platformNotBuilt(router, ...PLATFORM),
+  api: (ctx) => teamFeedApi(ctx),
+  routes: (app, ctx) => serviceEntryRoutes(app, ctx),
+  platformRoutes: (router, ctx) => serviceConsoleRoutes(router, ctx),
 };
