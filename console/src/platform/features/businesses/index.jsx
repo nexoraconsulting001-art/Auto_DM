@@ -1,14 +1,18 @@
 import { Building2 } from 'lucide-react';
-import { NotBuilt } from '../../NotBuilt.jsx';
+import { screen } from '../../lazy.js';
 
-/** Create a business, read its brand and import its products (PRD 5.5). Routes: platform.businesses, createBusiness, business, retryImport. */
-function BusinessesPage() {
-  return <NotBuilt title="Businesses">Create a business, read its brand and import its products (PRD 5.5).</NotBuilt>;
-}
+const load = () => import('./pages.jsx');
+const BusinessesPage = screen(load, 'BusinessesPage');
+const NewBusinessPage = screen(load, 'NewBusinessPage');
+const BusinessPage = screen(load, 'BusinessPage');
 
 export default {
   name: 'businesses',
   roles: ['super_admin', 'support', 'onboarding'],
   nav: { to: '/businesses', label: 'Businesses', icon: Building2, order: 10 },
-  routes: [{ path: 'businesses', element: <BusinessesPage /> }],
+  routes: [
+    { path: 'businesses', element: <BusinessesPage /> },
+    { path: 'businesses/new', element: <NewBusinessPage /> },
+    { path: 'businesses/:id', element: <BusinessPage /> },
+  ],
 };

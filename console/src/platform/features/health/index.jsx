@@ -1,14 +1,16 @@
 import { HeartPulse } from 'lucide-react';
-import { NotBuilt } from '../../NotBuilt.jsx';
+import { screen } from '../../lazy.js';
 
-/** Every business, worst first, with when each check last ran (PRD 5.9). Routes: platform.health, businessHealth, runHealth. */
-function HealthPage() {
-  return <NotBuilt title="Health">Every business, worst first, with when each check last ran (PRD 5.9).</NotBuilt>;
-}
+const load = () => import('./pages.jsx');
+const HealthPage = screen(load, 'HealthPage');
+const BusinessHealthPage = screen(load, 'BusinessHealthPage');
 
 export default {
   name: 'health',
   roles: ['super_admin', 'support'],
   nav: { to: '/health', label: 'Health', icon: HeartPulse, order: 30 },
-  routes: [{ path: 'health', element: <HealthPage /> }],
+  routes: [
+    { path: 'health', element: <HealthPage /> },
+    { path: 'health/:id', element: <BusinessHealthPage /> },
+  ],
 };
