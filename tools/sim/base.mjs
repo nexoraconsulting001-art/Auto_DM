@@ -449,6 +449,9 @@ export function createSim(spec) {
       assertSimulatorsAllowed(env);
       if (server) throw new Error(`The ${spec.name} simulator is already running.`);
       const listener = http.createServer(onRequest);
+      // Keep idle connections open longer than any client pool does, so a reused socket is never closed under a request.
+      listener.keepAliveTimeout = 120000;
+      listener.headersTimeout = 125000;
       await new Promise((resolve, reject) => {
         listener.once('error', reject);
         listener.listen(port, '127.0.0.1', resolve);
