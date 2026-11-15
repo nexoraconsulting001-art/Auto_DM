@@ -5,7 +5,7 @@ import { buyerBaseUrl } from '../admin-api/urls.js';
 import { matchesKeywords } from '../automations/match.js';
 import { isOptOut, isStart, wantsHuman } from '../compliance/words.js';
 import { directLink } from '../links/rules.js';
-import { isStop } from '../order-alerts/webhook.js';
+import { isStop, stopWhatsappMarketing } from '../order-alerts/webhook.js';
 
 /**
  * What a stored WhatsApp message means (PRD 6.12), worked through once. intake.js stores each message as an inbound_events
@@ -113,6 +113,8 @@ export function createProcessor(ctx) {
       [tenantId(), ev.subject, at],
     );
     await compliance.cancelFollowups?.(WHATSAPP_CHANNEL, ev.subject, 'cancelled.optout');
+    // Whatever word they used, marketing stops with automation: consent withdrawn and cart reminders cancelled, as for a STOP.
+    await stopWhatsappMarketing({ db, platform: ctx.platform }, `+${ev.personId}`);
     await record({ kind: 'optout', subject: ev.subject, decision: 'skipped', reason: 'optout' });
     if (!added || !(await canSend(ev.accountId))) return;
     await enqueue({

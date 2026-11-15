@@ -2,6 +2,7 @@
 // sign-in host, the Platform Console on its host, and plan changes written the way billing and the console write them.
 import crypto from 'node:crypto';
 import { withTenant } from '../../../src/tenancy.js';
+import { passReleaseGates } from '../../helpers.js';
 import { APP_HOST, OWNER, accountsApp, call, codeSignIn, freshIp, random10 } from '../../p5/accounts/support.js';
 
 export { APP_HOST, OWNER, call, codeSignIn, freshIp, random10 };
@@ -12,6 +13,8 @@ const linkOk = async () => new Response(null, { status: 200 });
 
 export async function world({ overrides = {} } = {}) {
   const app = await accountsApp({ overrides: { linkCheckFetch: linkOk, ...overrides } });
+  // The default business is connected like one that may go live (PRD 4.15).
+  await passReleaseGates(app.db, app.tenant.id);
   const sql = (text, params) => app.db.platform.query(text, params);
   let consoleSession;
 
@@ -48,6 +51,7 @@ export async function world({ overrides = {} } = {}) {
     async connectInstagram(tenantId, igUserId) {
       await app.platform.tenants.linkIgAccount(tenantId, igUserId, `ig${igUserId}`);
       await withTenant({ id: tenantId }, () => app.ctx.repos.igAccounts.setToken(igUserId, `token-${igUserId}`));
+      await passReleaseGates(app.db, tenantId, igUserId);
     },
     /** A plan change as billing (source 'billing'), the owner ('owner') or the console ('console') writes it: one plan_changes row. */
     changePlan: (tenantId, plan, { source = 'console', actor = 'platform:1', cycle = 'monthly' } = {}) =>

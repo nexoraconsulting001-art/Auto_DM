@@ -3,7 +3,10 @@ import { ApiError } from '../../contracts/api/errors.js';
 import { ProviderError } from '../../adapters/http.js';
 import { log } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
+import { WHATSAPP_LIMITS } from '../../contracts/addons.js';
 import { writeAudit } from '../audit/index.js';
+import { checkContent, linksIn } from '../compliance/content.js';
+import { linkProblem } from '../links/rules.js';
 
 /**
  * The add-on's console routes (src/contracts/api/addons.js, whatsappRoutes). The router has already checked who may call
@@ -26,6 +29,8 @@ const toOptin = (r) => ({ id: Number(r.id), purpose: r.purpose, source: r.source
 
 /** One keyword as it is kept: trimmed and single-spaced. The matcher folds case and form itself. */
 const cleanKeyword = (k) => String(k).normalize('NFC').trim().replace(/\s+/g, ' ');
+
+const LINK_REFUSAL = 'That link can’t be sent on WhatsApp.';
 
 export function whatsappApi(ctx) {
   const { db, config, providers, platform } = ctx;
@@ -126,6 +131,33 @@ export function whatsappApi(ctx) {
 
   // ---- keyword sets -------------------------------------------------------------------------------------------------
 
+  /**
+   * PRD 4.10 and 4.11 at save, as the gate checks again at send: the message's content (WhatsApp's 4,096-byte limit, no platform
+   * name, no request for card or bank details), and its link and every link written in the message (no shortener, nothing on
+   * the blocklist, WhatsApp only to the saved support number). {link} is where the link goes, so it is no variable to refuse.
+   */
+  async function checkKeywordSets(items) {
+    const settings = await ctx.repos.settings.getAll();
+    const context = { whatsappNumber: settings.support_whatsapp ?? '', blockedHosts: await ctx.repos.automations.blockedHosts() };
+    const refuse = (field, message, reason) => new ApiError('validation_failed', message, { fields: { [field]: message }, reason });
+    for (const [index, item] of items.entries()) {
+      const text = String(item.message ?? '').replaceAll('{link}', '');
+      const ownDomain = config.platformDomain ?? '';
+      const [problem] = checkContent({ text, ownDomain, maxBytes: WHATSAPP_LIMITS.textBytes });
+      if (problem) throw refuse(`items.${index}.message`, problem.message, problem.reason);
+      if (item.linkUrl) {
+        const reason = linkProblem(item.linkUrl, context);
+        if (reason) throw refuse(`items.${index}.linkUrl`, LINK_REFUSAL, reason);
+        const [promo] = checkContent({ url: item.linkUrl, ownDomain });
+        if (promo) throw refuse(`items.${index}.linkUrl`, promo.message, promo.reason);
+      }
+      for (const url of linksIn(text)) {
+        const reason = linkProblem(url, context);
+        if (reason) throw refuse(`items.${index}.message`, LINK_REFUSAL, reason);
+      }
+    }
+  }
+
   async function keywords() {
     const rows = await db.query('SELECT * FROM whatsapp_keywords WHERE tenant_id = $1 ORDER BY position, id', [tenantId()]);
     return { items: rows.map(toKeywordSet) };
@@ -136,6 +168,7 @@ export function whatsappApi(ctx) {
     const items = body.items.map((item) => ({ ...item, keywords: [...new Set(item.keywords.map(cleanKeyword).filter(Boolean))] }));
     const blank = items.findIndex((item) => !item.keywords.length);
     if (blank >= 0) throw new ApiError('validation_failed', 'Add a keyword', { fields: { [`items.${blank}.keywords`]: 'Add a keyword' } });
+    await checkKeywordSets(items);
     try {
       await db.tx(async (t) => {
         const existing = new Set((await t.query('SELECT id FROM whatsapp_keywords WHERE tenant_id = $1', [tenantId()])).map((r) => r.id));

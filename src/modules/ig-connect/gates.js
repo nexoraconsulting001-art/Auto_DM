@@ -52,5 +52,13 @@ export function createGates({ repos, config, cache, fetchImpl = globalThis.fetch
       const [account, health] = await Promise.all([repos.igAccounts.primary(), publicUrlsOk()]);
       return repos.igConnect.recordGates({ account, health });
     },
+
+    /**
+     * The same four gates from what is already recorded, without probing the public addresses: the health checks count while their
+     * last pass is fresh. Going live asks this (PRD 4.15), so a launch never waits on the network and a check that has not passed blocks it.
+     */
+    async check() {
+      return repos.igConnect.recordGates({ account: await repos.igAccounts.primary(), health: {} });
+    },
   };
 }

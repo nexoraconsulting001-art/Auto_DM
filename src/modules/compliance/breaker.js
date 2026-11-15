@@ -5,6 +5,8 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
 const INITIAL_WAIT_MINUTES = 30;
+/** What the seller calls each channel, so the alert sends them to the right connection. */
+const CHANNEL_NAMES = Object.freeze({ instagram: 'Instagram', facebook: 'Facebook', whatsapp: 'WhatsApp' });
 const REDUCED_MS = 15 * MINUTE;
 const POLICY_WINDOW_MS = 15 * MINUTE;
 const POLICY_ERRORS_TO_TRIP = 5;
@@ -57,7 +59,7 @@ export function createBreaker({ db, repos, now, gate }) {
     try {
       await repos.alerts?.raise({
         kind: 'breaker.open', severity: 'critical', target: channel,
-        message: `Sending on ${channel === 'facebook' ? 'Facebook' : 'Instagram'} is paused while we check a problem with your account. Automated messages are held, and we’ll retry shortly.`,
+        message: `Sending on ${CHANNEL_NAMES[channel] ?? 'your account'} is paused while we check a problem with your account. Automated messages are held, and we’ll retry shortly.`,
         dedupeKey: `breaker:${channel}:${+time}`,
       });
       await crossTenantGuard();

@@ -20,7 +20,7 @@ export const adminModules = (extra = []) => [...MODULES.filter((m) => m !== admi
 
 /** A test app with the seller API on, signed in as the owner. `api(method, path, body)` calls /api/v1 as the owner. */
 export async function adminApp({ extra, ...options } = {}) {
-  const app = await startApp({ ig: fakeIg(), ...options, modules: adminModules(extra) });
+  const app = await startApp({ ig: fakeIg(), releaseGates: true, ...options, modules: adminModules(extra) });
   const signIn = async (who, headers = {}) => {
     const res = await fetch(`${app.base}/api/v1/auth/login`, jsonRequest('POST', who, headers));
     assert.equal(res.status, 201, 'sign-in failed');

@@ -61,7 +61,7 @@ export function igConnectRepo(db) {
         const unchanged = JSON.stringify(last?.details?.failing ?? null) === JSON.stringify(failing);
         // A business that has never connected has nothing to report.
         if (!unchanged && (account || last)) {
-          for (const decision of passed ? ['gate.passed'] : failing) await logDecision(t, { kind: 'gate', decision, details: { failing } });
+          for (const decision of passed ? ['gate.passed'] : failing) await logDecision(t, { kind: 'gate', decision, reason: decision, details: { failing } });
         }
         return { passed, gates: [...results, { code: 'gate.passed', passed }] };
       });

@@ -100,11 +100,30 @@ function ownCacheKeys(cache) {
   return { ...cache, get: (key) => cache.get(prefix + key), set: (key, ...rest) => cache.set(prefix + key, ...rest), del: (key) => cache.del(prefix + key) };
 }
 
-export async function startApp({ ig = fakeIg(), overrides = {}, modules, logins = DEFAULT_LOGINS } = {}) {
+/** The scopes a full Instagram connect grants. */
+export const CONNECT_SCOPES = Object.freeze(['instagram_business_basic', 'instagram_business_manage_messages', 'instagram_business_manage_comments', 'instagram_business_manage_insights']);
+
+/**
+ * Puts a business where a real connect followed by the hourly gate check leaves it: the Instagram account holds the scopes it was
+ * granted, and every Meta release gate (PRD 4.15) has passed. Only then may an automation go to Test or Live.
+ */
+export async function passReleaseGates(db, tenantId, igUserId = IG_ACCOUNT.igUserId) {
+  await db.platform.query('UPDATE ig_accounts SET granted_scopes = $3 WHERE tenant_id = $1 AND ig_user_id = $2', [tenantId, igUserId, [...CONNECT_SCOPES]]);
+  await db.platform.query(
+    `INSERT INTO compliance_settings (tenant_id, subject_salt, access_level, app_role_ok, privacy_url_ok_at, deletion_callback_ok_at, gate_passed_at)
+     VALUES ($1, $2, 'advanced', true, now(), now(), now())
+     ON CONFLICT (tenant_id) DO UPDATE SET access_level = 'advanced', app_role_ok = true, privacy_url_ok_at = now(), deletion_callback_ok_at = now(), gate_passed_at = now()`,
+    [tenantId, crypto.randomBytes(24).toString('hex')],
+  );
+}
+
+/** `releaseGates: true` connects the default business the way a seller who may go live is connected (passReleaseGates). */
+export async function startApp({ ig = fakeIg(), overrides = {}, modules, logins = DEFAULT_LOGINS, releaseGates = false } = {}) {
   const { db, repos, platform, tenant } = await setup({ logins });
   await repos.users.ensureOwner(OWNER);
   await platform.tenants.linkIgAccount(tenant.id, IG_ACCOUNT.igUserId, IG_ACCOUNT.username);
   await repos.igAccounts.setToken(IG_ACCOUNT.igUserId, IG_ACCOUNT.token);
+  if (releaseGates) await passReleaseGates(db, tenant.id);
   // Drivers follow the environment, so the CI production profile runs the whole app on Redis, S3 and ClickHouse.
   const appConfig = { ...config, storageDriver: process.env.STORAGE_DRIVER || 'memory', queueDriver: process.env.QUEUE_DRIVER || 'pg', analyticsDriver: process.env.ANALYTICS_DRIVER || 'pg', cacheDriver: process.env.CACHE_DRIVER || 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', passwordLogin: true, adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dataKey: TEST_DATA_KEY, dryRun: false, oneDmPerUser: false, ...overrides };
   const drivers = createPlatform(appConfig, { db });

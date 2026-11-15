@@ -1,6 +1,6 @@
 import { ApiError } from '../../contracts/api/index.js';
 import { COMPLIANCE_LIMITS as L } from '../../contracts/compliance.js';
-import { checkContent } from '../compliance/content.js';
+import { checkContent, linksIn } from '../compliance/content.js';
 import { linkProblem } from '../links/rules.js';
 import { hasWords } from './match.js';
 import { render, unknownVariables } from './message.js';
@@ -92,11 +92,33 @@ async function checkPlan(input, { repos }) {
   if (input.linkMode === 'one_tap' && !(await repos.entitlements.can('links.one_tap'))) throw refuse('One tap needs a paid plan', 'linkMode', undefined);
 }
 
-async function checkLink(input, { repos }) {
-  if (!input.linkUrl) return;
+/** Every text a buyer gets from this automation, by the field it is saved in. */
+function textFields(input) {
+  const fields = input.variants.flatMap((variant, index) => [[`variants.${index}.body`, variant.body], [`variants.${index}.fallbackText`, variant.fallbackText]]);
+  fields.push(['linkMessage', input.linkMessage], ['followupText', input.followupText]);
+  return fields.filter(([, text]) => text);
+}
+
+/**
+ * The destination and every link written into the messages, with or without https:// (PRD 4.11), under the same rules as at send:
+ * no shortener, nothing on the blocklist, WhatsApp only to the saved number. A destination on the platform's own domains is
+ * promotion (PRD 4.10, content.bhava_promo); a seller's page on the neutral domain is the seller's own.
+ */
+async function checkLink(input, { repos, config }) {
+  const written = textFields(input).flatMap(([field, text]) => linksIn(text).map((url) => [field, url]));
+  if (!input.linkUrl && !written.length) return;
   const settings = await repos.settings.getAll();
-  const reason = linkProblem(input.linkUrl, { whatsappNumber: settings.support_whatsapp, blockedHosts: await repos.automations.blockedHosts() });
-  if (reason) throw refuse('That link can’t be used in a DM.', 'linkUrl', reason);
+  const context = { whatsappNumber: settings.support_whatsapp, blockedHosts: await repos.automations.blockedHosts() };
+  if (input.linkUrl) {
+    const reason = linkProblem(input.linkUrl, context);
+    if (reason) throw refuse('That link can’t be used in a DM.', 'linkUrl', reason);
+    const [promo] = checkContent({ url: input.linkUrl, ownDomain: config?.platformDomain ?? '' }).filter((problem) => problem.reason === 'content.bhava_promo');
+    if (promo) throw refuse(promo.message, 'linkUrl', promo.reason);
+  }
+  for (const [field, url] of written) {
+    const reason = linkProblem(url, context);
+    if (reason) throw refuse('A link in this message can’t be used in a DM.', field, reason);
+  }
 }
 
 async function checkPublicReplies(input, { repos }) {
