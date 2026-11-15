@@ -135,14 +135,24 @@ export function createRefunds(ctx, payments) {
       [tenantId(), refundId],
     );
     if (!row || row.method !== 'gateway' || !(row.status === 'requested' || (row.status === 'failed' && row.error_code === RETRYING))) return row;
+    // A refund the gateway already gave an id is looked up by it, never asked for again (money-13): a second ask would rest on
+    // the gateway still holding the idempotency key. Only a refund whose answer was lost is asked for again with its key.
+    const lookUp = row.status === 'requested' && isGatewayId(row.gateway_refund_id);
     let answer;
     try {
       const creds = await payments.settings.credentials(row.mode, { accountRef: row.account_ref });
-      answer = await creds.adapter.refund(creds.account, row.gateway_payment_id, { amountPaise: Number(row.amount_paise), idempotencyKey: gatewayKey(row), notes: { refund: String(row.id) } });
+      answer = lookUp
+        ? await creds.adapter.fetchRefund(creds.account, row.gateway_payment_id, row.gateway_refund_id)
+        : await creds.adapter.refund(creds.account, row.gateway_payment_id, { amountPaise: Number(row.amount_paise), idempotencyKey: gatewayKey(row), notes: { refund: String(row.id) } });
     } catch (err) {
       if (err instanceof PaymentError) return db.tx((t) => markFailed(t, row.id, err.reason === ACCOUNT_CHANGED ? ACCOUNT_CHANGED : 'account_unavailable'));
       if (!(err instanceof ProviderError)) throw err;
-      if (err.delivery === 'none') return db.tx((t) => markFailed(t, row.id, err.code || err.kind));
+      // A refund looked up and not found, or refused, is left as it is: its webhook, or a person, settles it.
+      if (err.delivery === 'none' && !lookUp) return db.tx((t) => markFailed(t, row.id, err.code || err.kind));
+      if (lookUp) {
+        log.warn('refunds.lookup_failed', { refundId: Number(row.id), kind: err.kind });
+        return reread(row.id);
+      }
       // The gateway may have made it: the sweep asks again with the same key, which can only ever make this one refund.
       log.warn('refunds.gateway_unanswered', { refundId: Number(row.id), kind: err.kind });
       return reread(row.id);
@@ -339,11 +349,16 @@ export function createRefunds(ctx, payments) {
     }
   }
 
-  /** Refunds whose gateway answer was lost, asked about again with their own key, a few minutes apart. */
+  /**
+   * Refunds whose gateway answer was lost, asked about again with their own key, or looked up by the gateway's id when it is
+   * known: every 2 minutes in the first hour, every 30 minutes in the first day, then every 6 hours up to 30 days.
+   */
   async function sweep({ limit = 100 } = {}) {
     const due = await platformDb.query(
       `SELECT tenant_id, id FROM refunds WHERE method = 'gateway' AND (status = 'requested' OR (status = 'failed' AND error_code = $1))
-         AND updated_at < now() - interval '2 minutes' AND created_at > now() - interval '30 days' ORDER BY updated_at LIMIT $2`,
+         AND updated_at < now() - CASE WHEN created_at > now() - interval '1 hour' THEN interval '2 minutes'
+                                        WHEN created_at > now() - interval '1 day' THEN interval '30 minutes' ELSE interval '6 hours' END
+         AND created_at > now() - interval '30 days' ORDER BY updated_at LIMIT $2`,
       [RETRYING, limit],
     );
     const results = [];
