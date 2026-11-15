@@ -1,0 +1,8 @@
+.feedback-item { display: grid; gap: var(--space-2, 8px); padding: 14px 0; border-top: 1px solid var(--line, #e4e2da); }
+.feedback-item:first-child { border-top: 0; }
+.feedback-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.feedback-business { font-weight: 600; background: none; border: 0; padding: 0; color: inherit; text-align: left; text-decoration: underline; cursor: pointer; }
+.feedback-meta { color: var(--ink-soft, #5b5a70); font-size: 0.875rem; }
+.feedback-words { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.feedback-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.feedback-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
