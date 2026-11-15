@@ -63,7 +63,7 @@ test('S-28: a refund above what was captured is blocked, at the API and when two
   need(await shop.refund(row.id, { amountPaise: 39900 }), 201, 'Exactly what is left');
 });
 
-test('S-28: the same tap twice is one refund, and a wrong password or an unpaid order gets none', async () => {
+test('S-28: the same tap twice is one refund, and a session without a fresh re-auth or an unpaid order gets none', async () => {
   const shop = await addP4Shop(world);
   const { row, paymentId } = await paidOrder(shop);
   const key = idemKey();
@@ -74,14 +74,17 @@ test('S-28: the same tap twice is one refund, and a wrong password or an unpaid 
   assert.equal((await shop.refunds(row.id)).length, 1);
   await world.quiet(800);
   assert.equal(sum(await gatewayRefunds(paymentId), (r) => r.amount), 10000, 'The gateway refunded twice');
-  refused(await shop.refund(row.id, { amountPaise: 1000, password: 'not-my-password' }), 'A refund with the wrong password', [401, 403]);
-  refused(await shop.refund(row.id, { amountPaise: 1000, password: undefined }), 'A refund with no password', [400, 401, 403]);
+  // 5.11: the re-auth is a WhatsApp code or the device unlock, not a password. A session past it refunds nothing.
+  await shop.sql(`UPDATE sessions SET fresh_until = now() - interval '1 minute' WHERE tenant_id = $1`, [shop.tenantId]);
+  refused(await shop.refund(row.id, { amountPaise: 1000 }), 'A refund without a fresh re-auth', 403);
+  await shop.sql(`UPDATE sessions SET fresh_until = now() + interval '10 minutes' WHERE tenant_id = $1`, [shop.tenantId]);
   const product = await shop.item({ pricePaise: 50000 });
   const unpaid = await buyer(world, shop).order({ lines: [line(product)] });
   const unpaidRow = await shop.order(unpaid.orderNumber);
   refused(await shop.refund(unpaidRow.id, { amountPaise: 1000 }), 'Refunding an unpaid order');
   const other = await addP4Shop(world);
-  refused(await shop.as(other.token)('POST', `/orders/${row.id}/refunds`, { amountPaise: 1000, idempotencyKey: idemKey(), password: other.owner.password }), 'Another business’s owner refunding this order', [403, 404]);
+  // On its own address, with its own fresh session: this order is not one it can see.
+  refused(await other.refund(row.id, { amountPaise: 1000 }), 'Another business’s owner refunding this order', [403, 404]);
   assert.equal((await shop.refunds(row.id)).length, 1);
 });
 
@@ -122,14 +125,14 @@ test('S-29: a manager, staff or a shopper cannot refund; only the owner', async 
   const shop = await addP4Shop(world);
   const { row, b } = await paidOrder(shop);
   const manager = await shop.manager();
-  const asManager = await manager.send('POST', `/orders/${row.id}/refunds`, { amountPaise: 1000, idempotencyKey: idemKey(), password: manager.password });
+  const asManager = await manager.send('POST', `/orders/${row.id}/refunds`, { amountPaise: 1000, idempotencyKey: idemKey() });
   assert.equal(asManager.status, 403, `A manager refunded: ${asManager.status}`);
   assert.match(asManager.json().error, /owner/i);
   const staff = await addStaff(world, shop, { permissions: ['orders'] });
-  need(await shop.as(staff.token)('POST', `/orders/${row.id}/refunds`, { amountPaise: 1000, idempotencyKey: idemKey(), password: staff.password }), 403, 'Staff with orders refunding');
+  need(await shop.as(staff.token)('POST', `/orders/${row.id}/refunds`, { amountPaise: 1000, idempotencyKey: idemKey() }), 403, 'Staff with orders refunding');
   need(await shop.as(staff.token)('POST', '/refunds/1/retry'), [403, 404], 'Staff retrying a refund');
   await b.signIn();
-  const asShopper = await b.api('POST', `/api/v1/orders/${row.id}/refunds`, { amountPaise: 1000, idempotencyKey: idemKey(), password: 'x' });
+  const asShopper = await b.api('POST', `/api/v1/orders/${row.id}/refunds`, { amountPaise: 1000, idempotencyKey: idemKey() });
   assert.ok([401, 403].includes(asShopper.status), `A shopper reached the refund call: ${asShopper.status}`);
   assert.equal((await shop.refunds(row.id)).length, 0);
   const seen = need(await manager.send('GET', `/orders/${row.id}/refunds`), 200, 'A manager reading refunds');

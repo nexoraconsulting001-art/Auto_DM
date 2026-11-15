@@ -191,4 +191,4 @@ export async function openWorld(t, { overrides = {}, plan = 't3' } = {}) {
 }
 
 /** The owner's refund body. */
-export const refundBody = (amountPaise, extra = {}) => ({ amountPaise, reason: 'Damaged in transit', idempotencyKey: `rf-${crypto.randomUUID()}`, password: OWNER.password, ...extra });
+export const refundBody = (amountPaise, extra = {}) => ({ amountPaise, reason: 'Damaged in transit', idempotencyKey: `rf-${crypto.randomUUID()}`, ...extra });

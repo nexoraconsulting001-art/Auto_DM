@@ -121,7 +121,7 @@ export const Refund = z.object({
   processedAt: Timestamp.nullable(),
 });
 /**
- * Owner only, after a fresh re-auth: `password` is the owner's own, checked on this call (5.11). `idempotencyKey` makes a
+ * Owner only, after a fresh re-auth (5.11: a WhatsApp code or the device unlock, never a password). `idempotencyKey` makes a
  * repeated tap the same refund. A cash-on-delivery refund is 'manual' and needs the reference of how it was paid back.
  */
 export const RefundCreate = z.object({
@@ -131,7 +131,6 @@ export const RefundCreate = z.object({
   reference: text(100).optional(),
   returnId: Id.optional(),
   idempotencyKey: z.string().min(8).max(80).regex(/^[\w-]+$/),
-  password: z.string().min(1).max(200),
 });
 
 export const paymentRoutes = {
@@ -154,8 +153,8 @@ export const paymentRoutes = {
 export const refundRoutes = {
   'refunds.forOrder': { method: 'GET', path: '/orders/:id/refunds', access: reader, params: IdParams, response: z.object({ items: z.array(Refund) }) },
   /** A manager gets 403 (S-29). */
-  'refunds.create': { method: 'POST', path: '/orders/:id/refunds', access: OWNER_ONLY, params: IdParams, body: RefundCreate, status: 201, response: Refund },
+  'refunds.create': { method: 'POST', path: '/orders/:id/refunds', access: OWNER_ONLY, fresh: true, params: IdParams, body: RefundCreate, status: 201, response: Refund },
   'refunds.get': { method: 'GET', path: '/refunds/:id', access: reader, params: IdParams, response: Refund },
   /** Tries a failed refund again at the gateway. */
-  'refunds.retry': { method: 'POST', path: '/refunds/:id/retry', access: OWNER_ONLY, params: IdParams, response: Refund },
+  'refunds.retry': { method: 'POST', path: '/refunds/:id/retry', access: OWNER_ONLY, fresh: true, params: IdParams, response: Refund },
 };

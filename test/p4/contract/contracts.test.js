@@ -89,10 +89,13 @@ test('who may do what: refunds and the customer list are the owner’s, and no r
   }
   // S-29: a manager is refused by the access rule itself.
   assert.deepEqual([...byId['refunds.create'].access.roles], ['owner']);
-  assert.equal(RefundCreate.safeParse({ amountPaise: 20000, idempotencyKey: 'refund-key-1', password: 'x' }).success, true);
-  assert.equal(RefundCreate.safeParse({ amountPaise: 0, idempotencyKey: 'refund-key-1', password: 'x' }).success, false);
-  assert.equal(RefundCreate.safeParse({ amountPaise: 20000, idempotencyKey: 'refund-key-1' }).success, false, 'a fresh re-auth is part of the request');
-  assert.equal(RefundCreate.safeParse({ amountPaise: 199.5, idempotencyKey: 'refund-key-1', password: 'x' }).success, false, 'whole paise');
+  assert.equal(RefundCreate.safeParse({ amountPaise: 20000, idempotencyKey: 'refund-key-1' }).success, true);
+  assert.equal(RefundCreate.safeParse({ amountPaise: 0, idempotencyKey: 'refund-key-1' }).success, false);
+  // 5.11: the re-auth is the session's own fresh check (a WhatsApp code or the device unlock), not a field of the request.
+  assert.equal(byId['refunds.create'].fresh, true, 'refunds.create needs a fresh re-auth');
+  assert.equal(byId['refunds.retry'].fresh, true, 'refunds.retry needs a fresh re-auth');
+  assert.equal('password' in RefundCreate.shape, false, 'a refund never takes a password');
+  assert.equal(RefundCreate.safeParse({ amountPaise: 199.5, idempotencyKey: 'refund-key-1' }).success, false, 'whole paise');
   assert.equal(StockAdjust.safeParse({ productId: 1, stock: 5 }).success, true);
   assert.equal(StockAdjust.safeParse({ productId: 1, stock: 5, delta: 1 }).success, false);
   // Order-moving routes take a move, never a total.
