@@ -261,14 +261,12 @@ test('the feedback routes: three Platform Console routes owned by the feedback m
   assert.equal((await onConsole(app, onboarder, '/feedback')).status, 403);
 });
 
-test('the importer: listed with the platform’s modules, its rules are data, and plan and run answer not built', async () => {
+test('the importer: listed with the platform’s modules, its rules are data, and plan and run exist', async () => {
   const names = MODULES.map((m) => m.name);
   assert.deepEqual(names.slice(names.indexOf('tenant-health'), names.indexOf('tenant-health') + 3), ['tenant-health', 'feedback', 'migration']);
   assert.deepEqual(MODULES.find((m) => m.name === 'migration').owns, { migrations: ['800_migration.sql'], tables: ['migration_runs', 'migration_id_map'], api: [], store: [], platform: [], jobs: [] });
   const importer = createMigration({});
   assert.deepEqual(Object.keys(importer), ['plan', 'run']);
-  await assert.rejects(importer.plan({}, {}), { code: 'not_implemented' });
-  await assert.rejects(importer.run({}, {}), { code: 'not_implemented' });
 
   const source = { format: 'bhava-legacy-export', version: 1, label: 'old shop', tables: { orders: [{ id: 1, order_number: 4210 }], products: [] } };
   assert.equal(MigrationSource.safeParse(source).success, true);
