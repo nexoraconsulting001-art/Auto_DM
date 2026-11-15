@@ -31,11 +31,11 @@
  *   counts       { <business key>: { <ACTIVITY_KINDS member>: n } }
  *   digest       sha-256 over the ordered list of [day, business key, kind, subject index]: no name, no text
  *
- * The seed track builds run(). createRng, createClock and digestOf are built, so every part of Phase 8 draws from the
- * same generator.
+ * run() is built in ./run.mjs and re-exported here; createRng, createClock and digestOf are the shared parts every piece of
+ * Phase 8 draws from. The world it runs in is ./world.mjs (the app, its worker and the simulators); seeding a business is ./seed.mjs.
  */
 import crypto from 'node:crypto';
-import { SHOWCASE } from '../../../src/contracts/seed.js';
+import { SHOWCASE, inventedPerson } from '../../../src/contracts/seed.js';
 
 export const ACTIVITY_KINDS = Object.freeze([
   'comment', 'dm', 'story_reply', 'mention', 'insights', 'visit', 'cart', 'checkout', 'payment', 'shipment', 'delivery', 'whatsapp', 'return', 'refund', 'review',
@@ -99,7 +99,4 @@ export function runOptions({ businesses, days = SHOWCASE.days, seed = SHOWCASE.r
   return { businesses, days, seed, clock, world, rng: createRng(seed) };
 }
 
-export async function run(options) {
-  runOptions(options);
-  throw new ActivityError('The activity generator is not built yet (Phase 8, seed track).');
-}
+export { run } from './run.mjs';

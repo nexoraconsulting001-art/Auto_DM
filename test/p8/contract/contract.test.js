@@ -352,7 +352,7 @@ test('the load and drill tools: their parts, their options, the shared report wr
   assert.equal(rssMb(2 ** 30), null, 'a process that is not there has no reading, never 0');
 });
 
-test('the activity generator: a seeded generator and a clock that only moves when told, so two runs agree; run answers not built', async () => {
+test('the activity generator: a seeded generator and a clock that only moves when told, so two runs agree; run and seedShowcase say what they need', async () => {
   const draw = (seed) => { const rng = createRng(seed); return [rng.next(), rng.int(1, 6), rng.pick(['a', 'b', 'c']), rng.chance(0.5), rng.fork('first').int(0, 1000), rng.fork('second').int(0, 1000)]; };
   assert.deepEqual(draw(SHOWCASE.randomSeed), draw(SHOWCASE.randomSeed));
   assert.notDeepEqual(draw(1), draw(2));
@@ -379,8 +379,8 @@ test('the activity generator: a seeded generator and a clock that only moves whe
   assert.deepEqual([given.days, given.seed], [SHOWCASE.days, SHOWCASE.randomSeed]);
   assert.throws(() => runOptions({ businesses: [], clock }), /businesses/);
   assert.throws(() => runOptions({ businesses: [{ key: 'first' }] }), /clock/);
-  await assert.rejects(runActivity({ businesses: [{ key: 'first' }], clock }), /not built/);
-  await assert.rejects(seedShowcase({}), /not built/);
+  await assert.rejects(runActivity({ businesses: [{ key: 'first' }], clock }), /Give the world/);
+  await assert.rejects(seedShowcase({}), /Give the database/);
   const source = read('tools/sim/activity/index.mjs').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.equal(/Math\.random|Date\.now|new Date\(\)/.test(source), false, 'no choice and no time comes from outside the seed and the clock');
 });
