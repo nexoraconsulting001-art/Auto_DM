@@ -1,0 +1,48 @@
+# The production load balancer (compose.yaml, service lb). No value here is a secret or a real address: the domain,
+# the ACME account email and Cloudflare's address ranges come from the environment.
+{
+	email {$ACME_EMAIL}
+	# A seller's own domain gets a certificate the first time it is visited, but only if the app says the host is a
+	# verified domain of a business that is open (GET /tls/ask?domain=<host>, PRD 5.4).
+	on_demand_tls {
+		ask http://127.0.0.1:8081/tls/ask
+	}
+	servers {
+		# Cloudflare is in front: trust its ranges only, and take the visitor's address from CF-Connecting-IP.
+		trusted_proxies static {$TRUSTED_PROXY_RANGES}
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+	}
+}
+
+(upstreams) {
+	reverse_proxy web-1:3000 web-2:3000 {
+		lb_policy round_robin
+		lb_try_duration 5s
+		health_uri /readyz
+		health_interval 5s
+		health_timeout 2s
+		health_status 200
+		fail_duration 10s
+		# The app trusts exactly one proxy, so it gets one address: the visitor's.
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+# The platform hosts, behind Cloudflare (SSL mode "Full (strict)"): Cloudflare's origin certificate, mounted as a file.
+{$PLATFORM_DOMAIN}, *.{$PLATFORM_DOMAIN} {
+	tls /run/secrets/origin.crt /run/secrets/origin.key
+	import upstreams
+}
+
+# Every other host is a seller's own domain.
+https:// {
+	tls {
+		on_demand
+	}
+	import upstreams
+}
+
+# Only for the on-demand "ask" above; listens on the container's loopback.
+http://127.0.0.1:8081 {
+	import upstreams
+}

@@ -1,0 +1,51 @@
+# CI and local checks only (npm run check:r06, the templates job): adds Postgres and an S3-compatible store as local
+# services, so compose.yaml runs with no outside service. Never for production.
+#
+#   docker compose --env-file .env.example -f compose.yaml -f compose.ci.yaml config -q
+#
+# Passwords here are throwaway CI values from the environment, defaulting to "ci", on networks nothing outside reaches.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bhava
+      POSTGRES_PASSWORD: ${CI_POSTGRES_PASSWORD:-ci}
+      POSTGRES_DB: bhava
+    networks: [data]
+    labels:
+      bhava.app/role: database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bhava -d bhava"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  objects:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${CI_S3_USER:-minioci}
+      MINIO_ROOT_PASSWORD: ${CI_S3_PASSWORD:-minioci-secret}
+    networks: [data]
+
+  web-1:
+    environment:
+      S3_ENDPOINT: http://objects:9000
+      S3_FORCE_PATH_STYLE: "1"
+      BACKUP_S3_ENDPOINT: http://objects:9000
+    depends_on:
+      postgres: { condition: service_healthy }
+  web-2:
+    environment:
+      S3_ENDPOINT: http://objects:9000
+      S3_FORCE_PATH_STYLE: "1"
+      BACKUP_S3_ENDPOINT: http://objects:9000
+    depends_on:
+      postgres: { condition: service_healthy }
+  worker:
+    environment:
+      S3_ENDPOINT: http://objects:9000
+      S3_FORCE_PATH_STYLE: "1"
+      BACKUP_S3_ENDPOINT: http://objects:9000
+    depends_on:
+      postgres: { condition: service_healthy }

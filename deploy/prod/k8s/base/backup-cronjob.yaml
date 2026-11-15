@@ -1,0 +1,72 @@
+# A database backup on its own schedule, independent of the worker's nightly one (which feeds
+# backup_last_success_seconds). Both write backups/daily-<day of month>.dump to the backup bucket through
+# BACKUP_STORAGE_DRIVER=s3 and the BACKUP_S3_* settings, so a stuck worker never stops backups. 15:30 UTC daily.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bhava-backup
+  labels:
+    app.kubernetes.io/name: bhava
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "30 15 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: bhava
+            app.kubernetes.io/component: backup
+            bhava.app/data-client: "true"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: bhava
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: bhava-worker
+              imagePullPolicy: IfNotPresent
+              command: ["node", "scripts/backup.js"]
+              envFrom:
+                - configMapRef:
+                    name: bhava-config
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: secrets
+                  mountPath: /run/secrets
+                  readOnly: true
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 8Gi
+            - name: secrets
+              secret:
+                secretName: bhava-secrets
+                defaultMode: 0400

@@ -1,14 +1,44 @@
+# What never reaches the image (see Dockerfile). The build context is the repository root.
 **/node_modules
-console/dist
-data
-.env
-.git
-test
-*.log
 **/.env
+.git
+.github
+*.log
+data
+test-results
+playwright-report
+.gate
+.brand-builds
+.stryker-tmp
+reports
+console/dist
+console/dist-platform
+
+# Tests, docs and the developer's tools.
+test
+e2e
+docs
+requirements
+jest.apps.config.cjs
+playwright.config.mjs
+
 # The mobile apps are not part of the server image.
 apps
 packages
-jest.apps.config.cjs
-e2e
-test-results
+
+# tools/: only what the server and its scripts import. The simulators stay out, apart from the guard that refuses them.
+tools/*
+!tools/build-brand
+tools/build-brand/fixtures
+!tools/presubmit
+!tools/drill
+!tools/golive
+!tools/sim
+tools/sim/*
+!tools/sim/guard.mjs
+
+# A script that drives the simulators (demos), and the deploy templates. The go-live sign-off file stays: the
+# go-live checklist reads deploy/golive/attestations.json (GOLIVE_ATTESTATIONS) at run time.
+scripts/showcase.js
+deploy
+!deploy/golive

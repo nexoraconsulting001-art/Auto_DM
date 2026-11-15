@@ -1,0 +1,24 @@
+# The base: everything Bhava runs, for any conformant cluster. No region, no provider annotation, no secret value, no
+# host name: the overlay (overlays/production) or the Terraform module (../../terraform) fills those in.
+#
+# Not in here, on purpose:
+#   - the migration Job (../jobs/migrate): it runs once per release BEFORE this is applied, so it is applied on its own;
+#   - the Secret bhava-secrets: it comes from the cluster's secret store (kubectl create secret, an ExternalSecret, a CSI
+#     driver; see ../examples). Nothing here holds a secret's value.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: bhava
+    includeSelectors: false
+resources:
+  - serviceaccount.yaml
+  - configmap.yaml
+  - web.yaml
+  - worker.yaml
+  - service.yaml
+  - ingress.yaml
+  - pdb.yaml
+  - hpa.yaml
+  - backup-cronjob.yaml
+  - networkpolicy.yaml

@@ -1,0 +1,21 @@
+# The settings that are not secret. Secrets are files in the bhava-secrets volume (SECRETS_DRIVER=file), never here.
+# The overlay merges in DEPLOY_ENV, the hosts and the object storage addresses; the values below are neutral defaults.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bhava-config
+data:
+  NODE_ENV: production
+  SECRETS_DRIVER: file
+  SECRETS_DIR: /run/secrets
+  STORAGE_DRIVER: s3
+  QUEUE_DRIVER: redis
+  CACHE_DRIVER: redis
+  ANALYTICS_DRIVER: clickhouse
+  BACKUP_STORAGE_DRIVER: s3
+  SECRETS_FORMAT: v2
+  SHUTDOWN_SECONDS: "25"
+  HEALTH_CHECK_MS: "2000"
+  WORKER_HEALTH_HOST: 0.0.0.0
+  WORKER_HEALTH_PORT: "3001"
+  PORT: "3000"
