@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRedactor } from './secrets.js';
 
 /**
  * Where the settings marked secret in src/config.js (SECRET_SETTINGS) come from. SECRETS_DRIVER picks one:
@@ -19,7 +20,7 @@ import path from 'node:path';
  * Nothing here logs, returns in an error or puts in a URL the value of a setting: an error names the setting only.
  *
  *   readLocalSecrets(names, env)                    -> { values, sources }        env, *_FILE and SECRETS_DIR; synchronous
- *   createSecretSource({ names, env, fetch, onAlert }) -> { driver, load(), start(onChange), stop(), state() }
+ *   createSecretSource({ names, env, fetch, onAlert }) -> { driver, load(), start(onChange), refresh(), stop(), state(), redactor() }
  */
 export const SECRET_DRIVERS = Object.freeze(['env', 'file', 'http']);
 
@@ -77,6 +78,8 @@ export function readLocalSecrets(names, env = process.env, { readFile = fs.readF
 }
 
 const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/i;
+/** The largest answer read from the secret manager: a secret is small, so anything bigger is not one. */
+const MAX_ANSWER = 64 * 1024;
 
 function httpSettings(env) {
   const url = String(env.SECRETS_URL || '').replace(/\/+$/, '');
@@ -115,6 +118,7 @@ export function createSecretSource({ names, env = process.env, fetch: send = (..
   const status = { driver, loadedAt: null, refreshedAt: null, failures: 0, lastError: null };
   let last = null;
   let timer = null;
+  let refreshing = false;
 
   async function fetchOne(http, token, name) {
     let response;
@@ -123,17 +127,27 @@ export function createSecretSource({ names, env = process.env, fetch: send = (..
     } catch {
       throw new SecretSourceError('The secret manager could not be reached', { setting: name, code: 'unreachable' });
     }
-    if (response.status === 404) return null;
-    if (response.status === 401 || response.status === 403) throw new SecretSourceError('The secret manager refused the token', { setting: 'SECRETS_TOKEN_FILE', code: 'unauthorized' });
-    if (!response.ok) throw new SecretSourceError(`The secret manager answered ${response.status}`, { setting: name, code: 'unavailable' });
-    let body;
+    // An answer that is not the value is never read: a manager's error text may echo the request, token and all.
+    const discard = () => response.body?.cancel?.().catch(() => {});
+    if (response.status === 404) return discard(), null;
+    if (response.status === 401 || response.status === 403) {
+      discard();
+      throw new SecretSourceError('The secret manager refused the token', { setting: 'SECRETS_TOKEN_FILE', code: 'unauthorized' });
+    }
+    if (!response.ok) {
+      discard();
+      throw new SecretSourceError(`The secret manager answered ${Number(response.status) || 'an error'}`, { setting: name, code: 'unavailable' });
+    }
+    let body = null;
     try {
-      body = await response.json();
+      const text = await response.text();
+      if (text.length <= MAX_ANSWER) body = JSON.parse(text);
     } catch {
       body = null;
     }
-    if (!body || typeof body.value !== 'string') throw new SecretSourceError('The secret manager’s answer could not be read', { setting: name, code: 'invalid_answer' });
-    return { value: body.value, version: body.version ?? null };
+    if (!body || typeof body.value !== 'string' || !body.value) throw new SecretSourceError('The secret manager’s answer could not be read', { setting: name, code: 'invalid_answer' });
+    const version = typeof body.version === 'number' || (typeof body.version === 'string' && body.version.length <= 64) ? body.version : null;
+    return { value: body.value, version };
   }
 
   async function read() {
@@ -154,6 +168,50 @@ export function createSecretSource({ names, env = process.env, fetch: send = (..
     return { ...local, versions };
   }
 
+  const alert = (code, setting) => {
+    try {
+      onAlert({ code, setting });
+    } catch {
+      // A broken alert must not stop the refresh.
+    }
+  };
+
+  /**
+   * One refresh. A setting the source held before and no longer answers keeps its last good value and raises an alert
+   * (`missing`): a deleted secret never empties a running process. Only one refresh runs at a time.
+   */
+  async function refresh(onChange) {
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      const next = await read();
+      const lost = names.filter((name) => last?.values[name] !== undefined && next.values[name] === undefined);
+      for (const name of lost) {
+        next.values[name] = last.values[name];
+        next.sources[name] = last.sources[name];
+        if (last.versions?.[name] !== undefined) next.versions[name] = last.versions[name];
+      }
+      const changed = names.filter((name) => next.values[name] !== last?.values[name]);
+      last = next;
+      status.refreshedAt = now();
+      if (lost.length) {
+        status.failures += 1;
+        status.lastError = 'missing';
+        for (const name of lost) alert('missing', name);
+      } else {
+        status.lastError = null;
+      }
+      if (changed.length) await onChange({ values: next.values, sources: next.sources, changed });
+    } catch (err) {
+      // The last good values stay in use.
+      status.failures += 1;
+      status.lastError = err instanceof SecretSourceError ? err.code : 'secret_source';
+      alert(status.lastError, err instanceof SecretSourceError ? err.setting : null);
+    } finally {
+      refreshing = false;
+    }
+  }
+
   return {
     driver,
     async load() {
@@ -165,27 +223,17 @@ export function createSecretSource({ names, env = process.env, fetch: send = (..
       if (driver !== 'http' || timer) return;
       const { refreshSeconds } = httpSettings(env);
       if (!refreshSeconds) return;
-      timer = setInterval(async () => {
-        try {
-          const next = await read();
-          const changed = names.filter((name) => next.values[name] !== last?.values[name]);
-          last = next;
-          status.refreshedAt = now();
-          status.lastError = null;
-          if (changed.length) await onChange({ values: next.values, sources: next.sources, changed });
-        } catch (err) {
-          // The last good values stay in use.
-          status.failures += 1;
-          status.lastError = err?.code ?? 'secret_source';
-          onAlert({ code: status.lastError, setting: err?.setting ?? null });
-        }
-      }, refreshSeconds * 1000);
+      timer = setInterval(() => refresh(onChange), refreshSeconds * 1000);
       timer.unref?.();
     },
+    /** Runs one refresh now (the timer's work), for a test or an operator's "reload secrets". */
+    refresh: (onChange = () => {}) => refresh(onChange),
     stop() {
       if (timer) clearInterval(timer);
       timer = null;
     },
     state: () => ({ ...status }),
+    /** A function that scrubs every value this source has loaded out of a text (src/platform/secrets.js createRedactor). */
+    redactor: () => createRedactor(Object.values(last?.values ?? {})),
   };
 }

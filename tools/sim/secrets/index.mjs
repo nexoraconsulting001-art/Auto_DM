@@ -15,6 +15,9 @@
  *   POST /token   { token }             changes the token the manager accepts, so the app's token is now wrong
  *   POST /slow    { ms }                every read waits this long first (0 turns it off)
  *   POST /outage  { on }                every read answers 503 while on
+ *   POST /echo    { on }                every read answers 500 with an error text that echoes the request, its
+ *                                       Authorization header included, as a careless provider's error does
+ *   POST /garbage { on }                every read answers 200 with a body that is not the answer's shape
  *
  * A fault from base.mjs does the rest: a timeout, a dropped connection, a malformed body.
  *
@@ -32,6 +35,8 @@ export function createSecretsManager({ token = 'sim-secrets-token', prefix = 'v1
   let accepted = token;
   let slowMs = 0;
   let outage = false;
+  let echo = false;
+  let garbage = false;
   const path = `/${String(prefix).replace(/^\/+|\/+$/g, '')}/:name`;
 
   const put = (name, value, { mustExist = false } = {}) => {
@@ -52,14 +57,18 @@ export function createSecretsManager({ token = 'sim-secrets-token', prefix = 'v1
       accepted = token;
       slowMs = 0;
       outage = false;
+      echo = false;
+      garbage = false;
     },
     routes: (on) => {
       on('GET', path, async (req) => {
         if (slowMs > 0) await new Promise((resolve) => setTimeout(resolve, slowMs));
         if (outage) throw refuse(503, 'unavailable', 'The secret manager is not available.');
+        if (echo) throw refuse(500, 'internal', `Could not serve GET ${req.path} with Authorization: ${req.headers.authorization ?? ''}`);
         if (req.headers.authorization !== `Bearer ${accepted}`) throw refuse(401, 'unauthorized', 'The token is not valid.');
         const versions = held.get(req.params.name);
         if (!versions) throw refuse(404, 'not_found', 'That secret is not held.');
+        if (garbage) return { data: { secret: versions[versions.length - 1] } };
         return { value: versions[versions.length - 1], version: versions.length };
       });
     },
@@ -80,6 +89,14 @@ export function createSecretsManager({ token = 'sim-secrets-token', prefix = 'v1
       on('POST', '/outage', ({ body }) => {
         outage = body?.on !== false;
         return { on: outage };
+      });
+      on('POST', '/echo', ({ body }) => {
+        echo = body?.on !== false;
+        return { on: echo };
+      });
+      on('POST', '/garbage', ({ body }) => {
+        garbage = body?.on !== false;
+        return { on: garbage };
       });
     },
   });
