@@ -25,6 +25,12 @@ export const AUTH_LIMITS = Object.freeze({
   codeSendsPerAddress: Object.freeze({ scope: 'seller_code_sends_ip', limit: 20, windowMs: 60 * 60_000 }),
   codeTriesPerNumber: Object.freeze({ scope: 'seller_code_tries_number', limit: 10, windowMs: 15 * 60_000 }),
   codeTriesPerAddress: Object.freeze({ scope: 'seller_code_tries_ip', limit: 30, windowMs: 15 * 60_000 }),
+  /**
+   * A signed-in person's own codes (re-auth, linking a number) are counted per person, apart from the anonymous per-number
+   * counts above: a stranger who knows the number cannot use up what the person's re-auth needs.
+   */
+  codeSendsPerPerson: Object.freeze({ scope: 'seller_code_sends_person', limit: 5, windowMs: 60 * 60_000 }),
+  codeTriesPerPerson: Object.freeze({ scope: 'seller_code_tries_person', limit: 10, windowMs: 15 * 60_000 }),
   providerSignInsPerAddress: Object.freeze({ scope: 'seller_provider_signins_ip', limit: 30, windowMs: 15 * 60_000 }),
   refreshesPerAddress: Object.freeze({ scope: 'seller_refreshes_ip', limit: 120, windowMs: 15 * 60_000 }),
   deviceSecretTries: Object.freeze({ scope: 'seller_device_secret_tries', limit: 5, windowMs: 15 * 60_000 }),

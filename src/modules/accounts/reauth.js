@@ -29,7 +29,8 @@ export function reauthHandlers(ctx, { people, codes, devices, sendCode }) {
       if (code) {
         const [phone] = await people.phonesOf(user.person_id);
         await limit(ctx.platform, AUTH_LIMITS.codeTriesPerAddress, req.ip);
-        if (phone) await limit(ctx.platform, AUTH_LIMITS.codeTriesPerNumber, phone);
+        // Per person, not per number: anonymous guesses at the number must not refuse the owner's own code.
+        await limit(ctx.platform, AUTH_LIMITS.codeTriesPerPerson, `reauth:${user.person_id}`);
         if (!phone || !(await codes.check({ subject: phone, purpose: 'reauth', personId: user.person_id, code }))) {
           log.warn('accounts.code_refused', { purpose: 'reauth' });
           throw wrong('code');

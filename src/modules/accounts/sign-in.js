@@ -27,10 +27,20 @@ export function signInHandlers(ctx, services) {
     alternatives: alternatives(),
   });
 
-  /** Sends a code for `purpose` unless one is still waiting; the per-number limit counts only codes that go out. */
+  /**
+   * Sends a code for `purpose` unless one is still waiting; the limit counts only codes that go out. A signed-in person's
+   * code (re-auth, link: `personId` given) is counted per person, an anonymous sign-in's per number, so neither can use up
+   * the other's.
+   */
   async function sendCode({ subject, purpose, personId = null }) {
     if (await codes.waiting({ subject, purpose, personId })) return;
-    await limit(ctx.platform, AUTH_LIMITS.codeSendsPerNumber, subject);
+    if (personId) {
+      await limit(ctx.platform, AUTH_LIMITS.codeSendsPerPerson, `${purpose}:${personId}`);
+      // A number someone is linking may be anyone's: it keeps a cap of its own, apart from sign-in's, against spam.
+      if (purpose === 'link') await limit(ctx.platform, AUTH_LIMITS.codeSendsPerNumber, `link:${subject}`);
+    } else {
+      await limit(ctx.platform, AUTH_LIMITS.codeSendsPerNumber, subject);
+    }
     const code = await codes.issue({ subject, purpose, personId });
     if (code) await codes.send({ subject, code, purpose });
   }
