@@ -523,6 +523,13 @@ export async function connectInstagramFlow(world, shop, nextLogin = {}) {
   const back = new URL(consent.headers.get('location'));
   const done = await hit(world, `${back.pathname}${back.search}`, { host: shop.host });
   assert.ok(done.status < 400, `The Instagram callback answered ${done.status}: ${done.text.slice(0, 200)}`);
+  // D-4: the callback saves nothing; whoever started the connect finishes it in their own session. This shop started
+  // it with its API token, as the owner app does, so Meta's answer comes back to the app's scheme and the app finishes.
+  const location = done.headers?.location ?? (typeof done.headers?.get === 'function' ? done.headers.get('location') : null);
+  const next = location ? new URL(location, 'http://relative.invalid') : null;
+  if (next?.searchParams.get('instagram') === 'finish') {
+    await shop.call('/instagram/connect/finish', 200, { method: 'POST', body: { finishToken: next.searchParams.get('f') } }, 'Finishing the Instagram connection');
+  }
   return done;
 }
 

@@ -105,7 +105,7 @@ function TypeStep({ mode, open, action, token, onStarted }) {
 function InstagramStep({ connection, action }) {
   const { api } = useServices();
   const { t } = useStrings();
-  const connect = useBrowserConnect((body) => api.instagram.connect(body), { browser: WebBrowser, appState: AppState, keys: [IG_KEY, SIGNUP] });
+  const connect = useBrowserConnect((body) => api.instagram.connect(body), { browser: WebBrowser, appState: AppState, keys: [IG_KEY, SIGNUP], finish: (body) => api.instagram.connectFinish(body) });
   const lost = connection && connection.status !== 'not_connected' && connection.status !== 'active';
   return (
     <Card testID="signup-instagram">

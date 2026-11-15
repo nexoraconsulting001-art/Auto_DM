@@ -93,6 +93,8 @@ export function createIgConnect({ fetchImpl, now } = {}) {
     },
 
     routes(app, ctx) {
+      // The console's last step of connecting Instagram, in the signed-in session of who started it (D-4).
+      app.get(PROVIDER_PATHS.instagramFinish, (req, res, next) => services(ctx).connect.finishInBrowser(req, res).catch(next));
       // A buyer on a business's address sees that business's policy, never Bhava's.
       app.get(PRIVACY_PATH, async (_req, res) => {
         res.set('Cache-Control', 'public, max-age=3600').type('html').send(String(sellerPrivacyPage({ settings: await buyerSettings(ctx.repos) })));
@@ -104,6 +106,7 @@ export function createIgConnect({ fetchImpl, now } = {}) {
     api: (ctx) => ({
       'instagram.connection': async () => connectionView(await ctx.repos.igAccounts.primary()),
       'instagram.connect': ({ body, user, req }) => services(ctx).connect.start({ user, returnTo: body.returnTo, req }),
+      'instagram.connectFinish': ({ body, user }) => services(ctx).connect.finishByApp({ finishToken: body.finishToken, user }),
       'instagram.disconnect': async ({ user }) => {
         const account = await ctx.repos.igAccounts.primary();
         if (!account) return;

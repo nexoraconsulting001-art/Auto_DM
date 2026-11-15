@@ -295,7 +295,11 @@ test('Unified Login connects through the same flow, with Instagram names for its
   const dialog = await fetch(started.body.authorizeUrl, { redirect: 'manual' });
   const back = new URL(dialog.headers.get('location'));
   const done = await fetch(`${slice.app.base}${back.pathname}${back.search}`, { redirect: 'manual' });
-  assert.equal(new URL(done.headers.get('location')).searchParams.get('instagram'), 'connected');
+  // D-4: started with the API token, as the owner app does: Meta's answer goes back to the app, which finishes it.
+  const next = new URL(done.headers.get('location'));
+  assert.equal(next.searchParams.get('instagram'), 'finish');
+  const finished = await business.api('POST', '/instagram/connect/finish', { finishToken: next.searchParams.get('f') });
+  assert.equal(finished.body.outcome, 'connected');
 
   const row = await accountRow(slice, IG_A);
   assert.equal(row.login_kind, 'unified');

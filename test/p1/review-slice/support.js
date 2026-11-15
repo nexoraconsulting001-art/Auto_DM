@@ -5,6 +5,7 @@ import { MODULES } from '../../../src/modules/index.js';
 import { bindTenant } from '../../../src/repos/index.js';
 import { createMeta } from '../../../tools/sim/meta/index.mjs';
 import { startApp } from '../../helpers.js';
+import { withTenant } from '../../../src/tenancy.js';
 
 export const APP_ID = 'bhava-ig-app';
 export const APP_SECRET = 'secret'; // the app secret startApp configures
@@ -99,18 +100,45 @@ export async function addBusiness(app, name = `shop${++businesses}`) {
   return { name, tenant, repos, host, phone, password, token, api: apiWith(app, token), anonymous: apiWith(app, null), signIn: async (who) => apiWith(app, await signIn(app, who, host)) };
 }
 
-/** Plays the seller at Meta's consent screen, then the browser arriving back at the one registered address. */
+/** The owner's console session on the business's own host (a cookie and its CSRF token), made once per business. */
+export async function consoleSession(app, business) {
+  if (business.console) return business.console;
+  const owner = await business.repos.users.findByPhone(business.phone);
+  const token = await withTenant(business.tenant, () => app.platform.sessions.create(owner.id, 1, 'cookie'));
+  const cookie = `sid=${token}`;
+  const me = await fetch(`${app.base}/api/v1/auth/me`, { headers: { cookie, 'x-forwarded-host': business.host } });
+  assert.equal(me.status, 200, 'the console session works');
+  business.console = { cookie, csrf: (await me.json()).csrf };
+  return business.console;
+}
+
+/**
+ * Plays the seller at Meta's consent screen, then the browser arriving back at the one registered address, then (D-4)
+ * the same browser finishing the connect in the console's session on the business's own host. `done` is the callback's
+ * answer, `finished` the finish step's, and `landing` where the browser ends up.
+ */
 export async function consent({ app, sim }, business, { igUserId, scopes, deny, returnTo = '/admin/settings' } = {}) {
   await sim.post('/oauth/next', { ...(igUserId ? { igUserId } : {}), ...(scopes ? { scopes } : {}), ...(deny ? { deny: true } : {}) });
-  const started = await business.api('POST', '/instagram/connect', { returnTo });
+  const session = await consoleSession(app, business);
+  const res = await fetch(`${app.base}/api/v1/instagram/connect`, {
+    method: 'POST',
+    headers: { cookie: session.cookie, 'x-csrf-token': session.csrf, 'x-forwarded-host': business.host, 'content-type': 'application/json' },
+    body: JSON.stringify({ returnTo }),
+  });
+  const started = { status: res.status, body: await res.json() };
   assert.equal(started.status, 200, JSON.stringify(started.body));
   const dialog = await fetch(started.body.authorizeUrl, { redirect: 'manual' });
   assert.equal(dialog.status, 302, await dialog.text());
   const back = new URL(dialog.headers.get('location'));
   const callback = () => fetch(`${app.base}${back.pathname}${back.search}`, { redirect: 'manual', headers: { 'x-forwarded-host': back.host } });
   const done = await callback();
-  const landing = done.headers.get('location') ? new URL(done.headers.get('location'), 'http://relative.invalid') : null;
-  return { authorizeUrl: new URL(started.body.authorizeUrl), back, done, landing, outcome: landing?.searchParams.get('instagram') ?? null, callback };
+  let landing = done.headers.get('location') ? new URL(done.headers.get('location'), 'http://relative.invalid') : null;
+  let finished = null;
+  if (landing?.pathname === '/oauth/instagram/finish') {
+    finished = await fetch(`${app.base}${landing.pathname}${landing.search}`, { redirect: 'manual', headers: { 'x-forwarded-host': landing.host, cookie: session.cookie } });
+    landing = finished.headers.get('location') ? new URL(finished.headers.get('location'), 'http://relative.invalid') : null;
+  }
+  return { authorizeUrl: new URL(started.body.authorizeUrl), back, done, finished, landing, outcome: landing?.searchParams.get('instagram') ?? null, callback };
 }
 
 export const seedIg = (sim, igUserId, fields = {}) => sim.post('/accounts', { igUserId, username: `user${igUserId.slice(-4)}`, ...fields });

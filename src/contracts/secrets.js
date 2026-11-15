@@ -20,6 +20,7 @@ const column = (table, name, key, kind, tenant = true) => Object.freeze({ table,
 export const SECRET_COLUMNS = Object.freeze([
   column('ig_accounts', 'access_token_enc', ['ig_user_id'], 'token'),
   column('fb_pages', 'access_token_enc', ['page_id'], 'token'),
+  column('oauth_states', 'pending_login_enc', ['state_hash'], 'token'),
   column('whatsapp_accounts', 'access_token_enc', ['tenant_id'], 'token'),
   column('gateway_keys', 'key_secret_enc', ['tenant_id', 'provider'], 'gateway'),
   column('payment_settings', 'oauth_access_enc', ['tenant_id'], 'gateway'),

@@ -64,6 +64,8 @@ export const TlsAskQuery = z.object({ domain: text(253) });
 export const PROVIDER_PATHS = Object.freeze({
   webhook: '/webhook',
   instagramCallback: '/oauth/instagram/callback',
+  /** GET on the host the console started from: finishes a connect only in the signed-in session of who started it (D-4). */
+  instagramFinish: '/oauth/instagram/finish',
   facebookCallback: '/oauth/facebook/callback',
   deauthorize: '/meta/deauthorize',
   deletion: '/meta/deletion',

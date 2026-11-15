@@ -8,6 +8,15 @@ export const CONNECTION_STATUSES = Object.freeze(['not_connected', 'active', 're
 export const ReturnTo = text(200).regex(/^\/(?!\/)/, 'Use a page of this site');
 export const ConnectStart = z.object({ returnTo: ReturnTo.optional() });
 export const ConnectLink = z.object({ authorizeUrl: z.string() });
+/**
+ * The owner app's last step of a connect (D-4): Meta's answer comes back to the app as
+ * bhavabusiness://auth/callback?instagram=finish&f=<finishToken>, and the app sends the token with its own session. Only
+ * the person who started the connect, in this business, can finish it. `outcome` is the word the console's
+ * ?instagram= gets.
+ */
+export const ConnectFinish = z.object({ finishToken: z.string().min(20).max(200) });
+export const CONNECT_OUTCOMES = Object.freeze(['connected', 'missing_scopes', 'denied', 'failed', 'forbidden', 'taken', 'expired']);
+export const ConnectFinished = z.object({ outcome: z.enum(CONNECT_OUTCOMES) });
 
 /** The business's Instagram connection. health is amber at 14 days or less or after a failed refresh, red at 3 days or less (PRD 4.2). */
 export const IgConnection = z.object({
@@ -39,6 +48,7 @@ export const IgMediaItem = z.object({
 export const instagramRoutes = {
   'instagram.connection': { method: 'GET', path: '/instagram/connection', access: staffWith('automations'), response: IgConnection },
   'instagram.connect': { method: 'POST', path: '/instagram/connect', access: MANAGERS, body: ConnectStart, response: ConnectLink },
+  'instagram.connectFinish': { method: 'POST', path: '/instagram/connect/finish', access: MANAGERS, body: ConnectFinish, response: ConnectFinished },
   'instagram.disconnect': { method: 'DELETE', path: '/instagram/connection', access: MANAGERS, status: 204, response: null },
   'instagram.media': { method: 'GET', path: '/instagram/media', access: staffWith('automations'), query: IgMediaQuery, response: page(IgMediaItem) },
 };
