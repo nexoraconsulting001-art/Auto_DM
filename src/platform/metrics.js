@@ -1,34 +1,120 @@
 import crypto from 'node:crypto';
+import { FORBIDDEN_LABELS, METRICS, metricProblem } from '../contracts/metrics.js';
 
 /**
- * Counters and timings in Prometheus text format at /metrics, so any monitoring tool can scrape them
- * (production adds dashboards and alerts on top). Labels never carry personal data.
+ * Counters, gauges and timings in Prometheus text format at /metrics, so any monitoring tool can scrape them (Phase 9).
+ * Every name, type and label is checked against the catalogue (METRICS in src/contracts/metrics.js):
  *
- *   metrics.inc('http_requests_total', { status: '200' })
- *   metrics.observe('http_request_seconds', 0.12)
+ *   metrics.inc('http_requests_total', { method: 'GET', group: 'store', status: '200' })
+ *   metrics.observe('http_request_seconds', 0.12, { group: 'store' })
  *   metrics.gauge('queue_jobs', () => [{ labels: { queue: 'dm', status: 'queued' }, value: 3 }])
+ *
+ * - A label the catalogue does not give a metric, a value outside a label's set, or a type used the wrong way is not written;
+ *   `createMetrics({ strict: true })` throws instead (the tests), and also refuses a name the catalogue does not have. rejected() lists what was refused.
+ * - Each metric holds at most `maxSeries` label combinations; a new one beyond that is dropped, so no label can grow without bound.
+ * - Label values never carry a business, person, address or text (FORBIDDEN_LABELS), so /metrics holds no personal data.
+ * - /metrics answers only with its token (handler); without one configured it does not exist.
+ * - The middleware also counts webhook requests by provider and outcome, and requests in flight.
+ * - Setting `backup_last_success_seconds` also gives `backup_age_seconds`.
  */
-export function createMetrics() {
+const BUCKETS = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
+const DEFAULT_MAX_SERIES = 500;
+
+/** Which outside service's webhook a request is, from its method and path; null for any other request. */
+export function webhookProviderOf(method, path) {
+  if (method !== 'POST') return null;
+  if (path === '/webhook') return 'meta';
+  if (path === '/webhooks/whatsapp') return 'whatsapp';
+  if (path === '/webhooks/courier') return 'shiprocket';
+  if (path === '/webhooks/shopify') return 'shopify';
+  if (path === '/webhooks/billing/razorpay') return 'razorpay_billing';
+  if (path === '/webhooks/razorpay' || path.startsWith('/webhooks/razorpay/')) return 'razorpay';
+  return null;
+}
+
+/** accepted (the 2xx), bad_signature (refused as not genuine), or refused (any other answer, including every fault of ours). */
+export const webhookResultOf = (status) => (status < 300 ? 'accepted' : [400, 401, 403].includes(status) ? 'bad_signature' : 'refused');
+
+/** The call class of a Meta call, from what it did. */
+export function metaCallClass({ method = 'GET', pathname = '' } = {}) {
+  const path = String(pathname);
+  if (/(^|\/)(oauth|refresh_access_token|debug_token|access_token)/.test(path)) return 'token';
+  if (/\/messages$|\/message_attachments$|\/replies$|\/private_replies$/.test(path)) return 'send';
+  if (/\/insights$|\/insights\//.test(path)) return 'insights';
+  if (/subscribed_apps/.test(path)) return 'subscribe';
+  if (/\/(media|media_publish|stories)$/.test(path)) return 'media';
+  return method === 'GET' ? 'read' : 'other';
+}
+
+/** ok, throttled, token_error, timeout or error. */
+export function metaCallResult({ status = 0, kind } = {}) {
+  if (kind === 'throttled' || kind === 'buc_throttled') return 'throttled';
+  if (kind === 'token_invalid') return 'token_error';
+  if (kind === 'timeout' || kind === 'network') return 'timeout';
+  if (kind || status >= 400 || status === 0) return 'error';
+  return 'ok';
+}
+
+/** A log entry's name as a bounded label: its first dotted part, lower snake case, 30 characters at most. */
+export function errorKind(msg) {
+  const first = String(msg ?? '').split('.')[0].toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
+  return /^[a-z]/.test(first) ? first : 'error';
+}
+
+export function createMetrics({ strict = false, maxSeries = DEFAULT_MAX_SERIES, service = 'web', now = () => Date.now() } = {}) {
   const counters = new Map();
   const timings = new Map();
   const gauges = new Map();
-  const BUCKETS = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
+  const refused = new Map();
+  let inFlight = 0;
   const key = (labels = {}) => JSON.stringify(Object.entries(labels).sort());
   const fmt = (labels = {}) => {
     const parts = Object.entries(labels).map(([k, v]) => `${k}="${String(v).replace(/["\\\n]/g, '_')}"`);
     return parts.length ? `{${parts.join(',')}}` : '';
   };
+  const refuseWhy = (why) => refused.set(why, (refused.get(why) ?? 0) + 1);
 
-  return {
+  /**
+   * True when this write is refused. It throws instead when strict. A catalogued metric is held to its type, labels and values.
+   * One the catalogue does not have is refused when strict; otherwise it is written, but a forbidden label name or a long label
+   * value is still refused, and the series limit still holds, so even an uncatalogued metric cannot grow without bound.
+   */
+  function problemOf(name, labels, type) {
+    if (METRICS[name]) return metricProblem(name, labels) ?? (METRICS[name].type !== type ? `${name} is a ${METRICS[name].type}, not a ${type}` : null);
+    if (strict) return `${name} is not in the catalogue`;
+    const bad = Object.entries(labels).find(([label, value]) => FORBIDDEN_LABELS.includes(label) || String(value).length > 40);
+    return bad ? `${name} has the label ${bad[0]}` : null;
+  }
+  function refuse(name, labels, type) {
+    const why = problemOf(name, labels, type);
+    if (!why) return false;
+    if (strict) throw new Error(why);
+    refuseWhy(why);
+    return true;
+  }
+  const full = (store, name, k) => {
+    const m = store.get(name);
+    if (m && !m.has(k) && m.size >= maxSeries) {
+      refuseWhy(`${name} is at its series limit`);
+      return true;
+    }
+    return false;
+  };
+
+  const self = {
     inc(name, labels = {}, by = 1) {
-      const m = counters.get(name) ?? new Map();
+      if (refuse(name, labels, 'counter')) return;
       const k = key(labels);
+      if (full(counters, name, k)) return;
+      const m = counters.get(name) ?? new Map();
       m.set(k, { labels, value: (m.get(k)?.value ?? 0) + by });
       counters.set(name, m);
     },
     observe(name, seconds, labels = {}) {
-      const m = timings.get(name) ?? new Map();
+      if (refuse(name, labels, 'histogram')) return;
       const k = key(labels);
+      if (full(timings, name, k)) return;
+      const m = timings.get(name) ?? new Map();
       const t = m.get(k) ?? { labels, count: 0, sum: 0, buckets: BUCKETS.map(() => 0) };
       t.count++;
       t.sum += seconds;
@@ -39,16 +125,23 @@ export function createMetrics() {
       timings.set(name, m);
     },
     gauge(name, read) {
+      if (refuse(name, {}, 'gauge')) return;
       gauges.set(name, read);
+      if (name === 'backup_last_success_seconds') {
+        gauges.set('backup_age_seconds', async () => (await read()).map(({ labels, value }) => ({ labels, value: Math.max(0, Math.floor(now() / 1000) - value) })));
+      }
     },
+    /** What the catalogue refused, by reason: [] when nothing was. */
+    rejected: () => [...refused].map(([why, count]) => ({ why, count })),
     async render() {
       const out = [];
+      const head = (name, type) => out.push(`# HELP ${name} ${METRICS[name]?.help ?? name}`, `# TYPE ${name} ${type}`);
       for (const [name, m] of counters) {
-        out.push(`# TYPE ${name} counter`);
+        head(name, 'counter');
         for (const { labels, value } of m.values()) out.push(`${name}${fmt(labels)} ${value}`);
       }
       for (const [name, m] of timings) {
-        out.push(`# TYPE ${name} histogram`);
+        head(name, 'histogram');
         for (const t of m.values()) {
           BUCKETS.forEach((b, i) => out.push(`${name}_bucket${fmt({ ...t.labels, le: b })} ${t.buckets[i]}`));
           out.push(`${name}_bucket${fmt({ ...t.labels, le: '+Inf' })} ${t.count}`);
@@ -56,37 +149,79 @@ export function createMetrics() {
           out.push(`${name}_count${fmt(t.labels)} ${t.count}`);
         }
       }
-      for (const [name, read] of gauges) {
-        out.push(`# TYPE ${name} gauge`);
+      const sources = new Map([['http_requests_in_flight', async () => [{ labels: { service }, value: inFlight }]], ...gauges]);
+      for (const [name, read] of sources) {
+        const lines = [];
         try {
-          for (const { labels, value } of await read()) out.push(`${name}${fmt(labels)} ${value}`);
+          for (const { labels, value } of await read()) {
+            if ((METRICS[name] && metricProblem(name, labels)) || !Number.isFinite(Number(value))) continue;
+            lines.push(`${name}${fmt(labels)} ${value}`);
+          }
         } catch {
           // A gauge that can't be read right now is left out of this scrape.
+          continue;
         }
+        if (lines.length) out.push(`# HELP ${name} ${METRICS[name]?.help ?? name}`, `# TYPE ${name} gauge`, ...lines);
       }
       return `${out.join('\n')}\n`;
     },
-    /** Express middleware counting requests by method, route group and status, with timings. */
+    /** Express middleware counting requests by method, route group and status, with timings, requests in flight and webhooks by provider. */
     middleware() {
       return (req, res, next) => {
         const start = process.hrtime.bigint();
-        res.on('finish', () => {
+        let done = false;
+        inFlight++;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          inFlight--;
           const group = req.path.split('/')[1] || 'home';
           const labels = { method: req.method, group: /^[a-z-]{1,20}$/.test(group) ? group : 'other', status: String(res.statusCode) };
-          this.inc('http_requests_total', labels);
-          this.observe('http_request_seconds', Number(process.hrtime.bigint() - start) / 1e9, { group: labels.group });
-        });
+          self.inc('http_requests_total', labels);
+          self.observe('http_request_seconds', Number(process.hrtime.bigint() - start) / 1e9, { group: labels.group });
+          const provider = webhookProviderOf(req.method, req.path);
+          if (provider) self.inc('webhook_received_total', { provider, result: webhookResultOf(res.statusCode) });
+        };
+        res.on('finish', finish);
+        res.on('close', finish);
         next();
       };
     },
     /** Express handler for /metrics, protected by METRICS_TOKEN (Bearer). Hidden when no token is set. */
     handler(token) {
       return async (req, res) => {
-        const sent = (req.get('authorization') || '').replace(/^Bearer /, '');
+        const header = req.get('authorization') || '';
+        const sent = header.startsWith('Bearer ') ? header.slice(7) : '';
         const ok = token && sent.length === token.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(token));
+        res.set('Cache-Control', 'no-store');
         if (!ok) return res.sendStatus(404);
-        res.type('text/plain; version=0.0.4').send(await this.render());
+        res.type('text/plain; version=0.0.4').send(await self.render());
       };
     },
   };
+  return self;
+}
+
+/**
+ * Counts every run of a queue's jobs (job_runs_total by queue and result, job_failures_total) by wrapping the queue's drain(),
+ * which both work() and tests go through. Once per queue object. Returns false when the queue has no drain().
+ */
+export function instrumentQueue(metrics, queue) {
+  if (typeof queue?.drain !== 'function' || queue.drain.instrumented) return false;
+  const drain = queue.drain.bind(queue);
+  const wrapped = (name, handler, options) =>
+    drain(name, async (job) => {
+      try {
+        const out = await handler(job);
+        metrics.inc('job_runs_total', { queue: name, result: 'ok' });
+        return out;
+      } catch (err) {
+        metrics.inc('job_runs_total', { queue: name, result: 'failed' });
+        metrics.inc('job_failures_total', { queue: name });
+        throw err;
+      }
+    }, options);
+  wrapped.instrumented = true;
+  queue.drain = wrapped;
+  return true;
 }

@@ -1,0 +1,91 @@
+# Unit tests for queue.yaml (promtool test rules): each alert fires on its bad input and is gone after recovery.
+rule_files:
+  - ../queue.yaml
+evaluation_interval: 1m
+tests:
+  - name: QueueGrowing fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "queue_jobs{queue=\"dm.send\",status=\"queued\"}"
+        values: "0+40x59 100+0x30"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: QueueGrowing
+        exp_alerts:
+          - exp_labels:
+              queue: "dm.send"
+              severity: "ticket"
+              area: "queue"
+              alertname: "QueueGrowing"
+            exp_annotations:
+              summary: "A queue is getting longer"
+              description: "More than 500 jobs are waiting in a queue and there are more than 15 minutes ago, for 15 minutes. Workers are not keeping up."
+              runbook: "deploy/prod/monitoring/README.md#queuegrowing"
+      - eval_time: 70m
+        alertname: QueueGrowing
+        exp_alerts: []
+  - name: QueueOldestJobTooOld fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "queue_oldest_job_seconds{queue=\"dm.send\"}"
+        values: "100+0x4 900+0x19 5+0x39"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QueueOldestJobTooOld
+        exp_alerts:
+          - exp_labels:
+              queue: "dm.send"
+              severity: "ticket"
+              area: "queue"
+              alertname: "QueueOldestJobTooOld"
+            exp_annotations:
+              summary: "A job has waited more than 10 minutes"
+              description: "The oldest waiting job in a queue is more than 10 minutes old for 5 minutes. Messages and webhooks queued behind it are delayed."
+              runbook: "deploy/prod/monitoring/README.md#queueoldestjobtooold"
+      - eval_time: 40m
+        alertname: QueueOldestJobTooOld
+        exp_alerts: []
+  - name: QueueStuck fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "queue_oldest_job_seconds{queue=\"webhooks.meta\"}"
+        values: "100+0x4 2400+0x19 5+0x39"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QueueStuck
+        exp_alerts:
+          - exp_labels:
+              queue: "webhooks.meta"
+              severity: "page"
+              area: "queue"
+              alertname: "QueueStuck"
+            exp_annotations:
+              summary: "A queue has stopped moving"
+              description: "The oldest waiting job in a queue is more than 30 minutes old for 5 minutes. The worker is probably down or wedged."
+              runbook: "deploy/prod/monitoring/README.md#queuestuck"
+      - eval_time: 40m
+        alertname: QueueStuck
+        exp_alerts: []
+  - name: QueueJobsFailing fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "job_runs_total{queue=\"dm.send\",result=\"ok\"}"
+        values: "0 30+30x59"
+      - series: "job_runs_total{queue=\"dm.send\",result=\"failed\"}"
+        values: "0 20+20x24 500+0x34"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QueueJobsFailing
+        exp_alerts:
+          - exp_labels:
+              queue: "dm.send"
+              severity: "ticket"
+              area: "queue"
+              alertname: "QueueJobsFailing"
+            exp_annotations:
+              summary: "Jobs of a queue are failing"
+              description: "More than 20% of the runs of a queue failed for 10 minutes."
+              runbook: "deploy/prod/monitoring/README.md#queuejobsfailing"
+      - eval_time: 55m
+        alertname: QueueJobsFailing
+        exp_alerts: []

@@ -1,0 +1,57 @@
+# Where alerts go (Alertmanager). Routes by `severity`, which every rule in rules/ sets to `page` or `ticket`:
+#   page    a person is woken: something customers feel is failing now, or will within the hour.
+#   ticket  it can wait for working hours: something is degrading, expiring or filling up.
+# The receivers are placeholders. Each reads where to send from a file the deploy mounts from its secret store
+# (deploy/prod), so no address, key or webhook URL is ever in this file; an empty or missing file makes Alertmanager refuse to start,
+# which is better than alerts going nowhere.
+#
+# Grouping: every route groups by `alertname` first, so a flood of one alert (a queue per business class, a provider, a pod) is one
+# notification, and a different alert is never folded into it or held back by it. A business is not a label of any metric, so one
+# business's trouble shows as the same alert as everyone's, in the same group; the Platform Console says which business.
+# Inhibition is by named pairs only, each with a label that must match, so a page never hides an unrelated ticket.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: ticket
+  group_by: [alertname, severity, area]
+  group_wait: 1m
+  group_interval: 10m
+  repeat_interval: 12h
+  routes:
+    - matchers: [severity="page"]
+      receiver: page
+      group_by: [alertname, severity, area, provider, queue, channel, call_class, group, probe, pool, service, kind]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 1h
+    - matchers: [severity="ticket"]
+      receiver: ticket
+      group_by: [alertname, severity, area, provider, queue, channel, call_class, group, probe, pool, service, kind]
+      group_wait: 5m
+      group_interval: 30m
+      repeat_interval: 12h
+
+receivers:
+  - name: page
+    webhook_configs:
+      - url_file: /etc/alertmanager/destinations/page
+        send_resolved: true
+  - name: ticket
+    webhook_configs:
+      - url_file: /etc/alertmanager/destinations/ticket
+        send_resolved: true
+
+inhibit_rules:
+  - source_matchers: [alertname="QueueStuck"]
+    target_matchers: [alertname="QueueOldestJobTooOld"]
+    equal: [queue]
+  - source_matchers: [alertname="MetaUsageCritical"]
+    target_matchers: [alertname="MetaUsageHigh"]
+    equal: [call_class]
+  - source_matchers: [alertname="CertificateExpiryImminent"]
+    target_matchers: [alertname="CertificateExpiringSoon"]
+    equal: [instance]
+  - source_matchers: [alertname=~"UptimeBurnFast|UptimeBurnSlow"]
+    target_matchers: [alertname="UptimeBurnTicket"]
+    equal: [probe]

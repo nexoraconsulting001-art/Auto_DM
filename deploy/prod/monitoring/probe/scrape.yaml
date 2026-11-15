@@ -1,0 +1,45 @@
+# The scrape jobs that belong with the rules: the platform's own /metrics, and the outside probe. Merge into prometheus.yaml.
+# Every address below is a placeholder to replace at deploy time; keep real ones out of the repository.
+#
+# The `probe` label names the objective a probe feeds (webhook, shopper_page), which the burn-rate rules group by.
+scrape_configs:
+  - job_name: web
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/metrics-token
+    scheme: https
+    static_configs:
+      - targets: ['PLATFORM_HOST_WEB:443']
+  - job_name: worker
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/metrics-token
+    scheme: https
+    static_configs:
+      - targets: ['PLATFORM_HOST_WORKER:443']
+  - job_name: probe_webhook
+    metrics_path: /probe
+    params:
+      module: [webhook]
+    static_configs:
+      - targets: ['https://PLATFORM_HOST_WEBHOOK/webhook']
+        labels:
+          probe: webhook
+    relabel_configs: &probe_relabel
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: PROBE_EXPORTER_ADDRESS:9115
+  - job_name: probe_shopper_page
+    metrics_path: /probe
+    params:
+      module: [shopper_page]
+    static_configs:
+      - targets: ['https://PLATFORM_HOST_SHOWCASE/']
+        labels:
+          probe: shopper_page
+    relabel_configs: *probe_relabel

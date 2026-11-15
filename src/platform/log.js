@@ -11,7 +11,27 @@ import { currentTenant } from '../tenancy.js';
  *   reportError(err, fields)    logs it and passes it to every reporter added with onError()
  */
 const requestContext = new AsyncLocalStorage();
-const PRIVATE_FIELD = /^(user_?name|text|message|phone|email|password|token|access_?token|authorization)$/i;
+const PRIVATE_FIELD = /^(user_?name|ig_?user_?name|text|message|body|caption|comment|reply|phone|mobile|email|address|password|passwd|secret|api_?key|token|access_?token|refresh_?token|authorization|cookie|signature)$/i;
+const SECRET_SHAPES = [
+  [/(Bearer\s+)[\w.~+/=-]+/gi, '$1[token]'],
+  [/\b(EAA|IGQ|IGAA)[\w-]{12,}/g, '[token]'],
+  [/\b(rzp_(?:live|test)_|sk_(?:live|test)_|shpat_|whsec_)[\w-]+/gi, '[key]'],
+  [/\b((?:access_|refresh_)?token|api_?key|key|secret|password|signature)=[^&\s"']+/gi, '$1=[redacted]'],
+  [/\+?\d(?:[ -]?\d){9,}/g, '[number]'],
+];
+/** Takes secret-shaped and phone-shaped text out of a string: an error's message can quote what a person wrote or a request carried. */
+export function scrub(text) {
+  let out = String(text);
+  for (const [pattern, replacement] of SECRET_SHAPES) out = out.replace(pattern, replacement);
+  return out;
+}
+const clean = (value, depth = 0) => {
+  if (typeof value === 'string') return scrub(value);
+  if (value === null || typeof value !== 'object' || value instanceof Error) return value;
+  if (depth >= 2) return '[nested]';
+  if (Array.isArray(value)) return value.slice(0, 20).map((v) => clean(v, depth + 1));
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !PRIVATE_FIELD.test(key)).map(([key, v]) => [key, clean(v, depth + 1)]));
+};
 const reporters = [];
 let format = process.env.LOG_FORMAT || 'json';
 let sink = (line, level) => (level === 'error' ? process.stderr : process.stdout).write(`${line}\n`);
@@ -24,17 +44,22 @@ export const withRequestId = (id, fn) => requestContext.run({ requestId: id }, f
 export const currentRequestId = () => requestContext.getStore()?.requestId ?? null;
 
 function write(level, msg, given = {}) {
-  const fields = Object.fromEntries(Object.entries(given).filter(([key]) => !PRIVATE_FIELD.test(key)));
+  const fields = Object.fromEntries(Object.entries(given).filter(([key]) => !PRIVATE_FIELD.test(key)).map(([key, v]) => [key, clean(v)]));
   const tenant = currentTenant();
   const entry = {
     time: new Date().toISOString(),
     level,
-    msg,
+    msg: scrub(String(msg)),
     ...(tenant?.slug || tenant?.id ? { tenant: tenant.slug || tenant.id } : {}),
+    ...(tenant?.id ? { tenantId: tenant.id } : {}),
     ...(currentRequestId() ? { requestId: currentRequestId() } : {}),
     ...fields,
   };
-  if (entry.err instanceof Error) entry.err = { message: entry.err.message, stack: entry.err.stack };
+  if (entry.err instanceof Error) {
+    // The first line of a stack is the message, so only the frames are kept; the message is kept apart, with secret and phone shapes taken out.
+    const frames = String(entry.err.stack ?? '').split('\n').filter((l) => /^\s+at /.test(l)).join('\n');
+    entry.err = { name: entry.err.name, ...(entry.err.code ? { code: String(entry.err.code).slice(0, 80) } : {}), message: scrub(entry.err.message), stack: scrub(frames) };
+  }
   const line = format === 'pretty'
     ? `${entry.time} ${level.toUpperCase().padEnd(5)} ${entry.tenant ? `[${entry.tenant}] ` : ''}${msg}${Object.keys(fields).length ? ` ${JSON.stringify(fields)}` : ''}`
     : JSON.stringify(entry);

@@ -1,0 +1,67 @@
+# Webhook intake and processing. Generated once from the track's spec and edited by hand since; every alert has a case in tests/webhooks.yaml
+# that fires it on bad input and clears it on recovery. Metrics are the catalogue's (src/contracts/metrics.js).
+# Annotations are plain text on purpose: no template reads a label or a value, so nothing in an alert can name a person.
+groups:
+  - name: bhava-webhooks
+    interval: 1m
+    rules:
+      - alert: WebhookIntakeFailing
+        expr: sum by (provider) (rate(webhook_received_total{provider=~"meta|whatsapp|shopify",result="refused"}[5m])) / sum by (provider) (rate(webhook_received_total{provider=~"meta|whatsapp|shopify"}[5m])) > 0.05 and sum by (provider) (rate(webhook_received_total{provider=~"meta|whatsapp|shopify"}[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: page
+          area: webhooks
+        annotations:
+          summary: "A webhook intake is refusing deliveries"
+          description: "More than 5% of a provider's webhook deliveries were refused by us (a fault, not a bad signature) for 5 minutes. The provider retries for a limited time, so events can be lost."
+          runbook: "deploy/prod/monitoring/README.md#webhookintakefailing"
+      - alert: WebhookIntakeSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_seconds_bucket{group="webhook"}[5m]))) > 2
+        for: 10m
+        labels:
+          severity: page
+          area: webhooks
+        annotations:
+          summary: "Meta webhook requests are slow to answer"
+          description: "The slowest 5% of requests to the Meta webhook take longer than 2 seconds for 10 minutes. Meta times out slow endpoints and may stop delivering."
+          runbook: "deploy/prod/monitoring/README.md#webhookintakeslow"
+      - alert: WebhookNotStored
+        expr: sum(rate(webhook_received_total{result="accepted"}[10m])) - sum(rate(webhook_stored_total[10m])) > 0.05
+        for: 10m
+        labels:
+          severity: page
+          area: webhooks
+        annotations:
+          summary: "Webhooks are answered 200 but not written down"
+          description: "Accepted webhook deliveries outnumber the events stored for 10 minutes. An event answered with a 200 and not stored is lost for good."
+          runbook: "deploy/prod/monitoring/README.md#webhooknotstored"
+      - alert: WebhookProcessingFailing
+        expr: sum by (provider) (rate(webhook_processed_total{result="failed"}[10m])) / sum by (provider) (rate(webhook_processed_total[10m])) > 0.1
+        for: 10m
+        labels:
+          severity: ticket
+          area: webhooks
+        annotations:
+          summary: "Stored webhook events are failing to process"
+          description: "More than 10% of the stored events of a provider failed when worked through, for 10 minutes. They stay stored and are retried."
+          runbook: "deploy/prod/monitoring/README.md#webhookprocessingfailing"
+      - alert: PaymentWebhookFailing
+        expr: sum(rate(webhook_received_total{provider=~"razorpay|razorpay_billing",result="refused"}[10m])) > 0.01 or sum(rate(webhook_processed_total{provider=~"razorpay|razorpay_billing",result="failed"}[10m])) > 0.01
+        for: 10m
+        labels:
+          severity: page
+          area: store
+        annotations:
+          summary: "Payment webhooks are failing"
+          description: "Razorpay webhooks (store payments or Bhava's own billing) were refused or failed in processing for 10 minutes. Orders may stay unpaid and subscriptions may not renew until they are retried."
+          runbook: "deploy/prod/monitoring/README.md#paymentwebhookfailing"
+      - alert: CourierWebhookFailing
+        expr: sum(rate(webhook_received_total{provider="shiprocket",result="refused"}[10m])) > 0.01 or sum(rate(webhook_processed_total{provider="shiprocket",result="failed"}[10m])) > 0.01
+        for: 15m
+        labels:
+          severity: ticket
+          area: store
+        annotations:
+          summary: "Courier tracking webhooks are failing"
+          description: "Shiprocket tracking webhooks were refused or failed in processing for 15 minutes. Shipment status shown to buyers will lag until they are retried."
+          runbook: "deploy/prod/monitoring/README.md#courierwebhookfailing"

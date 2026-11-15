@@ -1,0 +1,77 @@
+# Sending, the compliance gate and Meta. Generated once from the track's spec and edited by hand since; every alert has a case in tests/sending.yaml
+# that fires it on bad input and clears it on recovery. Metrics are the catalogue's (src/contracts/metrics.js).
+# Annotations are plain text on purpose: no template reads a label or a value, so nothing in an alert can name a person.
+groups:
+  - name: bhava-sending
+    interval: 1m
+    rules:
+      - alert: SendsFailing
+        expr: sum by (channel) (rate(compliance_outcomes_total{outcome="failed"}[10m])) / sum by (channel) (rate(compliance_outcomes_total{outcome=~"sent|failed"}[10m])) > 0.1 and sum by (channel) (rate(compliance_outcomes_total{outcome=~"sent|failed"}[10m])) > 0.01
+        for: 10m
+        labels:
+          severity: page
+          area: sending
+        annotations:
+          summary: "Messages are failing to send"
+          description: "More than 10% of send attempts on a channel failed for 10 minutes. Buyers are not getting their replies."
+          runbook: "deploy/prod/monitoring/README.md#sendsfailing"
+      - alert: SendsHeld
+        expr: sum by (channel) (rate(compliance_outcomes_total{family="held"}[15m])) > 0.05
+        for: 15m
+        labels:
+          severity: ticket
+          area: sending
+        annotations:
+          summary: "Messages are being held back"
+          description: "The compliance gate has held messages on a channel (for review or for a plan's message limit) at more than three a minute for 15 minutes."
+          runbook: "deploy/prod/monitoring/README.md#sendsheld"
+      - alert: ComplianceGateEngaged
+        expr: sum by (channel) (rate(compliance_outcomes_total{family="paused"}[10m])) / sum by (channel) (rate(compliance_outcomes_total[10m])) > 0.5 and sum by (channel) (rate(compliance_outcomes_total[10m])) > 0.02
+        for: 10m
+        labels:
+          severity: page
+          area: sending
+        annotations:
+          summary: "The kill switch or the breaker looks engaged"
+          description: "More than half of the send decisions on a channel were refused as paused for 10 minutes: the global kill switch or the circuit breaker is engaged, or every business paused at once. Check the compliance screen before anything else."
+          runbook: "deploy/prod/monitoring/README.md#compliancegateengaged"
+      - alert: MetaThrottling
+        expr: sum by (call_class) (rate(meta_calls_total{result="throttled"}[10m])) > 0.02
+        for: 10m
+        labels:
+          severity: ticket
+          area: sending
+        annotations:
+          summary: "Meta is throttling our calls"
+          description: "Meta answered calls of a class with a rate-limit error at more than one a minute for 10 minutes."
+          runbook: "deploy/prod/monitoring/README.md#metathrottling"
+      - alert: MetaUsageHigh
+        expr: max by (call_class) (meta_usage_ratio) > 0.8
+        for: 10m
+        labels:
+          severity: ticket
+          area: sending
+        annotations:
+          summary: "Meta rate limit use is above 80%"
+          description: "Some account has used more than 80% of a Meta rate limit for 10 minutes. Throttling is likely next."
+          runbook: "deploy/prod/monitoring/README.md#metausagehigh"
+      - alert: MetaUsageCritical
+        expr: max by (call_class) (meta_usage_ratio) > 0.95
+        for: 5m
+        labels:
+          severity: page
+          area: sending
+        annotations:
+          summary: "Meta rate limit use is above 95%"
+          description: "Some account has used more than 95% of a Meta rate limit for 5 minutes. Sends of that class are about to be refused."
+          runbook: "deploy/prod/monitoring/README.md#metausagecritical"
+      - alert: MetaTokenFailuresRising
+        expr: sum(rate(meta_calls_total{result="token_error"}[15m])) > 0.01
+        for: 10m
+        labels:
+          severity: ticket
+          area: sending
+        annotations:
+          summary: "Meta is rejecting access tokens"
+          description: "Calls to Meta failed for an invalid or revoked token at more than one every two minutes for 10 minutes. Businesses may need to reconnect, or a refresh is failing."
+          runbook: "deploy/prod/monitoring/README.md#metatokenfailuresrising"
