@@ -423,7 +423,13 @@ test('C-08: someone else\'s Instagram account can\'t be connected over this busi
   const { authorizeUrl } = await b.call('/instagram/connect', 200, { method: 'POST', body: {} });
   const consent = await fetch(authorizeUrl, { redirect: 'manual' });
   const back = new URL(consent.headers.get('location'));
-  await hit(world, `${back.pathname}${back.search}`, { host: b.host });
+  const done = await hit(world, `${back.pathname}${back.search}`, { host: b.host });
+  // D-4: the callback saves nothing; b started with its token, so b finishes the connect in its own session.
+  const next = new URL(done.headers.location ?? '/', 'http://relative.invalid');
+  if (next.searchParams.get('instagram') === 'finish') {
+    const finished = await b.call('/instagram/connect/finish', 200, { method: 'POST', body: { finishToken: next.searchParams.get('f') } });
+    assert.notEqual(finished.outcome, 'connected');
+  }
   const owners = await b.sql('SELECT tenant_id FROM ig_accounts WHERE ig_user_id = $1', [a.igUserId]);
   assert.deepEqual(owners.map((r) => r.tenant_id), [a.tenantId], 'The account stays with the business that has it');
 });

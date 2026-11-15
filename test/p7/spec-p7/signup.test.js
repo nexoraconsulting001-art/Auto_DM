@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { SIGNUP_STEPS } from '../../../src/contracts/billing.js';
 import {
   APP, appSignIn, assertSellerBrand, billingHook, cardCharge, charge, change, authorize, consoleUser, json, key, linksIn, need, newInvite, newPhone, one, opCall, setSetting, setSignup, shopOn, sql,
-  subscribe, unique, useBillingWorld, hit, pause,
+  subscribe, unique, useBillingWorld, hit, pause, finishConnect,
 } from './support.js';
 
 const world = useBillingWorld();
@@ -62,7 +62,8 @@ test('F-121: sign-up with a keyword and a link ends with the first automation li
   const connect = need(await owner.call('POST', '/instagram/connect', {}), 200, 'Starting Instagram');
   const consent = await fetch(connect.data.authorizeUrl, { redirect: 'manual' });
   const back = new URL(consent.headers.get('location'));
-  need(await hit(world, `${back.pathname}${back.search}`, { host }), [200, 302, 303], 'Instagram coming back');
+  const done = need(await hit(world, `${back.pathname}${back.search}`, { host }), [200, 302, 303], 'Instagram coming back');
+  assert.equal(await finishConnect(world, done, { send: owner.call, cookie: owner.cookie, host }), 'connected', 'the owner finishes the connect in their own session');
   const reel = numericId();
   await world.meta.post('/media', { igUserId, productType: 'REELS', caption: 'First reel', id: reel });
   const result = await person.call('POST', '/signup/first-automation', { runToken, mediaId: String(reel), keyword: 'LINK', link: 'https://example.com/shop' });
@@ -164,7 +165,8 @@ test('F-129: one Free plan per Instagram account: a second sign-up cannot take a
     const start = need(await owner.call('POST', '/instagram/connect', {}), 200, 'Starting Instagram');
     const consent = await fetch(start.data.authorizeUrl, { redirect: 'manual' });
     const back = new URL(consent.headers.get('location'));
-    return hit(world, `${back.pathname}${back.search}`, { host: run.started.data.host });
+    const done = await hit(world, `${back.pathname}${back.search}`, { host: run.started.data.host });
+    return Object.assign(done, { outcome: await finishConnect(world, done, { send: owner.call, cookie: owner.cookie, host: run.started.data.host }) });
   };
   need(await connectAs(first), [200, 302, 303], 'The first connection');
   const second = await signUp({ mode: null });
@@ -173,6 +175,7 @@ test('F-129: one Free plan per Instagram account: a second sign-up cannot take a
   assert.equal(linked.length, 1, 'one business holds the account');
   assert.equal(Number(linked[0].tenant_id), Number(first.started.data.tenantId));
   assert.ok(answer.status >= 300 || /already|another|one free/i.test(answer.text), `the second is told: ${answer.status}`);
+  assert.notEqual(answer.outcome, 'connected', 'D-4: and its finish step does not connect it either');
   void setSetting;
 });
 
@@ -348,7 +351,8 @@ async function connectIg(run, igUserId) {
   const start = need(await owner.call('POST', '/instagram/connect', {}), 200, 'Starting Instagram');
   const consent = await fetch(start.data.authorizeUrl, { redirect: 'manual' });
   const back = new URL(consent.headers.get('location'));
-  return hit(world, `${back.pathname}${back.search}`, { host: run.started.data.host });
+  const done = await hit(world, `${back.pathname}${back.search}`, { host: run.started.data.host });
+  return Object.assign(done, { outcome: await finishConnect(world, done, { send: owner.call, cookie: owner.cookie, host: run.started.data.host }) });
 }
 
 test('F-129: a self-referral by the same Instagram account is never credited, even when the referred account starts paying', async () => {
