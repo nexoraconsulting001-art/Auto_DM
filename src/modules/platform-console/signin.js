@@ -154,13 +154,20 @@ export function registerSignIn(router, ctx, auth) {
       await auth.recordFailure(req);
       throw new Refusal(400, TICKET_GONE, 'ticket_expired');
     }
-    // One try at a time per ticket.
-    const busy = `${key}:busy`;
-    if (await cache.get(busy)) throw new Refusal(429, 'Wait a moment and try again.', 'rate_limited');
-    await cache.set(busy, 1, 10);
+    // One try at a time per ticket, taken in one statement so two requests at the same moment cannot both hold it.
+    const ticketId = sha(body.ticket);
+    const busy = await platform.rateLimit.hit('platform_totp_busy', ticketId, { limit: 1, windowMs: 10_000 });
+    if (!busy.allowed) throw new Refusal(429, 'Wait a moment and try again.', 'rate_limited');
     try {
       const [user] = await pdb.query('SELECT id, email, name, role, totp_secret_enc, totp_enrolled_at FROM platform_users WHERE id = $1 AND disabled_at IS NULL', [held.userId]);
       if (!user) {
+        await cache.del(key);
+        throw new Refusal(400, TICKET_GONE, 'ticket_expired');
+      }
+      // Each try is counted before the code is checked, atomically: a burst cannot get more than TICKET_TRIES looks.
+      const attempt = await platform.rateLimit.hit('platform_totp_tries', ticketId, { limit: TICKET_TRIES, windowMs: PLATFORM_LOGIN.ticketMinutes * 60_000 });
+      if (!attempt.allowed) {
+        await auth.recordFailure(req);
         await cache.del(key);
         throw new Refusal(400, TICKET_GONE, 'ticket_expired');
       }
@@ -168,9 +175,8 @@ export function registerSignIn(router, ctx, auth) {
       const accepted = await acceptCode(user, body.code, enrolling);
       if (!accepted) {
         await auth.recordFailure(req);
-        const tries = held.tries + 1;
+        const tries = attempt.hits;
         if (tries >= TICKET_TRIES) await cache.del(key);
-        else await cache.set(key, { ...held, tries }, Math.max(1, (held.until - Date.now()) / 1000));
         await audit(user.id, 'platform.sign_in_totp_wrong', { tries });
         throw new Refusal(400, tries >= TICKET_TRIES ? TICKET_GONE : 'That code isn’t right. Check your authenticator and try again.', 'bad_code');
       }
@@ -188,7 +194,7 @@ export function registerSignIn(router, ctx, auth) {
       log.info('platform.signed_in', { userId: user.id, method: accepted });
       return { user: describe(user), csrf, ...(recoveryCodes ? { recoveryCodes } : {}) };
     } finally {
-      await cache.del(busy);
+      await platform.rateLimit.reset('platform_totp_busy', ticketId);
     }
   });
 

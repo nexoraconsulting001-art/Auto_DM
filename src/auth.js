@@ -198,11 +198,31 @@ export function createAuth({ secret, users, sessions, tenants, cache, passwordLo
 }
 
 /**
+ * The Platform Console's failed sign-ins per address, counted in Postgres (platform.rateLimit) in one statement: a
+ * read-then-write count in the cache (Redis in production, two round trips) loses failures that arrive together.
+ * Nothing clears it early: one person's good sign-in from an address says nothing about another's guesses there.
+ */
+function platformLimiter(rateLimit) {
+  const scope = 'platform_login_failures';
+  const window = { limit: MAX_FAILURES, windowMs: WINDOW_SECONDS * 1000 };
+  return {
+    async tooManyAttempts(req) {
+      return !(await rateLimit.peek(scope, String(req.ip), window)).allowed;
+    },
+    async recordFailure(req) {
+      await rateLimit.hit(scope, String(req.ip), window);
+    },
+    clearFailures: async () => {},
+  };
+}
+
+/**
  * Sessions for Bhava's own team, kept apart from business sessions: another table, another cookie.
  * Mounted only on the platform host. Sign-in methods (email OTP and TOTP, PRD 5.5) plug in as in createAuth.
+ * `rateLimit` is platform.rateLimit; without it (a test with no database) the limit is counted in the cache.
  */
-export function createPlatformAuth({ secret, platformUsers, cache }) {
-  const limiter = loginLimiter(cache, 'platform-login-attempts');
+export function createPlatformAuth({ secret, platformUsers, cache, rateLimit = null }) {
+  const limiter = rateLimit ? platformLimiter(rateLimit) : loginLimiter(cache, 'platform-login-attempts');
   const csrfFor = (token) => hmac(secret, `platform-csrf:${token}`);
 
   return {
@@ -224,7 +244,6 @@ export function createPlatformAuth({ secret, platformUsers, cache }) {
 
     /** Starts a session and returns its CSRF token. */
     async login(req, res, user) {
-      await limiter.clearFailures(req);
       const token = await platformUsers.createSession(user.id, PLATFORM_SESSION_DAYS);
       res.cookie(PLATFORM_COOKIE, token, {
         httpOnly: true,

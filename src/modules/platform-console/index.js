@@ -57,7 +57,7 @@ export const platformConsole = {
     const host = platformHostOf(ctx.config);
     if (!host) return; // No platform host configured: platform sign-in is off.
     const { repos, config, platform, modules } = ctx;
-    const auth = createPlatformAuth({ secret: config.sessionSecret, platformUsers: repos.platformUsers, cache: platform.cache });
+    const auth = createPlatformAuth({ secret: config.sessionSecret, platformUsers: repos.platformUsers, cache: platform.cache, rateLimit: platform.rateLimit });
     const r = express.Router();
     r.use(auth.load, auth.checkCsrf, auditConsoleWrites(ctx.db));
 
