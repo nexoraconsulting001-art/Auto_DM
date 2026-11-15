@@ -1,0 +1,37 @@
+{
+  "note": "The listing template for a seller's branded shopper app. The same template serves every business: {{brand_name}} is the business's own name (at most 30 characters, the brand file's limit), {{shop_name_short}} its short name. Buyers see the seller's brand only, so no text here names the platform; tools/review-pack fails if one does, and if any text is over a store's limit with a 30-character name. The permission sentences are the shopper app's own usage descriptions (apps/shopper/app.config.js).",
+  "play": {
+    "title": "{{brand_name}}",
+    "shortDescription": "Shop {{brand_name}} and track your orders in the app.",
+    "category": "SHOPPING",
+    "fullDescription": "{{brand_name}} in your pocket. Browse the catalog, save favourites, pay securely and follow every order until it arrives.\n\nShop\n- Browse products and collections, with photos and videos.\n- Save items to your wishlist and come back to them.\n- Pay with UPI, cards, netbanking or cash on delivery where the shop offers it.\n\nOrders\n- Track every order, from packed to delivered.\n- Start a return or exchange, with a photo of the item.\n- Leave a review with a photo.\n\nYour account\n- Sign in with a WhatsApp code, Google or Apple. There are no passwords.\n- Keep your addresses, so checkout takes a few taps.\n- Choose which notifications you get, and when.\n\nPermissions\n- The camera and photo library are used only when you add a photo for a return or a review.\n- Notifications tell you about your orders; offers only if you choose them.\n\nYou can delete your account in the app at any time."
+  },
+  "appStore": {
+    "name": "{{brand_name}}",
+    "subtitle": "Shop and track orders",
+    "promotionalText": "Browse, pay and follow your orders in one place.",
+    "keywords": "shop,store,orders,cart,wishlist,track,returns,cod,upi",
+    "primaryCategory": "Shopping",
+    "secondaryCategory": "Lifestyle",
+    "description": "{{brand_name}} in your pocket. Browse the catalog, save favourites, pay securely and follow every order until it arrives.\n\nShop\n- Browse products and collections, with photos and videos.\n- Save items to your wishlist and come back to them.\n- Pay with UPI, cards, netbanking or cash on delivery where the shop offers it.\n\nOrders\n- Track every order, from packed to delivered.\n- Start a return or exchange, with a photo of the item.\n- Leave a review with a photo.\n\nYour account\n- Sign in with a WhatsApp code, Google or Apple. There are no passwords.\n- Keep your addresses, so checkout takes a few taps.\n- Choose which notifications you get, and when.\n\nPermissions\n- The camera and photo library are used only when you add a photo for a return or a review.\n- Notifications tell you about your orders; offers only if you choose them.\n\nYou can delete your account in the app at any time."
+  },
+  "permissions": {
+    "android.permission.CAMERA": "Take a photo of an item for a return request or a review.",
+    "android.permission.POST_NOTIFICATIONS": "Notifications tell you about your orders; offers only if you choose them.",
+    "NSCameraUsageDescription": "Take a photo of an item for a return request or a review.",
+    "NSPhotoLibraryUsageDescription": "Choose a photo or a short video of an item for a return request or a review."
+  },
+  "collected": {
+    "name": { "play": { "category": "Personal info", "type": "Name" }, "apple": { "category": "Contact Info", "type": "Name" } },
+    "phone": { "play": { "category": "Personal info", "type": "Phone number" }, "apple": { "category": "Contact Info", "type": "Phone Number" } },
+    "email": { "play": { "category": "Personal info", "type": "Email address" }, "apple": { "category": "Contact Info", "type": "Email Address" } },
+    "address": { "play": { "category": "Personal info", "type": "Address" }, "apple": { "category": "Contact Info", "type": "Physical Address" } },
+    "purchase_history": { "play": { "category": "Financial info", "type": "Purchase history" }, "apple": { "category": "Purchases", "type": "Purchase History" } },
+    "device_id": { "play": { "category": "Device or other IDs", "type": "Device or other IDs" }, "apple": { "category": "Identifiers", "type": "Device ID" } }
+  },
+  "ageRating": {
+    "play": "Everyone, unless the business sells age-restricted goods; the questionnaire answers are in age-rating.md.",
+    "apple": "4+ unless the business sells age-restricted goods."
+  },
+  "reviewNotes": "The app opens on the shop {{brand_name}}. Use the review sign-in: in the app's sign-in screen enter the review phone number and code given in the credentials fields. The demo account has sample orders and a saved address. No payment is taken: the review build uses the payment gateway's test mode, and cash on delivery needs no payment. Notifications can be allowed or refused; the app works either way. Delete the account from the account screen."
+}

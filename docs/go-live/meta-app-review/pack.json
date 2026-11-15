@@ -1,0 +1,158 @@
+{
+  "note": "The source of the Meta App Review pack: every permission the code asks for, and the screencast that shows it. permissions.md and screencast-scripts.md are written from this file by `node tools/review-pack/index.mjs --write`; `node tools/review-pack/index.mjs` fails when this file and the code disagree. Nothing in the pack has been submitted to anyone.",
+  "submitted": false,
+  "permissions": [
+    {
+      "name": "instagram_business_basic", "group": "instagram", "login": "Instagram Login",
+      "usedFor": "Reads the connected professional account's id, username and profile picture, so a business can see which account is connected and Bhava can match webhook events to the right business.",
+      "where": "Connect screen (account name, connected badge and the list of what was allowed); the account name in the console header.",
+      "justification": "Our app lets a business connect its own Instagram professional account and automate replies to its own customers. We need instagram_business_basic to identify the account the business connected, show its username on the Connect screen so the owner can confirm it is the right account, and route incoming events to that business only. Without it the business cannot tell which account is linked and no other permission can work. We read only the connected account, never other people's profiles.",
+      "screencast": "sc-01-instagram-connect"
+    },
+    {
+      "name": "instagram_business_manage_messages", "group": "instagram", "login": "Instagram Login",
+      "usedFor": "Receives direct messages sent to the business and sends the business's own replies, inside Meta's 24-hour window and only through Bhava's compliance checks.",
+      "where": "Inbox (read and reply); Automations (a keyword or comment starts a reply); the compliance log that says why a message was or was not sent.",
+      "justification": "Our app helps small sellers answer customers who message their Instagram account. We need instagram_business_manage_messages to receive a customer's message through the webhook, show it in the seller's inbox, and send the seller's reply or the seller's own automation reply to that same customer. We send only to people who messaged the business first, inside the 24-hour window, with a visible opt-out, with per-person and per-comment limits, and never promotional text from Bhava.",
+      "screencast": "sc-02-messages"
+    },
+    {
+      "name": "instagram_business_manage_comments", "group": "instagram", "login": "Instagram Login",
+      "usedFor": "Reads comments on the business's own posts and reels and replies to them, including the comment-to-DM flow where a keyword in a comment starts a private reply.",
+      "where": "Automations (comment trigger and public reply); Inbox (comment threads).",
+      "justification": "Sellers ask customers to comment a word on a post to get the product link. We need instagram_business_manage_comments to receive those comments for the seller's own media, match the seller's keyword, post the seller's public reply, and start the private reply. Replies are limited per comment, per post and per hour, and comments are only read for the account that connected.",
+      "screencast": "sc-03-comments"
+    },
+    {
+      "name": "instagram_business_manage_insights", "group": "instagram", "login": "Instagram Login",
+      "usedFor": "Reads reach, views, interactions and audience figures for the connected account and its media, so the business sees how posts and automations perform.",
+      "where": "Analytics (account and post figures, refresh); Reach Guard and Account Health.",
+      "justification": "We show each seller how their own account and posts perform, and warn them when reach drops so they can slow their automations. We need instagram_business_manage_insights to read the account and media insight metrics Meta provides for the seller's own account. The figures are shown only to that seller, labelled with their source, and never sold, shared or used to profile people. If a seller does not allow this permission the product still works, and the screens say Permission needed.",
+      "screencast": "sc-04-insights"
+    },
+    {
+      "name": "pages_show_list", "group": "facebook", "login": "Facebook Login for Business",
+      "usedFor": "Lists the Facebook Pages the person manages so they can choose which Page to connect.",
+      "where": "Connect screen, Facebook section: the Page picker.",
+      "justification": "A seller who also sells through Facebook connects one Page to Bhava. We need pages_show_list to show the Pages the person manages so they choose the right one. We store only the chosen Page.",
+      "screencast": "sc-05-facebook-page"
+    },
+    {
+      "name": "pages_manage_metadata", "group": "facebook", "login": "Facebook Login for Business",
+      "usedFor": "Subscribes the app to the connected Page's webhook fields, so messages and comments on the Page reach the business.",
+      "where": "Connect screen, Facebook section: connected state and webhook status.",
+      "justification": "We need pages_manage_metadata to subscribe our app to the webhook fields of the one Page the seller connected, so the seller's Page messages and comments arrive. We make no other change to the Page and remove the subscription when the seller disconnects.",
+      "screencast": "sc-05-facebook-page"
+    },
+    {
+      "name": "pages_messaging", "group": "facebook", "login": "Facebook Login for Business",
+      "usedFor": "Receives and sends Messenger messages for the connected Page.",
+      "where": "Inbox (Messenger threads next to Instagram ones); Automations on the Page.",
+      "justification": "We need pages_messaging so a seller can answer customers who message their Facebook Page from the same inbox as Instagram. Messages go only to people who messaged the Page first, inside the messaging window, through the same limits and opt-out rules as Instagram.",
+      "screencast": "sc-05-facebook-page"
+    },
+    {
+      "name": "pages_read_engagement", "group": "facebook", "login": "Facebook Login for Business",
+      "usedFor": "Reads the Page's posts and the comments on them, so comment automations can match the seller's keyword.",
+      "where": "Automations on the Page (choose a post, comment trigger).",
+      "justification": "We need pages_read_engagement to read the seller's own Page posts and the comments on them, so the seller can pick a post for an automation and the keyword in a comment can be recognised. We read only the connected Page.",
+      "screencast": "sc-05-facebook-page"
+    },
+    {
+      "name": "pages_manage_engagement", "group": "facebook", "login": "Facebook Login for Business",
+      "usedFor": "Replies to comments on the connected Page's posts with the seller's own reply text.",
+      "where": "Automations on the Page (public reply to a comment).",
+      "justification": "We need pages_manage_engagement to post the seller's own public reply under a comment on the seller's Page post, for example 'Check your messages'. Replies are limited per comment and per hour, and nothing is posted without the seller having set the automation up.",
+      "screencast": "sc-05-facebook-page"
+    },
+    {
+      "name": "whatsapp_business_management", "group": "whatsapp", "login": "WhatsApp Embedded Signup",
+      "usedFor": "Lets a business with the WhatsApp add-on connect its own WhatsApp Business account and manage its message templates.",
+      "where": "WhatsApp screen: Connect WhatsApp (embedded signup), the number, and the template list.",
+      "justification": "A seller with the WhatsApp add-on connects their own WhatsApp Business account through Meta's embedded signup. We need whatsapp_business_management to read that account and its phone number and to create and read the message templates the seller uses. We touch only the account the seller chose.",
+      "screencast": "sc-06-whatsapp"
+    },
+    {
+      "name": "whatsapp_business_messaging", "group": "whatsapp", "login": "WhatsApp Embedded Signup",
+      "usedFor": "Sends and receives WhatsApp messages from the business's own number: order updates and replies to customers who agreed to hear from the business.",
+      "where": "WhatsApp screen: conversations and the automations that reply there.",
+      "justification": "We need whatsapp_business_messaging so a seller's WhatsApp number can reply to customers who wrote to it, and send approved template messages such as order updates to customers who opted in. Messages outside the 24-hour window use only approved templates, and an opt-out stops all further messages.",
+      "screencast": "sc-06-whatsapp"
+    }
+  ],
+  "screencasts": [
+    {
+      "id": "sc-01-instagram-connect", "title": "Connect an Instagram account", "rehearsal": "e2e/p9/screencasts/reviewer.spec.js",
+      "start": "The review sign-in page on the platform host, on a phone-sized screen.",
+      "steps": [
+        { "tap": "Open the review sign-in page and enter the review phone number and the review code from the submission form.", "see": "The Bhava review page, signed in, with 'No account is connected yet.'" },
+        { "tap": "Tap Connect Instagram.", "see": "Instagram's own consent screen, listing the four permissions: profile, messages, comments and insights." },
+        { "tap": "Allow all four.", "see": "Back on Bhava: 'Instagram is connected.', the account's @username, and a table of every permission that was granted." },
+        { "tap": "Tap the privacy policy link.", "see": "The privacy policy, with the heading about how to delete your data." },
+        { "tap": "Go back and tap Disconnect Instagram.", "see": "'Instagram is disconnected. The access token has been deleted.' and 'No account is connected yet.'" }
+      ]
+    },
+    {
+      "id": "sc-02-messages", "title": "Receive and reply to a direct message", "rehearsal": "",
+      "start": "Signed in to the console as the demo business's owner, with Instagram connected.",
+      "steps": [
+        { "tap": "From a second Instagram account that holds a tester role on the app, send a direct message to the connected account.", "see": "The message arrives on the phone being recorded." },
+        { "tap": "Open Inbox in the console.", "see": "The conversation with that message, newest first." },
+        { "tap": "Type a reply and tap Send.", "see": "The reply shows as sent, and arrives in the tester account's Instagram inbox." },
+        { "tap": "Open the compliance log for that conversation.", "see": "A line saying the message was sent, and the rule that allowed it. No message text appears in the log." }
+      ]
+    },
+    {
+      "id": "sc-03-comments", "title": "Comment on a post and get a private reply", "rehearsal": "",
+      "start": "Signed in as the owner, with one automation on a post: keyword 'LINK', a public reply and a private reply.",
+      "steps": [
+        { "tap": "Open Automations and open the automation.", "see": "The post, the keyword, the public reply and the private reply, with the switch on." },
+        { "tap": "From the tester account, comment the keyword on that post.", "see": "The comment appears under the post." },
+        { "tap": "Wait a few seconds, then open the post on the tester account.", "see": "The seller's public reply under the comment, and a direct message with the link in the tester's inbox." },
+        { "tap": "Open Inbox in the console.", "see": "The comment thread, with both replies marked as sent by the automation." }
+      ]
+    },
+    {
+      "id": "sc-04-insights", "title": "See account and post insights", "rehearsal": "e2e/p9/screencasts/insights.spec.js",
+      "start": "Signed in as the owner, with Instagram connected and insights allowed.",
+      "steps": [
+        { "tap": "Open Analytics.", "see": "Account figures by day, each labelled with its source and when it was last updated; the last two days flagged as still changing." },
+        { "tap": "Tap a metric such as Comments.", "see": "The metric's days; a day with no number says No data." },
+        { "tap": "Tap Refresh now.", "see": "A line saying when the figures were updated." }
+      ]
+    },
+    {
+      "id": "sc-05-facebook-page", "title": "Connect a Facebook Page and answer a Page message", "rehearsal": "",
+      "start": "Signed in as the owner, on the Connect screen, Facebook section.",
+      "steps": [
+        { "tap": "Tap Connect Facebook Page.", "see": "Facebook's own consent screen, listing the Page permissions." },
+        { "tap": "Choose the Page and allow.", "see": "Back on Bhava: the Page's name, the connected badge and the webhook status." },
+        { "tap": "From a tester account, send the Page a message and comment on a Page post.", "see": "Both arrive on the phone being recorded." },
+        { "tap": "Open Inbox and reply to the message.", "see": "The reply shows as sent and arrives in Messenger." },
+        { "tap": "Open the Page automation and show the public reply under the comment.", "see": "The seller's reply under the tester's comment on the Page post." }
+      ]
+    },
+    {
+      "id": "sc-06-whatsapp", "title": "Connect WhatsApp and send a template message", "rehearsal": "",
+      "start": "Signed in as the owner of a business that has the WhatsApp add-on, on the WhatsApp screen.",
+      "steps": [
+        { "tap": "Tap Connect WhatsApp.", "see": "Meta's embedded signup, asking which account and number to connect." },
+        { "tap": "Finish the signup.", "see": "Back on Bhava: the number, its quality status and the template list." },
+        { "tap": "Open a template and tap Send test to the owner's own number.", "see": "The message arrives on the owner's WhatsApp." },
+        { "tap": "From the owner's number, reply to it.", "see": "The reply shows in the WhatsApp conversation list." }
+      ]
+    }
+  ],
+  "reviewer": {
+    "loginPath": "/review",
+    "loginNote": "The review login works only for the review phone number and fixed code that go in Meta's submission form, and only while the review flag is on. It opens the demo business and nothing else. The phone number and code are set in the platform's own settings (REVIEW_LOGIN_PHONE and REVIEW_LOGIN_CODE_HASH) and are typed into the submission form by hand: they are never written in this repository.",
+    "demoBusiness": "The demo business is a sample shop that never sends: its compliance settings are paused with dry run on, so every message is held and shown as 'would send'. For the screencasts that must show a real message arriving, record with a business connected to a real test account that holds a role on the app."
+  },
+  "gates": [
+    { "code": "gate.access_level", "meaning": "The app has Advanced Access for the account (Standard Access only works for accounts with a role on the app)." },
+    { "code": "gate.scope_missing", "meaning": "The messages and comments permissions are granted; if not, the owner is shown a reconnect button." },
+    { "code": "gate.privacy_url", "meaning": "The privacy page answers at its public address." },
+    { "code": "gate.deletion_callback", "meaning": "The data deletion callback answers at its public address." },
+    { "code": "gate.passed", "meaning": "All of the above passed; the business may go live." }
+  ]
+}

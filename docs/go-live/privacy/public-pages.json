@@ -1,0 +1,14 @@
+{
+  "note": "The public pages App Review and the stores point to. `kind` says where the address is served: platform (the platform's own host) or business (each business's own domain). tools/review-pack checks each address against the code (src/contracts/api/provider.js, src/modules/ig-connect/gates.js, src/contracts/api/store.js).",
+  "pages": [
+    { "id": "privacy", "kind": "platform", "path": "/privacy", "used": ["meta", "play", "apple"], "what": "Privacy policy, including how to delete your data" },
+    { "id": "deauthorize", "kind": "platform", "path": "/meta/deauthorize", "used": ["meta"], "what": "Deauthorize callback (called by Meta, POST)" },
+    { "id": "deletion", "kind": "platform", "path": "/meta/deletion", "used": ["meta"], "what": "Data deletion callback (called by Meta, POST)" },
+    { "id": "deletion-status", "kind": "platform", "path": "/meta/deletion/:code", "used": ["meta"], "what": "Deletion progress page for a confirmation code" },
+    { "id": "review", "kind": "platform", "path": "/review", "used": ["meta"], "what": "Review sign-in page for App Review" },
+    { "id": "policy-privacy", "kind": "business", "path": "/policies/privacy", "used": ["play", "apple"], "what": "A business's privacy page (the seller's branded app points here)" },
+    { "id": "policy-terms", "kind": "business", "path": "/policies/terms", "used": ["play", "apple"], "what": "A business's terms page" },
+    { "id": "policy-refund", "kind": "business", "path": "/policies/refund", "used": ["play", "apple"], "what": "A business's refund page" },
+    { "id": "policy-shipping", "kind": "business", "path": "/policies/shipping", "used": ["play", "apple"], "what": "A business's shipping page" }
+  ]
+}
