@@ -71,6 +71,19 @@ async function needPlan(ctx) {
   if (!(await ctx.repos.entitlements.can(SHIPPING_FEATURE))) throw new ApiError('forbidden', 'Shipping isn’t on your plan.', { reason: 'plan' });
 }
 
+/**
+ * The business's own Shiprocket login is an integration credential: only the owner sets it, replaces it or switches
+ * the shipping mode (PRD: managers have no payment or integration keys; the owner may connect their own account). A
+ * manager keeps the pickup address and may send the mode and email as they already are, the way the screens send the form.
+ */
+async function ownerOnlyCourierAccount(settings, body, user) {
+  if (user?.role === 'owner') return;
+  const current = await settings.get();
+  const sameEmail = (value) => String(value ?? '').trim().toLowerCase() === String(current.ownEmail ?? '').trim().toLowerCase();
+  const touches = body.ownPassword !== undefined || (body.mode !== undefined && body.mode !== current.mode) || (body.ownEmail !== undefined && !sameEmail(body.ownEmail));
+  if (touches) throw new ApiError('forbidden', 'Only the owner can connect or change the courier account.');
+}
+
 /** Runs `fn` as each business in turn; one business's failure never stops the rest. */
 const asEach = (msg) => (tenant, fn) => withTenant(tenant, fn).catch((err) => reportError(err, { msg, tenantId: tenant }));
 
@@ -99,7 +112,9 @@ export const shipping = {
     'shippingSettings.get': () => shippingFor(ctx).settings.get(),
     'shippingSettings.update': async ({ body, user }) => {
       await needPlan(ctx);
-      return shippingFor(ctx).settings.update(body, actorOf(user));
+      const { settings } = shippingFor(ctx);
+      await ownerOnlyCourierAccount(settings, body, user);
+      return settings.update(body, actorOf(user));
     },
     'shipping.serviceability': async ({ query }) => {
       const { serviceability } = shippingFor(ctx);
