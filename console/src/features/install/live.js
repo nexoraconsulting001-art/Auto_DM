@@ -133,9 +133,24 @@ function showHint() {
   document.body.append(el);
 }
 
+/**
+ * The worker's scope is /admin/, so a page opened as /admin (no slash) is outside it and would run without the worker. Say
+ * /admin/ in the address bar before the router starts; the console's own routes are the same either way.
+ */
+function stayInScope() {
+  try {
+    const { pathname, search, hash } = globalThis.location;
+    const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+    if (base && pathname === base) globalThis.history.replaceState(globalThis.history.state, '', `${base}/${search}${hash}`);
+  } catch {
+    // the address stays as it was
+  }
+}
+
 export function startInstallLive() {
   if (started || typeof document === 'undefined') return;
   started = true;
+  stayInScope();
   watchSessions();
   addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
