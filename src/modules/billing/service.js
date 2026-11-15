@@ -755,7 +755,8 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       if (!stale(eventAtMs, lastMs)) {
         const start = ev.subscription?.currentStart ? iso(ev.subscription.currentStart * 1000) : null;
         const end = ev.subscription?.currentEnd ? iso(ev.subscription.currentEnd * 1000) : null;
-        const moves = s.next_plan && s.next_plan !== 'free' && planInfo && planInfo.plan_code === s.next_plan;
+        // The scheduled change is applied by a charge for exactly that plan and cycle: a monthly retry of the same plan is not it.
+        const moves = s.next_plan && s.next_plan !== 'free' && planInfo && planInfo.plan_code === s.next_plan && planInfo.cycle === (s.next_cycle ?? s.cycle);
         await t.query(
           `UPDATE subscriptions SET status = 'active', grace_until = NULL, suspended_at = NULL,
              current_period_start = CASE WHEN $2::timestamptz IS NOT NULL AND (current_period_end IS NULL OR $3::timestamptz >= current_period_end) THEN $2::timestamptz ELSE current_period_start END,
