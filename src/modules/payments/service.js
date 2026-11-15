@@ -342,7 +342,9 @@ export function createPayments(ctx) {
       const to = TRANSFER_EVENT[type] ?? null;
       if (!to) return { outcome: 'not_handled' };
       const from = row.transfer_status;
-      const forward = from === 'failed' ? to !== 'failed' : Object.hasOwn(TRANSFER_RANK, to) ? TRANSFER_RANK[to] > (TRANSFER_RANK[from] ?? 99) : from !== 'reversed' && from !== to;
+      // Route's amount_reversed is the transfer's running total: a later reversed event with a larger total is news (money-7).
+      const grew = to === 'reversed' && (paiseOf(transfer?.amountReversedPaise) ?? 0) > Number(row.reversed_paise);
+      const forward = from === 'failed' ? to !== 'failed' : Object.hasOwn(TRANSFER_RANK, to) ? TRANSFER_RANK[to] > (TRANSFER_RANK[from] ?? 99) : (from !== 'reversed' && from !== to) || grew;
       if (!forward) return { outcome: 'stale' };
 
       const transferPaise = Math.min(Number(row.amount_paise), paiseOf(transfer?.amountPaise) ?? Number(row.transfer_paise));
@@ -352,7 +354,24 @@ export function createPayments(ctx) {
       let review = to === 'failed';
       if (to === 'reversed') {
         const atGateway = Math.min(set.transfer_paise, paiseOf(transfer?.amountReversedPaise) ?? set.transfer_paise);
-        review = atGateway > Number(row.reversed_paise);
+        // First what this business's own refunds explain: a refund finished without its reversal in hand (a webhook, or an
+        // answer still to come) waits with reversal_status pending, and this is that reversal. Only the rest is unexplained.
+        let unexplained = atGateway - Number(row.reversed_paise);
+        if (unexplained > 0) {
+          const waiting = await t.query(
+            `SELECT * FROM refunds WHERE tenant_id = $1 AND payment_id = $2 AND method = 'gateway' AND status IN ('requested', 'processed') AND reversal_status IN ('pending', 'recover')
+             ORDER BY id FOR UPDATE`,
+            [tenantId(), row.id],
+          );
+          for (const refund of waiting) {
+            const take = Math.min(Number(refund.amount_paise), unexplained);
+            if (take <= 0) break;
+            await t.query(`UPDATE refunds SET reversal_status = 'reversed', reversal_paise = $3, updated_at = now() WHERE tenant_id = $1 AND id = $2`, [tenantId(), refund.id, take]);
+            await writeLine(t, { orderId: row.order_id, kind: 'transfer_reversal', amountPaise: -take, ref: `refund:${refund.id}` });
+            unexplained -= take;
+          }
+        }
+        review = unexplained > 0;
         set.reversed_paise = Math.max(Number(row.reversed_paise), atGateway);
       }
       if (to === 'processed' || to === 'settled') await writeLine(t, { orderId: row.order_id, kind: 'transfer', amountPaise: set.transfer_paise, ref });

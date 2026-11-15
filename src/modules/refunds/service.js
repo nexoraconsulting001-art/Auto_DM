@@ -68,9 +68,10 @@ export function createRefunds(ctx, payments) {
     const set = { processed_at: new Date(), error_code: '' };
     if (gatewayRefundId && !refund.gateway_refund_id) set.gateway_refund_id = gatewayRefundId;
 
-    // Managed: the same part of the seller's Route transfer comes back (S-75). Own mode never has one (S-76).
+    // Managed: the same part of the seller's Route transfer comes back (S-75). Own mode never has one (S-76). A reversal that
+    // Route's transfer.reversed already matched to this refund (payments.applyTransfer) is not counted again (money-7).
     let reversedPaise = 0;
-    if (payment.mode === 'managed') {
+    if (payment.mode === 'managed' && refund.reversal_status !== 'reversed') {
       const room = Number(payment.transfer_paise) - Number(payment.reversed_paise);
       const got = paiseOf(reversal?.amountPaise);
       if (got && got > 0) {
