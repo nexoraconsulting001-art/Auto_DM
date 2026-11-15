@@ -2,16 +2,20 @@
  * What a production configuration must be (Phase 9; G-09). The rules are data: each has an id, the settings it reads
  * and one test of the config. src/server.js and src/worker.js call guardProduction() at start when NODE_ENV is production.
  *
- *   DEPLOY_ENV=production   a failing rule refuses to start. The error lists rule ids and setting names, never a value.
- *   anything else           the failing rules are returned for the start-up log (`production.guard`), and the process
+ *   DEPLOY_ENV=production   a failing rule refuses to start, whatever NODE_ENV says (a production deploy that forgot
+ *                           NODE_ENV is still production). The error lists rule ids and setting names, never a value.
+ *   NODE_ENV=production     otherwise the failing rules are returned for the start-up log (`production.guard`), and the process
  *                           starts: QA on the shared VM and the tools that start the server with NODE_ENV=production run
  *                           the simple drivers on purpose. The go-live checklist treats this as not ready.
  *
  * The production templates in deploy/prod set DEPLOY_ENV=production; nothing else does.
  */
 const text = (value) => String(value ?? '').trim();
-const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|\[?::1\]?|0\.0\.0\.0|host\.docker\.internal)$/i;
-const TEST_HOST = /(^|\.)(test|localhost|example|invalid|local)$/i;
+const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|0(\.\d{1,3}){3}|\[::1?\]|::1?|host\.docker\.internal|gateway\.docker\.internal)$/i;
+const TEST_HOST = /(^|\.)(test|localhost|example|invalid|local|internal|lan|home|localdomain)$/i;
+const PRIVATE_V4 = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/;
+// IPv6 in brackets, as URL gives it: unique-local (fc00::/7), link-local (fe80::/10) and any IPv4-mapped address.
+const PRIVATE_V6 = /^\[(f[cd][0-9a-f]{0,2}:|fe[89ab][0-9a-f]?:|::ffff:)/i;
 
 /** Every setting that points an adapter at another address than the provider's own: empty in production. */
 export const SIMULATOR_SETTINGS = Object.freeze({
@@ -35,8 +39,11 @@ export function looksLikeSimulator(url) {
   } catch {
     return true;
   }
-  const host = parsed.hostname;
-  return parsed.protocol !== 'https:' || LOOPBACK.test(host) || TEST_HOST.test(host) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(host);
+  const host = parsed.hostname.replace(/\.+$/, '');
+  if (parsed.protocol !== 'https:' || !host) return true;
+  if (LOOPBACK.test(host) || TEST_HOST.test(host) || PRIVATE_V4.test(host) || PRIVATE_V6.test(host)) return true;
+  // A one-word name ("sim", "secrets") is a container or a hosts-file entry, never a provider's public address.
+  return !host.startsWith('[') && !host.includes('.');
 }
 
 /** A key or id the provider issues for its test mode. */
@@ -44,10 +51,19 @@ export const looksLikeTestKey = (value) => /^(rzp_test_|sk_test_|pk_test_)/i.tes
 
 const fromSecretSource = (config, name) => ['file', 'http'].includes(config.secretSources?.[name]);
 
+/** The login (user name) of a database address, or '' when it has none or is not an address. */
+export function loginOf(url) {
+  try {
+    return decodeURIComponent(new URL(text(url)).username);
+  } catch {
+    return '';
+  }
+}
+
 /** Each rule: id, the settings to change, what must hold, and ok(config) -> boolean. */
 export const PRODUCTION_RULES = Object.freeze([
-  { id: 'db.two_logins', settings: ['DATABASE_URL', 'DATABASE_OWNER_URL'], must: 'two database logins: the restricted app role and the owner', ok: (c) => Boolean(text(c.databaseUrl) && text(c.databaseOwnerUrl) && c.databaseUrl !== c.databaseOwnerUrl) },
-  { id: 'storage.object', settings: ['STORAGE_DRIVER', 'S3_BUCKET'], must: 'object storage, not a local folder', ok: (c) => c.storageDriver === 's3' && Boolean(text(c.s3Bucket)) },
+  { id: 'db.two_logins', settings: ['DATABASE_URL', 'DATABASE_OWNER_URL'], must: 'two database logins: the restricted app role and the owner', ok: (c) => Boolean(loginOf(c.databaseUrl) && loginOf(c.databaseOwnerUrl) && loginOf(c.databaseUrl) !== loginOf(c.databaseOwnerUrl)) },
+  { id: 'storage.object', settings: ['STORAGE_DRIVER', 'S3_BUCKET', 'S3_ENDPOINT'], must: 'object storage, not a local folder or a test endpoint', ok: (c) => c.storageDriver === 's3' && Boolean(text(c.s3Bucket)) && !looksLikeSimulator(c.s3Endpoint) },
   { id: 'queue.redis', settings: ['QUEUE_DRIVER', 'REDIS_URL'], must: 'the queue on Redis', ok: (c) => c.queueDriver === 'redis' && Boolean(text(c.redisUrl)) },
   { id: 'cache.redis', settings: ['CACHE_DRIVER', 'REDIS_URL'], must: 'the cache on Redis, not in memory', ok: (c) => c.cacheDriver === 'redis' && Boolean(text(c.redisUrl)) },
   { id: 'secrets.data_key', settings: ['DATA_KEY', 'SECRETS_DRIVER'], must: 'DATA_KEY from a mounted file or a secret manager', ok: (c) => Boolean(text(c.dataKey)) && fromSecretSource(c, 'DATA_KEY') },
@@ -76,7 +92,10 @@ export function productionProblems(config, rules = PRODUCTION_RULES) {
 }
 
 export const isProduction = (env = process.env) => text(env.NODE_ENV).toLowerCase() === 'production';
-export const deployEnvOf = (config, env = process.env) => text(config?.deployEnv ?? env.DEPLOY_ENV).toLowerCase();
+export const deployEnvOf = (config, env = process.env) => {
+  const value = text(config?.deployEnv || env.DEPLOY_ENV).toLowerCase();
+  return value === 'prod' ? 'production' : value;
+};
 
 export class ProductionGuardError extends Error {
   constructor(problems) {
@@ -87,12 +106,13 @@ export class ProductionGuardError extends Error {
 }
 
 /**
- * Called at start. Outside NODE_ENV=production it does nothing and answers []. In production it answers the broken rules,
- * and throws ProductionGuardError instead when DEPLOY_ENV is production.
+ * Called at start. With DEPLOY_ENV=production (or prod) a broken rule throws ProductionGuardError, whatever NODE_ENV is.
+ * Otherwise, under NODE_ENV=production, it answers the broken rules for the log; outside both it does nothing and answers [].
  */
 export function guardProduction(config, env = process.env) {
-  if (!isProduction(env)) return [];
+  const enforced = deployEnvOf(config, env) === 'production';
+  if (!enforced && !isProduction(env)) return [];
   const problems = productionProblems(config);
-  if (problems.length && deployEnvOf(config, env) === 'production') throw new ProductionGuardError(problems);
+  if (problems.length && enforced) throw new ProductionGuardError(problems);
   return problems;
 }
