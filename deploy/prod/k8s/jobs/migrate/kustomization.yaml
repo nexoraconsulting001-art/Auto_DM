@@ -1,0 +1,14 @@
+# The migration Job, applied on its own BEFORE each rollout (runbooks/rollout-and-rollback.md):
+#   kubectl -n bhava delete job bhava-migrate --ignore-not-found
+#   kubectl apply -k deploy/prod/k8s/overlays/production-migrate
+#   kubectl -n bhava wait --for=condition=complete job/bhava-migrate --timeout=15m
+#   kubectl apply -k deploy/prod/k8s/overlays/production
+# A Job's pod template cannot change, so it is never part of the base that every rollout re-applies.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: bhava
+    includeSelectors: false
+resources:
+  - job.yaml

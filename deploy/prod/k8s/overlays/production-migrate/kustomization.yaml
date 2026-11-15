@@ -1,0 +1,10 @@
+# The migration Job for production: the same namespace and image as overlays/production. Change newTag in both.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: bhava
+resources:
+  - ../../jobs/migrate
+images:
+  - name: bhava-web
+    newName: registry.example.com/bhava/bhava-web
+    newTag: "0.0.0-set-me"

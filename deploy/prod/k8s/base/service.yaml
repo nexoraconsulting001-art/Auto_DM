@@ -1,0 +1,35 @@
+# The web servers, with no session stickiness: sessions live in the database, so any pod answers any request.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bhava-web
+  labels:
+    app.kubernetes.io/name: bhava
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bhava
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# The worker's health port, for the monitoring stack only (the network policy admits nothing else).
+apiVersion: v1
+kind: Service
+metadata:
+  name: bhava-worker
+  labels:
+    app.kubernetes.io/name: bhava
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bhava
+    app.kubernetes.io/component: worker
+  ports:
+    - name: health
+      port: 3001
+      targetPort: health

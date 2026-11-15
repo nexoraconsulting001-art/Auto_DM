@@ -1,0 +1,44 @@
+# Placeholders only. Copy to terraform.tfvars outside the repository (or pass -var-file) and fill in.
+# No value here is a secret: credentials live in the secret store, under the names in deploy/prod/compose/README.md.
+
+kubeconfig_path    = "~/.kube/config"
+kube_context       = "set-me"
+namespace          = "bhava"
+ingress_namespace  = "set-me-ingress-namespace"
+ingress_class_name = "set-me"
+
+# One of deploy/prod/regions.json: an India region of the chosen provider.
+region = "set-me"
+
+web_image    = "registry.example.com/bhava/bhava-web:0.0.0"
+worker_image = "registry.example.com/bhava/bhava-worker:0.0.0"
+release      = "0.0.0"
+
+platform_domain = "example.com"
+public_base_url = "https://app.example.com"
+
+postgres = {
+  host     = "postgres.example.com"
+  database = "bhava"
+  cidr     = "192.0.2.0/28"
+}
+
+redis = {
+  host = "redis.example.com"
+  cidr = "192.0.2.16/28"
+}
+
+analytics = {
+  url  = "https://analytics.example.com:8443"
+  cidr = "192.0.2.32/28"
+}
+
+object_storage = {
+  endpoint      = "https://objects.example.com"
+  bucket        = "bhava-files"
+  backup_bucket = "bhava-backups"
+}
+
+secrets = {
+  external_store_name = ""
+}

@@ -1,0 +1,214 @@
+# Bhava in production on one host (or a few) without Kubernetes: two web servers behind a small load balancer, one
+# worker, Redis and the analytics database. Postgres and object storage are outside addresses (managed services).
+#
+#   docker compose --env-file .env -f compose.yaml up -d
+#
+# Every secret is a mounted file: the app containers read SECRETS_DIR=/run/secrets (SECRETS_DRIVER=file), a read-only
+# folder with one file per setting, named as the setting (DATA_KEY, DATABASE_URL, ...). Redis and the analytics
+# database take their passwords from their own files. None of those files is in this repository: SECRETS_HOST_DIR
+# names where they are on the host (README.md here lists them). No value in this file is a secret or a real address.
+name: bhava-prod
+
+x-app: &app
+  restart: unless-stopped
+  user: node
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m,mode=1777
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  # Longer than SHUTDOWN_SECONDS, so the drain always finishes before the container is killed.
+  stop_grace_period: 40s
+  stop_signal: SIGTERM
+  environment: &app-env
+    NODE_ENV: production
+    DEPLOY_ENV: production
+    RELEASE: ${RELEASE:?set RELEASE}
+    SECRETS_DRIVER: file
+    SECRETS_DIR: /run/secrets
+    SECRETS_FORMAT: v2
+    PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:?set PLATFORM_DOMAIN}
+    PLATFORM_HOST: ${PLATFORM_HOST:-}
+    PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL}
+    STORAGE_DRIVER: s3
+    S3_ENDPOINT: ${S3_ENDPOINT:?set S3_ENDPOINT}
+    S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET}
+    S3_REGION: ${S3_REGION:?set S3_REGION}
+    S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-0}
+    BACKUP_STORAGE_DRIVER: s3
+    BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:?set BACKUP_S3_ENDPOINT}
+    BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:?set BACKUP_S3_BUCKET}
+    BACKUP_S3_REGION: ${BACKUP_S3_REGION:?set BACKUP_S3_REGION}
+    QUEUE_DRIVER: redis
+    CACHE_DRIVER: redis
+    ANALYTICS_DRIVER: clickhouse
+    CLICKHOUSE_DB: ${CLICKHOUSE_DB:-bhava}
+    SHUTDOWN_SECONDS: "25"
+    HEALTH_CHECK_MS: "2000"
+  volumes:
+    - type: bind
+      source: ${SECRETS_HOST_DIR:?set SECRETS_HOST_DIR}/app
+      target: /run/secrets
+      read_only: true
+  networks: [app, data]
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+
+x-web: &web
+  <<: *app
+  image: ${BHAVA_WEB_IMAGE:?set BHAVA_WEB_IMAGE}
+  command: ["node", "src/server.js"]
+  environment:
+    <<: *app-env
+    PORT: "3000"
+  expose: ["3000"]
+  depends_on:
+    redis: { condition: service_healthy }
+    analytics: { condition: service_healthy }
+  deploy:
+    resources:
+      limits: { cpus: "1.0", memory: 768m }
+      reservations: { memory: 384m }
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+    interval: 10s
+    timeout: 5s
+    retries: 3
+    start_period: 60s
+
+services:
+  web-1:
+    <<: *web
+  web-2:
+    <<: *web
+
+  worker:
+    <<: *app
+    image: ${BHAVA_WORKER_IMAGE:?set BHAVA_WORKER_IMAGE}
+    command: ["node", "src/worker.js"]
+    environment:
+      <<: *app-env
+      WORKER_HEALTH_HOST: 127.0.0.1
+      WORKER_HEALTH_PORT: "3001"
+    depends_on:
+      redis: { condition: service_healthy }
+      analytics: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768m }
+        reservations: { memory: 384m }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # The load balancer: round robin over the two web servers, each health-checked on /readyz, with no stickiness.
+  # It ends TLS: an origin certificate for the platform hosts (Cloudflare in front), and on-demand certificates for
+  # sellers' own domains, issued only for hosts the app's /tls/ask approves. Caddyfile here.
+  lb:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:?set PLATFORM_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+      TRUSTED_PROXY_RANGES: ${TRUSTED_PROXY_RANGES:?set TRUSTED_PROXY_RANGES}
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      - type: bind
+        source: ${SECRETS_HOST_DIR:?set SECRETS_HOST_DIR}/lb
+        target: /run/secrets
+        read_only: true
+      - caddy-data:/data
+      - caddy-config:/config
+    tmpfs:
+      - /tmp:size=16m
+    depends_on:
+      web-1: { condition: service_started }
+      web-2: { condition: service_started }
+    networks: [edge, app]
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256m }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *logging
+
+  # The queue and the cache. Its password is in redis.conf (requirepass), the same one REDIS_URL carries.
+  redis:
+    image: redis:7.4.1-alpine
+    restart: unless-stopped
+    command: ["redis-server", "/run/secrets/redis.conf"]
+    volumes:
+      - type: bind
+        source: ${SECRETS_HOST_DIR:?set SECRETS_HOST_DIR}/redis/redis.conf
+        target: /run/secrets/redis.conf
+        read_only: true
+      - redis-data:/data
+    networks: [data]
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512m }
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping 2>&1 | grep -qE 'PONG|NOAUTH'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  # The analytics database. Its login is in users.xml, the same one CLICKHOUSE_URL carries.
+  analytics:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    restart: unless-stopped
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - type: bind
+        source: ${SECRETS_HOST_DIR:?set SECRETS_HOST_DIR}/analytics/users.xml
+        target: /etc/clickhouse-server/users.d/bhava.xml
+        read_only: true
+      - analytics-data:/var/lib/clickhouse
+    networks: [data]
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 2g }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    logging: *logging
+
+networks:
+  # Only the load balancer is reachable from outside.
+  edge: {}
+  # The web servers and the worker reach the outside world (Meta, Postgres, object storage) through this one.
+  app: {}
+  # Redis and the analytics database: no way out, and only the app containers on it.
+  data:
+    internal: true
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}
+  redis-data: {}
+  analytics-data: {}

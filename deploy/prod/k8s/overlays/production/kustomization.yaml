@@ -1,0 +1,30 @@
+# Production: the image tag, the replica counts, the hosts, DEPLOY_ENV=production and the data services' address
+# ranges. Every value marked "set-me" or under example.com / the documentation address ranges is a placeholder;
+# the Terraform module (../../../terraform) sets all of them from its variables instead of this file.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: bhava
+resources:
+  - ../../base
+images:
+  - name: bhava-web
+    newName: registry.example.com/bhava/bhava-web
+    newTag: "0.0.0-set-me"
+  - name: bhava-worker
+    newName: registry.example.com/bhava/bhava-worker
+    newTag: "0.0.0-set-me"
+replicas:
+  - name: bhava-web
+    count: 2
+  - name: bhava-worker
+    count: 1
+patches:
+  - path: config.yaml
+  - path: ingress.yaml
+  - target:
+      kind: Deployment
+      name: bhava-(web|worker)
+    patch: |-
+      - op: replace
+        path: /spec/template/metadata/annotations/bhava.app~1config-version
+        value: "1"

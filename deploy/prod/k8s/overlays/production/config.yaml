@@ -1,0 +1,21 @@
+# Production settings merged into bhava-config. Placeholders: the platform domain is example.com, and the object
+# storage endpoint, buckets and region are set by whoever deploys (Terraform fills them from its variables).
+# S3_REGION and BACKUP_S3_REGION must be an India region from deploy/prod/regions.json.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bhava-config
+data:
+  DEPLOY_ENV: production
+  RELEASE: "0.0.0-set-me"
+  PLATFORM_DOMAIN: example.com
+  PLATFORM_HOST: app.example.com
+  PUBLIC_BASE_URL: https://app.example.com
+  S3_ENDPOINT: https://objects.example.com
+  S3_BUCKET: bhava-files
+  S3_REGION: set-me
+  S3_FORCE_PATH_STYLE: "0"
+  BACKUP_S3_ENDPOINT: https://objects.example.com
+  BACKUP_S3_BUCKET: bhava-backups
+  BACKUP_S3_REGION: set-me
+  CLICKHOUSE_DB: bhava

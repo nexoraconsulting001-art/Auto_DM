@@ -1,0 +1,14 @@
+# The way in. The class and the platform hosts are the overlay's. A host no rule names (a seller's own domain)
+# reaches the web servers through the default backend, and the app finds the business by its host.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bhava
+  labels:
+    app.kubernetes.io/name: bhava
+spec:
+  defaultBackend:
+    service:
+      name: bhava-web
+      port:
+        name: http

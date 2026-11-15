@@ -1,0 +1,71 @@
+# Brings the database up to the new release's migrations and makes sure the restricted app login exists, then exits.
+# It runs with the NEW image while the OLD pods still serve: every migration must keep the running release working
+# (add, backfill, then remove in a later release; runbooks/database-changes.md). The web servers also run any
+# missing migration at start under the same advisory lock, and report /readyz "behind" until they have, so new code
+# never takes traffic on an old schema. It reads only the two database logins, from the secret volume.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bhava-migrate
+  labels:
+    app.kubernetes.io/name: bhava
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bhava
+        app.kubernetes.io/component: migrate
+        bhava.app/data-client: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: bhava
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: bhava-web
+          imagePullPolicy: IfNotPresent
+          command: ["node", "scripts/move-to-cloud.js", "schema"]
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: SECRETS_DRIVER
+              value: file
+            - name: SECRETS_DIR
+              value: /run/secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: secrets
+              mountPath: /run/secrets
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: secrets
+          secret:
+            secretName: bhava-secrets
+            defaultMode: 0400

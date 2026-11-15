@@ -1,0 +1,118 @@
+# The web server: two or more replicas behind the Service. A rollout adds a new pod before it removes an old one
+# (maxUnavailable 0), and a new pod takes traffic only once /readyz says the database, the migrations, the queue,
+# storage and the cache are up, so old code keeps serving until the new code is ready.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bhava-web
+  labels:
+    app.kubernetes.io/name: bhava
+    app.kubernetes.io/component: web
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bhava
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bhava
+        app.kubernetes.io/component: web
+        bhava.app/data-client: "true"
+      annotations:
+        # Changed by the overlay or Terraform when bhava-config changes, so the pods restart with the new settings.
+        bhava.app/config-version: "0"
+    spec:
+      serviceAccountName: bhava
+      automountServiceAccountToken: false
+      # Longer than the preStop pause (5 s) plus SHUTDOWN_SECONDS (25 s), so the drain always finishes.
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: bhava
+              app.kubernetes.io/component: web
+      containers:
+        - name: web
+          image: bhava-web
+          imagePullPolicy: IfNotPresent
+          command: ["node", "src/server.js"]
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: bhava-config
+          env:
+            - name: NODE_OPTIONS
+              value: --max-old-space-size=512
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          startupProbe:
+            httpGet:
+              path: /startupz
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 90
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          lifecycle:
+            # The pre-stop drain: the pod leaves the Service's endpoints before SIGTERM arrives; then the server stops
+            # taking new requests and finishes those in flight within SHUTDOWN_SECONDS.
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: secrets
+              mountPath: /run/secrets
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: secrets
+          secret:
+            secretName: bhava-secrets
+            defaultMode: 0400

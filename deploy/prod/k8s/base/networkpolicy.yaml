@@ -1,0 +1,149 @@
+# Network policy: nothing in the namespace talks to anything unless a policy below allows it.
+#
+# The database stays private: only pods labelled bhava.app/data-client (web, worker, the migration Job, the backup
+# CronJob) may reach the database, Redis and the analytics database, each on its own port and address range, and
+# nothing may reach a Postgres pod in this namespace except those pods. The managed database's own firewall should
+# admit only the cluster's egress addresses as well (runbooks/first-deploy.md).
+#
+# The address ranges here are placeholders from the documentation ranges (RFC 5737); the overlay or the Terraform
+# module replaces them with the managed services' ranges.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bhava-default-deny
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bhava-dns
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# The ingress controller's namespace (labelled bhava.app/ingress=true) reaches the web servers; the monitoring
+# namespace (bhava.app/monitoring=true) reaches the health and metrics ports. Nothing else comes in.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bhava-web-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: bhava
+      app.kubernetes.io/component: web
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              bhava.app/ingress: "true"
+        - namespaceSelector:
+            matchLabels:
+              bhava.app/monitoring: "true"
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bhava-worker-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: bhava
+      app.kubernetes.io/component: worker
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              bhava.app/monitoring: "true"
+      ports:
+        - protocol: TCP
+          port: 3001
+---
+# What the app's pods may reach: the three data services by range and port, object storage, and the public internet
+# on 443 (Meta, WhatsApp, the payment and courier providers) but no other private address.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bhava-data-egress
+spec:
+  podSelector:
+    matchLabels:
+      bhava.app/data-client: "true"
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.0.2.0/28
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - ipBlock:
+            cidr: 192.0.2.16/28
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - ipBlock:
+            cidr: 192.0.2.32/28
+      ports:
+        - protocol: TCP
+          port: 8123
+        - protocol: TCP
+          port: 8443
+    - to:
+        - ipBlock:
+            cidr: 192.0.2.48/28
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# When Postgres runs inside the cluster instead of as a managed service (a test cluster), its pods carry
+# bhava.app/role=database, and only the app's pods reach them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bhava-database-private
+spec:
+  podSelector:
+    matchLabels:
+      bhava.app/role: database
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              bhava.app/data-client: "true"
+      ports:
+        - protocol: TCP
+          port: 5432

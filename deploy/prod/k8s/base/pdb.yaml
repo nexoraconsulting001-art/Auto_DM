@@ -1,0 +1,22 @@
+# A node drain or a cluster upgrade never takes the last ready web server, and takes worker pods one at a time.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bhava-web
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bhava
+      app.kubernetes.io/component: web
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bhava-worker
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bhava
+      app.kubernetes.io/component: worker
