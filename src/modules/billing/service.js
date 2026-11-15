@@ -33,6 +33,15 @@ const DAY = 86_400_000;
 export const QUEUE_AHEAD_MS = DAY;
 const LIVE = ['active', 'past_due', 'grace'];
 const PASS_THROUGH_METERS = Object.freeze({ whatsapp_messages: { kind: 'whatsapp', name: 'WhatsApp messages, at cost' }, ai_units: { kind: 'ai', name: 'AI usage, at cost' } });
+/**
+ * The pass-through kinds billed on Bhava's invoice (collected_by 'invoice'): the provider charge's name and the invoice line's
+ * label. Shipping is here only for a seller billed monthly for its courier charges (shipping_settings.charge_billing).
+ */
+const INVOICED_PASS_THROUGH = Object.freeze({
+  whatsapp: { name: 'WhatsApp messages, at cost', label: 'WhatsApp messages' },
+  ai: { name: 'AI usage, at cost', label: 'AI usage' },
+  shipping: { name: 'Shipping, at cost', label: 'Shipping' },
+});
 
 const iso = (value) => (value ? new Date(value).toISOString() : null);
 const day = (value) => (value ? new Date(value).toISOString().slice(0, 10) : null);
@@ -651,11 +660,16 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       if (planInfo && planInfo.plan_code !== 'free') lines.push(await planLine(t, { plan: planInfo.plan_code, cycle: planInfo.cycle, offer, settings, placeOfSupply: pos, periodStart, periodEnd }));
       const queued = await t.query(`SELECT * FROM subscription_items WHERE tenant_id = $1 AND provider_item_id IS NOT NULL AND provider_item_id NOT LIKE 'free:%' ORDER BY id`, [business]);
       for (const item of queued) lines.push(itemLine(item, addons.get(item.addon_code), { offer, settings, placeOfSupply: pos, months }));
-      const passing = await t.query(`SELECT * FROM pass_through_charges WHERE tenant_id = $1 AND collected_by = 'invoice' AND invoice_id IS NULL ORDER BY id`, [business]);
+      // Only what queuePassThrough asked the provider to charge, one line per kind and month, as it was asked for.
+      const passing = await t.query(
+        `SELECT kind, period, array_agg(id ORDER BY id) AS ids, sum(amount_paise)::bigint AS amount, sum(quantity)::bigint AS quantity FROM pass_through_charges
+         WHERE tenant_id = $1 AND collected_by = 'invoice' AND invoice_id IS NULL AND queued_at IS NOT NULL AND kind = ANY($2::text[]) GROUP BY kind, period ORDER BY period, kind`,
+        [business, Object.keys(INVOICED_PASS_THROUGH)],
+      );
       for (const charge of passing) {
         lines.push(taxedLine({
-          kind: 'pass_through', code: charge.kind, description: `${charge.kind === 'whatsapp' ? 'WhatsApp messages' : 'AI usage'} at cost, ${String(day(charge.period)).slice(0, 7)}`, sac: settings.sac,
-          quantity: Number(charge.quantity), unitPaise: 0, grossPaise: Number(charge.amount_paise), rateBp: settings.tax_rate_bp, sellerState: settings.state_code, placeOfSupply: pos,
+          kind: 'pass_through', code: charge.kind, description: `${INVOICED_PASS_THROUGH[charge.kind].label} at cost, ${String(day(charge.period)).slice(0, 7)}`, sac: settings.sac,
+          quantity: Number(charge.quantity), unitPaise: 0, grossPaise: Number(charge.amount), rateBp: settings.tax_rate_bp, sellerState: settings.state_code, placeOfSupply: pos,
         }));
       }
       const expected = totalsOf(lines).totalPaise;
@@ -670,7 +684,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
             [business, queued.map((i) => Number(i.id)), iso(ev.subscription?.currentEnd ? ev.subscription.currentEnd * 1000 : at())],
           );
         }
-        if (passing.length) await t.query('UPDATE pass_through_charges SET invoice_id = $3 WHERE tenant_id = $1 AND id = ANY($2::bigint[])', [business, passing.map((c) => Number(c.id)), invoice.id]);
+        if (passing.length) await t.query('UPDATE pass_through_charges SET invoice_id = $3 WHERE tenant_id = $1 AND id = ANY($2::bigint[])', [business, passing.flatMap((c) => c.ids.map(Number)), invoice.id]);
       }
       await recordPayment(t, { s, payment: ev.payment, status: 'captured', invoiceId: invoice?.id ?? null });
 
@@ -807,26 +821,54 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     return done;
   }
 
-  /** The months before this one with a WhatsApp or AI cost not yet charged: queued at cost, then written with their counts. */
+  /**
+   * The one writer of pass-through charges to the provider (F-114, 9.10). For every closed month (never this one, which is
+   * still counting): the WhatsApp and AI cost rows, written here from usage_months when the hourly usage job has not yet,
+   * and every invoice-billed row not yet queued (WhatsApp, AI, and courier charges of a seller billed monthly) are charged
+   * at the provider as one line per kind and month, and marked queued_at. Only queued rows go on the invoice (applyCharge),
+   * so the invoice lists exactly what the provider takes. The rows are claimed before the provider is asked and released
+   * if it fails, so the next run asks again with the same key, which the provider answers with the same line.
+   */
   async function queuePassThrough(s, settings) {
     const thisMonth = usageMonthOf(at());
-    const months = await db.query(
-      `SELECT meter, month, used, cost_paise FROM usage_months WHERE tenant_id = $1 AND meter = ANY($2::text[]) AND month < $3::date AND cost_paise > 0 ORDER BY month, meter`,
+    await db.query(
+      `INSERT INTO pass_through_charges (tenant_id, kind, amount_paise, quantity, period, collected_by, source_ref)
+       SELECT tenant_id, CASE meter WHEN 'whatsapp_messages' THEN 'whatsapp' ELSE 'ai' END, cost_paise, used, month, 'invoice', 'usage:' || meter || ':' || to_char(month, 'YYYY-MM')
+       FROM usage_months WHERE tenant_id = $1 AND meter = ANY($2::text[]) AND month < $3::date AND cost_paise > 0
+       ON CONFLICT (tenant_id, kind, source_ref) DO UPDATE SET amount_paise = EXCLUDED.amount_paise, quantity = EXCLUDED.quantity
+         WHERE pass_through_charges.invoice_id IS NULL AND pass_through_charges.queued_at IS NULL
+           AND (pass_through_charges.amount_paise, pass_through_charges.quantity) IS DISTINCT FROM (EXCLUDED.amount_paise, EXCLUDED.quantity)`,
       [tenantId(), Object.keys(PASS_THROUGH_METERS), thisMonth],
     );
     const buyer = await buyerOf(db, settings);
     let count = 0;
-    for (const m of months) {
-      const { kind, name } = PASS_THROUGH_METERS[m.meter];
-      const ref = `usage:${m.meter}:${day(m.month).slice(0, 7)}`;
-      const [exists] = await db.query('SELECT 1 FROM pass_through_charges WHERE tenant_id = $1 AND kind = $2 AND source_ref = $3', [tenantId(), kind, ref]);
-      if (exists) continue;
-      const line = taxedLine({ kind: 'pass_through', code: kind, description: name, grossPaise: Number(m.cost_paise), quantity: Number(m.used), rateBp: settings.tax_rate_bp, sellerState: settings.state_code, placeOfSupply: buyer.stateCode || settings.state_code });
-      await provider().addCharge(s.provider_subscription_id, { name, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: `pt:${tenantId()}:${kind}:${day(m.month).slice(0, 7)}` });
-      await db.query(
-        `INSERT INTO pass_through_charges (tenant_id, kind, amount_paise, quantity, period, collected_by, source_ref) VALUES ($1, $2, $3, $4, $5::date, 'invoice', $6) ON CONFLICT DO NOTHING`,
-        [tenantId(), kind, Number(m.cost_paise), Number(m.used), day(m.month), ref],
+    const due = await db.query(
+      `SELECT kind, period, array_agg(id ORDER BY id) AS ids, max(id) AS last FROM pass_through_charges
+       WHERE tenant_id = $1 AND collected_by = 'invoice' AND invoice_id IS NULL AND queued_at IS NULL AND period < $2::date AND kind = ANY($3::text[]) AND amount_paise > 0
+       GROUP BY kind, period ORDER BY period, kind`,
+      [tenantId(), thisMonth, Object.keys(INVOICED_PASS_THROUGH)],
+    );
+    for (const group of due) {
+      const { kind } = group;
+      const month = day(group.period).slice(0, 7);
+      const claimed = await db.query(
+        `UPDATE pass_through_charges SET queued_at = now() WHERE tenant_id = $1 AND id = ANY($2::bigint[]) AND queued_at IS NULL AND invoice_id IS NULL RETURNING id, amount_paise, quantity`,
+        [tenantId(), group.ids.map(Number)],
       );
+      if (!claimed.length) continue;
+      const gross = claimed.reduce((sum, r) => sum + Number(r.amount_paise), 0);
+      const quantity = claimed.reduce((sum, r) => sum + Number(r.quantity), 0);
+      const { name } = INVOICED_PASS_THROUGH[kind];
+      const line = taxedLine({ kind: 'pass_through', code: kind, description: name, grossPaise: gross, quantity, rateBp: settings.tax_rate_bp, sellerState: settings.state_code, placeOfSupply: buyer.stateCode || settings.state_code });
+      // WhatsApp and AI keep the key they always had (one per kind and month); a month's courier charges are named by their last row.
+      const key = kind === 'shipping' ? `pt:${tenantId()}:shipping:${month}:${group.last}` : `pt:${tenantId()}:${kind}:${month}`;
+      try {
+        const made = await provider().addCharge(s.provider_subscription_id, { name, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: key });
+        await db.query('UPDATE pass_through_charges SET provider_charge_id = $3 WHERE tenant_id = $1 AND id = ANY($2::bigint[])', [tenantId(), claimed.map((r) => Number(r.id)), made?.id ? String(made.id).slice(0, 80) : null]);
+      } catch (err) {
+        await db.query('UPDATE pass_through_charges SET queued_at = NULL WHERE tenant_id = $1 AND id = ANY($2::bigint[]) AND invoice_id IS NULL', [tenantId(), claimed.map((r) => Number(r.id))]);
+        throw err;
+      }
       count += 1;
     }
     return count;
