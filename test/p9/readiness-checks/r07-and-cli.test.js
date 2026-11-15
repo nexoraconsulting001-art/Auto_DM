@@ -47,7 +47,7 @@ for (const check of ['r05', 'r06', 'r07']) {
 
   test(`${spec.scenario}: an address that is not on this machine or a CI service is refused at once, exit 2, with the setting named and no secret printed`, async () => {
     const env = {
-      TEST_DATABASE_URL: 'postgres://admin:pg-pass-zq81@127.0.0.1:1/x', REDIS_URL: 'rediss://:redis-pass-zq82@cache.prod-cluster.invalid:6380', CLICKHOUSE_URL: 'http://ch:ch-pass-zq83@127.0.0.1:1',
+      TEST_DATABASE_URL: 'postgres://admin:pg-pass-zq81@127.0.0.1:1/x', REDIS_URL: 'rediss://:redis-pass-zq82@cache.prod-cluster.invalid:6380', CLICKHOUSE_URL: 'http://ch:ch-pass-zq83@127.0.0.1:1', // secret-scan:allow
       S3_ENDPOINT: 'http://127.0.0.1:1', S3_BUCKET: 'b', S3_ACCESS_KEY_ID: 'key-zq85', S3_SECRET_ACCESS_KEY: 'secret-zq84',
     };
     const res = await runNode(['tools/readiness/index.mjs', check, '--json'], { env, timeoutMs: 60_000 });
@@ -61,7 +61,7 @@ for (const check of ['r05', 'r06', 'r07']) {
 
   test(`${spec.scenario}: a local service that is named but is not there fails with the step it broke, not with a stack trace`, async () => {
     const env = {
-      TEST_DATABASE_URL: 'postgres://admin:pg-pass-zq81@127.0.0.1:1/x', REDIS_URL: 'redis://127.0.0.1:1', CLICKHOUSE_URL: 'http://127.0.0.1:1',
+      TEST_DATABASE_URL: 'postgres://admin:pg-pass-zq81@127.0.0.1:1/x', REDIS_URL: 'redis://127.0.0.1:1', CLICKHOUSE_URL: 'http://127.0.0.1:1', // secret-scan:allow
       S3_ENDPOINT: 'http://127.0.0.1:1', S3_BUCKET: 'b', S3_ACCESS_KEY_ID: 'key-zq85', S3_SECRET_ACCESS_KEY: 'secret-zq84',
     };
     const res = await runNode(['tools/readiness/index.mjs', check, '--json'], { env, timeoutMs: 120_000 });

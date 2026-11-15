@@ -33,8 +33,8 @@ test('F-64: reading every secret column straight from the database shows ciphert
   closers.push(w.close);
   const a = await w.make('alpha');
   const b = await w.make('beta');
-  const TOKEN_A = 'IGQVJ-alpha-token-0001-xyz';
-  const TOKEN_B = 'IGQVJ-beta-token-0002-xyz';
+  const TOKEN_A = 'IGQVJ-alpha-token-0001-xyz'; // secret-scan:allow
+  const TOKEN_B = 'IGQVJ-beta-token-0002-xyz'; // secret-scan:allow
   const GATEWAY = 'razorpay-secret-alpha-0003';
   await connect(w, a, 'ig-alpha-1', TOKEN_A);
   await connect(w, b, 'ig-beta-1', TOKEN_B);
@@ -434,7 +434,7 @@ test('F-66: the job, its progress and the counters carry no value, key or busine
 // ---- F-67 ----------------------------------------------------------------------------------------------------------------
 
 test('F-67: an address in an error loses its token, login and credentials wherever it sits', () => {
-  const TOKEN = 'EAAGm0PX4ZCpsBAKtokenvalue123';
+  const TOKEN = 'EAAGm0PX4ZCpsBAKtokenvalue123'; // secret-scan:allow
   const cases = [
     `GET https://graph.instagram.com/v21.0/me?fields=id&access_token=${TOKEN} failed`,
     `request to https://graph.facebook.com/v21.0/123/messages?access_token=${TOKEN}&limit=5 failed: ECONNRESET`,
@@ -451,7 +451,7 @@ test('F-67: an address in an error loses its token, login and credentials wherev
 });
 
 test('F-67: an error that holds a request address is logged without the token, in the message, the stack and the reporter\'s copy', () => {
-  const TOKEN = 'EAAGm0PX4ZCpsBAKerrortoken456';
+  const TOKEN = 'EAAGm0PX4ZCpsBAKerrortoken456'; // secret-scan:allow
   const logs = captureLog();
   const reported = [];
   try {
@@ -468,7 +468,7 @@ test('F-67: an error that holds a request address is logged without the token, i
 });
 
 test('F-67: a provider that echoes the whole request in its error leaves the token out of what the caller can see and log', async () => {
-  const TOKEN = 'EAAGm0PX4ZCpsBAKechoedtoken789';
+  const TOKEN = 'EAAGm0PX4ZCpsBAKechoedtoken789'; // secret-scan:allow
   const provider = await echoingProvider();
   closers.push(provider.close);
   const ig = createInstagram({ graphBaseUrl: provider.url, igApiBaseUrl: provider.url, fbGraphBaseUrl: provider.url, dryRun: false });
@@ -485,7 +485,7 @@ test('F-67: a provider that echoes the whole request in its error leaves the tok
 });
 
 test('F-67: a webhook whose send fails with an address in the error leaves the token out of the log, the alerts and every table', async () => {
-  const TOKEN = 'token-ME-echo-secret-1234567';
+  const TOKEN = 'token-ME-echo-secret-1234567'; // secret-scan:allow
   const echoing = {
     calls: [],
     accounts: [],

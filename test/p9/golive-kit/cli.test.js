@@ -57,8 +57,8 @@ test('G-16: live checks with a database it cannot reach and a provider that hang
   closers.push(() => new Promise((resolve) => { hang.closeAllConnections?.(); hang.close(resolve); }));
   const base = `http://127.0.0.1:${hang.address().port}`;
   const env = {
-    DATABASE_URL: 'postgres://app:MARKER-cli-db-7y@127.0.0.1:1/bhava', APP_SECRET: 'MARKER-cli-app-8u', IG_APP_ID: '1784201234567', VERIFY_TOKEN: 'MARKER-cli-verify-9i',
-    AI_BASE_URL: base, AI_API_KEY: 'MARKER-cli-ai-0o', RAZORPAY_KEY_ID: 'rzp_live_Cli1234567', RAZORPAY_KEY_SECRET: 'MARKER-cli-rzp-1p',
+    DATABASE_URL: 'postgres://app:MARKER-cli-db-7y@127.0.0.1:1/bhava', APP_SECRET: 'MARKER-cli-app-8u', IG_APP_ID: '1784201234567', VERIFY_TOKEN: 'MARKER-cli-verify-9i', // secret-scan:allow
+    AI_BASE_URL: base, AI_API_KEY: 'MARKER-cli-ai-0o', RAZORPAY_KEY_ID: 'rzp_live_Cli1234567', RAZORPAY_KEY_SECRET: 'MARKER-cli-rzp-1p', // secret-scan:allow
   };
   const started = Date.now();
   const res = await golive(['--json'], env);

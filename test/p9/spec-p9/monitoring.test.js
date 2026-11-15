@@ -303,13 +303,13 @@ function parseSeries(text) {
   return out;
 }
 
-async function scrape(app, token = 'metrics-token-for-spec-0123456789') {
+async function scrape(app, token = 'metrics-token-for-spec-0123456789') { // secret-scan:allow
   const res = await fetch(`${app.base}/metrics`, { headers: { authorization: `Bearer ${token}` } });
   return { status: res.status, text: await res.text() };
 }
 
 test('G-06: every series the app serves is in the catalogue, with bounded label names, and none names a business or a person', async () => {
-  const app = await startApp({ overrides: { metricsToken: 'metrics-token-for-spec-0123456789' } });
+  const app = await startApp({ overrides: { metricsToken: 'metrics-token-for-spec-0123456789' } }); // secret-scan:allow
   apps.push(() => app.close());
   await app.platform.tenants.create({ slug: 'leaky-slug-shop', name: 'Leaky Name Shop', plan: 't3' });
   for (const p of ['/', '/healthz', '/nope', '/leaky-slug-shop', '/api/v1/me', '/login']) await fetch(`${app.base}${p}`, { headers: { 'x-forwarded-host': 'leaky-slug-shop.bhava.test' } });
@@ -334,7 +334,7 @@ function assertNoneOfText(text, needles) {
 }
 
 test('G-06: a flood of different addresses, hosts and statuses does not make a flood of series: every label stays inside its declared ceiling', async () => {
-  const app = await startApp({ overrides: { metricsToken: 'metrics-token-for-spec-0123456789' } });
+  const app = await startApp({ overrides: { metricsToken: 'metrics-token-for-spec-0123456789' } }); // secret-scan:allow
   apps.push(() => app.close());
   for (let i = 0; i < 140; i++) {
     const word = `shop${[i % 26, Math.floor(i / 26) % 26, Math.floor(i / 676)].map((n) => String.fromCharCode(97 + n)).join('')}`;
@@ -357,7 +357,7 @@ test('G-06: a flood of different addresses, hosts and statuses does not make a f
 });
 
 test('G-06: /metrics answers only with the token, and a wrong or empty token learns nothing', async () => {
-  const app = await startApp({ overrides: { metricsToken: 'metrics-token-for-spec-0123456789' } });
+  const app = await startApp({ overrides: { metricsToken: 'metrics-token-for-spec-0123456789' } }); // secret-scan:allow
   apps.push(() => app.close());
   const none = await fetch(`${app.base}/metrics`);
   const wrong = await fetch(`${app.base}/metrics`, { headers: { authorization: 'Bearer wrong-token-of-another-length' } });
@@ -373,7 +373,7 @@ test('G-06: /metrics answers only with the token, and a wrong or empty token lea
 });
 
 test('G-06: the series the code is promised to emit are served after the work that makes them', async () => {
-  const app = await startApp({ overrides: { metricsToken: 'metrics-token-for-spec-0123456789' } });
+  const app = await startApp({ overrides: { metricsToken: 'metrics-token-for-spec-0123456789' } }); // secret-scan:allow
   apps.push(() => app.close());
   await fetch(`${app.base}/healthz`);
   const { text } = await scrape(app);

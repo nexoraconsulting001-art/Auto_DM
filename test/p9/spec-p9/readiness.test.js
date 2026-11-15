@@ -11,9 +11,9 @@ import { assertNoneOf, exists, needsCi, read, runNode } from './support.js';
 const ENV = process.env;
 const SECRETS = ['pg-pass-zq81', 'redis-pass-zq82', 'ch-pass-zq83', 's3-secret-zq84', 's3-key-zq85'];
 const remote = {
-  TEST_DATABASE_URL: 'postgres://admin:pg-pass-zq81@db.prod-cluster.example.com:5432/bhava',
+  TEST_DATABASE_URL: 'postgres://admin:pg-pass-zq81@db.prod-cluster.example.com:5432/bhava', // secret-scan:allow
   REDIS_URL: 'rediss://:redis-pass-zq82@cache.prod-cluster.example.com:6380',
-  CLICKHOUSE_URL: 'https://default:ch-pass-zq83@analytics.prod-cluster.example.com:8443',
+  CLICKHOUSE_URL: 'https://default:ch-pass-zq83@analytics.prod-cluster.example.com:8443', // secret-scan:allow
   S3_ENDPOINT: 'https://storage.prod-cluster.example.com',
   S3_BUCKET: 'live-customer-files',
   S3_ACCESS_KEY_ID: 's3-key-zq85',
@@ -89,7 +89,7 @@ test('G-11: R-06 starts two web servers and a worker, and sends requests to alte
 test('G-12: the data-move scripts refuse to run with nothing to move and name what they need, without printing a connection string or touching anything', async () => {
   for (const script of ['scripts/move-to-cloud.js', 'scripts/copy-files.js']) {
     assert.ok(exists(script), `${script} is not built`);
-    const res = await runNode([script], { env: { TARGET_DATABASE_URL: 'postgres://u:pg-pass-zq81@127.0.0.1:1/x' }, timeoutMs: 60_000 });
+    const res = await runNode([script], { env: { TARGET_DATABASE_URL: 'postgres://u:pg-pass-zq81@127.0.0.1:1/x' }, timeoutMs: 60_000 }); // secret-scan:allow
     assert.notEqual(res.code, 0, script);
     assert.equal(res.timedOut, false);
     assertNoneOf(script, res.stdout + res.stderr, ['pg-pass-zq81']);

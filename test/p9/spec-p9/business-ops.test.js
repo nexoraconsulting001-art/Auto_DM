@@ -123,7 +123,7 @@ test('G-14: the answer holds numbers and dates only: no name, no message text, n
 });
 
 test('G-14: the per-business numbers are in the console only: /metrics never shows them, and a business\'s own staff never reach them', async (t) => {
-  const app = await startWorld(t, { overrides: { metricsToken: 'metrics-token-ops-spec-0123456789' } });
+  const app = await startWorld(t, { overrides: { metricsToken: 'metrics-token-ops-spec-0123456789' } }); // secret-scan:allow
   const a = await addBusiness(app, { slug: 'ops-solo', name: 'Solo Shop' });
   await give(app, a, { errors: 4, calls: 4, usage: 71, queue: { depth: 31, oldest: 123 } });
   const metrics = await (await fetch(`${app.base}/metrics`, { headers: { authorization: 'Bearer metrics-token-ops-spec-0123456789' } })).text();

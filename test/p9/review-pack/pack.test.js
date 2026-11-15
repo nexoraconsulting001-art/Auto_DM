@@ -117,8 +117,8 @@ test('G-20: every document and the owner listing is free of banned claims, secre
 test('G-20: a secret, a real account id, a phone number, a server address or a personal email in a document fails', () => {
   const leaks = {
     token: `Use EAAG${'a'.repeat(40)} to sign in`,
-    razorpay: 'key rzp_live_AbCdEf123456',
-    private: '-----BEGIN PRIVATE KEY-----',
+    razorpay: 'key rzp_live_AbCdEf123456', // secret-scan:allow
+    private: '-----BEGIN PRIVATE KEY-----', // secret-scan:allow
     db: 'postgres://app:hunter2@db.internal/bhava',
     id: 'The account is 17841400000000011',
     phone: 'Sign in as 9123456780',

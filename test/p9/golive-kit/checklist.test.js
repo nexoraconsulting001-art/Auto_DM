@@ -21,9 +21,9 @@ after(async () => {
 });
 
 const GOOD = {
-  igAppId: '1784201234567', appSecret: 'real-app-secret-9f8e7d6c', verifyToken: 'real-verify-token-5a4b3c2d',
-  razorpayKeyId: 'rzp_live_AbCdEf123456', razorpayKeySecret: 'rzp-live-secret-aa11bb22', razorpayWebhookSecret: 'rzp-hook-secret-cc33dd44',
-  razorpayPartnerClientId: 'partner-client-ee55ff66', razorpayPartnerClientSecret: 'partner-secret-gg77hh88',
+  igAppId: '1784201234567', appSecret: 'real-app-secret-9f8e7d6c', verifyToken: 'real-verify-token-5a4b3c2d', // secret-scan:allow
+  razorpayKeyId: 'rzp_live_AbCdEf123456', razorpayKeySecret: 'rzp-live-secret-aa11bb22', razorpayWebhookSecret: 'rzp-hook-secret-cc33dd44', // secret-scan:allow
+  razorpayPartnerClientId: 'partner-client-ee55ff66', razorpayPartnerClientSecret: 'partner-secret-gg77hh88', // secret-scan:allow
   publicBaseUrl: 'https://app.bhava.in', platformDomain: 'bhava.in', platformHost: 'bhava.in',
 };
 const SECRET_VALUES = Object.values(GOOD).filter((v) => !/^https:|^bhava\.in$/.test(v));
@@ -81,7 +81,7 @@ test('G-16: a setting with a real-looking value is ready; a test value in any fo
   const clean = await checklist(GOOD).status();
   assert.equal(itemOf(clean, 'meta.app_settings').state, 'ready');
   assert.equal(itemOf(clean, 'razorpay.settings').state, 'ready');
-  const bad = ['http://127.0.0.1:9101', 'https://graph.test/v1', 'https://10.0.0.4', 'rzp_test_AbCdEf123456', 'RZP_TEST_AbCdEf123456', '  changeme  ', 'sim-secret', 'app-sim', 'https://api.example.com', 'placeholder', 'TODO', 'xxxx', 'dummy', '', '   ', 'my_test_key'];
+  const bad = ['http://127.0.0.1:9101', 'https://graph.test/v1', 'https://10.0.0.4', 'rzp_test_AbCdEf123456', 'RZP_TEST_AbCdEf123456', '  changeme  ', 'sim-secret', 'app-sim', 'https://api.example.com', 'placeholder', 'TODO', 'xxxx', 'dummy', '', '   ', 'my_test_key']; // secret-scan:allow
   for (const [item, keys] of [['meta.app_settings', ['igAppId', 'appSecret', 'verifyToken']], ['razorpay.settings', ['razorpayKeyId', 'razorpayKeySecret', 'razorpayWebhookSecret', 'razorpayPartnerClientId', 'razorpayPartnerClientSecret']]]) {
     for (const key of keys) {
       for (const value of bad) {
@@ -226,10 +226,10 @@ test('G-16: Razorpay is ready on a live key that Route answers; a refused key an
   });
   const ready = await checklist(GOOD, { bases: { razorpay: rzp.base } }).status({ live: true });
   assert.equal(itemOf(ready, 'razorpay.route').state, 'ready');
-  const refused = await checklist({ ...GOOD, razorpayKeySecret: 'another-live-secret-77' }, { bases: { razorpay: rzp.base } }).status({ live: true });
+  const refused = await checklist({ ...GOOD, razorpayKeySecret: 'another-live-secret-77' }, { bases: { razorpay: rzp.base } }).status({ live: true }); // secret-scan:allow
   assert.equal(itemOf(refused, 'razorpay.route').state, 'missing');
   assert.equal(itemOf(refused, 'razorpay.route').detail, DETAIL.refused);
-  const testKey = await checklist({ ...GOOD, razorpayKeyId: 'rzp_test_AbCdEf123456' }, { bases: { razorpay: rzp.base } }).status({ live: true });
+  const testKey = await checklist({ ...GOOD, razorpayKeyId: 'rzp_test_AbCdEf123456' }, { bases: { razorpay: rzp.base } }).status({ live: true }); // secret-scan:allow
   assert.equal(itemOf(testKey, 'razorpay.route').state, 'missing');
   assert.equal(rzp.calls.length, 2, 'a test-mode key is never sent');
 });
@@ -241,7 +241,7 @@ test('G-16: Bhava’s WhatsApp number and its templates are checked through the 
     'GET /v23.0/111222333': () => [200, { id: '111222333', verified_name: 'Bhava', display_phone_number: '+91 90000 00000', quality_rating: 'GREEN' }],
     'GET /v23.0/999888777/message_templates': () => [200, { data: names.map((name, i) => ({ id: String(i), name, language: 'en', category: 'UTILITY', status: approvedAll || i > 0 ? 'APPROVED' : 'PENDING' })) }],
   });
-  const config = { ...GOOD, platformWhatsappPhoneId: '111222333', platformWhatsappToken: 'wa-live-token-0a9b8c', platformWhatsappWabaId: '999888777' };
+  const config = { ...GOOD, platformWhatsappPhoneId: '111222333', platformWhatsappToken: 'wa-live-token-0a9b8c', platformWhatsappWabaId: '999888777' }; // secret-scan:allow
   const whatsapp = createWhatsApp({ whatsappBaseUrl: wa.base });
   const status = await checklist(config, { world: { whatsapp } }).status({ live: true });
   assert.equal(itemOf(status, 'whatsapp.sender').state, 'ready');
@@ -287,7 +287,7 @@ test('G-16: a probe that throws, answers nonsense or invents a phrase is reporte
 
 test('G-15, G-17: with every setting real, every probe ready and every sign-off on file the checklist is clear, exits 0 and the verdict opens sign-up', async () => {
   const everything = Object.fromEntries(Object.entries(GOLIVE_ITEMS.filter((i) => i.check.kind === 'probe').reduce((acc, i) => ({ ...acc, [i.check.probe]: true }), {})).map(([name]) => [name, { settings: [], simulators: [], local: true, run: async () => ({ state: 'ready', detail: 'ok' }) }]));
-  const config = { ...GOOD, reviewLoginPhone: '919000000001', reviewLoginCodeHash: 'f'.repeat(64), whatsappAppId: '22334455667', whatsappSignupConfigId: '33445566778', whatsappAppSecret: 'wa-app-secret-5d6e7f', goliveAttestations: attestFile(ATTESTED.map((id) => entry(id))) };
+  const config = { ...GOOD, reviewLoginPhone: '919000000001', reviewLoginCodeHash: 'f'.repeat(64), whatsappAppId: '22334455667', whatsappSignupConfigId: '33445566778', whatsappAppSecret: 'wa-app-secret-5d6e7f', goliveAttestations: attestFile(ATTESTED.map((id) => entry(id))) }; // secret-scan:allow
   const golive = createGolive({ config }, { env: {}, probes: everything });
   const status = await golive.status({ live: true });
   assert.deepEqual(blockingOpen(status.items).map((i) => i.id), []);

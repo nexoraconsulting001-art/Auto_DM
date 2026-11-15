@@ -272,7 +272,7 @@ test('migrations 900 and 910: the re-wrap table is the platform’s, every encry
   await assert.rejects(sql('UPDATE signup_settings SET daily_cap = 0'), /check/i);
   assert.equal(await store.madeToday(), 0);
 
-  assert.equal(redactUrl('GET https://user:pw123456@graph.example/v1/me?access_token=EAAB123&fields=id failed'), 'GET https://[redacted]@graph.example/v1/me?access_token=[redacted]&fields=[redacted] failed');
+  assert.equal(redactUrl('GET https://user:pw123456@graph.example/v1/me?access_token=EAAB123&fields=id failed'), 'GET https://[redacted]@graph.example/v1/me?access_token=[redacted]&fields=[redacted] failed'); // secret-scan:allow
   assert.equal(redactUrl('Authorization: Bearer abcdefgh12345678'), 'Authorization: Bearer [redacted]');
 });
 

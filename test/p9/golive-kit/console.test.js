@@ -13,7 +13,7 @@ import { world } from '../../p7/signup-plans/support.js';
 const put = (app, who, body) => onConsole(app, who, '/signup', { method: 'PUT', body });
 const modeOf = async (app, who) => (await onConsole(app, who, '/signup')).json();
 const audits = (app) => (app.db.platform ?? app.db).query(`SELECT actor, details FROM audit_log WHERE action = 'signup.mode_set' ORDER BY id`);
-const MARKERS = { razorpayKeySecret: 'MARKER-gk-rzp-1q', appSecret: 'MARKER-gk-app-2w', platformWhatsappToken: 'MARKER-gk-wa-3e', razorpayKeyId: 'rzp_test_GoliveKit123' };
+const MARKERS = { razorpayKeySecret: 'MARKER-gk-rzp-1q', appSecret: 'MARKER-gk-app-2w', platformWhatsappToken: 'MARKER-gk-wa-3e', razorpayKeyId: 'rzp_test_GoliveKit123' }; // secret-scan:allow
 
 test('G-15: the console answers the checklist to a super admin and support only, with live checks on request, and never a value', async (t) => {
   const app = await startWorld(t, { overrides: MARKERS });

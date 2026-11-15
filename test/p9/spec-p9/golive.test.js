@@ -20,8 +20,8 @@ after(async () => {
   for (const close of closers.reverse()) await close();
 });
 
-const GOOD = { IG_APP_ID: '1784201234567', APP_SECRET: 'real-app-secret-9f8e7d6c', VERIFY_TOKEN: 'real-verify-token-5a4b3c2d' };
-const LIVE_RAZORPAY = { RAZORPAY_KEY_ID: 'rzp_live_AbCdEf123456', RAZORPAY_KEY_SECRET: 'rzp-live-secret-aa11bb22', RAZORPAY_WEBHOOK_SECRET: 'rzp-hook-secret-cc33dd44', RAZORPAY_PARTNER_CLIENT_ID: 'partner-client-ee55ff66', RAZORPAY_PARTNER_CLIENT_SECRET: 'partner-secret-gg77hh88' };
+const GOOD = { IG_APP_ID: '1784201234567', APP_SECRET: 'real-app-secret-9f8e7d6c', VERIFY_TOKEN: 'real-verify-token-5a4b3c2d' }; // secret-scan:allow
+const LIVE_RAZORPAY = { RAZORPAY_KEY_ID: 'rzp_live_AbCdEf123456', RAZORPAY_KEY_SECRET: 'rzp-live-secret-aa11bb22', RAZORPAY_WEBHOOK_SECRET: 'rzp-hook-secret-cc33dd44', RAZORPAY_PARTNER_CLIENT_ID: 'partner-client-ee55ff66', RAZORPAY_PARTNER_CLIENT_SECRET: 'partner-secret-gg77hh88' }; // secret-scan:allow
 
 /** Runs `node scripts/golive.js` with a chosen environment; answers the exit code, the text and (for --json) the parsed status. */
 /** The checklist must run at all for a test about its answer to mean anything. */
@@ -86,7 +86,7 @@ test('G-15: the checklist never prints a secret: every secret setting holds a ma
     env[name] = name === 'DATA_KEY' ? Buffer.alloc(32, 7).toString('base64') : marker;
     markers.push(env[name]);
   }
-  env.DATABASE_URL = 'postgres://app:MARKER-dbpass-vq93xz@127.0.0.1:1/x';
+  env.DATABASE_URL = 'postgres://app:MARKER-dbpass-vq93xz@127.0.0.1:1/x'; // secret-scan:allow
   markers.push('MARKER-dbpass-vq93xz');
   const runs = await Promise.all([golive(env, ['--offline']), golive(env, ['--offline', '--json']), golive({ ...env, NODE_ENV: 'production', DEPLOY_ENV: 'production' }, ['--offline'])]);
   for (const res of runs) {
@@ -103,7 +103,7 @@ test('G-15: the checklist never prints a secret even when a provider fails with 
   await new Promise((resolve) => echoing.listen(0, '127.0.0.1', resolve));
   closers.push(() => new Promise((resolve) => { echoing.closeAllConnections?.(); echoing.close(resolve); }));
   const base = `http://127.0.0.1:${echoing.address().port}`;
-  const env = { GRAPH_BASE_URL: base, IG_API_BASE_URL: base, FB_GRAPH_BASE_URL: base, RAZORPAY_BASE_URL: base, SHIPROCKET_BASE_URL: base, WHATSAPP_BASE_URL: base, APP_SECRET: 'MARKER-echo-app-secret-q1', IG_APP_ID: '1784201234567', RAZORPAY_KEY_SECRET: 'MARKER-echo-rzp-q2', RAZORPAY_KEY_ID: 'rzp_live_Zz9Zz9Zz9Zz9', PLATFORM_WHATSAPP_TOKEN: 'MARKER-echo-wa-q3', SHIPROCKET_PASSWORD: 'MARKER-echo-ship-q4' };
+  const env = { GRAPH_BASE_URL: base, IG_API_BASE_URL: base, FB_GRAPH_BASE_URL: base, RAZORPAY_BASE_URL: base, SHIPROCKET_BASE_URL: base, WHATSAPP_BASE_URL: base, APP_SECRET: 'MARKER-echo-app-secret-q1', IG_APP_ID: '1784201234567', RAZORPAY_KEY_SECRET: 'MARKER-echo-rzp-q2', RAZORPAY_KEY_ID: 'rzp_live_Zz9Zz9Zz9Zz9', PLATFORM_WHATSAPP_TOKEN: 'MARKER-echo-wa-q3', SHIPROCKET_PASSWORD: 'MARKER-echo-ship-q4' }; // secret-scan:allow
   const res = await golive(env, ['--json']);
   assertNoneOf('the output', `${res.stdout}\n${res.stderr}`, ['MARKER-echo-app-secret-q1', 'MARKER-echo-rzp-q2', 'MARKER-echo-wa-q3', 'MARKER-echo-ship-q4']);
   assert.ok(res.status, 'it still answered');
@@ -117,7 +117,7 @@ test('G-16: a setting that holds a simulator address, a test-mode key or a place
   const clean = await golive(base);
   assert.equal(clean.item('meta.app_settings')?.state, 'ready', `a real-looking value is ready: ${clean.item('meta.app_settings')?.detail}`);
   assert.equal(clean.item('razorpay.settings')?.state, 'ready');
-  const bad = ['http://127.0.0.1:9101', 'https://graph.test/v1', 'rzp_test_AbCdEf123456', 'RZP_TEST_AbCdEf123456', '  changeme  ', 'sim-secret', 'https://api.example.com', 'http://localhost:3000', 'placeholder', 'TODO'];
+  const bad = ['http://127.0.0.1:9101', 'https://graph.test/v1', 'rzp_test_AbCdEf123456', 'RZP_TEST_AbCdEf123456', '  changeme  ', 'sim-secret', 'https://api.example.com', 'http://localhost:3000', 'placeholder', 'TODO']; // secret-scan:allow
   const cases = [];
   for (const [item, settings] of [['meta.app_settings', Object.keys(GOOD)], ['razorpay.settings', Object.keys(LIVE_RAZORPAY)]]) {
     for (const name of settings) for (const value of bad) cases.push({ item, name, value, env: { ...base, [name]: value } });
@@ -248,7 +248,7 @@ test('G-15: a sign-off file that is not JSON, empty, missing or of another versi
 // ---- the Platform Console --------------------------------------------------------------------------------------------------
 
 test('G-15: the Platform Console answers the same list to a super admin and to support, to nobody else, and never with a value', async (t) => {
-  const app = await startWorld(t, { overrides: { razorpayKeySecret: 'MARKER-console-rzp-zz1', appSecret: 'MARKER-console-app-zz2', platformWhatsappToken: 'MARKER-console-wa-zz3', razorpayKeyId: 'rzp_test_ConsoleKey123' } });
+  const app = await startWorld(t, { overrides: { razorpayKeySecret: 'MARKER-console-rzp-zz1', appSecret: 'MARKER-console-app-zz2', platformWhatsappToken: 'MARKER-console-wa-zz3', razorpayKeyId: 'rzp_test_ConsoleKey123' } }); // secret-scan:allow
   assert.deepEqual([...platformRoutes['platform.goliveStatus'].platformRoles], ['super_admin', 'support']);
   const admin = await consoleUser(app);
   const support = await consoleUser(app, 'support');
@@ -262,7 +262,7 @@ test('G-15: the Platform Console answers the same list to a super admin and to s
   assert.equal(a.status, 200, a.text.slice(0, 200));
   const status = GoliveStatus.parse(a.json());
   assert.deepEqual(b.json().items.map((i) => [i.id, i.state]), status.items.map((i) => [i.id, i.state]));
-  assertNoneOf('the console answer', a.text, ['MARKER-console', 'rzp_test_ConsoleKey123', 'golive-seller', 'Golive Seller']);
+  assertNoneOf('the console answer', a.text, ['MARKER-console', 'rzp_test_ConsoleKey123', 'golive-seller', 'Golive Seller']); // secret-scan:allow
   assert.notEqual(status.items.find((i) => i.id === 'razorpay.settings').state, 'ready', 'a test-mode key in the running configuration');
   assert.equal(status.ready, false);
   for (const item of status.items.filter((i) => i.kind === 'per_business')) assert.equal(item.blocks, false);

@@ -67,7 +67,7 @@ test('G-02: a cache check that never answers does not hang the probe: readiness 
 test('G-02: readiness is false while storage is down and says nothing of the bucket or the keys', async () => {
   const app = await webApp();
   const { health } = app.ctx.platform;
-  health.check('storage', async () => { throw new Error('bucket prod-media-bucket refused key AKIAABCDEFGHIJKLMNOP secret wJalrXUtnFEMI/K7MDENG'); });
+  health.check('storage', async () => { throw new Error('bucket prod-media-bucket refused key AKIAABCDEFGHIJKLMNOP secret wJalrXUtnFEMI/K7MDENG'); }); // secret-scan:allow
   const down = await ask(app, '/readyz');
   const text = await down.text();
   assert.equal(down.status, DOWN);
@@ -314,7 +314,7 @@ test('G-04: every setting that carries a secret can come from a file, and none i
 
 // ---- G-05 ----------------------------------------------------------------------------------------------------------------
 
-async function manager(secrets = { DATA_KEY: 'mgr-data-key-1', APP_SECRET: 'mgr-app-secret-1' }) {
+async function manager(secrets = { DATA_KEY: 'mgr-data-key-1', APP_SECRET: 'mgr-app-secret-1' }) { // secret-scan:allow
   const m = createSecretsManager({ token: 'mgr-token-zz91', prefix: 'v1/bhava', secrets });
   await m.start();
   apps.push(() => m.close());
@@ -335,7 +335,7 @@ test('G-05: a secret manager that is down, slow or refuses the token refuses the
   await m.post('/slow', { ms: 3000 });
   const slow = await runNode(['src/server.js'], { env: prod, timeoutMs: 60_000 });
   await m.post('/slow', { ms: 0 });
-  await m.post('/token', { token: 'a-different-token-77' });
+  await m.post('/token', { token: 'a-different-token-77' }); // secret-scan:allow
   const refused = await runNode(['src/server.js'], { env: prod, timeoutMs: 60_000 });
   for (const [label, res] of [['down', down], ['slow', slow], ['refused', refused]]) {
     assert.equal(res.timedOut, false, `${label}: it gave up by itself`);
@@ -376,7 +376,7 @@ test('G-05: a token that stops being accepted during a refresh keeps the last go
   await source.load();
   const changes = [];
   source.start((c) => changes.push(c));
-  await m.post('/token', { token: 'rotated-away-token-5' });
+  await m.post('/token', { token: 'rotated-away-token-5' }); // secret-scan:allow
   await waitFor(() => alerts.length > 0, 5000);
   assert.equal(alerts[0].code, 'unauthorized');
   assert.deepEqual(changes, []);
@@ -408,8 +408,8 @@ function goodProduction(extra = {}) {
 }
 function withDb(env) {
   const { __dir: dir, ...rest } = env;
-  fs.writeFileSync(path.join(dir, 'DATABASE_URL'), 'postgres://app:db-app-pass-77@127.0.0.1:1/bhava');
-  fs.writeFileSync(path.join(dir, 'DATABASE_OWNER_URL'), 'postgres://owner:db-owner-pass-88@127.0.0.1:1/bhava');
+  fs.writeFileSync(path.join(dir, 'DATABASE_URL'), 'postgres://app:db-app-pass-77@127.0.0.1:1/bhava'); // secret-scan:allow
+  fs.writeFileSync(path.join(dir, 'DATABASE_OWNER_URL'), 'postgres://owner:db-owner-pass-88@127.0.0.1:1/bhava'); // secret-scan:allow
   fs.writeFileSync(path.join(dir, 'REDIS_URL'), 'rediss://:redis-pass-99@127.0.0.1:1');
   delete rest.DATABASE_URL_FILE;
   return rest;
