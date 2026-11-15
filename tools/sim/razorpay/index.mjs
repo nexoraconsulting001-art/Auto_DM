@@ -17,7 +17,9 @@
  *   POST /v1/customers   POST /v1/plans { period, interval, item: { name, amount } }                 Bhava's own billing (PRD 5.12)
  *   POST /v1/subscriptions { plan_id, customer_id, total_count, notes }      GET /v1/subscriptions/:id
  *   PATCH /v1/subscriptions/:id { plan_id, schedule_change_at: 'now' | 'cycle_end' }                 POST /v1/subscriptions/:id/cancel
- *   POST /v1/subscriptions/:id/addons { item: { name, amount }, quantity, notes }    GET /v1/addons?subscription_id=
+ *   POST /v1/subscriptions/:id/addons { item: { name, amount }, quantity, notes }    DELETE /v1/addons/:id (only one not yet charged)
+ *   GET  /v1/addons?count=&skip=&from=&to=   as Razorpay documents it: every add-on of the account, newest first, `count`
+ *        (default 10, at most 100) from `skip`. It takes no subscription filter: a caller filters by subscription_id itself
  *   GET  /v1/settlements/recon/combined?year=&month=    with X-Razorpay-Account: what was settled to one linked account in a month
  *
  * Controls (under /__sim), beside the shared ones in base.mjs (faults, calls, the clock):
@@ -332,8 +334,21 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
       });
       on('GET', '/v1/addons', (req) => {
         billingOnly(req);
-        const items = [...addons.values()].filter((a) => !req.query?.subscription_id || a.subscription_id === req.query.subscription_id);
+        const count = Math.min(100, Math.max(1, Number(req.query?.count ?? 10) || 10));
+        const skip = Math.max(0, Number(req.query?.skip ?? 0) || 0);
+        const from = Number(req.query?.from ?? 0) || 0;
+        const to = Number(req.query?.to ?? 0) || Infinity;
+        const all = [...addons.values()].filter((a) => a.created_at >= from && a.created_at <= to).sort((x, y) => y.created_at - x.created_at || (x.id < y.id ? 1 : -1));
+        const items = all.slice(skip, skip + count);
         return { entity: 'collection', count: items.length, items };
+      });
+      on('DELETE', '/v1/addons/:id', (req) => {
+        billingOnly(req);
+        const addon = addons.get(req.params.id);
+        if (!addon) throw razorpayError(400, 'The id provided does not exist');
+        if (addon.invoice_id) throw razorpayError(400, 'The addon has already been charged and cannot be deleted.');
+        addons.delete(addon.id);
+        return [];
       });
       on('GET', '/v1/settlements/recon/combined', (req) => {
         if (caller(req) !== 'platform') throw razorpayError(400, 'Route is not enabled for this account.');

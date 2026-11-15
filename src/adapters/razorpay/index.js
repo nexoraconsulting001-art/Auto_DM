@@ -277,6 +277,9 @@ function createPartner(config, request, authRequest) {
   };
 }
 
+const ADDON_PAGE = 100;
+const ADDON_PAGES = 50;
+
 /** Subscriptions on Bhava's own account: what a business pays Bhava (PRD 5.12). */
 function createBilling(config, request) {
   const auth = () => ({ authorization: basic(need(config.razorpayBillingKeyId || config.razorpayKeyId, 'RAZORPAY_KEY_ID'), need(config.razorpayBillingKeySecret || config.razorpayKeySecret, 'RAZORPAY_KEY_SECRET')) });
@@ -285,6 +288,21 @@ function createBilling(config, request) {
     if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('Razorpay needs an amount in whole paise');
     return amount;
   };
+  /**
+   * The add-on of one subscription carrying `key` in its notes, or null. Razorpay's list of add-ons is the whole account's,
+   * newest first, in pages (count at most 100), and documents no subscription filter: every page is read until one comes
+   * back short, and the subscription is matched here. ADDON_PAGES bounds it.
+   */
+  async function findAddon(subscriptionId, key) {
+    for (let page = 0; page < ADDON_PAGES; page++) {
+      const { body } = await request('GET', '/v1/addons', { headers: auth(), query: { count: ADDON_PAGE, skip: page * ADDON_PAGE }, retries: 2 });
+      const items = body?.items ?? [];
+      const found = items.find((addon) => addon.subscription_id === subscriptionId && addon.notes?.key === key);
+      if (found) return found;
+      if (items.length < ADDON_PAGE) return null;
+    }
+    throw new Error('Too many Razorpay add-ons to look through for a repeat; not adding another');
+  }
   return {
     kind: 'billing',
     async createCustomer({ name, email = '', phone = '', reference = '' }) {
@@ -311,10 +329,19 @@ function createBilling(config, request) {
     async addCharge(id, { name, amountPaise, quantity = 1, idempotencyKey }) {
       const key = need(idempotencyKey, 'an idempotency key');
       // Razorpay has no idempotency header for add-ons, so the key rides in the notes and is looked for before a new line is made.
-      const { body: existing } = await request('GET', '/v1/addons', { headers: auth(), query: { subscription_id: need(id, 'a subscription id') }, retries: 2 });
-      const found = (existing?.items ?? []).find((addon) => addon.subscription_id === id && addon.notes?.key === key);
+      const found = await findAddon(need(id, 'a subscription id'), key);
       const made = found ?? (await request('POST', `${sub(id)}/addons`, { headers: auth(), json: { item: { name, amount: wholePaise(amountPaise), currency: 'INR' }, quantity, notes: { key } } })).body;
       return { id: made.id, amountPaise: made.item?.amount ?? amountPaise, quantity: made.quantity ?? quantity };
+    },
+    /**
+     * Takes back a line not yet charged: by its id, or, when the answer that named it was lost, by its key. Answers whether a
+     * line was deleted. A line the provider already charged is refused (a ProviderError, delivery 'none').
+     */
+    async removeCharge(id, { addonId = null, idempotencyKey = null } = {}) {
+      const target = addonId ?? (idempotencyKey ? (await findAddon(need(id, 'a subscription id'), idempotencyKey))?.id : null);
+      if (!target) return false;
+      await request('DELETE', `/v1/addons/${encodeURIComponent(target)}`, { headers: auth() });
+      return true;
     },
     async cancel(id, { atCycleEnd = false } = {}) {
       const { body } = await request('POST', `${sub(id)}/cancel`, { headers: auth(), json: { cancel_at_cycle_end: atCycleEnd ? 1 : 0 } });

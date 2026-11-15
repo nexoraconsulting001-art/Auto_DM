@@ -443,6 +443,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       throw providerFailure(err);
     }
 
+    if (target === 'free' && result.effective === 'period_end') await endUnpaid(actor);
     if (result.toFree) {
       // No subscription to end (a plan set by the console): the owner's own move to Free is recorded as theirs.
       await platformDb.query(
@@ -489,6 +490,9 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
   async function queueItem(item, key, { settings, months }) {
     const s = await subOf(db);
     if (!s?.provider_subscription_id || s.status === 'cancelled') return null;
+    // A line removed in the meantime is never queued (money-4).
+    const [running] = await db.query('SELECT 1 FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND (ends_at IS NULL OR ends_at > now())', [tenantId(), item.id]);
+    if (!running) return null;
     const addons = await addonsByCode(db);
     const offer = asOffer(await offerRow(db, s.offer_code));
     const buyer = await buyerOf(db, settings);
@@ -501,6 +505,36 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     await db.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL', [tenantId(), item.id, added.id]);
     return added.id;
   }
+
+  /**
+   * A removed or never-paid line's charge still waiting at the provider is taken back (money-4, money-10): by its id, or by
+   * its first key when that answer was lost. Done, the line is marked `free:<id>` (nothing to charge), so nothing queues or
+   * invoices it again. A provider that already charged it refuses; the charge's invoice then carries it (applyCharge). A
+   * failure is left for the renewals job, which tries again. -> true once nothing is pending
+   */
+  async function dropPending(item, s) {
+    const pid = item.provider_item_id;
+    if (pid?.startsWith('free:')) return true;
+    if (!pid && item.billed_through) return true; // charged already, and nothing queued since
+    if (s?.provider_subscription_id) {
+      try {
+        await provider().removeCharge(s.provider_subscription_id, pid ? { addonId: pid } : { idempotencyKey: `item:${item.id}:first` });
+      } catch (err) {
+        if (!(err instanceof ProviderError)) throw err;
+        log.warn('billing.drop_deferred', { item: Number(item.id), kind: err.kind, delivery: err.delivery });
+        return false;
+      }
+    }
+    await db.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NOT DISTINCT FROM $4', [tenantId(), item.id, `free:${item.id}`, pid ?? null]);
+    return true;
+  }
+
+  /** Lines that ended with a charge still pending at the provider: removed ones, and never-paid ones of an ending subscription. */
+  const pendingEnded = (q) => q.query(
+    `SELECT * FROM subscription_items WHERE tenant_id = $1 AND ends_at IS NOT NULL
+       AND ((provider_item_id IS NOT NULL AND provider_item_id NOT LIKE 'free:%') OR (provider_item_id IS NULL AND billed_through IS NULL)) ORDER BY id`,
+    [tenantId()],
+  );
 
   async function addItem({ code, quantity = 1, requestKey }, user) {
     const settings = await settingsOf(db);
@@ -525,6 +559,9 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
         if (why === 'already_has') throw new ApiError('conflict', 'You already have this.', { reason: 'already_has' });
         if (!s?.provider_subscription_id || s.status === 'cancelled') throw new ApiError('conflict', 'Pick a paid plan first.', { reason: 'needs_subscription' });
         if (s.status === 'suspended') throw new ApiError('conflict', 'Pay what is due first.', { reason: 'suspended' });
+        // Granted at once but charged with the next subscription charge, so only on a paid subscription that has one coming (money-10).
+        if (!s.current_period_end) throw new ApiError('conflict', 'Finish paying for your plan first.', { reason: 'needs_subscription' });
+        if (s.next_plan === 'free') throw new ApiError('conflict', 'Your plan ends when this period does, so nothing more can be added.', { reason: 'ending' });
         const [row] = await t.query(
           `INSERT INTO subscription_items (tenant_id, subscription_id, addon_code, kind, quantity, unit_price_paise, cycle, created_by, request_key)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
@@ -553,6 +590,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
   }
 
   async function removeItem(id, user) {
+    let removed = null;
     const done = await locked(async (t) => {
       const [item] = await t.query('SELECT * FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND (ends_at IS NULL OR ends_at > now()) FOR UPDATE', [tenantId(), id]);
       if (!item) return null;
@@ -563,9 +601,34 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       await t.query('UPDATE subscription_items SET ends_at = GREATEST(starts_at, COALESCE($3::timestamptz, now())) WHERE tenant_id = $1 AND id = $2', [tenantId(), id, end ? iso(end) : null]);
       await switchOffEnded(t);
       await writeAudit(t, { actor: `user:${user.id}`, action: 'billing.item_removed', target: `item:${id}`, details: { code: item.addon_code } });
+      removed = { item, s };
       return true;
     });
     if (!done) throw new ApiError('not_found');
+    // Whatever is waiting at the provider for this line is taken back: removed is never charged again (money-4).
+    const [now] = await db.query('SELECT * FROM subscription_items WHERE tenant_id = $1 AND id = $2', [tenantId(), id]);
+    if (now) await dropPending(now, removed.s);
+  }
+
+  /**
+   * The business scheduled its move to Free: the provider will charge nothing more, so every line not yet paid for ends now
+   * and its pending provider charge is taken back (money-10). Paid lines run to the end of what is paid.
+   */
+  async function endUnpaid(actor) {
+    const ended = await locked(async (t) => {
+      const rows = await t.query(
+        `UPDATE subscription_items SET ends_at = GREATEST(starts_at, now()) WHERE tenant_id = $1 AND billed_through IS NULL AND (ends_at IS NULL OR ends_at > now()) RETURNING *`,
+        [tenantId()],
+      );
+      if (rows.length) {
+        await switchOffEnded(t);
+        await writeAudit(t, { actor, action: 'billing.items_ended', target: 'plan', details: { items: rows.map((r) => Number(r.id)), reason: 'moving_to_free_unpaid' } });
+      }
+      return rows;
+    });
+    const s = await subOf(db);
+    for (const item of ended) await dropPending(item, s);
+    return ended.length;
   }
 
   // ---- invoices ----
@@ -677,9 +740,9 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       if (lines.length) {
         invoice = await issue(t, { sourceRef: `charge:${ev.payment.id}`, lines, settings, buyer, placeOfSupply: pos, periodStart, periodEnd });
         if (queued.length) {
+          // A removed line keeps its end: if the provider charged it before it could be taken back, ops credits it (below).
           await t.query(
-            `UPDATE subscription_items SET provider_item_id = NULL, billed_through = $3::timestamptz,
-               ends_at = CASE WHEN ends_at IS NOT NULL AND ends_at < $3::timestamptz AND cycle = 'monthly' THEN $3::timestamptz ELSE ends_at END
+            `UPDATE subscription_items SET provider_item_id = NULL, billed_through = $3::timestamptz
              WHERE tenant_id = $1 AND id = ANY($2::bigint[])`,
             [business, queued.map((i) => Number(i.id)), iso(ev.subscription?.currentEnd ? ev.subscription.currentEnd * 1000 : at())],
           );
@@ -708,8 +771,12 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
         }
       }
       await writeAudit(t, { actor: 'billing', action: 'billing.charged', target: invoice ? `invoice:${invoice.id}` : 'payment', details: { amountPaise: ev.payment.amountPaise ?? 0, invoice: invoice?.number ?? null } });
-      return { outcome: 'processed', resumed, mismatch: expected !== Number(ev.payment.amountPaise ?? 0) ? { expected, got: Number(ev.payment.amountPaise) } : null, invoiceId: invoice?.id ?? null };
+      const removedCharged = queued.filter((i) => i.ends_at).map((i) => Number(i.id));
+      return { outcome: 'processed', resumed, removedCharged, mismatch: expected !== Number(ev.payment.amountPaise ?? 0) ? { expected, got: Number(ev.payment.amountPaise) } : null, invoiceId: invoice?.id ?? null };
     });
+    if (outcome.removedCharged?.length) {
+      await opsAlert(platformDb, { tenantId: business, kind: 'billing.removed_item_charged', message: `A Bhava charge included ${outcome.removedCharged.length} add-on line(s) the business had removed before it could be taken back (invoice ${outcome.invoiceId}). Issue a credit note.`, target: `invoice:${outcome.invoiceId}`, dedupeKey: `billing-removed:${outcome.invoiceId}` });
+    }
     if (outcome.mismatch) {
       log.warn('billing.amount_mismatch', { tenantId: business, invoice: outcome.invoiceId, expected: outcome.mismatch.expected, got: outcome.mismatch.got });
       await opsAlert(platformDb, { tenantId: business, kind: 'billing.amount_mismatch', message: `A Bhava charge of ${outcome.mismatch.got} paise does not match the ${outcome.mismatch.expected} paise its invoice lists (invoice ${outcome.invoiceId}). Check it and issue a credit note if needed.`, target: `invoice:${outcome.invoiceId}`, dedupeKey: `billing-mismatch:${outcome.invoiceId}` });
@@ -800,7 +867,8 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
           await db.tx(async (t) => switchOffEnded(t));
           const s = await subOf(db);
           const months = monthsOf(s.cycle);
-          const fresh = await db.query(`SELECT * FROM subscription_items WHERE tenant_id = $1 AND provider_item_id IS NULL AND billed_through IS NULL ORDER BY id`, [tenantId()]);
+          for (const item of await pendingEnded(db)) await dropPending(item, s);
+          const fresh = await db.query(`SELECT * FROM subscription_items WHERE tenant_id = $1 AND provider_item_id IS NULL AND billed_through IS NULL AND (ends_at IS NULL OR ends_at > now()) ORDER BY id`, [tenantId()]);
           for (const item of fresh) if (await queueItem(item, `item:${item.id}:first`, { settings, months })) done.queued += 1;
           const end = s.current_period_end ? new Date(s.current_period_end) : null;
           if (end && end - at() <= QUEUE_AHEAD_MS) {
