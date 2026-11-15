@@ -5,10 +5,31 @@ import { routeList } from '../../../src/contracts/api/index.js';
 import { adminListsRepo } from '../../../src/modules/admin-api/repo.js';
 import { MODULES } from '../../../src/modules/index.js';
 import { NoTenantError, withTenant } from '../../../src/tenancy.js';
-import { REEL_ID, openTestDb } from '../../helpers.js';
+import { REEL_ID, fakeIg, openTestDb } from '../../helpers.js';
 import { capturingLogs, ok, placeOrder, refused, secondBusiness, withApp } from './support.js';
 
 const reelBody = (productIds) => ({ keywords: ['LINK'], productIds, headline: 'Secret reel', slug: 'secret-reel' });
+
+const LEAF_IG = 'IG-leaf';
+
+/** Instagram where REEL_ID was posted on leaf's account: only leaf's own token reads it (D-5). */
+function leafPostedTheReel() {
+  const ig = fakeIg();
+  const read = ig.getMedia;
+  ig.getMedia = async (account, id) => {
+    if (String(id) === REEL_ID && account?.igUserId !== LEAF_IG) throw Object.assign(new Error('Unsupported get request'), { status: 400, kind: 'validation' });
+    return read(account, id);
+  };
+  return ig;
+}
+
+/** The second business with its Instagram connected: a reel is only ever set up on a post of the business's own account. */
+async function leafWithInstagram(app) {
+  const leaf = await secondBusiness(app);
+  await app.platform.tenants.linkIgAccount(leaf.tenant.id, LEAF_IG, 'leaf');
+  await leaf.repos.igAccounts.setToken(LEAF_IG, 'leaf-token');
+  return leaf;
+}
 
 /** Gives signed-in staff the role and permissions the database cannot store yet. */
 const actingAs = (role, permissions) => ({
@@ -33,8 +54,8 @@ test('every route in the contract is answered, by exactly one module', () => {
   assert.deepEqual([...answered].sort(), routeList.map((r) => r.id).sort());
 });
 
-test('R-01: another business\'s ids are not found on every route, and the attempt is logged with ids only', withApp(async (app) => {
-  const leaf = await secondBusiness(app);
+test('R-01: another business\'s ids are not found on every route, and the attempt is logged with ids only', withApp({ ig: leafPostedTheReel() }, async (app) => {
+  const leaf = await leafWithInstagram(app);
   const shopper = await leaf.repos.users.create({ name: 'Asha K', phone: '9876543210', password: 'secret1' });
   const product = await ok(await leaf.api('POST', '/products', { name: 'SECRET pot', pricePaise: 100 }), 201);
   const category = await ok(await leaf.api('POST', '/categories', { name: 'SECRET shelf' }), 201);
@@ -83,8 +104,8 @@ test('F-02: the owner of one business gets a 404 for another\'s product, and not
   assert.doesNotMatch(JSON.stringify(lines), /SECRET/);
 }));
 
-test('lists hold only the caller\'s own rows, on every list route', withApp(async (app) => {
-  const leaf = await secondBusiness(app);
+test('lists hold only the caller\'s own rows, on every list route', withApp({ ig: leafPostedTheReel() }, async (app) => {
+  const leaf = await leafWithInstagram(app);
   const product = await ok(await leaf.api('POST', '/products', { name: 'SECRET pot', pricePaise: 100 }), 201);
   await ok(await leaf.api('POST', '/categories', { name: 'SECRET shelf' }), 201);
   await placeOrder(leaf.repos, product);
@@ -105,7 +126,6 @@ test('F-03: the module\'s lists refuse to run with no business selected', async 
   await assert.rejects(() => lists.orders({ limit: 5 }), NoTenantError);
   await assert.rejects(() => lists.customers({ limit: 5 }), NoTenantError);
   await assert.rejects(() => lists.activity({ limit: 5 }), NoTenantError);
-  await assert.rejects(() => lists.reelHeldElsewhere('1'), NoTenantError);
   const [tenant] = await db.query(`INSERT INTO tenants (slug, name) VALUES ('t', 'T') RETURNING id, slug`);
   assert.deepEqual(await withTenant(tenant, () => lists.orders({ limit: 5 })), { items: [], nextCursor: null });
   await db.close();

@@ -86,9 +86,8 @@ export function reelsRepo(db) {
       if (!/^\d+$/.test(mediaId)) throw new ValidationError('Invalid Instagram post ID');
 
       const tid = tenantId();
-      // Media ids are unique across Instagram, so this one check has to see every business's reels.
-      const [owner] = await (db.platform ?? db).query('SELECT tenant_id FROM reels WHERE ig_media_id = $1', [mediaId]);
-      if (owner && owner.tenant_id !== tid) throw new ValidationError('This Instagram post belongs to another business');
+      // Rows are keyed per business (D-5): another business holding the same id never blocks this one, and nothing here reads
+      // another business's rows. That the post is this business's own is checked against its Instagram before a new reel is saved.
       const [taken] = await db.query('SELECT 1 FROM reels WHERE tenant_id = $3 AND slug = $1 AND ig_media_id <> $2', [r.slug, mediaId, tid]);
       if (taken) throw new ValidationError(`The store link “${r.slug}” is already used by another reel`);
       const found = await db.query('SELECT id FROM products WHERE tenant_id = $2 AND id = ANY($1::int[])', [r.productIds, tid]);
@@ -99,13 +98,12 @@ export function reelsRepo(db) {
           `INSERT INTO reels (tenant_id, ig_media_id, slug, headline, keywords, dm_message, button_text, public_reply, active,
              permalink, thumbnail_url, caption, video_url)
            VALUES ($13, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-           ON CONFLICT (ig_media_id) DO UPDATE SET slug = $2, headline = $3, keywords = $4, dm_message = $5,
+           ON CONFLICT (tenant_id, ig_media_id) DO UPDATE SET slug = $2, headline = $3, keywords = $4, dm_message = $5,
              button_text = $6, public_reply = $7, active = $8,
              permalink = COALESCE(NULLIF($9, ''), reels.permalink),
              thumbnail_url = COALESCE(NULLIF($10, ''), reels.thumbnail_url),
              caption = COALESCE(NULLIF($11, ''), reels.caption),
-             video_url = COALESCE(NULLIF($12, ''), reels.video_url), updated_at = now()
-           WHERE reels.tenant_id = EXCLUDED.tenant_id`,
+             video_url = COALESCE(NULLIF($12, ''), reels.video_url), updated_at = now()`,
           [mediaId, r.slug, r.headline, r.keywords, r.dm_message, r.button_text, r.public_reply, r.active,
             r.permalink, r.thumbnail_url, r.caption, r.video_url, tid],
         );

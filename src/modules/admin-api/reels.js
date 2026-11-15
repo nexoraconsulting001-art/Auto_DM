@@ -5,6 +5,8 @@ import { mapPage, pageOf } from './paging.js';
 import { reelStoreUrl, storeBaseUrl } from './urls.js';
 
 const INSTAGRAM_POSTS_FETCHED = 50;
+/** How the Graph client marks an answer that means "not this account's post". */
+const NOT_THEIRS = new Set(['validation', 'not_found', 'permission']);
 
 const toReel = (r, base) => ({
   id: r.ig_media_id,
@@ -72,6 +74,24 @@ const toInstagramPost = (post, configured) => ({
 export function reelsApi({ repos, config }, setup) {
   const base = (req) => storeBaseUrl(req, config);
 
+  /**
+   * Reads the post with this business's own Instagram token, which is the only proof it is theirs (D-5). Instagram answers
+   * the same for another account's post as for one that doesn't exist, and so does this.
+   */
+  async function requireOwnPost(mediaId) {
+    const client = await setup.igClient();
+    if (!client) throw new ApiError('conflict', 'Connect your Instagram account before setting up a reel.');
+    let media;
+    try {
+      media = await client.getMedia(mediaId);
+    } catch (err) {
+      if (NOT_THEIRS.has(err?.kind) || [400, 403, 404].includes(err?.status)) throw new ApiError('not_found');
+      log.warn('api.reel_media_check_failed', { status: err?.status, code: err?.code, kind: err?.kind });
+      throw new ApiError('conflict', 'We couldn’t reach Instagram. Try again in a minute.');
+    }
+    if (!media || (media.id !== undefined && String(media.id) !== String(mediaId))) throw new ApiError('not_found');
+  }
+
   return {
     'reels.list': async ({ query, req }) => {
       const rows = await repos.reels.list();
@@ -84,10 +104,11 @@ export function reelsApi({ repos, config }, setup) {
       return reel && toReelDetail(reel, base(req));
     },
 
-    // Another business's post is "not found" here like any other id of theirs (PRD 11, R-01).
+    // A new reel's post must be on this business's own Instagram. Another business's post is "not found" here like any
+    // other id of theirs (PRD 11, R-01), and reads the same as one that doesn't exist.
     'reels.save': async ({ params, body, req }) => {
-      if (await repos.adminLists.reelHeldElsewhere(params.id)) throw new ApiError('not_found');
       const existing = await repos.reels.get(params.id);
+      if (!existing) await requireOwnPost(params.id);
       const saved = await retryOnRace(() => repos.reels.save(params.id, reelInput(body, existing)));
       return toReelDetail(saved, base(req));
     },

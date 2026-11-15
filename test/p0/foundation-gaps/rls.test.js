@@ -130,9 +130,15 @@ test('the recipe in HANDOFF.md fences a new table in one line', async () => {
   );
 });
 
-test('claiming another business\'s Instagram post is still a clear refusal under the fence', async () => {
+test('the same Instagram post id at two businesses stays two rows under the fence, each seen and changed only by its own', async () => {
   const { a, b, lamp, pot } = await twoBusinesses();
   await b.reels.save('17900000000000900', { headline: 'Theirs', keywords: 'LINK', productIds: [pot.id], active: 'on' });
-  await assert.rejects(() => a.reels.save('17900000000000900', { headline: 'Mine', keywords: 'LINK', productIds: [lamp.id], active: 'on' }), /belongs to another business/);
-  assert.equal(await a.adminLists.reelHeldElsewhere('17900000000000900'), true);
+  const mine = await a.reels.save('17900000000000900', { headline: 'Mine', keywords: 'LINK', productIds: [lamp.id], active: 'on' });
+  assert.equal(mine.headline, 'Mine');
+  assert.deepEqual(mine.products.map((p) => p.id), [lamp.id]);
+  const theirs = await b.reels.get('17900000000000900');
+  assert.equal(theirs.headline, 'Theirs');
+  assert.deepEqual(theirs.products.map((p) => p.id), [pot.id]);
+  assert.deepEqual((await a.reels.list()).map((r) => r.headline), ['Mine']);
+  assert.deepEqual((await b.reels.list()).map((r) => r.headline), ['Theirs']);
 });

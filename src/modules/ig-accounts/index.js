@@ -1,10 +1,11 @@
 import { log } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { ValidationError } from '../../util.js';
+import { RELEASED_BY_OWNER } from '../../repos/connections.js';
 import { writeAudit } from '../audit/index.js';
 
-/** status_reason of a connection the seller ended. It reads as "not connected", and frees the account for another business. */
-export const DISCONNECTED_BY_OWNER = 'owner.disconnected';
+/** status_reason of a connection the seller ended. It reads as "not connected", and frees the account for another business (src/repos/connections.js). */
+export const DISCONNECTED_BY_OWNER = RELEASED_BY_OWNER;
 const DELETION_REQUESTED = 'deletion.requested';
 
 /** One row of the compliance log (PRD 4.16) on `runner`, so a change and its row land together. Ids only. */

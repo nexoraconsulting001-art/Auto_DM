@@ -4,6 +4,7 @@ import { LEGACY_TABLES, MigrationOptions, MigrationReport, MigrationSource, coun
 import { APP_ROLE } from '../../db/index.js';
 import { log } from '../../platform/log.js';
 import { tenantId, withTenant } from '../../tenancy.js';
+import { RELEASED_BY_OWNER } from '../../repos/connections.js';
 import { writeAudit } from '../audit/index.js';
 import { plainLine } from '../imports/text.js';
 import { MigrationRefused, keysOf, prepare, sourceHash } from './rules.js';
@@ -79,7 +80,9 @@ async function lookups(q, tid, source) {
     reelSlugs: set(await q('SELECT slug FROM reels WHERE tenant_id = $1 AND slug = ANY($2::text[])', [tid, k.reelSlugs]), 'slug'),
     // Across every business, but only whether a value is taken and by which business id: nothing of another business is read.
     reelOwners: owners(await q('SELECT ig_media_id, tenant_id FROM reels WHERE ig_media_id = ANY($1::text[])', [k.reelIds]), 'ig_media_id'),
-    accountOwners: owners(await q('SELECT ig_user_id, tenant_id FROM ig_accounts WHERE ig_user_id = ANY($1::text[])', [k.accounts]), 'ig_user_id'),
+    // Each business keeps its own row (tenancy-1); ordered so the business holding the account now is the one kept.
+    accountOwners: owners(await q(`SELECT ig_user_id, tenant_id FROM ig_accounts WHERE ig_user_id = ANY($1::text[])
+      ORDER BY (access_token_enc = '' AND status_reason = $2) DESC, status_changed_at ASC NULLS FIRST`, [k.accounts, RELEASED_BY_OWNER]), 'ig_user_id'),
     orderNumbers: set(await q('SELECT order_number FROM orders WHERE tenant_id = $1 AND order_number = ANY($2::text[])', [tid, k.orderNumbers]), 'order_number'),
     takenTokens: set(await q('SELECT public_token FROM orders WHERE public_token = ANY($1::text[])', [k.tokens]), 'public_token'),
     takenComments: set(await q('SELECT comment_id FROM activity WHERE comment_id = ANY($1::text[])', [k.comments]), 'comment_id'),

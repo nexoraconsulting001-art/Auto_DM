@@ -53,11 +53,5 @@ export function adminListsRepo(db) {
       );
       return pageOfFetched(rows, limit, (a) => [Number(a.at_micros), a.id]);
     },
-
-    /** True when another business holds this Instagram post. Media ids are unique across Instagram, so a claim on it can only be refused. */
-    async reelHeldElsewhere(id) {
-      const [row] = await (db.platform ?? db).query('SELECT 1 FROM reels WHERE ig_media_id = $1 AND tenant_id <> $2', [String(id), tenantId()]);
-      return Boolean(row);
-    },
   };
 }

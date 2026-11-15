@@ -11,6 +11,16 @@ function passwordLoginFrom(env) {
   if (env.PASSWORD_LOGIN !== undefined && env.PASSWORD_LOGIN !== '') return env.PASSWORD_LOGIN === '1';
   return env.NODE_ENV === 'test' || (env.NODE_ENV !== 'production' && Boolean(env.NODE_TEST_CONTEXT));
 }
+/**
+ * The business served on an address no business has, and given webhooks for accounts no business holds. Production has none
+ * (D-6): unset there it is empty, so unknown addresses get the 404 and unknown accounts are logged and skipped; a production
+ * deploy that sets it is refused by the production guard (tenancy.no_default). Elsewhere it is 'default' unless set.
+ */
+function defaultTenantFrom(env) {
+  if (env.DEFAULT_TENANT !== undefined) return env.DEFAULT_TENANT;
+  const production = String(env.NODE_ENV ?? '').trim().toLowerCase() === 'production' || ['production', 'prod'].includes(String(env.DEPLOY_ENV ?? '').trim().toLowerCase());
+  return production ? '' : 'default';
+}
 const list = (value) => String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
 const positive = (value, fallback) => (Number(value) > 0 ? Number(value) : fallback);
 /** "a=b,c=d" as { a: 'b', c: 'd' }. */
@@ -267,7 +277,7 @@ export const config = {
   otaMinLaunches: positive(process.env.OTA_MIN_LAUNCHES, 50),
   otaWindowMinutes: positive(process.env.OTA_WINDOW_MINUTES, 60),
   otaBaselineCrashRate: positive(process.env.OTA_BASELINE_CRASH_RATE, 0.005),
-  defaultTenant: process.env.DEFAULT_TENANT ?? 'default',
+  defaultTenant: defaultTenantFrom(process.env),
   defaultTenantName: process.env.DEFAULT_TENANT_NAME || 'My store',
 };
 

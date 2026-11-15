@@ -419,6 +419,7 @@ test('the production rules: data, each refusing its own fault by setting name, e
     'hosts.platform': { publicBaseUrl: 'http://localhost:3000' },
     'sending.live': { dryRun: true },
     'fetch.no_transport': { safeFetchTransport: { dial: () => {} } },
+    'tenancy.no_default': { defaultTenant: 'default' },
   };
   assert.deepEqual(Object.keys(broken).sort(), PRODUCTION_RULES.map((r) => r.id).sort(), 'every rule has a case here');
   for (const [id, change] of Object.entries(broken)) assert.deepEqual(productionProblems({ ...good, ...change }).map((p) => p.id), [id], id);

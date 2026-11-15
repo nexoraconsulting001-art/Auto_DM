@@ -139,6 +139,12 @@ test('K-31: a story link opened after the story has expired shows the cover, or 
 test('K-33, K-34: one business can never link to, show or open another\'s products or pages, and a page on the shared domain never names the platform', async (t) => {
   const s = await shop(t, { overrides: { platformDomain: 'shops.example', publicBaseUrl: '' } });
   const other = await secondShop(s.app, { slug: 'zari', name: 'Zari and Co', domain: 'shops.example' });
+  // The first post is on the first business's Instagram: another account's token can't read it, as on Instagram (D-5).
+  const readMedia = s.ig.getMedia;
+  s.ig.getMedia = async (account, id) => {
+    if (String(id) === '17900000000000010' && account?.igUserId !== 'ME') throw Object.assign(new Error('Unsupported get request'), { status: 400, kind: 'validation' });
+    return readMedia(account, id);
+  };
   const mine = await addProduct(s.app, s.repos, s.tenant, { name: 'My Bottle', externalUrl: 'https://shop.example/bottle' });
   const theirs = await addProduct(s.app, other.repos, other.tenant, { name: 'Their Saree', price: '4999' });
 
@@ -153,8 +159,13 @@ test('K-33, K-34: one business can never link to, show or open another\'s produc
   assert.equal(theirPage.status, 201, JSON.stringify(theirPage.body));
   assert.equal(theirPage.body.url, 'https://zari.shops.example/r/festive');
 
-  // A post one business has a page for is simply not found for the other, and their ids mean nothing here.
-  assert.equal((await other.api('POST', '/pages', { kind: 'reel', mediaId: '17900000000000010', productIds: [theirs.id] })).status, 404);
+  // A post one business has a page for is refused to the other exactly like a post that doesn't exist, and their ids mean nothing here.
+  const claimed = await other.api('POST', '/pages', { kind: 'reel', mediaId: '17900000000000010', productIds: [theirs.id] });
+  assert.equal(claimed.status, 400);
+  s.ig.media['17900000000000019'] = null;
+  const missing = await other.api('POST', '/pages', { kind: 'reel', mediaId: '17900000000000019', productIds: [theirs.id] });
+  assert.deepEqual([claimed.status, claimed.body.code, claimed.body.error], [missing.status, missing.body.code, missing.body.error]);
+  assert.equal((await other.api('GET', '/pages')).body.items.length, 1, 'nothing is created for the other business');
   assert.equal((await other.api('GET', `/pages/${page.body.id}`)).status, 404);
   assert.equal((await other.api('PATCH', `/pages/${page.body.id}`, { headline: 'Taken' })).status, 404);
   assert.equal((await other.api('DELETE', `/pages/${page.body.id}`)).status, 404);
