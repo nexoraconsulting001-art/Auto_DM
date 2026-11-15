@@ -4,7 +4,8 @@ import { IdTokenError } from '../../adapters/oidc.js';
 import { log } from '../../platform/log.js';
 import { limit, refused } from './shared.js';
 
-const APPLE_NONCE_WINDOW_MS = 15 * 60_000;
+/** How long a spent Sign in with Apple nonce is remembered: longer than an identity token lives. The shopper app's uses it too. */
+export const APPLE_NONCE_WINDOW_MS = 15 * 60_000;
 
 /**
  * Signing in (PRD 5.11, 10.2, 10.3, 10.6): auth.start and auth.verify (the WhatsApp code), auth.exchange (the end of a
