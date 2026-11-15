@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "businesses": [
+    {
+      "key": "first",
+      "file": "mehta-mart.json"
+    },
+    {
+      "key": "second",
+      "file": "plant-store.json"
+    }
+  ]
+}

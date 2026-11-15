@@ -66,7 +66,9 @@ test('F-37 F-43: every route of this phase’s list has a screen that calls it (
   // screens, and the team list is a later part of the console. Everything else must be reached.
   const elsewhere = new Set(['platform.siteAdapters', 'platform.setSiteAdapter', 'platform.themePresets', 'platform.saveThemePreset', 'platform.customisationRequests',
     'platform.createCustomisationRequest', 'platform.decideCustomisationRequest', 'platform.team', 'platform.addTeamMember', 'platform.updateTeamMember',
-    'platform.alerts', 'platform.accountHealthList', 'platform.unblockPerson']);
+    'platform.alerts', 'platform.accountHealthList', 'platform.unblockPerson',
+    // Phase 8's feedback routes: their screen and its test are Phase 8's (test/p8).
+    'platform.feedback', 'platform.createFeedback', 'platform.updateFeedback']);
   const missing = Object.keys(PLATFORM_ROUTES).filter((id) => !used.has(id) && !elsewhere.has(id));
   assert.deepEqual(missing, [], `routes with no screen: ${missing.join(', ')}`);
 });

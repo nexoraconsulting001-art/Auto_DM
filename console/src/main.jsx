@@ -7,9 +7,12 @@ import './design/base.css';
 import './design/components.css';
 import './design/screens.css';
 import { App } from './App.jsx';
+import { registerServiceWorker } from './pwa/register.js';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />
   </StrictMode>,
 );
+
+registerServiceWorker();

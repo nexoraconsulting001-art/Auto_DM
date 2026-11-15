@@ -1,0 +1,434 @@
+{
+  "schema": 1,
+  "note": "An invented plant catalogue, used when no outside catalogue is given. Every name, price and description is made up. Photos are added by the seed track.",
+  "categories": [
+    {
+      "name": "Easy Indoor Plants",
+      "slug": "easy-indoor-plants",
+      "description": "Hard to kill, happy in a living room.",
+      "imageUrl": "",
+      "position": 1
+    },
+    {
+      "name": "Balcony Bloomers",
+      "slug": "balcony-bloomers",
+      "description": "Flowers for a sunny railing.",
+      "imageUrl": "",
+      "position": 2
+    },
+    {
+      "name": "Desk Greens",
+      "slug": "desk-greens",
+      "description": "Small plants for a work table.",
+      "imageUrl": "",
+      "position": 3
+    },
+    {
+      "name": "Pots & Care",
+      "slug": "pots-and-care",
+      "description": "Planters, soil mix and plant food.",
+      "imageUrl": "",
+      "position": 4
+    }
+  ],
+  "products": [
+    {
+      "name": "Money Plant Golden",
+      "description": "A trailing money plant with gold-splashed leaves. Water once a week.",
+      "pricePaise": 24900,
+      "mrpPaise": 31100,
+      "images": [],
+      "categories": [
+        "Easy Indoor Plants"
+      ],
+      "featured": false,
+      "stock": null,
+      "options": [
+        {
+          "name": "Pot",
+          "values": [
+            "Grow pot",
+            "Ceramic pot"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "options": {
+            "Pot": "Grow pot"
+          },
+          "stock": 30,
+          "sku": ""
+        },
+        {
+          "options": {
+            "Pot": "Ceramic pot"
+          },
+          "pricePaise": 49900,
+          "stock": 12,
+          "sku": ""
+        }
+      ]
+    },
+    {
+      "name": "Snake Plant Laurentii",
+      "description": "Upright sword leaves with a yellow edge. Fine in low light.",
+      "pricePaise": 39900,
+      "mrpPaise": 49900,
+      "images": [],
+      "categories": [
+        "Easy Indoor Plants"
+      ],
+      "featured": false,
+      "stock": null,
+      "options": [
+        {
+          "name": "Pot",
+          "values": [
+            "Grow pot",
+            "Ceramic pot"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "options": {
+            "Pot": "Grow pot"
+          },
+          "stock": 30,
+          "sku": ""
+        },
+        {
+          "options": {
+            "Pot": "Ceramic pot"
+          },
+          "pricePaise": 64900,
+          "stock": 12,
+          "sku": ""
+        }
+      ]
+    },
+    {
+      "name": "ZZ Plant",
+      "description": "Glossy leaves that forgive a missed watering.",
+      "pricePaise": 54900,
+      "mrpPaise": 68600,
+      "images": [],
+      "categories": [
+        "Easy Indoor Plants"
+      ],
+      "featured": false,
+      "stock": null,
+      "options": [
+        {
+          "name": "Pot",
+          "values": [
+            "Grow pot",
+            "Ceramic pot"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "options": {
+            "Pot": "Grow pot"
+          },
+          "stock": 30,
+          "sku": ""
+        },
+        {
+          "options": {
+            "Pot": "Ceramic pot"
+          },
+          "pricePaise": 79900,
+          "stock": 12,
+          "sku": ""
+        }
+      ]
+    },
+    {
+      "name": "Areca Palm Medium",
+      "description": "A soft feathery palm, about two feet tall on arrival.",
+      "pricePaise": 69900,
+      "mrpPaise": 87400,
+      "images": [],
+      "categories": [
+        "Easy Indoor Plants"
+      ],
+      "featured": true,
+      "stock": null,
+      "options": [
+        {
+          "name": "Pot",
+          "values": [
+            "Grow pot",
+            "Ceramic pot"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "options": {
+            "Pot": "Grow pot"
+          },
+          "stock": 30,
+          "sku": ""
+        },
+        {
+          "options": {
+            "Pot": "Ceramic pot"
+          },
+          "pricePaise": 94900,
+          "stock": 12,
+          "sku": ""
+        }
+      ]
+    },
+    {
+      "name": "Peace Lily",
+      "description": "White blooms through the year in bright shade.",
+      "pricePaise": 44900,
+      "mrpPaise": 56100,
+      "images": [],
+      "categories": [
+        "Easy Indoor Plants"
+      ],
+      "featured": false,
+      "stock": null,
+      "options": [
+        {
+          "name": "Pot",
+          "values": [
+            "Grow pot",
+            "Ceramic pot"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "options": {
+            "Pot": "Grow pot"
+          },
+          "stock": 30,
+          "sku": ""
+        },
+        {
+          "options": {
+            "Pot": "Ceramic pot"
+          },
+          "pricePaise": 69900,
+          "stock": 12,
+          "sku": ""
+        }
+      ]
+    },
+    {
+      "name": "Hibiscus Red",
+      "description": "A sun-loving hibiscus with large red flowers.",
+      "pricePaise": 29900,
+      "mrpPaise": 37400,
+      "images": [],
+      "categories": [
+        "Balcony Bloomers"
+      ],
+      "featured": false,
+      "stock": null,
+      "options": [
+        {
+          "name": "Pot",
+          "values": [
+            "Grow pot",
+            "Ceramic pot"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "options": {
+            "Pot": "Grow pot"
+          },
+          "stock": 30,
+          "sku": ""
+        },
+        {
+          "options": {
+            "Pot": "Ceramic pot"
+          },
+          "pricePaise": 54900,
+          "stock": 12,
+          "sku": ""
+        }
+      ]
+    },
+    {
+      "name": "Bougainvillea Pink",
+      "description": "A hardy climber that flowers most in full sun.",
+      "pricePaise": 34900,
+      "mrpPaise": 43600,
+      "images": [],
+      "categories": [
+        "Balcony Bloomers"
+      ],
+      "featured": false,
+      "stock": null,
+      "options": [
+        {
+          "name": "Pot",
+          "values": [
+            "Grow pot",
+            "Ceramic pot"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "options": {
+            "Pot": "Grow pot"
+          },
+          "stock": 30,
+          "sku": ""
+        },
+        {
+          "options": {
+            "Pot": "Ceramic pot"
+          },
+          "pricePaise": 59900,
+          "stock": 12,
+          "sku": ""
+        }
+      ]
+    },
+    {
+      "name": "Jasmine Mogra",
+      "description": "Fragrant white flowers through the summer.",
+      "pricePaise": 27900,
+      "mrpPaise": 34900,
+      "images": [],
+      "categories": [
+        "Balcony Bloomers"
+      ],
+      "featured": false,
+      "stock": null,
+      "options": [
+        {
+          "name": "Pot",
+          "values": [
+            "Grow pot",
+            "Ceramic pot"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "options": {
+            "Pot": "Grow pot"
+          },
+          "stock": 30,
+          "sku": ""
+        },
+        {
+          "options": {
+            "Pot": "Ceramic pot"
+          },
+          "pricePaise": 52900,
+          "stock": 12,
+          "sku": ""
+        }
+      ]
+    },
+    {
+      "name": "Jade Plant Mini",
+      "description": "A small succulent with round leaves. Water every ten days.",
+      "pricePaise": 19900,
+      "mrpPaise": 24900,
+      "images": [],
+      "categories": [
+        "Desk Greens"
+      ],
+      "featured": false,
+      "stock": null,
+      "options": [
+        {
+          "name": "Pot",
+          "values": [
+            "Grow pot",
+            "Ceramic pot"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "options": {
+            "Pot": "Grow pot"
+          },
+          "stock": 30,
+          "sku": ""
+        },
+        {
+          "options": {
+            "Pot": "Ceramic pot"
+          },
+          "pricePaise": 44900,
+          "stock": 12,
+          "sku": ""
+        }
+      ]
+    },
+    {
+      "name": "Lucky Bamboo Three Layer",
+      "description": "Three tiers of bamboo stalks in a glass bowl.",
+      "pricePaise": 32900,
+      "mrpPaise": 41100,
+      "images": [],
+      "categories": [
+        "Desk Greens"
+      ],
+      "featured": false,
+      "stock": 40,
+      "options": [],
+      "variants": []
+    },
+    {
+      "name": "Terracotta Planter Set of 3",
+      "description": "Three hand-finished terracotta pots with saucers.",
+      "pricePaise": 59900,
+      "mrpPaise": 74900,
+      "images": [],
+      "categories": [
+        "Pots & Care"
+      ],
+      "featured": false,
+      "stock": 40,
+      "options": [],
+      "variants": []
+    },
+    {
+      "name": "Potting Mix 5 kg",
+      "description": "Cocopeat, compost and perlite, ready to use.",
+      "pricePaise": 24900,
+      "mrpPaise": 31100,
+      "images": [],
+      "categories": [
+        "Pots & Care"
+      ],
+      "featured": false,
+      "stock": 40,
+      "options": [],
+      "variants": []
+    },
+    {
+      "name": "Organic Plant Food 500 ml",
+      "description": "A liquid seaweed feed. One cap in a litre of water.",
+      "pricePaise": 17900,
+      "mrpPaise": 22400,
+      "images": [],
+      "categories": [
+        "Pots & Care"
+      ],
+      "featured": false,
+      "stock": 40,
+      "options": [],
+      "variants": []
+    }
+  ]
+}

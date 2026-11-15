@@ -1,0 +1,15 @@
+{
+  "id": "/admin/",
+  "name": "Bhava for Business",
+  "short_name": "Bhava",
+  "description": "Run your Instagram store: orders, automations and insights.",
+  "start_url": "/admin/",
+  "scope": "/admin/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F6F5F1",
+  "theme_color": "#F6F5F1",
+  "icons": [
+    { "src": "/admin/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

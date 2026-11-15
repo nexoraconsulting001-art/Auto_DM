@@ -1,0 +1,274 @@
+{
+  "schema": 1,
+  "business": {
+    "slug": "mehta-mart",
+    "name": "Mehta Mart",
+    "legalName": "Mehta Mart (sample business)",
+    "accountType": "seller",
+    "plan": "t4",
+    "cycle": "monthly",
+    "igUsername": "demo_mehta_mart",
+    "igUserId": "9000100000000001",
+    "owner": {
+      "name": "Kavish Ranade",
+      "phone": "+919000000001",
+      "email": "kavish.ranade.0001@example.com"
+    }
+  },
+  "brandKit": {
+    "preset": "tadka",
+    "colors": {
+      "accent": "#D4A72C"
+    },
+    "headingFont": "",
+    "bodyFont": "",
+    "logo": "",
+    "logoDark": "",
+    "favicon": "",
+    "publicReplyVariants": [
+      "Sent you a DM 📩",
+      "Check your DMs, the link is there 👇",
+      "Done! Have a look at your inbox ✨"
+    ]
+  },
+  "app": {
+    "appName": "Mehta Mart",
+    "shortName": "Mehta Mart",
+    "urlScheme": "mehtamart",
+    "androidPackage": "app.sample.mehtamart",
+    "iosBundleId": null,
+    "splashBackground": "#FFF8E6",
+    "icon": "",
+    "splash": "",
+    "supportEmail": "help@mehta-mart.example"
+  },
+  "products": {
+    "from": "file",
+    "file": "../mehtamart.json",
+    "format": "legacy"
+  },
+  "categories": [],
+  "reels": [
+    {
+      "key": "kitchen-creations",
+      "igMediaId": "9000200000000001",
+      "kind": "reel",
+      "caption": "Kitchen Creations: everything from this reel is in the link. Comment KITCHEN and we will DM it to you.",
+      "headline": "Kitchen Creations",
+      "slug": "kitchen-creations",
+      "categories": [
+        "Kitchen Creations"
+      ],
+      "products": [
+        "Silicone Oil Brush for Cooking Heat Resistant BBQ & Baking Pastry Brush",
+        "Silicone Spatula for Non-Stick Cookware Heat Resistant Baking & Cooking Spoon",
+        "Stainless Steel Nutmeg & Cheese Grater | Citrus Zester Kitchen Grater Tool",
+        "Plastic Butter Box with Cutting Guide – Butter Dish with Lid & Built-In Cutter",
+        "900ml Kitchen Storage Container Set – Airtight Food Storage Boxes for Pantry & Refrigerator",
+        "Ultra Sharp Stainless Steel Kitchen Knife – Wooden Grip Chef Knife for Meat, Vegetables & Fruit Cutting Tool",
+        "Electric Milk Frother Hand Blender – Coffee Foam Maker, Egg Beater & Whisk Mixer",
+        "Stainless Steel Apple Cutter – Plastic Handle Fruit Slicer & Corer for Easy Cutting",
+        "Silicone Hand Gloves – Multi-Purpose Dishwashing, Pet Grooming, Car Wash & Bathroom Cleaning",
+        "2-in-1 Kitchen Soap & Dishwash Dispenser – Liquid Soap Pump for Sink, Large Capacity",
+        "2-in-1 Jumbo Vegetable Chopper & Whisking Set with Storage Lid – Kitchen Cutter & Food Prep Tool",
+        "6PCS Silicone Stretch Lids – Food Grade, BPA-Free, Flexible & Reusable Bowl Covers"
+      ]
+    },
+    {
+      "key": "fresh-start-cleaning",
+      "igMediaId": "9000200000000002",
+      "kind": "reel",
+      "caption": "Fresh Start Cleaning: everything from this reel is in the link. Comment CLEAN and we will DM it to you.",
+      "headline": "Fresh Start Cleaning",
+      "slug": "fresh-start-cleaning",
+      "categories": [
+        "Fresh Start Cleaning"
+      ],
+      "products": [
+        "Mini Wire Brush Cleaning Tool Kit – Brass, Nylon & Stainless Steel Bristles for Multi-Purpose Cleaning",
+        "Magic Drying Towel – Reusable, Super Absorbent Multipurpose Cleaning Cloth for Home, Kitchen & Car",
+        "Cotton Floor Cleaning Pocha 3-Piece Combo – Durable, Absorbent Mop Set for Home, Kitchen & Office Floors",
+        "Microfiber Cleaning Cloth 3-Piece Combo – Lint-Free, Soft Wipes for Desktop, Computer, Electronics & Furniture",
+        "Super Bold Double-Sided Toilet Cleaning Brush – Heavy-Duty Bathroom Scrubber for Deep Cleaning",
+        "Cotton Dusting & Cleaning Cloth – 3PCS Combo for Home, Kitchen & Furniture Cleaning",
+        "Multifunctional Liquid Shoe Brush with Built-In Dispenser – Easy Cleaning & Polishing for Shoes",
+        "Instant White Shoe Cleaner Cream with Sponge – Quick Whitener & Stain Remover (Big Size)",
+        "Superior 5-Piece Kitchen Cleaning Towels – Multipurpose Dish Napkins & Wiping Cloths",
+        "2-in-1 Bathroom Cleaning Brush & Wiper – Long Handle Floor & Tile Scrub Brush",
+        "Microfiber Cleaning Cloth – 2-Piece Washable & Quick-Dry Cloth Set for Home & Car",
+        "Car Cleaning Wet Wipes – 80 Pcs Auto Interior & Glass Cleaning Anti-Fog Wipes"
+      ]
+    },
+    {
+      "key": "trending-toys",
+      "igMediaId": "9000200000000003",
+      "kind": "reel",
+      "caption": "Trending Toys: everything from this reel is in the link. Comment TOYS and we will DM it to you.",
+      "headline": "Trending Toys",
+      "slug": "trending-toys",
+      "categories": [
+        "Trending Toys"
+      ],
+      "products": [
+        "Magnetic Kluster Board Game Magnet Game Fun Table Top Strategy Game Magnetic STEM, Magnetic Board Game for Kids & Adults",
+        "Doraemon Air Blast Rocket Toy – Fun Launching Gadget for Kids’ Playtime",
+        "Super High Bouncing Balls – Moon & Space Balls for Kids and Adults, Fun Outdoor & Indoor Toy",
+        "Infant Rattle Toy Set – Musical Toys for Newborns & Babies",
+        "Magic Candy Flower Toy – Rotating Spinning Lollipop Toy for Kids & Adults",
+        "Uno Card Game – 112 Multicolor Cards for Kids 7+ & Adults, Family Fun Game",
+        "Talking Dancing Cactus Plush Toy – Rechargeable Singing & Interactive Kids Toy",
+        "Chair Tower Game – 36-Piece Stackable Blocks Set with 6 Colors for Kids & Family",
+        "Kids Water Dispenser Toy – Cartoon Character Drinking Fountain Pump",
+        "Small Magnetic Sketch Board for Kids – Portable Drawing & Writing Toy",
+        "Air Dry Clay – Colorful Soft Modeling Clay for Kids, Creative Art & Craft Gift Set",
+        "8.5 Inch LCD Writing Tablet – Multicolor E-Note Pad for Kids, Best Birthday Gift for Boys & Girls"
+      ]
+    }
+  ],
+  "landingPages": [
+    {
+      "slug": "kitchen-creations-picks",
+      "title": "Kitchen Creations picks",
+      "kind": "reel",
+      "reel": "kitchen-creations",
+      "categories": [
+        "Kitchen Creations"
+      ],
+      "products": [
+        "Silicone Oil Brush for Cooking Heat Resistant BBQ & Baking Pastry Brush",
+        "Silicone Spatula for Non-Stick Cookware Heat Resistant Baking & Cooking Spoon",
+        "Stainless Steel Nutmeg & Cheese Grater | Citrus Zester Kitchen Grater Tool",
+        "Plastic Butter Box with Cutting Guide – Butter Dish with Lid & Built-In Cutter",
+        "900ml Kitchen Storage Container Set – Airtight Food Storage Boxes for Pantry & Refrigerator",
+        "Ultra Sharp Stainless Steel Kitchen Knife – Wooden Grip Chef Knife for Meat, Vegetables & Fruit Cutting Tool"
+      ]
+    },
+    {
+      "slug": "fresh-start-cleaning-picks",
+      "title": "Fresh Start Cleaning picks",
+      "kind": "reel",
+      "reel": "fresh-start-cleaning",
+      "categories": [
+        "Fresh Start Cleaning"
+      ],
+      "products": [
+        "Mini Wire Brush Cleaning Tool Kit – Brass, Nylon & Stainless Steel Bristles for Multi-Purpose Cleaning",
+        "Magic Drying Towel – Reusable, Super Absorbent Multipurpose Cleaning Cloth for Home, Kitchen & Car",
+        "Cotton Floor Cleaning Pocha 3-Piece Combo – Durable, Absorbent Mop Set for Home, Kitchen & Office Floors",
+        "Microfiber Cleaning Cloth 3-Piece Combo – Lint-Free, Soft Wipes for Desktop, Computer, Electronics & Furniture",
+        "Super Bold Double-Sided Toilet Cleaning Brush – Heavy-Duty Bathroom Scrubber for Deep Cleaning",
+        "Cotton Dusting & Cleaning Cloth – 3PCS Combo for Home, Kitchen & Furniture Cleaning"
+      ]
+    },
+    {
+      "slug": "trending-toys-picks",
+      "title": "Trending Toys picks",
+      "kind": "reel",
+      "reel": "trending-toys",
+      "categories": [
+        "Trending Toys"
+      ],
+      "products": [
+        "Magnetic Kluster Board Game Magnet Game Fun Table Top Strategy Game Magnetic STEM, Magnetic Board Game for Kids & Adults",
+        "Doraemon Air Blast Rocket Toy – Fun Launching Gadget for Kids’ Playtime",
+        "Super High Bouncing Balls – Moon & Space Balls for Kids and Adults, Fun Outdoor & Indoor Toy",
+        "Infant Rattle Toy Set – Musical Toys for Newborns & Babies",
+        "Magic Candy Flower Toy – Rotating Spinning Lollipop Toy for Kids & Adults",
+        "Uno Card Game – 112 Multicolor Cards for Kids 7+ & Adults, Family Fun Game"
+      ]
+    }
+  ],
+  "automations": [
+    {
+      "name": "Kitchen Creations reel",
+      "reel": "kitchen-creations",
+      "trigger": "comment",
+      "keywords": [
+        "KITCHEN",
+        "LINK"
+      ],
+      "message": "Hi! Here is everything from the kitchen creations reel 👇",
+      "buttonText": "Shop now",
+      "link": {
+        "type": "bhava_page",
+        "page": "kitchen-creations-picks",
+        "url": ""
+      },
+      "state": "live"
+    },
+    {
+      "name": "Fresh Start Cleaning reel",
+      "reel": "fresh-start-cleaning",
+      "trigger": "comment",
+      "keywords": [
+        "CLEAN",
+        "LINK"
+      ],
+      "message": "Hi! Here is everything from the fresh start cleaning reel 👇",
+      "buttonText": "Shop now",
+      "link": {
+        "type": "bhava_page",
+        "page": "fresh-start-cleaning-picks",
+        "url": ""
+      },
+      "state": "live"
+    },
+    {
+      "name": "Trending Toys reel",
+      "reel": "trending-toys",
+      "trigger": "comment",
+      "keywords": [
+        "TOYS",
+        "LINK"
+      ],
+      "message": "Hi! Here is everything from the trending toys reel 👇",
+      "buttonText": "Shop now",
+      "link": {
+        "type": "bhava_page",
+        "page": "trending-toys-picks",
+        "url": ""
+      },
+      "state": "live"
+    }
+  ],
+  "faq": [
+    {
+      "question": "Do you deliver across India?",
+      "answer": "Yes. We deliver to every pincode our courier partners serve, usually in 3 to 6 working days."
+    },
+    {
+      "question": "Can I pay cash on delivery?",
+      "answer": "Yes, cash on delivery is available on most orders. You can also pay online by UPI or card."
+    },
+    {
+      "question": "How do I return something?",
+      "answer": "Open your order from the link in your confirmation message and choose Return within 7 days of delivery."
+    }
+  ],
+  "coupons": [
+    {
+      "code": "WELCOME10",
+      "kind": "percent",
+      "percentBp": 1000,
+      "maxDiscountPaise": 20000,
+      "minOrderPaise": 49900,
+      "maxUses": null,
+      "maxUsesPerCustomer": 1
+    },
+    {
+      "code": "FREESHIP",
+      "kind": "free_shipping",
+      "minOrderPaise": 79900,
+      "maxUses": null,
+      "maxUsesPerCustomer": null
+    }
+  ],
+  "settings": {
+    "store_name": "Mehta Mart",
+    "tagline": "Useful finds for every home.",
+    "hero_title": "Think shopping. Think us!",
+    "hero_subtitle": "Kitchen, cleaning, toys, travel and gifting finds at honest prices.",
+    "support_email": "help@mehta-mart.example",
+    "support_whatsapp": "919000000001"
+  }
+}

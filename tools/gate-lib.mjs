@@ -33,6 +33,9 @@ export const APP_JEST_CONFIG = 'jest.apps.config.cjs';
 /** tools/build-brand's own tests are node:test files under test/p6; its fixture brands are locked with that phase. */
 export const BRAND_FIXTURES = 'tools/build-brand/fixtures';
 export const BRAND_FIXTURES_PHASE = 6;
+/** The showcase seed files (Phase 8): the sample businesses every Phase 8 test runs on, frozen with the phase. */
+export const SHOWCASE_SEED = 'seed';
+export const SHOWCASE_SEED_PHASE = 8;
 
 export const range = (n) => Array.from({ length: n + 1 }, (_, k) => k);
 const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
@@ -173,6 +176,7 @@ export function phaseFileHashes(root, k) {
     ...maestroFlows(root, [k]).map((flow) => flow.file),
     // The fixture brands the shopper app's tests and CI build from.
     ...(k === BRAND_FIXTURES_PHASE ? walk(root, BRAND_FIXTURES) : []),
+    ...(k === SHOWCASE_SEED_PHASE ? walk(root, SHOWCASE_SEED) : []),
     ...(fs.existsSync(path.join(root, `requirements/p${k}.json`)) ? [`requirements/p${k}.json`] : []),
   ];
   return Object.fromEntries(files.sort().map((f) => [f, hashFile(path.join(root, f))]));
@@ -213,7 +217,11 @@ export function checkRequirements(root, n, testNames) {
   const names = [...new Set(testNames)];
   const covered = (id) => names.some((name) => name.startsWith(id) && !/[0-9A-Za-z]/.test(name[id.length] ?? ''));
   let total = 0;
+  /** How many ids each phase lists, and where each id was first listed: an id belongs to one phase only. */
+  const byPhase = {};
+  const firstIn = new Map();
   for (const k of range(n)) {
+    byPhase[k] = 0;
     const file = `requirements/p${k}.json`;
     let list;
     try {
@@ -233,13 +241,16 @@ export function checkRequirements(root, n, testNames) {
         continue;
       }
       if (seen.has(item.id)) problems.push(`${file} lists ${item.id} twice`);
+      else if (firstIn.has(item.id)) problems.push(`${file} lists ${item.id}, which ${firstIn.get(item.id)} already lists`);
+      else firstIn.set(item.id, file);
       seen.add(item.id);
       total++;
+      byPhase[k]++;
       if (!covered(item.id)) missing.push(item.id);
     }
   }
   if (missing.length) problems.push(`${missing.length} requirement(s) have no test whose name starts with the id: ${missing.join(', ')}`);
-  return { total, missing, problems };
+  return { total, missing, problems, byPhase };
 }
 
 /** A skipped or todo test fails the gate unless the allow list names it and says why. */

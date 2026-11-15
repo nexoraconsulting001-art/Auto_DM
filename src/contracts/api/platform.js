@@ -276,6 +276,40 @@ export const SignupInviteCreate = z.object({ note: text(200).default(''), maxUse
 /** The code is in this answer and nowhere else: only its hash is stored. */
 export const SignupInviteCreated = z.object({ invite: SignupInvite, code: z.string() });
 
+/** Phase 8 (Q-13): what a business said in a showcase session, and what became of it. */
+export const FEEDBACK_SEVERITIES = Object.freeze(['low', 'medium', 'high', 'blocker']);
+export const FEEDBACK_STATES = Object.freeze(['new', 'planned', 'fixed', 'declined']);
+export const FeedbackItem = z.object({
+  id: Id,
+  tenantId: Id,
+  tenantName: z.string(),
+  saidBy: z.string(),
+  area: z.string(),
+  text: z.string(),
+  severity: z.enum(FEEDBACK_SEVERITIES),
+  state: z.enum(FEEDBACK_STATES),
+  /** The commit or release that fixed it: set exactly when the state is `fixed`. */
+  fixedIn: z.string(),
+  createdBy: z.string(),
+  createdAt: Timestamp,
+  updatedAt: Timestamp,
+});
+export const FeedbackCreate = z.object({
+  saidBy: required(120, 'Say who gave the feedback'),
+  area: required(80, 'Say where in the product'),
+  text: required(2000, 'Write the feedback down'),
+  severity: z.enum(FEEDBACK_SEVERITIES).default('medium'),
+});
+/** Fields left out stay as they are. Moving to `fixed` needs fixedIn; moving away from it clears fixedIn. */
+export const FeedbackUpdate = z.object({
+  state: z.enum(FEEDBACK_STATES).optional(),
+  severity: z.enum(FEEDBACK_SEVERITIES).optional(),
+  fixedIn: text(80).optional(),
+}).refine((change) => change.state !== 'fixed' || Boolean(change.fixedIn?.trim()), { message: 'Say what fixed it', path: ['fixedIn'] })
+  .refine((change) => change.state === undefined || change.state === 'fixed' || !change.fixedIn?.trim(), { message: 'Only a fixed item says what fixed it', path: ['fixedIn'] })
+  .refine((change) => Object.values(change).some((value) => value !== undefined), { message: 'Nothing to change' });
+export const FeedbackListQuery = ListQuery.extend({ tenantId: IdText.optional(), state: z.enum(['all', ...FEEDBACK_STATES]).default('all') });
+
 export const platformRoutes = {
   'platform.businesses': { method: 'GET', path: '/tenants', platformRoles: onboardingTeam, query: ListQuery, response: page(BusinessSummary) },
   'platform.createBusiness': { method: 'POST', path: '/tenants', platformRoles: onboardingTeam, body: BusinessCreate, status: 201, response: BusinessCreated },
@@ -340,6 +374,10 @@ export const platformRoutes = {
   'platform.signupInvites': { method: 'GET', path: '/signup/invites', platformRoles: anyone, query: ListQuery, response: page(SignupInvite) },
   'platform.createSignupInvite': { method: 'POST', path: '/signup/invites', platformRoles: anyone, body: SignupInviteCreate, status: 201, response: SignupInviteCreated },
   'platform.revokeSignupInvite': { method: 'POST', path: '/signup/invites/:id/revoke', platformRoles: anyone, params: IdParams, response: SignupInvite },
+  // Phase 8: answered by src/modules/feedback.
+  'platform.feedback': { method: 'GET', path: '/feedback', platformRoles: anyone, query: FeedbackListQuery, response: page(FeedbackItem) },
+  'platform.createFeedback': { method: 'POST', path: '/tenants/:id/feedback', platformRoles: anyone, params: IdParams, body: FeedbackCreate, status: 201, response: FeedbackItem },
+  'platform.updateFeedback': { method: 'PATCH', path: '/feedback/:id', platformRoles: anyone, params: IdParams, body: FeedbackUpdate, response: FeedbackItem },
 };
 
 /** Which module answers each Phase 7 Platform Console route. */
@@ -350,6 +388,11 @@ export const BILLING_PLATFORM_OWNERS = Object.freeze({
   billing: Object.freeze(['platform.billing', 'platform.overridePlan', 'platform.createCreditNote', 'platform.suspendBilling', 'platform.resumeBilling', 'platform.billingSettings', 'platform.saveBillingSettings']),
   entitlements: Object.freeze(['platform.flags', 'platform.saveFlag', 'platform.tenantFlags', 'platform.setTenantFlag']),
   signup: Object.freeze(['platform.signup', 'platform.setSignupMode', 'platform.signupInvites', 'platform.createSignupInvite', 'platform.revokeSignupInvite']),
+});
+
+/** Which module answers each Phase 8 Platform Console route. */
+export const FEEDBACK_PLATFORM_OWNERS = Object.freeze({
+  feedback: Object.freeze(['platform.feedback', 'platform.createFeedback', 'platform.updateFeedback']),
 });
 
 export const platformRouteList = Object.freeze(Object.entries(platformRoutes).map(([id, route]) => Object.freeze({ id, ...route })));

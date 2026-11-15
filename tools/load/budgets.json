@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "note": "The limits the load test and the restore drill hold the platform to. Memory and Postgres settings are the QA server's (deploy/bhava/compose.yaml); test/p8/contract keeps the two in step. The p95 targets are server time per route class, measured at the client on loopback: the PRD's 2.5 s page budget (LCP on a 4G phone) is a browser measure, and these leave it room.",
+  "memoryMb": { "web": 512, "worker": 384, "postgres": 512 },
+  "postgres": { "sharedBuffersMb": 128, "maxConnections": 40 },
+  "businesses": 10,
+  "run": { "warmupSeconds": 10, "durationSeconds": 120, "connections": 40 },
+  "mix": [
+    { "class": "buyer_page", "weight": 40 },
+    { "class": "beacon", "weight": 15 },
+    { "class": "webhook", "weight": 20 },
+    { "class": "store_api", "weight": 10 },
+    { "class": "seller_api_read", "weight": 12 },
+    { "class": "seller_api_write", "weight": 3 }
+  ],
+  "p95Ms": {
+    "buyer_page": 400,
+    "beacon": 100,
+    "webhook": 150,
+    "store_api": 500,
+    "seller_api_read": 500,
+    "seller_api_write": 800
+  },
+  "failedRequests": 0,
+  "storm": {
+    "comments": 2000,
+    "overSeconds": 60,
+    "otherBusiness": { "sendDelayP95Seconds": 30, "pageP95Factor": 1.5 }
+  },
+  "restart": { "afterSeconds": 30, "lostWebhooks": 0, "duplicateSends": 0, "backWithinSeconds": 30 },
+  "drill": { "restoreWithinSeconds": 600 }
+}

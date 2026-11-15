@@ -1,0 +1,159 @@
+{
+  "schema": 1,
+  "business": {
+    "slug": "plant-store",
+    "name": "Plant Store",
+    "legalName": "Plant Store (sample business)",
+    "accountType": "seller",
+    "plan": "t3",
+    "cycle": "monthly",
+    "igUsername": "demo_plant_store",
+    "igUserId": "9000100000000002",
+    "owner": {
+      "name": "Lavanya Gokhale",
+      "phone": "+919000000002",
+      "email": "lavanya.gokhale.0002@example.com"
+    }
+  },
+  "brandKit": {
+    "preset": "mitti",
+    "colors": {},
+    "headingFont": "",
+    "bodyFont": "",
+    "logo": "",
+    "logoDark": "",
+    "favicon": "",
+    "publicReplyVariants": [
+      "Sent you the care guide and the link 🌿",
+      "Check your DMs 🌱"
+    ]
+  },
+  "app": {
+    "appName": "Plant Store",
+    "shortName": "Plants",
+    "urlScheme": "plantstore",
+    "androidPackage": "app.sample.plantstore",
+    "iosBundleId": null,
+    "splashBackground": "#F4EFE6",
+    "icon": "",
+    "splash": "",
+    "supportEmail": "help@plant-store.example"
+  },
+  "products": {
+    "from": "setting",
+    "setting": "SHOWCASE_PLANT_SEED",
+    "format": "legacy",
+    "fallback": {
+      "file": "plants.json",
+      "format": "bhava"
+    }
+  },
+  "categories": [],
+  "reels": [
+    {
+      "key": "indoor-starters",
+      "igMediaId": "9000200000000101",
+      "kind": "reel",
+      "caption": "Five plants that forgive beginners. Comment PLANT for the list.",
+      "headline": "Indoor starters",
+      "slug": "indoor-starters",
+      "categories": [],
+      "products": [],
+      "fill": 8
+    },
+    {
+      "key": "balcony-colour",
+      "igMediaId": "9000200000000102",
+      "kind": "reel",
+      "caption": "A balcony that flowers all year. Comment BLOOM for the plants.",
+      "headline": "Balcony colour",
+      "slug": "balcony-colour",
+      "categories": [],
+      "products": [],
+      "fill": 8
+    }
+  ],
+  "landingPages": [
+    {
+      "slug": "indoor-starters-picks",
+      "title": "Indoor starters",
+      "kind": "reel",
+      "reel": "indoor-starters",
+      "categories": [],
+      "products": [],
+      "fill": 6
+    },
+    {
+      "slug": "balcony-colour-picks",
+      "title": "Balcony colour",
+      "kind": "reel",
+      "reel": "balcony-colour",
+      "categories": [],
+      "products": [],
+      "fill": 6
+    }
+  ],
+  "automations": [
+    {
+      "name": "Indoor starters reel",
+      "reel": "indoor-starters",
+      "trigger": "comment",
+      "keywords": [
+        "PLANT",
+        "LINK"
+      ],
+      "message": "Hi! The beginner plants from the reel are here 🌿",
+      "buttonText": "See the plants",
+      "link": {
+        "type": "bhava_page",
+        "page": "indoor-starters-picks",
+        "url": ""
+      },
+      "state": "live"
+    },
+    {
+      "name": "Balcony colour reel",
+      "reel": "balcony-colour",
+      "trigger": "comment",
+      "keywords": [
+        "BLOOM"
+      ],
+      "message": "Hi! Every flowering plant from the reel is here 🌸",
+      "buttonText": "See the plants",
+      "link": {
+        "type": "bhava_page",
+        "page": "balcony-colour-picks",
+        "url": ""
+      },
+      "state": "live"
+    }
+  ],
+  "faq": [
+    {
+      "question": "How are plants packed?",
+      "answer": "Each plant travels in its grow pot inside a ventilated box with the soil sealed, so it arrives upright and moist."
+    },
+    {
+      "question": "What if my plant arrives damaged?",
+      "answer": "Send us a photo within 48 hours of delivery and we will replace it free of charge."
+    }
+  ],
+  "coupons": [
+    {
+      "code": "GREEN15",
+      "kind": "percent",
+      "percentBp": 1500,
+      "maxDiscountPaise": 15000,
+      "minOrderPaise": 39900,
+      "maxUses": null,
+      "maxUsesPerCustomer": 1
+    }
+  ],
+  "settings": {
+    "store_name": "Plant Store",
+    "tagline": "Plants that settle in.",
+    "hero_title": "Green for every corner",
+    "support_email": "help@plant-store.example",
+    "support_whatsapp": "919000000002"
+  }
+}

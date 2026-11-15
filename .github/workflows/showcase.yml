@@ -1,0 +1,211 @@
+name: Showcase
+
+# The showcase kit (Phase 8, Q-11): the sample businesses are loaded from their seed files, each one's brand kit is
+# exported to a brand file, a branded APK is built from it with the local driver of `npm run build-brand`, and a test
+# order is completed in that APK on an emulator against the job's own seeded server.
+#
+# Which businesses exist is data: seed/showcase/manifest.json names them by a neutral key, and this file names none.
+# Nothing here deploys anywhere or reaches an outside service: every provider is a simulator from tools/sim on the
+# runner. No secret and no account: the Android signing key is made in the job, masked and deleted.
+#
+# The steps marked "seed track" and "app track" call commands those tracks build; until they are built a run fails
+# there, by design, and never passes on an empty step.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'seed/**'
+      - 'tools/build-brand/**'
+      - '.github/workflows/showcase.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: showcase-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  EXPO_NO_TELEMETRY: '1'
+  CI: '1'
+  NODE_ENV: development
+  API_PORT: '3000'
+  MAESTRO_VERSION: '1.41.0'
+
+jobs:
+  seed:
+    name: Load the sample businesses and export their brand files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      keys: ${{ steps.list.outputs.keys }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: A sample business is named only under seed/ and docs/
+        run: npm run policy-check
+      - name: Every seed file fits the contract and every person in it is invented (Q-02)
+        run: npm run showcase -- --check
+      - name: The businesses of the manifest, by key
+        id: list
+        run: |
+          KEYS="$(node -p "JSON.stringify(require('./seed/showcase/manifest.json').businesses.map((b) => b.key))")"
+          echo "keys=$KEYS" >> "$GITHUB_OUTPUT"
+          echo "Sample businesses: $KEYS"
+      - name: The contract and the seed loader's tests
+        run: node --import ./tools/net-guard.mjs --test --test-force-exit --test-concurrency=1 "test/p8/**/*.test.js"
+      - name: Load both businesses twice on the built-in database and export a brand file for each (Q-01; seed track)
+        env:
+          ALLOW_PGLITE: '1'
+          DATA_DIR: ${{ runner.temp }}/showcase-data
+        run: |
+          npm run showcase -- --no-activity --export-brands "$RUNNER_TEMP/brand-files"
+          npm run showcase -- --no-activity --export-brands "$RUNNER_TEMP/brand-files"
+          for KEY in $(node -p "JSON.parse(process.argv[1]).join(' ')" '${{ steps.list.outputs.keys }}'); do
+            test -f "$RUNNER_TEMP/brand-files/$KEY/brand.json"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: showcase-brand-files
+          path: ${{ runner.temp }}/brand-files
+          if-no-files-found: error
+          retention-days: 7
+
+  build:
+    name: Branded APK (${{ matrix.key }})
+    needs: seed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        key: ${{ fromJSON(needs.seed.outputs.keys) }}
+    env:
+      KEY: ${{ matrix.key }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: showcase-brand-files
+          path: ${{ runner.temp }}/brand-files
+      - name: Make a signing key for this job only
+        run: |
+          KEY_PASS="$(openssl rand -hex 24)"
+          echo "::add-mask::$KEY_PASS"
+          echo "ANDROID_KEYSTORE_PASSWORD=$KEY_PASS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/ci.keystore" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=ci" >> "$GITHUB_ENV"
+          keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$RUNNER_TEMP/ci.keystore" -alias ci \
+            -keyalg RSA -keysize 2048 -validity 2 -storepass "$KEY_PASS" -keypass "$KEY_PASS" -dname "CN=CI build, O=CI" > /dev/null
+      - name: Build this business's APK from its exported brand file, with the local driver
+        env:
+          # The emulator reaches the job's own server at this address.
+          API_BASE_URL: http://10.0.2.2:${{ env.API_PORT }}
+        run: |
+          npm run build-brand -- "$RUNNER_TEMP/brand-files/$KEY/brand.json" --platform android --driver local --profile preview \
+            --out "$RUNNER_TEMP/brands" --report "$RUNNER_TEMP/report.json" > "$RUNNER_TEMP/build.log" 2>&1 \
+            || { tail -n 300 "$RUNNER_TEMP/build.log"; exit 1; }
+          tail -n 40 "$RUNNER_TEMP/build.log"
+      - name: The build log holds no key, keystore content or password
+        if: always()
+        run: |
+          test -f "$RUNNER_TEMP/build.log" || exit 0
+          node apps/shopper/.maestro/support/scan-binary.mjs log "$RUNNER_TEMP/build.log" --secret ANDROID_KEYSTORE_PASSWORD
+      - name: Throw the signing key away
+        if: always()
+        run: rm -f "$RUNNER_TEMP/ci.keystore"
+      - name: The APK is this business's package under this business's name, and holds no other business's name
+        run: |
+          APK="$(node -p "require('$RUNNER_TEMP/report.json').builds[0].artifact")"
+          echo "APK=$APK" >> "$GITHUB_ENV"
+          BRAND_FILE="$RUNNER_TEMP/brand-files/$KEY/brand.json"
+          AAPT2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)"
+          "$AAPT2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
+          node tools/build-check.mjs apk \
+            --package "$(node -p "require('$BRAND_FILE').android.package")" \
+            --label "$(node -p "require('$BRAND_FILE').shortName")" < "$RUNNER_TEMP/badging.txt"
+          OTHERS=()
+          for FILE in "$RUNNER_TEMP"/brand-files/*/brand.json; do
+            if [ "$FILE" != "$BRAND_FILE" ]; then OTHERS+=(--other "$FILE"); fi
+          done
+          node apps/shopper/.maestro/support/scan-binary.mjs binary "$APK" --brand "$BRAND_FILE" "${OTHERS[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: showcase-apk-${{ matrix.key }}
+          path: ${{ env.APK }}
+          if-no-files-found: error
+          retention-days: 14
+
+  emulator:
+    name: A test order on an emulator (${{ matrix.key }})
+    needs: [seed, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        key: ${{ fromJSON(needs.seed.outputs.keys) }}
+    env:
+      KEY: ${{ matrix.key }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: showcase-apk-${{ matrix.key }}
+          path: ${{ runner.temp }}/apk
+      - name: Install Maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Let the runner use hardware acceleration for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Complete a test order in this business's app, against the job's own seeded server (Q-11; app track)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            node tools/showcase-e2e.mjs --key "$KEY" --apk "$(ls "$RUNNER_TEMP"/apk/*.apk | head -1)" --port "$API_PORT"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: showcase-emulator-${{ matrix.key }}
+          path: |
+            ~/.maestro/tests
+            test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ready:
+    name: Showcase kit ready
+    if: always()
+    needs: [seed, build, emulator]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed
+        run: |
+          test "${{ needs.seed.result }}" = success
+          test "${{ needs.build.result }}" = success
+          test "${{ needs.emulator.result }}" = success

@@ -1,0 +1,22 @@
+[
+  { "id": "F-68", "title": "Migration dry run shows counts per table and writes nothing" },
+  { "id": "F-69", "title": "A failure at row 5,000 of an import rolls everything back" },
+  { "id": "F-70", "title": "First new order after an import (highest migrated 4210) is numbered 4211" },
+  { "id": "F-71", "title": "Migrated activity holds no usernames or comment text" },
+  { "id": "F-72", "title": "A migrated shopper logs in by OTP on the same phone and sees their old orders" },
+  { "id": "F-73", "title": "Reels of one old shop on the other's Instagram account block until drop or reassign" },
+  { "id": "Q-01", "title": "One command loads both sample businesses from seed files; a second run changes nothing" },
+  { "id": "Q-02", "title": "Every sample customer is invented; a check fails on any other name, phone, email or id" },
+  { "id": "Q-03", "title": "Thirty simulated days fill every screen; the same random seed gives the same data" },
+  { "id": "Q-04", "title": "After seeding, neither sample business reads the other's data on any route (R-01)" },
+  { "id": "Q-05", "title": "Load test, 10 businesses on QA-sized Postgres: no failure, p95 and memory in budget" },
+  { "id": "Q-06", "title": "A comment storm on one business keeps another's sends and pages inside the bound" },
+  { "id": "Q-07", "title": "A restart mid-load loses no webhook and sends nothing twice (R-02 under load)" },
+  { "id": "Q-08", "title": "Timed restore drill: counts and checksums match, fence and logins work (R-03)" },
+  { "id": "Q-09", "title": "A truncated, corrupted or wrong-version backup is refused; the target is untouched" },
+  { "id": "Q-10", "title": "Each demo script is walked end to end by a browser test on the seeded data" },
+  { "id": "Q-11", "title": "Showcase workflow builds each sample brand's APK and completes an emulator test order" },
+  { "id": "Q-12", "title": "The seller console installs as a web app and never shows another business's cache" },
+  { "id": "Q-13", "title": "Showcase feedback is logged per business, tracked to fixed, and shown in the console" },
+  { "id": "Q-14", "title": "The owner APK signs in and works against the seeded server" }
+]

@@ -334,7 +334,7 @@ async function main() {
     byPhase,
     failing,
     skipped: skips.verdicts,
-    requirements: { total: requirements.total, missing: requirements.missing },
+    requirements: { total: requirements.total, missing: requirements.missing, byPhase: requirements.byPhase },
     lockDigest: digestOf(phaseFileHashes(repoRoot, n)),
     problems,
   });

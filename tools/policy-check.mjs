@@ -14,14 +14,24 @@
  * And nothing under apps/ or packages/ may hold a value of any brand file in tools/build-brand/fixtures (its name, short
  * name, link scheme, package, bundle id, domain or team id), so a fixture brand can never leak into the source tree either.
  *
- *   node tools/policy-check.mjs [folder ...]     default: src, console/src, shared, apps, packages, tools/build-brand
+ * The showcase is held to the same line as the apps (Phase 8): a sample business is named only under seed/ and docs/.
+ * Everything that loads, exercises or tests the sample businesses (NAME_FREE) takes them from the seed manifest by a
+ * neutral key, so no line there, comments included, may name one.
+ *
+ *   node tools/policy-check.mjs [folder ...]     default: src, console/src, shared, apps, packages, tools/build-brand, and NAME_FREE
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_FOLDERS = ['src', 'console/src', 'shared', 'apps', 'packages', 'tools/build-brand'];
+/** Folders and files of the showcase where every text file is read for a business's name, comments and all. */
+export const NAME_FREE = Object.freeze([
+  'tools/sim/activity', 'tools/load', 'tools/drill', 'scripts/showcase.js', 'scripts/migrate-business.js', 'src/contracts/seed.js', 'src/contracts/migration.js',
+  'src/modules/migration', 'src/modules/feedback', 'console/src/platform/features/feedback', 'console/src/pwa', 'test/p8', 'e2e/p8', '.github/workflows/showcase.yml',
+]);
+const DEFAULT_FOLDERS = ['src', 'console/src', 'shared', 'apps', 'packages', 'tools/build-brand', ...NAME_FREE];
+const inNameFree = (rel) => NAME_FREE.some((entry) => rel === entry || rel.startsWith(`${entry}/`));
 const SKIP = new Set(['node_modules', 'dist', 'build', '.vite', 'android', 'ios', '.expo']);
 const EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.sql']);
 /** Under apps/ and packages/ every text file is read for a business's name, comments and all. */
@@ -153,6 +163,10 @@ export function checkSource(text, file = 'source.js') {
 
 function* walk(dir, extensions = EXTENSIONS) {
   if (!fs.existsSync(dir)) return;
+  if (fs.statSync(dir).isFile()) {
+    if (extensions.has(path.extname(dir))) yield dir;
+    return;
+  }
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (SKIP.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
@@ -166,13 +180,23 @@ export function checkFolders(folders = DEFAULT_FOLDERS, root = ROOT) {
   const findings = [];
   const relative = (file) => path.relative(root, file).split(path.sep).join('/');
   const brands = brandValues(root);
+  const seen = new Set();
   for (const folder of folders) {
-    const inApps = APP_FOLDERS.test(relative(path.resolve(root, folder)));
-    for (const file of walk(path.resolve(root, folder), inApps ? APP_TEXT : EXTENSIONS)) {
-      const text = fs.readFileSync(file, 'utf8');
+    const folderRel = relative(path.resolve(root, folder));
+    const inApps = APP_FOLDERS.test(folderRel);
+    for (const file of walk(path.resolve(root, folder), inApps || inNameFree(folderRel) ? APP_TEXT : EXTENSIONS)) {
       const rel = relative(file);
-      const code = EXTENSIONS.has(path.extname(file)) ? checkSource(text, rel) : [];
-      const named = inApps ? checkBrandNames(text, rel).filter((f) => !code.some((c) => c.line === f.line)) : [];
+      // A showcase file inside a folder already read (src/contracts/seed.js under src) is reported once.
+      if (seen.has(rel)) continue;
+      seen.add(rel);
+      const text = fs.readFileSync(file, 'utf8');
+      // Tests are not product code: a test may compare a business with a value. They are still read for a business name.
+      const code = EXTENSIONS.has(path.extname(file)) && !rel.startsWith('test/') && !rel.startsWith('e2e/') ? checkSource(text, rel) : [];
+      const named = inApps
+        ? checkBrandNames(text, rel).filter((f) => !code.some((c) => c.line === f.line))
+        : inNameFree(rel)
+          ? checkBrandNames(text, rel).filter((f) => !code.some((c) => c.line === f.line)).map((f) => ({ ...f, rule: 'business-name-outside-seed', message: 'names a sample business outside seed/ and docs/' }))
+          : [];
       const taken = new Set([...code, ...named].map((f) => f.line));
       const shopper = SHOPPER_FOLDERS.test(rel) ? checkShopperSource(text, rel).filter((f) => !taken.has(f.line)) : [];
       for (const f of shopper) taken.add(f.line);

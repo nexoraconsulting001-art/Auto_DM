@@ -27,6 +27,7 @@ import { demoTenant } from './demo-tenant/index.js';
 import { domains } from './domains/index.js';
 import { entitlements } from './entitlements/index.js';
 import { facebook } from './facebook/index.js';
+import { feedback } from './feedback/index.js';
 import { gatewayKeys } from './gateway-keys/index.js';
 import { impersonation } from './impersonation/index.js';
 import { igAccounts } from './ig-accounts/index.js';
@@ -39,6 +40,7 @@ import { leads } from './leads/index.js';
 import { links } from './links/index.js';
 import { loyalty } from './loyalty/index.js';
 import { managedServices } from './managed-services/index.js';
+import { migration } from './migration/index.js';
 import { notifications } from './notifications/index.js';
 import { onboarding } from './onboarding/index.js';
 import { orderAlerts } from './order-alerts/index.js';
@@ -137,9 +139,13 @@ import { wishlist } from './wishlist/index.js';
  * they send through, and after automations, whose keyword rules always run before an AI reply. ctx.inbound (automations/unmatched.js)
  * is where ai-replies registers for DMs no rule answered, and whatsapp-automation's setup registers WhatsApp as a channel of the gate.
  * ctx.providers.ai is the model provider (src/adapters/ai).
+ *
+ * Phase 8 (PRD 5.16, and the showcase) adds two folders directly after tenant-health, with the rest of the platform's own
+ * work: feedback (three Platform Console routes, FEEDBACK_PLATFORM_OWNERS) and migration (the importer of an old
+ * single-shop app: createMigration(ctx).plan and .run, used by `npm run migrate-business`; no routes, no jobs).
  */
 export const MODULES = [
-  brand, entitlements, billing, usage, signup, referrals, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, impersonation, managedServices, onboarding, tenantHealth, igConnect, compliance, automations, links, facebook, aiReplies, whatsappAutomation, domains,
+  brand, entitlements, billing, usage, signup, referrals, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, impersonation, managedServices, onboarding, tenantHealth, feedback, migration, igConnect, compliance, automations, links, facebook, aiReplies, whatsappAutomation, domains,
   insights, reachGuard, traffic, reports,
   appLinks,
   catalog, imports, categories, pages, themes, creator, leads,

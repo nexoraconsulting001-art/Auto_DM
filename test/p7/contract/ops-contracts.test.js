@@ -289,7 +289,9 @@ function filesUnder(dir) {
 
 test('the Platform Console is a second entry of the console project, with its own registry, and never part of the seller bundle', () => {
   const FEATURES = ['apps', 'audit', 'billing', 'businesses', 'exports', 'flags', 'health', 'impersonation', 'onboarding', 'services', 'signup', 'switches'];
-  assert.deepEqual(fs.readdirSync(path.join(repoRoot, 'console/src/platform/features'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort(), FEATURES);
+  // Folders a later phase adds are that phase's to check (Phase 8: feedback, test/p8).
+  const LATER = ['feedback'];
+  assert.deepEqual(fs.readdirSync(path.join(repoRoot, 'console/src/platform/features'), { withFileTypes: true }).filter((e) => e.isDirectory() && !LATER.includes(e.name)).map((e) => e.name).sort(), FEATURES);
   for (const name of FEATURES) {
     const source = read(`console/src/platform/features/${name}/index.jsx`);
     assert.match(source, new RegExp(`name: '${name}'`), name);
