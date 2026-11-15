@@ -7,7 +7,7 @@ import { OWNER_ONLY } from '@bhava/app-core/access';
 import { Banner, Button, Card, Choices, Field, Screen, Text, useTheme } from '@bhava/ui';
 import { useServices } from '../../shell/hooks.js';
 import { formatPaise, newRefundKey, refundBody, refundable, rupeesText } from '../orders/kit/rules.js';
-import { Offline, RecordView, RupeeField, SecretField, problemText, useAllowed, whenAsked, useWritable } from '../orders/kit/ui.js';
+import { Offline, RecordView, RupeeField, problemText, useAllowed, whenAsked, useWritable } from '../orders/kit/ui.js';
 
 /**
  * Refunding an order (PRD 9.8, S-28, S-29): owner only. The amount is the one a person types (the app never sends an
@@ -44,7 +44,6 @@ function RefundForm({ order, returnId }) {
   const [reason, setReason] = useState('');
   const [reference, setReference] = useState('');
   const [paymentId, setPaymentId] = useState('');
-  const [password, setPassword] = useState('');
   const [key, setKey] = useState(() => newRefundKey());
   const [problems, setProblems] = useState({});
   const [problem, setProblem] = useState('');
@@ -58,7 +57,7 @@ function RefundForm({ order, returnId }) {
 
   async function submit() {
     setProblem('');
-    const built = refundBody({ amountText: amount, reason, reference, paymentId: paymentId || null, returnId, idempotencyKey: key, password }, { most, byHand });
+    const built = refundBody({ amountText: amount, reason, reference, paymentId: paymentId || null, returnId, idempotencyKey: key }, { most, byHand });
     setProblems(built.problems ?? {});
     if (built.problems) return;
     if (!writable) {
@@ -68,12 +67,10 @@ function RefundForm({ order, returnId }) {
     setBusy(true);
     try {
       const refund = await whenAsked(runFresh, () => api.refunds.create(order.id, built.body));
-      setPassword('');
       setDone(refund);
       setKey(newRefundKey()); // the next refund, if any, is a new one
       await queryClient.invalidateQueries({ queryKey: ['orders'] });
     } catch (error) {
-      setPassword('');
       setProblem(problemText(t, error));
       if (error?.status >= 400 && error?.status < 500) await queryClient.invalidateQueries({ queryKey: ['orders'] });
     } finally {
@@ -111,7 +108,6 @@ function RefundForm({ order, returnId }) {
         ) : null}
         <Field testID="refund-reason" label={t('refunds.reason')} value={reason} onChangeText={setReason} maxLength={300} />
         {byHand ? <Field testID="refund-reference" label={t('refunds.reference')} hint={t('refunds.referenceHint')} value={reference} onChangeText={setReference} maxLength={100} error={problems.reference ? t(problems.reference) : undefined} /> : null}
-        <SecretField testID="refund-password" label={t('refunds.password')} hint={t('refunds.passwordWhy')} value={password} onChangeText={setPassword} error={problems.password ? t(problems.password) : undefined} />
         {problem ? <Banner tone="bad" testID="refund-problem">{problem}</Banner> : null}
         <Button testID="refund-submit" kind="danger" label={t('refunds.submit')} onPress={() => { submit(); }} busy={busy} disabled={!writable || !owner || most <= 0} />
       </Card>

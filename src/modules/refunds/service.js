@@ -1,7 +1,6 @@
 import { ProviderError } from '../../adapters/http.js';
 import { ApiError } from '../../contracts/api/index.js';
 import { log, reportError } from '../../platform/log.js';
-import { checkPassword } from '../../repos/users.js';
 import { tenantId, withTenant } from '../../tenancy.js';
 import { writeAudit } from '../audit/index.js';
 import { changeOrder, changeRow } from '../orders/state.js';
@@ -16,7 +15,8 @@ import { PaymentError, isGatewayId, lockOrder, paiseOf, raiseAlert, rupees, writ
  *       again (S-28), so two refunds at the same moment can't both pass the limit. Then the gateway is asked, outside any
  *       transaction, with a key that makes a repeat the same refund. A cash-on-delivery payment is refunded by hand: 'manual',
  *       with the reference of how the money went back, and processed at once.
- *   createByOwner(orderId, body, user)   the API's: the owner's password is checked again on the call (5.11), then create.
+ *   createByOwner(orderId, body, user)   the API's: the route is fresh (a re-auth in the last few minutes, 5.11), and here
+ *                                        the caller must still be the owner and within REFUND_LIMIT; then create.
  *   retry(refundId, actor)               a failed gateway refund, asked again with the same key.
  *   applyGatewayRefund({ paymentId, refund, type })   a refund webhook (9.7).
  *   onCancelled(orderId)                 order.cancelled: a shopper's own cancellation is refunded at once (S-56, S-69);
@@ -28,7 +28,8 @@ import { PaymentError, isGatewayId, lockOrder, paiseOf, raiseAlert, rupees, writ
  * In own mode nothing is reversed (S-76). Every refund is in the audit log.
  */
 const RETRYING = 'retrying';
-const REAUTH = Object.freeze({ limit: 5, windowMs: 15 * 60_000 });
+/** Refunds one owner may ask for in a window: enough for a day of returns, not for a runaway script. */
+const REFUND_LIMIT = Object.freeze({ limit: 30, windowMs: 15 * 60_000 });
 
 export const toRefund = (row) => ({
   id: Number(row.id), orderId: row.order_id, paymentId: Number(row.payment_id), amountPaise: Number(row.amount_paise), status: row.status, method: row.method,
@@ -209,16 +210,16 @@ export function createRefunds(ctx, payments) {
   }
 
   async function createByOwner(orderId, body, user) {
-    const limit = await ctx.platform.rateLimit.hit('refund_reauth', `${tenantId()}:${user.id}`, REAUTH);
-    if (!limit.allowed) throw new ApiError('rate_limited', 'Too many tries. Wait a few minutes and try again.');
-    // The signed-in owner's own password, checked against their own row: nothing else a sign-in does happens here.
-    const [me] = await db.query('SELECT id, role, password_hash FROM users WHERE tenant_id = $1 AND id = $2', [tenantId(), Number(user.id)]);
-    if (!me || me.role !== 'owner' || !(await checkPassword(body.password, me.password_hash))) {
-      log.warn('refunds.reauth_failed', { userId: user.id });
-      throw new ApiError('validation_failed', 'That password isn’t right.', { fields: { password: 'That password isn’t right' } });
+    const limit = await ctx.platform.rateLimit.hit('refund_create', `${tenantId()}:${user.id}`, REFUND_LIMIT);
+    if (!limit.allowed) throw new ApiError('rate_limited', 'Too many refunds at once. Wait a few minutes and try again.');
+    // The fresh re-auth is the router's (the route is marked fresh); the role is checked again on the person's own row.
+    const [me] = await db.query('SELECT id, role FROM users WHERE tenant_id = $1 AND id = $2 AND removed_at IS NULL', [tenantId(), Number(user.id)]);
+    if (!me || me.role !== 'owner') {
+      log.warn('refunds.not_owner', { userId: user.id });
+      throw new ApiError('forbidden');
     }
-    await ctx.platform.rateLimit.reset('refund_reauth', `${tenantId()}:${user.id}`);
-    return create(orderId, { ...body, actor: `user:${user.id}` });
+    const { password: _ignored, ...rest } = body ?? {};
+    return create(orderId, { ...rest, actor: `user:${user.id}` });
   }
 
   async function retry(refundId, actor) {

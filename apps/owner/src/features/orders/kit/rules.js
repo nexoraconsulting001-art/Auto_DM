@@ -172,14 +172,13 @@ export const newRefundKey = (now = Date.now(), random = Math.random) => `app-${n
  * Checks what a person typed for a refund and builds the body. Answers { body } or { problems: { field: key } }.
  * `most` is what can still be refunded; the server holds the refund inside what was captured again.
  */
-export function refundBody({ amountText, reason = '', reference = '', paymentId = null, returnId = null, idempotencyKey, password = '' }, { most, byHand = false } = {}) {
+export function refundBody({ amountText, reason = '', reference = '', paymentId = null, returnId = null, idempotencyKey }, { most, byHand = false } = {}) {
   const problems = {};
   const amountPaise = parseRupees(amountText);
   if (!amountPaise) problems.amount = 'refunds.problem.amount';
   else if (Number.isFinite(most) && amountPaise > most) problems.amount = 'refunds.problem.tooMuch';
   if (byHand && !String(reference).trim()) problems.reference = 'refunds.problem.reference';
-  // The contract still asks for the owner's own password on every refund (refunds.create), checked on the call.
-  if (!password) problems.password = 'refunds.problem.password';
+  // No password: refunds.create is a fresh route, so the server asks for the re-auth itself (5.11).
   if (Object.keys(problems).length) return { problems };
   return {
     body: {
@@ -189,7 +188,6 @@ export function refundBody({ amountText, reason = '', reference = '', paymentId 
       ...(String(reference).trim() ? { reference: String(reference).trim().slice(0, 100) } : {}),
       ...(paymentId ? { paymentId: Number(paymentId) } : {}),
       ...(returnId ? { returnId: Number(returnId) } : {}),
-      password,
     },
   };
 }

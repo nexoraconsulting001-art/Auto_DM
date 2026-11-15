@@ -7,6 +7,7 @@ import { formatDateTime, formatPaise, paiseToRupees, rupeesToPaise } from '../..
 import { useForm } from '../../lib/forms.js';
 import { useAllowed, useRefresh } from '../../lib/query.js';
 import { useFeedback } from '../../components/feedback.jsx';
+import { isCancelled, useFresh } from '../account/fresh.jsx';
 import { PAYMENT_ATTEMPT, PAYMENT_PURPOSE, REFUND, REVERSAL, TRANSFER, statusOf } from '../orders/shared/labels.js';
 import { refundable } from '../orders/shared/rules.js';
 import { Badges, RupeeField, StoreScreen, freshKey, useAction } from '../orders/shared/ui.jsx';
@@ -60,8 +61,9 @@ export function OrderPayments({ order }) {
 }
 
 /**
- * The owner's refund, in a sheet: the amount, why, how it was paid back for cash on delivery, and the owner's own password
- * again (5.11). One key per opening, so a second tap is the same refund.
+ * The owner's refund, in a sheet: the amount, why, and how it was paid back for cash on delivery. A refund needs a fresh
+ * check (5.11): when the session's last one has run out, the WhatsApp code sheet opens first. One key per opening, so a
+ * second tap is the same refund.
  */
 export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund', variant = 'outline', onDone }) {
   const sheet = useRef(null);
@@ -69,7 +71,8 @@ export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund'
   const refresh = useRefresh();
   const most = refundable(order);
   const start = suggestedPaise > 0 ? Math.min(suggestedPaise, most) : most;
-  const form = useForm({ amount: paiseToRupees(start), reason: '', reference: '', password: '', paymentId: '' }, { rename: { amountPaise: 'amount' } });
+  const fresh = useFresh();
+  const form = useForm({ amount: paiseToRupees(start), reason: '', reference: '', paymentId: '' }, { rename: { amountPaise: 'amount' } });
   const [key, setKey] = useState(() => freshKey('refund'));
   const payments = useQuery({ queryKey: paymentsKey(order.id), queryFn: () => api.payments.forOrder(order.id) });
   const captured = (payments.data?.items ?? []).filter((payment) => payment.status === 'captured' && payment.amountPaise > payment.refundedPaise);
@@ -77,7 +80,6 @@ export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund'
 
   function open() {
     form.set('amount', paiseToRupees(start));
-    form.set('password', '');
     setKey(freshKey('refund'));
     sheet.current?.showModal();
   }
@@ -88,28 +90,29 @@ export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund'
     const found = {};
     if (!Number.isSafeInteger(amountPaise) || amountPaise <= 0) found.amount = 'Enter an amount to refund';
     else if (amountPaise > most) found.amount = `You can refund at most ${formatPaise(most)}`;
-    if (!form.values.password) found.password = 'Enter your password';
     if (Object.keys(found).length) return form.reject(found);
     const body = {
       amountPaise,
       reason: form.values.reason.trim(),
       idempotencyKey: key,
-      password: form.values.password,
       ...(form.values.reference.trim() ? { reference: form.values.reference.trim() } : {}),
       ...(form.values.paymentId ? { paymentId: Number(form.values.paymentId) } : {}),
       ...(returnId ? { returnId } : {}),
     };
     let refund = null;
     const done = await form.run(async () => {
-      refund = await api.refunds.create(order.id, body);
+      try {
+        refund = await fresh.run(() => api.refunds.create(order.id, body));
+      } catch (error) {
+        if (isCancelled(error)) throw Object.assign(new Error('Confirm it’s you to refund.'), { code: 'reauth_required' });
+        throw error;
+      }
     });
     if (done) {
       sheet.current?.close();
       toast(refund?.status === 'failed' ? 'The gateway refused the refund. Try it again from Refunds.' : `Refund of ${formatPaise(amountPaise)} started.`);
       await refresh();
       onDone?.(refund);
-    } else {
-      form.set('password', '');
     }
     return undefined;
   }
@@ -131,7 +134,6 @@ export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund'
             )}
             <TextField label="Why (optional)" maxLength={300} {...form.field('reason')} />
             {byHand && <TextField label="How you paid it back" hint="Cash on delivery is refunded by you. Enter the UPI reference or receipt number." maxLength={100} {...form.field('reference')} />}
-            <TextField label="Your password" type="password" autoComplete="current-password" hint="Refunds need your password each time." {...form.field('password')} />
           </FieldGroup>
           {form.message && <Banner tone="bad">{form.message}</Banner>}
           <div className="sheet-actions">
@@ -140,6 +142,7 @@ export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund'
           </div>
         </form>
       </Sheet>
+      {fresh.sheet}
     </>
   );
 }

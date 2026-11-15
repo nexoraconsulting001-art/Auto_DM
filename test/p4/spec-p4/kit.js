@@ -372,7 +372,7 @@ export async function addP4Shop(world, { whatsapp = true, pay = true, pickup = t
     /** The courier reports a scan for an AWB, by webhook. */
     track: (awb, status, extra = {}) => world.ship.post('/track', { awb, status, ...extra }),
     /** A refund by the owner. */
-    refund: (orderId, body, { token = shop.token } = {}) => hit(world, `/api/v1/orders/${orderId}/refunds`, { host: shop.host, method: 'POST', token, body: { idempotencyKey: idemKey(), password: shop.owner.password, ...body } }),
+    refund: (orderId, body, { token = shop.token } = {}) => hit(world, `/api/v1/orders/${orderId}/refunds`, { host: shop.host, method: 'POST', token, body: { idempotencyKey: idemKey(), ...body } }),
 
     /** A manager of this business, signed in. */
     async manager() {
