@@ -99,26 +99,41 @@ function textFields(input) {
   return fields.filter(([, text]) => text);
 }
 
+/** What the link rules read for this business: the saved WhatsApp number and the blocklist (PRD 4.11). */
+async function linkContext(repos) {
+  const settings = await repos.settings.getAll();
+  return { whatsappNumber: settings.support_whatsapp, blockedHosts: await repos.automations.blockedHosts() };
+}
+
 /**
- * The destination and every link written into the messages, with or without https:// (PRD 4.11), under the same rules as at send:
- * no shortener, nothing on the blocklist, WhatsApp only to the saved number. A destination on the platform's own domains is
- * promotion (PRD 4.10, content.bhava_promo); a seller's page on the neutral domain is the seller's own.
+ * Every link written into a buyer-facing text, with or without https:// (PRD 4.11), under the same rules as at send: no shortener,
+ * nothing on the blocklist, WhatsApp only to the saved number. `fields` is [[field, text]]; throws for the first link that breaks
+ * a rule, naming its field. Every editor of a message a buyer gets calls this at save, so a link is never left for the send gate alone.
+ */
+export async function checkWrittenLinks(fields, { repos }, context = null) {
+  const written = fields.filter(([, text]) => text).flatMap(([field, text]) => linksIn(text).map((url) => [field, url]));
+  if (!written.length) return;
+  const rules = context ?? (await linkContext(repos));
+  for (const [field, url] of written) {
+    const reason = linkProblem(url, rules);
+    if (reason) throw refuse('A link in this message can’t be used in a DM.', field, reason);
+  }
+}
+
+/**
+ * The destination and every link written into the messages. A destination on the platform's own domains is promotion
+ * (PRD 4.10, content.bhava_promo); a seller's page on the neutral domain is the seller's own.
  */
 async function checkLink(input, { repos, config }) {
-  const written = textFields(input).flatMap(([field, text]) => linksIn(text).map((url) => [field, url]));
-  if (!input.linkUrl && !written.length) return;
-  const settings = await repos.settings.getAll();
-  const context = { whatsappNumber: settings.support_whatsapp, blockedHosts: await repos.automations.blockedHosts() };
+  let context = null;
   if (input.linkUrl) {
+    context = await linkContext(repos);
     const reason = linkProblem(input.linkUrl, context);
     if (reason) throw refuse('That link can’t be used in a DM.', 'linkUrl', reason);
     const [promo] = checkContent({ url: input.linkUrl, ownDomain: config?.platformDomain ?? '' }).filter((problem) => problem.reason === 'content.bhava_promo');
     if (promo) throw refuse(promo.message, 'linkUrl', promo.reason);
   }
-  for (const [field, url] of written) {
-    const reason = linkProblem(url, context);
-    if (reason) throw refuse('A link in this message can’t be used in a DM.', field, reason);
-  }
+  await checkWrittenLinks(textFields(input), { repos }, context);
 }
 
 async function checkPublicReplies(input, { repos }) {

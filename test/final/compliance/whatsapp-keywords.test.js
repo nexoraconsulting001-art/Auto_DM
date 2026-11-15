@@ -34,6 +34,7 @@ test('compliance-6: a keyword set that would fail at send is refused at save, wi
   await refused(shop, linkSet('saree', 'https://shop.example/p', { message: 'Also at tinyurl.com/abc {link}' }), 'link.shortener', 'items.0.message');
   await refused(shop, linkSet('saree', 'https://shop.example/p', { message: 'Or https://bit.ly/y' }), 'link.shortener', 'items.0.message');
   await refused(shop, linkSet('saree', 'https://shop.example/p', { message: 'Chat on wa.me/911111111111 {link}' }), 'link.not_allowlisted', 'items.0.message');
+  await refused(shop, linkSet('saree', 'https://shop.example/p', { message: 'Hi {first_name}, here it is {link}' }), 'content.bad_variable', 'items.0.message');
   assert.deepEqual(json(await shop.send('GET', '/whatsapp/keywords')).items, [], 'nothing was saved');
 });
 

@@ -143,7 +143,8 @@ export function whatsappApi(ctx) {
     for (const [index, item] of items.entries()) {
       const text = String(item.message ?? '').replaceAll('{link}', '');
       const ownDomain = config.platformDomain ?? '';
-      const [problem] = checkContent({ text, ownDomain, maxBytes: WHATSAPP_LIMITS.textBytes });
+      // Checked as the gate will see it at send, once {link} is filled: any other {name} would reach the shopper as written.
+      const [problem] = checkContent({ text, ownDomain, maxBytes: WHATSAPP_LIMITS.textBytes, filled: true });
       if (problem) throw refuse(`items.${index}.message`, problem.message, problem.reason);
       if (item.linkUrl) {
         const reason = linkProblem(item.linkUrl, context);
