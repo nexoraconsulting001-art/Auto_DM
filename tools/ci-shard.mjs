@@ -20,7 +20,7 @@
  * Balance: greedy, longest first, onto the lightest shard. A file's weight is its time in tools/ci-timings.json when
  * known, else its size scaled to the known times. Ties go by name, so the split depends only on the checkout.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -176,21 +176,113 @@ async function plan() {
   return problems;
 }
 
-function run(suite, k, n) {
+/** Minutes with no output at all before a node:test run counts as stalled. Normal runs never go quiet for 2. */
+const STALL_MINUTES = Number(process.env.CI_SHARD_STALL_MINUTES || 10);
+
+/** The processes on this machine, for the log of a stalled run. */
+function processList() {
+  const ps = spawnSync('ps', ['-eo', 'pid,ppid,etime,args', '--forest'], { encoding: 'utf8' });
+  return ps.status === 0 ? ps.stdout : '(ps is not available)';
+}
+
+/** A file as the reporters name it: relative to the repository, with forward slashes. */
+const repoPath = (file) => path.relative(root, path.resolve(root, file)).split(path.sep).join('/');
+
+/**
+ * One node --test run over these files, passed through to stdout. Resolves with its exit code, the files it showed
+ * any sign of (a test started, or the file's time) and those it finished, and whether it stalled: no output for
+ * STALL_MINUTES, after which the run (and every process it started) is stopped.
+ */
+function nodeRun(files) {
+  const args = [...testCiCommand().flags, '--test-reporter=./tools/ci-timing.mjs', '--test-reporter-destination=stdout', ...files];
+  return new Promise((resolve, reject) => {
+    // Its own process group, so a stalled run can be stopped with everything it started.
+    const child = spawn(process.execPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    const seen = new Set();
+    const finished = new Set();
+    let last = Date.now();
+    let stalled = false;
+    let partial = '';
+    child.stdout.on('data', (chunk) => {
+      last = Date.now();
+      process.stdout.write(chunk);
+      const text = partial + chunk.toString('utf8');
+      const lines = text.split('\n');
+      partial = lines.pop();
+      for (const line of lines) {
+        const m = /^ci-(start|timing \d+) (\S+)$/.exec(line.trim());
+        if (m) seen.add(m[2]);
+        if (m && m[1] !== 'start') finished.add(m[2]);
+      }
+    });
+    child.stderr.on('data', (chunk) => {
+      last = Date.now();
+      process.stderr.write(chunk);
+    });
+    const watchdog = setInterval(() => {
+      if (Date.now() - last < STALL_MINUTES * 60_000) return;
+      stalled = true;
+      clearInterval(watchdog);
+      console.log(`\nci-shard: no output for ${STALL_MINUTES} minutes. The processes:\n${processList()}`);
+      try {
+        if (process.platform === 'win32') child.kill('SIGKILL');
+        else process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        child.kill('SIGKILL');
+      }
+    }, 15_000);
+    child.once('error', (err) => {
+      clearInterval(watchdog);
+      reject(err);
+    });
+    child.once('close', (code) => {
+      clearInterval(watchdog);
+      resolve({ code: code ?? 1, seen, finished, stalled });
+    });
+  });
+}
+
+/**
+ * The node:test shard. If the runner stalls (it has, once, with every test file finished and nothing left running),
+ * the file it was in is reported as failed and the files it never reached run in a new runner, so no file is left
+ * out and the shard fails with a reason instead of hitting the job's time limit.
+ */
+export async function runNode(files) {
+  let remaining = files;
+  let exitCode = 0;
+  const stalledIn = [];
+  while (remaining.length) {
+    const { code, seen, finished, stalled } = await nodeRun(remaining);
+    if (code !== 0) exitCode = 1;
+    if (!stalled) break;
+    // Files run one at a time, in the order given: everything before the last file showing a sign of life is done.
+    // That file is the one the run stalled in, unless it finished, and then it is the next one.
+    let at = -1;
+    remaining.forEach((f, i) => {
+      if (seen.has(repoPath(f))) at = i;
+    });
+    if (at >= 0 && finished.has(repoPath(remaining[at]))) at++;
+    at = Math.max(at, 0);
+    const culprit = remaining[at];
+    if (culprit) stalledIn.push(culprit);
+    console.log(`::error title=Shard stalled::The test run went quiet for ${STALL_MINUTES} minutes in ${culprit ? repoPath(culprit) : 'no file'} and was stopped; that file counts as failed, and the files after it run again now.`);
+    remaining = remaining.slice(at + 1);
+    if (remaining.length) console.log(`ci-shard: running the ${remaining.length} file(s) after it:\n${remaining.map((f) => `  ${f}`).join('\n')}`);
+  }
+  for (const f of stalledIn) console.log(`::error file=${repoPath(f)},title=Shard stalled::The test run stalled in this file.`);
+  return stalledIn.length ? 1 : exitCode;
+}
+
+async function run(suite, k, n) {
   const files = split(suiteFiles(suite), n)[k - 1].files;
   console.log(`ci-shard: ${suite} shard ${k}/${n}: ${files.length} files`);
   for (const f of files) console.log(`  ${f}`);
   if (!files.length) throw new Error('This shard has no files');
-  let args;
-  let env = process.env;
-  if (suite === 'node') {
-    args = [...testCiCommand().flags, '--test-reporter=./tools/ci-timing.mjs', '--test-reporter-destination=stdout', ...files];
-  } else {
-    // As tools/gate.mjs runs Playwright: the config's settings, net-guard for the app servers the tests start.
-    const guard = pathToFileURL(path.join(root, 'tools', 'net-guard.mjs')).href;
-    env = { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${guard}`.trim() };
-    args = [path.join(root, 'node_modules', '@playwright', 'test', 'cli.js'), 'test', '--config=playwright.config.mjs', '--reporter=list', ...files.map(e2eFilter)];
-  }
+  if (suite === 'node') return runNode(files);
+  // As tools/gate.mjs runs Playwright: the config's settings, net-guard for the app servers the tests start.
+  const guard = pathToFileURL(path.join(root, 'tools', 'net-guard.mjs')).href;
+  const env = { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${guard}`.trim() };
+  const args = [path.join(root, 'node_modules', '@playwright', 'test', 'cli.js'), 'test', '--config=playwright.config.mjs', '--reporter=list', ...files.map(e2eFilter)];
   const result = spawnSync(process.execPath, args, { cwd: root, env, stdio: 'inherit' });
   if (result.error) throw result.error;
   return result.status ?? 1;
@@ -204,7 +296,7 @@ async function main(argv) {
   }
   if (command === 'files' || command === 'run') {
     const { k, n } = parseShard(shard);
-    if (command === 'run') return run(suite, k, n);
+    if (command === 'run') return await run(suite, k, n);
     for (const f of split(suiteFiles(suite), n)[k - 1].files) console.log(f);
     return 0;
   }

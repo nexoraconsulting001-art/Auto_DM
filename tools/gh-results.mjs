@@ -152,6 +152,20 @@ function readLog(text) {
       failures.push({ file: at[1].replace(/:\d+:\d+$/, ''), name, error: clip(error.join(' ')) });
     }
   }
+  // That section can leave failures out, so every top-level "✖ name (ms)" above it counts too, in the file the last
+  // "ci-start <file>" line (tools/ci-timing.mjs) named.
+  const listed = new Set(failures.map((f) => f.name));
+  let current = '';
+  for (let i = 0; i < (start >= 0 ? start : lines.length); i++) {
+    const s = /^ci-start (\S+)$/.exec(lines[i].trim());
+    if (s) current = s[1];
+    const m = /^✖ (.*?) \([\d.]+m?s\)$/.exec(lines[i]);
+    if (!m || listed.has(m[1])) continue;
+    listed.add(m[1]);
+    const error = [];
+    for (let k = i + 1; k < lines.length && error.length < 3 && !/^[✖✔﹣]/.test(lines[k]); k++) if (/^\s+\S/.test(lines[k]) && !lines[k].trim().startsWith('{')) error.push(lines[k].trim());
+    failures.push({ file: current, name: m[1], error: clip(error.join(' ')) });
+  }
   // jest: "● Suite › test" headings, each followed by its error.
   for (let i = 0; i < lines.length; i++) {
     const m = /^\s*● (.+)$/.exec(lines[i]);
@@ -221,6 +235,7 @@ async function main() {
   if (stillRunning) md.push(`**Gave up after ${maxMinutes} minutes: some runs had not finished.**`, '');
   const allTimings = {};
   const groups = new Map();
+  const failingFiles = new Map(); // job group -> Set of files with a failing test
   for (const run of runs) {
     const started = run.run_started_at ?? run.created_at;
     const ended = run.jobs.map((j) => j.completed_at).filter(Boolean).sort().at(-1);
@@ -255,6 +270,7 @@ async function main() {
         details.push(`### ${job.name}: ${job.conclusion}`, '', job.html_url, '');
         const steps = (job.steps ?? []).filter((st) => st.conclusion === 'failure' || st.conclusion === 'cancelled').map((st) => `${st.name} (${st.conclusion})`);
         if (steps.length) details.push(`Failed step: ${steps.join(', ')}`, '');
+        for (const f of info.failures) if (f.file) (failingFiles.get(groupOf(job.name)) ?? failingFiles.set(groupOf(job.name), new Set()).get(groupOf(job.name))).add(f.file);
         for (const f of info.failures) details.push(`- ${f.file ? `\`${f.file}\` ` : ''}${f.name}${f.error ? `: ${f.error}` : ''}`);
         for (const a of notes) details.push(`- ${a.path && a.path !== '.github' ? `\`${a.path}\` ` : ''}${a.title ? `${a.title}: ` : ''}${clip(a.message)}`);
         if (!info.failures.length && info.errors.length) details.push('', 'Log before the error:', '', '```', ...info.errors.flatMap((e) => [e, '']), '```');
@@ -264,6 +280,8 @@ async function main() {
     }
     md.push('', ...details);
   }
+  md.push('## Failing test files by job', '');
+  for (const [name, files] of failingFiles) md.push(`### ${name} (${files.size})`, '', ...[...files].sort().map((file) => `- ${file}`), '');
   md.push('## Totals by job', '', '| Job | Jobs | Failed jobs | Files | node tests (pass/fail) | e2e tests | jest tests | Longest |', '|---|---|---|---|---|---|---|---|');
   for (const [name, g] of groups) md.push(`| ${name} | ${g.jobs} | ${g.failed} | ${g.files || '-'} | ${g.tests ? `${g.tests} (${g.pass}/${g.fail})` : '-'} | ${g.e2e || '-'} | ${g.jest || '-'} | ${minutes(g.longest)} ${g.longestName !== name ? g.longestName.slice(name.length).trim() : ''} |`);
   md.push('');
