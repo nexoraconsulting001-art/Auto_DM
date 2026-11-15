@@ -134,7 +134,9 @@ function readLog(text) {
       const [, num, kind] = /(\d+) (\w+)/.exec(part.trim()) ?? [];
       if (num) counts[`jest ${kind}`] = (counts[`jest ${kind}`] ?? 0) + Number(num);
     }
-    // Playwright list reporter: "  12 passed (3.4m)", "  2 failed"
+    // Playwright: "Running 57 tests using 2 workers", then "  12 passed (3.4m)", "  2 failed"
+    const found = /^Running (\d+) tests? using/.exec(line.trim());
+    if (found) counts['e2e found'] = (counts['e2e found'] ?? 0) + Number(found[1]);
     const p = /^\s*(\d+) (passed|failed|flaky|skipped|did not run)( \(.*\))?$/.exec(line);
     if (p) counts[`e2e ${p[2]}`] = (counts[`e2e ${p[2]}`] ?? 0) + Number(p[1]);
   }
@@ -234,7 +236,7 @@ async function main() {
       const tests = [
         c.tests != null ? `node ${c.tests} (pass ${c.pass ?? 0}, fail ${c.fail ?? 0}, cancelled ${c.cancelled ?? 0}, skipped ${(c.skipped ?? 0) + (c.todo ?? 0)})` : '',
         c['jest total'] != null ? `jest ${c['jest total']} (fail ${c['jest failed'] ?? 0})` : '',
-        Object.keys(c).some((k) => k.startsWith('e2e ')) ? `e2e pass ${c['e2e passed'] ?? 0}, fail ${c['e2e failed'] ?? 0}, flaky ${c['e2e flaky'] ?? 0}, skipped ${c['e2e skipped'] ?? 0}, not run ${c['e2e did not run'] ?? 0}` : '',
+        Object.keys(c).some((k) => k.startsWith('e2e ')) ? `e2e found ${c['e2e found'] ?? '?'}: pass ${c['e2e passed'] ?? 0}, fail ${c['e2e failed'] ?? 0}, flaky ${c['e2e flaky'] ?? 0}, skipped ${c['e2e skipped'] ?? 0}, not run ${c['e2e did not run'] ?? 0}` : '',
       ].filter(Boolean).join('; ');
       md.push(`| ${job.name} | ${job.conclusion ?? job.status} | ${minutes(duration)} | ${tests || '-'} |`);
       const group = groups.get(groupOf(job.name)) ?? { jobs: 0, failed: 0, longest: 0, longestName: '', tests: 0, pass: 0, fail: 0, files: 0, e2e: 0, jest: 0 };
@@ -244,7 +246,7 @@ async function main() {
       group.tests += c.tests ?? 0;
       group.pass += c.pass ?? 0;
       group.fail += c.fail ?? 0;
-      group.e2e += (c['e2e passed'] ?? 0) + (c['e2e failed'] ?? 0) + (c['e2e flaky'] ?? 0) + (c['e2e skipped'] ?? 0) + (c['e2e did not run'] ?? 0);
+      group.e2e += c['e2e found'] ?? (c['e2e passed'] ?? 0) + (c['e2e failed'] ?? 0) + (c['e2e flaky'] ?? 0) + (c['e2e skipped'] ?? 0) + (c['e2e did not run'] ?? 0);
       group.jest += c['jest total'] ?? 0;
       group.files += info.shardFiles.reduce((n, s) => n + s.files, 0);
       groups.set(groupOf(job.name), group);
