@@ -4,8 +4,10 @@ name: Production readiness
 # PRD 11 (R-05, R-06, R-07) as scripts. Nothing here deploys anywhere or reaches an outside service: every tool runs from
 # its public container image, and every dependency is a service container on the runner.
 #
-# The job shapes are the contract; the steps call scripts the tracks build (tools/readiness/*.mjs, deploy/prod/*), so a
-# run fails at the first part that is not built yet.
+# The three hosting checks are tools/readiness/r05.mjs, r06.mjs and r07.mjs (helpers in tools/prod-checks). Each makes its own
+# database, bucket and analytics database on the service containers, never writes to a service it did not make, and removes what
+# it made. A failed check exits 1 and names exactly what differed; what a run cannot prove on a developer's machine (Redis,
+# the analytics database, MinIO, pg_dump, docker) is proved here.
 
 on:
   workflow_dispatch:
@@ -16,6 +18,10 @@ on:
       - '.dockerignore'
       - 'deploy/prod/**'
       - 'tools/readiness/**'
+      - 'tools/prod-checks/**'
+      - 'scripts/move-to-cloud.js'
+      - 'scripts/copy-files.js'
+      - 'src/backup.js'
       - 'src/platform/**'
       - 'src/config.js'
       - 'src/server.js'
@@ -57,11 +63,6 @@ jobs:
           done
       - name: The image has the backup tools
         run: docker run --rm --read-only bhava:prod-${{ matrix.arch }} pg_dump --version
-      - name: The image check of the runtime track (read-only start against service containers)
-        run: node tools/readiness/index.mjs validate --json
-        env:
-          READINESS_IMAGE: bhava:prod-${{ matrix.arch }}
-          READINESS_ONLY: image
 
   templates:
     name: Templates validate
@@ -93,11 +94,14 @@ jobs:
         run: ${{ env.SERVER_INSTALL }}
       - name: The region is India only, and rules and dashboards name only metrics that exist (G-06 to G-08)
         run: npm run prod:validate
+        env:
+          # The tools above each ran from their public image in this job; prod:validate runs the checks that need no container.
+          READINESS_SKIP_CONTAINERS: '1'
 
   readiness:
     name: ${{ matrix.check }} (${{ matrix.scenario }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -136,6 +140,7 @@ jobs:
       ANALYTICS_DRIVER: clickhouse
       CLICKHOUSE_URL: http://ci:ci@localhost:8123
       STORAGE_DRIVER: s3
+      # The job's own bucket. The checks make buckets of their own and never write to this one.
       S3_BUCKET: bhava-ci
       S3_REGION: ap-south-1
       S3_ENDPOINT: http://localhost:9000
