@@ -64,7 +64,7 @@ async function rtoCount(q, phone) {
   const digits = normalizePhone(phone);
   if (!digits) return 0;
   const [{ n }] = await q.query(
-    `SELECT count(*)::int AS n FROM orders WHERE tenant_id = $1 AND phone = ANY($2::text[]) AND fulfilment_status = 'rto_delivered'`,
+    `SELECT count(*)::int AS n FROM orders WHERE tenant_id = $1 AND phone = ANY($2::text[]) AND fulfilment_status IN ('rto_initiated', 'rto_delivered')`,
     [tenantId(), [digits, `+91${digits}`]],
   );
   return n;
@@ -123,16 +123,23 @@ export async function buildQuote(q, ctx, { lines: linesIn, address = null, phone
 
   const beforeFees = subtotalPaise - discountPaise - loyaltyPaise + shippingPaise;
   const codTotal = beforeFees + options.codFeePaise;
+  // What the door may collect (9.6: the order-value cap, the COD PIN codes, the courier's COD reach and the RTO block) holds
+  // for cash on delivery and for the balance of a part-advance order alike, as payments.settings.checkout has it (money-8).
+  const capReason = `Cash on delivery is available on orders up to ${formatRupees(options.codMaxPaise ?? 0)}.`;
+  let doorReason = '';
+  if (options.codMaxPaise !== null && beforeFees > options.codMaxPaise) doorReason = capReason;
+  else if (pincode && options.codPincodes.length && !options.codPincodes.includes(pincode)) doorReason = 'Cash on delivery isn’t available at this PIN code.';
+  else if (pincode && !reach.cod) doorReason = 'Cash on delivery isn’t available at this PIN code.';
+  else if (options.codBlockRto !== null && buyerPhone && (options.cod || options.partAdvance) && (await rtoCount(q, buyerPhone)) >= options.codBlockRto) doorReason = 'Cash on delivery isn’t available for this number. Please pay online.';
   let codReason = '';
   if (!options.cod) codReason = 'Cash on delivery isn’t offered by this store.';
-  else if (options.codMaxPaise !== null && codTotal > options.codMaxPaise) codReason = `Cash on delivery is available on orders up to ${formatRupees(options.codMaxPaise)}.`;
-  else if (pincode && options.codPincodes.length && !options.codPincodes.includes(pincode)) codReason = 'Cash on delivery isn’t available at this PIN code.';
-  else if (pincode && !reach.cod) codReason = 'Cash on delivery isn’t available at this PIN code.';
-  else if (options.codBlockRto !== null && buyerPhone && (await rtoCount(q, buyerPhone)) >= options.codBlockRto) codReason = 'Cash on delivery isn’t available for this number. Please pay online.';
+  else if (options.codMaxPaise !== null && codTotal > options.codMaxPaise) codReason = capReason;
+  else codReason = doorReason;
   const split = advanceSplit(options, beforeFees);
   let advanceReason = '';
   if (!options.partAdvance) advanceReason = 'Part payment isn’t offered by this store.';
   else if (!online) advanceReason = 'Online payment isn’t available at this store yet.';
+  else if (doorReason) advanceReason = doorReason;
   else if (!split) advanceReason = 'Part payment isn’t available for this order.';
   const paymentModes = [
     { mode: 'prepaid', available: online, reason: online ? '' : 'Online payment isn’t available at this store yet.' },
