@@ -4,7 +4,7 @@
   "memoryMb": { "web": 512, "worker": 384, "postgres": 512 },
   "postgres": { "sharedBuffersMb": 128, "maxConnections": 40 },
   "businesses": 10,
-  "run": { "warmupSeconds": 10, "durationSeconds": 120, "connections": 40 },
+  "run": { "warmupSeconds": 10, "durationSeconds": 120, "connections": 40, "requestsPerSecond": 15 },
   "mix": [
     { "class": "buyer_page", "weight": 40 },
     { "class": "beacon", "weight": 15 },

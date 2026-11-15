@@ -7,9 +7,12 @@
  *   npm run drill                     the whole drill
  *   npm run drill -- --only refuse    one part: restore or refuse
  *   npm run drill -- --out <name>     the report's folder under test-results (default: drill)
+ *   npm run drill -- --check-backup <file>   read a backup through with pg_restore, opening no database (exit 0 or 1)
  *
- * The steps, in order (DRILL_STEPS). The drill track builds run(); the backup and restore themselves are src/backup.js
- * (runBackup, runRestore), which this drill exercises and does not replace.
+ * The steps, in order (DRILL_STEPS), are in runner.mjs; the backup and restore themselves are src/backup.js (runBackup,
+ * runRestore), which this drill exercises and does not replace. It needs the PostgreSQL 16 client programs (pg_dump,
+ * pg_restore) on the PATH or in PG_BIN_DIR, and stops at once, saying so, without them. The exit code is 0 for a pass, 1 for a
+ * failed check, 2 for a mistake in how it was started. docs/runbooks/backup-restore.md says how to read the report.
  *
  *   seed        a source database with the sample businesses loaded (scripts/showcase.js) and some activity
  *   backup      runBackup on the owner login; the time and the size are recorded
@@ -30,6 +33,9 @@
  */
 import { pathToFileURL } from 'node:url';
 import { loadBudgets } from '../load/stack.mjs';
+import { checkBackup } from './backup-check.mjs';
+import { runDrill } from './runner.mjs';
+import { DrillError, checksumSql } from './sql.mjs';
 
 export const DRILL_STEPS = Object.freeze(['seed', 'backup', 'restore', 'compare', 'fence', 'logins', 'start', 'refuse']);
 export const DRILL_PARTS = Object.freeze({ restore: Object.freeze(['seed', 'backup', 'restore', 'compare', 'fence', 'logins', 'start']), refuse: Object.freeze(['seed', 'backup', 'refuse']) });
@@ -40,23 +46,7 @@ export const BAD_BACKUPS = Object.freeze({
   wrong_version: 'the archive header names a format version this server does not read',
 });
 
-export class DrillError extends Error {}
-
-const IDENT = /^[a-z_][a-z0-9_]{0,62}$/;
-
-/**
- * One statement that answers { rows, checksum } for a table: the number of rows and an md5 over every row as text, in
- * the order of `keyColumns`. With `tenantColumn` it takes $1, the business's id, and covers that business's rows only.
- */
-export function checksumSql(table, keyColumns, { tenantColumn = '' } = {}) {
-  for (const name of [table, ...keyColumns, ...(tenantColumn ? [tenantColumn] : [])]) {
-    if (!IDENT.test(name)) throw new DrillError(`"${name}" is not a table or column name`);
-  }
-  if (!keyColumns.length) throw new DrillError('A checksum needs the columns to order by');
-  const where = tenantColumn ? ` WHERE t.${tenantColumn} = $1` : '';
-  const order = keyColumns.map((column) => `t.${column}`).join(', ');
-  return `SELECT count(*)::int AS rows, COALESCE(md5(string_agg(t::text, '|' ORDER BY ${order})), '') AS checksum FROM ${table} t${where}`;
-}
+export { DrillError, checksumSql };
 
 export function parseArgs(argv) {
   const options = { only: [], out: 'drill' };
@@ -72,16 +62,28 @@ export function parseArgs(argv) {
   return options;
 }
 
-/** Runs the drill and answers the report. The drill track builds it. */
-export async function run(_options) {
-  throw new DrillError('The restore drill is not built yet (Phase 8, drill track).');
+/** Runs the drill and answers the report (see runner.mjs). `budgets` is required: the tool never guesses its limits. */
+export async function run(options) {
+  if (!options?.budgets) throw new DrillError('run() needs options.budgets (tools/load/budgets.json read by loadBudgets): it is not built to guess its limits.');
+  const only = options.only?.length ? options.only : ['restore', 'refuse'];
+  return runDrill({ ...options, only });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   (async () => {
     if (String(process.env.NODE_ENV).toLowerCase() === 'production') throw new DrillError('The drill never runs with NODE_ENV=production');
-    const options = parseArgs(process.argv.slice(2));
+    const args = process.argv.slice(2);
+    // npm run drill -- --check-backup <file>: read a backup through, opening no database (see docs/runbooks/backup-restore.md).
+    if (args[0] === '--check-backup') {
+      if (!args[1] || args.length !== 2) throw new DrillError('--check-backup needs one file');
+      const result = await checkBackup(args[1]);
+      console.log(result.ok ? `drill: ${args[1]} can be read from start to end.` : `drill: refused: ${result.reason}`);
+      process.exit(result.ok ? 0 : 1);
+    }
+    const options = parseArgs(args);
     const report = await run({ ...options, budgets: loadBudgets() });
+    // embedded-postgres' exit hook has nothing left to stop by now and would only print a warning about process.exit.
+    process.removeAllListeners('exit');
     process.exit(report.ok ? 0 : 1);
   })().catch((err) => {
     console.error(`drill: ${err.message}`);

@@ -59,9 +59,10 @@ const freePort = () => new Promise((resolve, reject) => {
 /**
  * Starts an embedded Postgres in `dir` (an empty or missing folder) with the budget's settings, creates the database
  * `bhava`, and makes the two logins the QA server has: the owner of the tables (migrations, the platform's work) and the
- * restricted app login (every business's work). Passwords are made up for the run and never printed.
+ * restricted app login (every business's work). Passwords are made up for the run and never printed. With `appLogin: false`
+ * the server starts with the owner only, as a new server does before the app first starts on it (the restore drill's target).
  */
-export async function startPostgres({ dir, budgets, database = 'bhava' }) {
+export async function startPostgres({ dir, budgets, database = 'bhava', appLogin = true }) {
   const { default: EmbeddedPostgres } = await import('embedded-postgres');
   const { default: pgClient } = await import('pg');
   const { ensureAppLogin } = await import('../../src/db/index.js');
@@ -91,6 +92,9 @@ export async function startPostgres({ dir, budgets, database = 'bhava' }) {
   const ownerUrl = `postgres://bhava:${ownerPassword}@127.0.0.1:${port}/${database}`;
   const appUrl = `postgres://bhava_app_load:${appPassword}@127.0.0.1:${port}/${database}`;
   const client = new pgClient.Client({ connectionString: ownerUrl });
+  if (!appLogin) {
+    return { ownerUrl, appUrl, port, pid: pg.process.pid, output: () => output.join(''), stop: () => pg.stop() };
+  }
   try {
     await client.connect();
     const db = { exec: (sql) => client.query(sql), query: async (sql, params) => (await client.query(sql, params)).rows };

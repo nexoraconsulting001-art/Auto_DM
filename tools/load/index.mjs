@@ -8,9 +8,12 @@
  *   npm run load -- --seconds 30      a shorter run than budgets.json says (the report says so, and it is not a pass of record)
  *   npm run load -- --out <name>      the report's folder under test-results (default: load)
  *
- * Every limit is data in budgets.json; this file holds none. The shared pieces (Postgres with the QA settings and two
- * logins, the two processes, memory readings, the report writer) are in stack.mjs and are built. Running the traffic is
- * the load track's:
+ * Every limit is data in budgets.json; this file holds none. The pieces: stack.mjs (Postgres with the QA settings and two
+ * logins, the two processes, the report writer), world.mjs (the ten businesses and the simulators), traffic.mjs and http.mjs
+ * (the mix, an open-loop driver), monitor.mjs (memory, queues, database answer), verify.mjs (lost and twice), analyze.mjs
+ * (the judgement) and runner.mjs (the three parts and the report). The exit code is 0 for a pass, 1 for a failed check or a
+ * run that did not finish, 2 for a mistake in how it was started. docs/runbooks/load-test.md says how to read the report.
+ *
  *
  *   run(options) -> report
  *
@@ -37,6 +40,7 @@
  */
 import { pathToFileURL } from 'node:url';
 import { loadBudgets } from './stack.mjs';
+import { runLoad } from './runner.mjs';
 
 export { loadBudgets, nodeFlags, postgresFlags, rssMb, startNode, startPostgres, writeReport } from './stack.mjs';
 
@@ -64,9 +68,13 @@ export function parseArgs(argv) {
   return options;
 }
 
-/** Runs the parts and answers the report. The load track builds it. */
-export async function run(_options) {
-  throw new LoadError('The load test is not built yet (Phase 8, load track).');
+/** Runs the parts and answers the report (see runner.mjs). `budgets` is required: the tool never guesses its limits. */
+export async function run(options) {
+  if (!options?.budgets) throw new LoadError('run() needs options.budgets (tools/load/budgets.json read by loadBudgets): it is not built to guess its limits.');
+  const parts = options.parts?.length ? options.parts : [...PARTS];
+  for (const part of parts) if (!PARTS.includes(part)) throw new LoadError(`--part is one of ${PARTS.join(', ')}`);
+  if (options.seconds != null && (!Number.isInteger(options.seconds) || options.seconds < 5 || options.seconds > 540)) throw new LoadError('--seconds is a whole number from 5 to 540');
+  return runLoad({ budgets: options.budgets, parts, seconds: options.seconds ?? null, out: options.out ?? 'load', say: options.say, root: options.root });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -74,6 +82,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (String(process.env.NODE_ENV).toLowerCase() === 'production') throw new LoadError('The load test never runs with NODE_ENV=production');
     const options = parseArgs(process.argv.slice(2));
     const report = await run({ ...options, budgets: loadBudgets() });
+    // embedded-postgres' exit hook has nothing left to stop by now and would only print a warning about process.exit.
+    process.removeAllListeners('exit');
     process.exit(report.ok ? 0 : 1);
   })().catch((err) => {
     console.error(`load: ${err.message}`);
