@@ -28,6 +28,8 @@ import { PaymentError, isGatewayId, lockOrder, paiseOf, raiseAlert, rupees, writ
  * In own mode nothing is reversed (S-76). Every refund is in the audit log.
  */
 const RETRYING = 'retrying';
+/** The payment ran on an own gateway account the store has since replaced: refunded there by the owner, never retried here. */
+const ACCOUNT_CHANGED = 'account_changed';
 /** Refunds one owner may ask for in a window: enough for a day of returns, not for a runaway script. */
 const REFUND_LIMIT = Object.freeze({ limit: 30, windowMs: 15 * 60_000 });
 
@@ -114,7 +116,10 @@ export function createRefunds(ctx, payments) {
     const order = await lockOrder(t, refund.order_id);
     const moved = await changeRow(t, 'refunds', refundId, 'failed', { ifAllowed: true, set: { error_code: String(code || 'refused').replace(/[^A-Za-z0-9_]/g, '').slice(0, 80) || 'refused' } });
     if (moved.row.status === 'failed') {
-      await raiseAlert(t, { kind: 'refund.failed', severity: 'critical', message: `A refund of ${rupees(moved.row.amount_paise)} on order ${order.order_number} didn’t go through. Try it again from the order.`, target: `order:${order.id}`, dedupeKey: `refund-failed:${refundId}:${Math.floor(Date.now() / 3_600_000)}` });
+      const message = moved.row.error_code === ACCOUNT_CHANGED
+        ? `A refund of ${rupees(moved.row.amount_paise)} on order ${order.order_number} can’t be sent: the payment was taken on a payment account this store no longer uses. Refund it from that account’s own dashboard.`
+        : `A refund of ${rupees(moved.row.amount_paise)} on order ${order.order_number} didn’t go through. Try it again from the order.`;
+      await raiseAlert(t, { kind: 'refund.failed', severity: 'critical', message, target: `order:${order.id}`, dedupeKey: `refund-failed:${refundId}:${Math.floor(Date.now() / 3_600_000)}` });
       await writeAudit(t, { actor: 'system', action: 'refund.failed', target: `order:${order.id}`, details: { refundId: Number(refundId), code: moved.row.error_code } });
     }
     return moved.row;
@@ -135,7 +140,7 @@ export function createRefunds(ctx, payments) {
       const creds = await payments.settings.credentials(row.mode, { accountRef: row.account_ref });
       answer = await creds.adapter.refund(creds.account, row.gateway_payment_id, { amountPaise: Number(row.amount_paise), idempotencyKey: gatewayKey(row), notes: { refund: String(row.id) } });
     } catch (err) {
-      if (err instanceof PaymentError) return db.tx((t) => markFailed(t, row.id, 'account_unavailable'));
+      if (err instanceof PaymentError) return db.tx((t) => markFailed(t, row.id, err.reason === ACCOUNT_CHANGED ? ACCOUNT_CHANGED : 'account_unavailable'));
       if (!(err instanceof ProviderError)) throw err;
       if (err.delivery === 'none') return db.tx((t) => markFailed(t, row.id, err.code || err.kind));
       // The gateway may have made it: the sweep asks again with the same key, which can only ever make this one refund.
@@ -232,6 +237,7 @@ export function createRefunds(ctx, payments) {
       const [refund] = await t.query('SELECT * FROM refunds WHERE tenant_id = $1 AND id = $2 FOR UPDATE', [tenantId(), id]);
       if (refund.status === 'processed') return { row: refund, done: true };
       if (refund.method !== 'gateway') throw new ApiError('conflict', 'A refund paid back by hand isn’t sent to the gateway.');
+      if (refund.error_code === ACCOUNT_CHANGED) throw new ApiError('conflict', 'This payment was taken on a payment account this store no longer uses. Refund it from that account’s own dashboard.');
       if (refund.status === 'requested' || refund.error_code === RETRYING) return { row: refund };
       const [payment] = await t.query('SELECT * FROM payments WHERE tenant_id = $1 AND id = $2 FOR UPDATE', [tenantId(), refund.payment_id]);
       if (payment.status !== 'captured' || (await held(t, payment.id, refund.id)) + Number(refund.amount_paise) > Number(payment.amount_paise)) {
