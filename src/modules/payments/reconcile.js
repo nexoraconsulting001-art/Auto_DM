@@ -65,6 +65,39 @@ export function createReconcile(ctx, service) {
         reportError(err, { msg: 'payments.check_failed', tenantId: tid, paymentId: Number(id) });
       }
     }
+    // Managed payments captured but with no Route transfer yet (its answer was lost, or Route was down), and courier
+    // charges still to be taken from a payout: sent again, a couple of minutes apart.
+    const untransferred = await platformDb.query(
+      `SELECT tenant_id, id, order_id FROM payments WHERE mode = 'managed' AND status = 'captured' AND transfer_id IS NULL AND NOT needs_review
+         AND gateway_payment_id IS NOT NULL AND updated_at < now() - interval '2 minutes' AND captured_at > now() - interval '7 days' ORDER BY updated_at LIMIT $1`,
+      [limit],
+    );
+    for (const { tenant_id: tid, id } of untransferred) {
+      try {
+        await withTenant(tid, async () => {
+          await db.query('UPDATE payments SET updated_at = now() WHERE tenant_id = $1 AND id = $2', [tenantId(), id]);
+          const row = await service.sendTransfer(Number(id));
+          results.push({ tenantId: tid, paymentId: Number(id), outcome: row?.transfer_id ? 'transferred' : 'untransferred' });
+        });
+      } catch (err) {
+        reportError(err, { msg: 'payments.transfer_failed', tenantId: tid, paymentId: Number(id) });
+      }
+    }
+    const untaken = await platformDb.query(
+      `SELECT DISTINCT l.tenant_id, l.order_id FROM settlement_lines l JOIN payments p ON p.tenant_id = l.tenant_id AND p.order_id = l.order_id AND p.mode = 'managed' AND p.status = 'captured' AND p.transfer_id IS NOT NULL
+       LEFT JOIN shipping_settings s ON s.tenant_id = l.tenant_id
+       WHERE l.kind = 'shipping_charge' AND COALESCE(s.charge_billing, 'payout') = 'payout' AND l.occurred_at > now() - interval '7 days' AND l.occurred_at < now() - interval '2 minutes'
+         AND NOT EXISTS (SELECT 1 FROM settlement_lines r WHERE r.tenant_id = l.tenant_id AND r.kind = 'transfer_reversal' AND r.ref = l.ref)
+       LIMIT $1`,
+      [limit],
+    );
+    for (const { tenant_id: tid, order_id: orderId } of untaken) {
+      try {
+        await withTenant(tid, () => service.takeShipping(orderId));
+      } catch (err) {
+        reportError(err, { msg: 'payments.shipping_take_failed', tenantId: tid, orderId });
+      }
+    }
     return results;
   }
 

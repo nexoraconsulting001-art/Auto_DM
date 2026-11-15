@@ -87,6 +87,7 @@ const toPayment = (p) => ({
 });
 const toOrder = (o, keyId) => ({ id: o.id, amountPaise: o.amount, amountPaidPaise: o.amount_paid ?? 0, status: o.status, receipt: o.receipt ?? '', keyId });
 const toRefund = (r) => ({ id: r.id, status: r.status, amountPaise: r.amount, paymentId: r.payment_id });
+const toTransfer = (t) => ({ id: t.id, recipient: t.recipient, amountPaise: t.amount ?? 0, amountReversedPaise: t.amount_reversed ?? 0, status: String(t.status ?? '') });
 const toDate = (seconds) => (Number(seconds) > 0 ? new Date(Number(seconds) * 1000) : null);
 const toSubscription = (s) => ({
   id: s.id,
@@ -161,12 +162,42 @@ function createRoute(config, request) {
   return {
     kind: 'route',
     ...common(request, { authFor: auth, keyIdFor: () => config.razorpayKeyId }),
+    /**
+     * The gateway order carries no transfer: the gateway's fee is known only once the payment is captured, and the seller
+     * gets the sale less that fee (S-70), so the transfer is made after capture with transferPayment.
+     */
     async createOrder(account, { amountPaise, receipt, notes = {} }) {
-      const { body } = await request('POST', '/v1/orders', {
-        headers: auth(),
-        json: { amount: amountPaise, currency: 'INR', receipt, notes, transfers: [{ account: linked(account), amount: amountPaise, currency: 'INR', on_hold: false }] },
-      });
+      linked(account);
+      const { body } = await request('POST', '/v1/orders', { headers: auth(), json: { amount: amountPaise, currency: 'INR', receipt, notes } });
       return toOrder(body, config.razorpayKeyId);
+    },
+    /** The Route transfers already made from one captured payment: [{ id, recipient, amountPaise, amountReversedPaise, status }]. */
+    async paymentTransfers(account, gatewayPaymentId) {
+      linked(account);
+      const { body } = await request('GET', `/v1/payments/${encodeURIComponent(gatewayPaymentId)}/transfers`, { headers: auth(), retries: 2 });
+      return (body?.items ?? []).map(toTransfer);
+    },
+    /**
+     * Sends `amountPaise` of a captured payment to the seller's linked account. Razorpay takes no idempotency key here, so a
+     * transfer already made from this payment to this account is answered instead of a second one: a repeat after a lost
+     * answer never pays the seller twice.
+     */
+    async transferPayment(account, gatewayPaymentId, { amountPaise, notes = {} }) {
+      const to = linked(account);
+      const made = (await this.paymentTransfers(account, gatewayPaymentId)).find((t) => t.recipient === to);
+      if (made) return made;
+      const { body } = await request('POST', `/v1/payments/${encodeURIComponent(gatewayPaymentId)}/transfers`, {
+        headers: auth(),
+        json: { transfers: [{ account: to, amount: amountPaise, currency: 'INR', on_hold: false, notes }] },
+      });
+      const item = body?.items?.[0] ?? null;
+      return item ? toTransfer(item) : null;
+    },
+    /** Takes `amountPaise` of a transfer back to Bhava's account, e.g. a courier charge taken from the payout. -> { id, amountPaise } */
+    async reverseTransfer(account, transferId, { amountPaise, notes = {} }) {
+      linked(account);
+      const { body } = await request('POST', `/v1/transfers/${encodeURIComponent(transferId)}/reversals`, { headers: auth(), json: { amount: amountPaise, notes } });
+      return { id: body?.id ?? null, amountPaise: body?.amount ?? 0 };
     },
     async refund(account, gatewayPaymentId, { amountPaise, idempotencyKey, notes = {} }) {
       linked(account);

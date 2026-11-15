@@ -63,7 +63,7 @@ test('a simulator is refused in production, and a host that is not the providerâ
   assert.doesNotThrow(() => createStoreAdapters({ emailDriver: 'http', emailBaseUrl: 'https://api.mail.example', emailHosts: 'https://api.mail.example' }, production));
 });
 
-test('razorpay route: an order with its transfer, the checkout signature, a refund that reverses, and no double refund', async (t) => {
+test('razorpay route: an order, its transfer after capture net of the fee, the checkout signature, a refund that reverses, and no double refund', async (t) => {
   const sim = await start(t, createRazorpaySim());
   const razorpay = createRazorpay(razorpayConfig(sim), { env: {} });
   const { route } = razorpay;
@@ -73,7 +73,9 @@ test('razorpay route: an order with its transfer, the checkout signature, a refu
   const account = await route.createLinkedAccount({ email: 'seller@example.test', phone: '9000000001', legalName: 'Mehta Mart', businessType: 'proprietorship', contactName: 'Asha', reference: 'tenant-1' });
   assert.equal(account.status, 'created');
   // Until KYC passes, the gateway refuses to route money there.
-  await assert.rejects(() => route.createOrder({ linkedAccountId: account.id }, { amountPaise: 100000, receipt: 'MM-1001' }), (err) => err instanceof ProviderError && err.kind === 'rejected' && err.delivery === 'none');
+  const early = await route.createOrder({ linkedAccountId: account.id }, { amountPaise: 100000, receipt: 'MM-1000' });
+  const { payment: earlyPayment } = await sim.post('/pay', { orderId: early.id, webhook: false });
+  await assert.rejects(() => route.transferPayment({ linkedAccountId: account.id }, earlyPayment.id, { amountPaise: 97640 }), (err) => err instanceof ProviderError && err.kind === 'rejected' && err.delivery === 'none');
   await sim.post('/accounts/kyc', { id: account.id, status: 'activated' });
   assert.equal((await route.fetchLinkedAccount(account.id)).status, 'activated');
 
@@ -96,12 +98,20 @@ test('razorpay route: an order with its transfer, the checkout signature, a refu
   assert.ok(fetched.feePaise > 0 && fetched.taxPaise > 0, 'the gateway fee and its GST, at cost');
   assert.deepEqual((await route.orderPayments(linked, order.id)).map((p) => p.id), [payment.id], 'S-26: what reconciliation asks');
   assert.equal((await route.fetchOrder(linked, order.id)).status, 'paid');
-  const [transfer] = (await sim.get('/state')).transfers;
-  assert.deepEqual([transfer.recipient, transfer.amount], [account.id, 100000], 'S-70: the whole amount goes to the seller; no commission');
+  // S-70: the transfer is made after capture, for the sale less the gateway fee (with its GST); asked again, it is the same one.
+  const net = 100000 - fetched.feePaise;
+  const transfer = await route.transferPayment(linked, payment.id, { amountPaise: net, notes: { payment: '1' } });
+  assert.deepEqual([transfer.recipient, transfer.amountPaise], [account.id, net], 'S-70: the sale less the gateway fee goes to the seller; no commission');
+  assert.equal((await route.transferPayment(linked, payment.id, { amountPaise: net })).id, transfer.id, 'a repeat after a lost answer never pays twice');
+  assert.equal((await sim.get('/state')).transfers.length, 1);
+  assert.deepEqual((await route.paymentTransfers(linked, payment.id)).map((x) => x.id), [transfer.id]);
 
   const refund = await route.refund(linked, payment.id, { amountPaise: 20000, idempotencyKey: 'refund-key-1' });
   assert.deepEqual([refund.status, refund.amountPaise, refund.reversal.amountPaise], ['processed', 20000, 20000], 'S-75: the transfer is taken back by the same amount');
   assert.equal((await route.fetchTransfer(transfer.id)).amountReversedPaise, 20000);
+  // A courier charge taken from the payout: part of the transfer taken back on its own.
+  assert.equal((await route.reverseTransfer(linked, transfer.id, { amountPaise: 8500, notes: { charge: 'shipment:1' } })).amountPaise, 8500);
+  assert.equal((await route.fetchTransfer(transfer.id)).amountReversedPaise, 28500);
   // The answer to a refund is lost: the call is repeated with the same key and is the same refund.
   await sim.fault({ kind: 'partial', match: { path: '/v1/payments/*/refund' } });
   const repeated = await route.refund(linked, payment.id, { amountPaise: 30000, idempotencyKey: 'refund-key-2' });
@@ -176,7 +186,7 @@ test('razorpay webhooks: signed over the exact bytes, repeated with the same eve
   hook.got.length = 0;
   const order = await route.createOrder({ linkedAccountId: account.id }, { amountPaise: 100000, receipt: 'MM-1' });
 
-  await sim.post('/pay', { orderId: order.id, duplicates: 3 });
+  const first = await sim.post('/pay', { orderId: order.id, duplicates: 3 });
   const captured = hook.got.filter((g) => g.body.event === 'payment.captured');
   assert.equal(captured.length, 3, 'S-23: the same event three times');
   assert.equal(new Set(captured.map((g) => g.headers[SIGNATURE_HEADERS.razorpayEventId])).size, 1, 'with one event id to dedupe on');
@@ -201,7 +211,7 @@ test('razorpay webhooks: signed over the exact bytes, repeated with the same eve
   const bad = await sim.post('/webhooks/send', { event: 'payment.captured', payload: { payment: { entity: { id: 'pay_forged', order_id: order.id } } }, signature: 'bad' });
   assert.equal(verifyWebhook(hook.got[0].raw, hook.got[0].headers[SIGNATURE_HEADERS.razorpay], sim.webhookSecret), false, 'a forged event does not verify');
   assert.ok(bad.eventId);
-  const [transfer] = (await sim.get('/state')).transfers;
+  const transfer = await route.transferPayment({ linkedAccountId: account.id }, first.payment.id, { amountPaise: 97640 });
   await sim.post('/transfers/fail', { id: transfer.id });
   assert.equal(hook.got.at(-1).body.event, 'transfer.failed', 'a failed transfer is told too (9.7)');
   // The clock is the test's: an event made after it is moved carries the new time.

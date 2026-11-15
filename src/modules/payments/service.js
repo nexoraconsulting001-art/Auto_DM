@@ -199,8 +199,9 @@ export function createPayments(ctx) {
 
       const tax = Math.min(gp.taxPaise, gp.feePaise);
       const set = { gateway_payment_id: gp.id, method: gp.method, fee_paise: gp.feePaise - tax, fee_tax_paise: tax, captured_at: new Date(), error_code: '' };
-      // Managed: the gateway order carried a transfer of the whole amount to the seller's linked account (S-70).
-      if (row.mode === 'managed') Object.assign(set, { transfer_paise: Number(row.amount_paise), transfer_status: row.transfer_status === 'none' ? 'created' : row.transfer_status });
+      // Managed: the seller's transfer is the sale less the gateway's fee and its GST (S-70, F-113). It is made right after
+      // this commits (sendTransfer), and the payments check sends it again if that answer is lost.
+      if (row.mode === 'managed') set.transfer_paise = Math.max(0, Number(row.amount_paise) - gp.feePaise);
       const moved = await changeRow(t, 'payments', row.id, 'captured', { ifAllowed: true, set });
       if (!moved.changed) return { outcome: 'stale' };
       await writeCaptureLines(t, moved.row);
@@ -220,10 +221,110 @@ export function createPayments(ctx) {
         await holdOrder(t, order.id, 'review', { actor, reason: 'paid after the order was cancelled' });
         await raiseAlert(t, { kind: 'payment.after_cancel', severity: 'critical', message: `Order ${order.order_number} was paid after it was cancelled. Refund ${rupees(row.amount_paise)} to the shopper.`, target: `order:${order.id}`, dedupeKey: `payment-late:${row.id}` });
       }
-      return { outcome: 'processed', order: changed.order };
+      return { outcome: 'processed', order: changed.order, transferFor: row.mode === 'managed' && !twin ? Number(row.id) : null };
     });
-    if (result.outcome === 'processed' || result.outcome === 'amount_mismatch' || result.outcome === 'duplicate_capture') kick();
-    return result;
+    const { transferFor, ...answer } = result;
+    if (transferFor) await sendTransfer(transferFor).catch((err) => log.warn('payments.transfer_unsent', { paymentId: transferFor, kind: err?.kind ?? err?.code ?? 'error' }));
+    if (answer.outcome === 'processed' || answer.outcome === 'amount_mismatch' || answer.outcome === 'duplicate_capture') kick();
+    return answer;
+  }
+
+  /**
+   * Managed: the Route transfer of one captured payment to the seller's linked account, for transfer_paise (the sale less
+   * the gateway fee). Outside any transaction. The adapter answers a transfer already made from this payment instead of a
+   * second one, so calling this again after a lost answer never pays the seller twice. A payment held for review, or a
+   * second capture of the same part of an order, is left for a person. -> the payment row
+   */
+  async function sendTransfer(paymentId) {
+    const [row] = await db.query(`SELECT * FROM payments WHERE tenant_id = $1 AND id = $2 AND mode = 'managed' AND status = 'captured'`, [tenantId(), paymentId]);
+    if (!row || row.transfer_id || row.needs_review || !row.gateway_payment_id) return row ?? null;
+    const net = Number(row.transfer_paise);
+    if (net < 100) return row; // Route moves at least a rupee
+    let made;
+    try {
+      const creds = await settings.credentials('managed', { accountRef: row.account_ref });
+      made = await creds.adapter.transferPayment(creds.account, row.gateway_payment_id, { amountPaise: net, notes: { payment: String(row.id) } });
+    } catch (err) {
+      if (!(err instanceof ProviderError) && !(err instanceof PaymentError)) throw err;
+      log.warn('payments.transfer_unsent', { paymentId: Number(row.id), kind: err.kind ?? err.code });
+      return row;
+    }
+    if (!made || !isGatewayId(made.id)) return row;
+    await db.tx(async (t) => {
+      await lockOrder(t, row.order_id);
+      const [now] = await t.query('SELECT * FROM payments WHERE tenant_id = $1 AND id = $2 FOR UPDATE', [tenantId(), row.id]);
+      if (now.transfer_id) return;
+      const sent = Math.min(Number(now.amount_paise), paiseOf(made.amountPaise) ?? net);
+      if (sent !== net) await writeGap(t, { kind: 'amount_mismatch', ref: `payment:${now.id}`, details: { reason: 'transfer_amount', expectedPaise: net, gotPaise: sent } });
+      await changeRow(t, 'payments', now.id, now.status, { set: { transfer_id: made.id, transfer_paise: Math.max(sent, Number(now.reversed_paise)), transfer_status: now.transfer_status === 'none' ? 'created' : now.transfer_status } });
+    });
+    await takeShipping(row.order_id);
+    return (await db.query('SELECT * FROM payments WHERE tenant_id = $1 AND id = $2', [tenantId(), row.id]))[0];
+  }
+
+  /**
+   * Courier charges on Bhava's account that are taken from the payout (shipping_settings.charge_billing 'payout', 9.10):
+   * each is taken back from the order's Route transfer once, as a transfer reversal, and shown as a transfer_reversal line
+   * with the shipment's ref. The line is written first, so a charge is never taken twice; a gateway that definitely refused
+   * gives it back, and an answer that was lost is left for ops. An order whose transfer is still to be made is taken when it
+   * is (sendTransfer); one with no managed online payment, or not enough left on it, is a gap for ops. -> what was taken
+   */
+  async function takeShipping(orderId) {
+    const [cfg] = await db.query('SELECT charge_billing FROM shipping_settings WHERE tenant_id = $1', [tenantId()]);
+    if (cfg?.charge_billing === 'monthly') return [];
+    const due = await db.query(
+      `SELECT l.ref, -l.amount_paise - COALESCE(c.amount_paise, 0) AS paise FROM settlement_lines l
+       LEFT JOIN settlement_lines c ON c.tenant_id = l.tenant_id AND c.kind = 'adjustment' AND c.ref = l.ref || ':cancelled'
+       WHERE l.tenant_id = $1 AND l.order_id = $2 AND l.kind = 'shipping_charge'
+         AND NOT EXISTS (SELECT 1 FROM settlement_lines r WHERE r.tenant_id = l.tenant_id AND r.kind = 'transfer_reversal' AND r.ref = l.ref)
+       ORDER BY l.id`,
+      [tenantId(), orderId],
+    );
+    const taken = [];
+    for (const { ref, paise } of due) {
+      const amount = Number(paise);
+      if (!(amount > 0)) continue;
+      const claim = await db.tx(async (t) => {
+        await lockOrder(t, orderId);
+        const online = await t.query(`SELECT * FROM payments WHERE tenant_id = $1 AND order_id = $2 AND mode = 'managed' AND status = 'captured' ORDER BY id DESC FOR UPDATE`, [tenantId(), orderId]);
+        if (!online.length) return null;
+        if (online.some((p) => !p.transfer_id && !p.needs_review)) return null; // taken once the transfer is made
+        const p = online.find((x) => x.transfer_id && Number(x.transfer_paise) - Number(x.reversed_paise) >= amount);
+        if (!p) {
+          await writeGap(t, { kind: 'settlement_missing', ref, details: { reason: 'shipping_uncollected', amountPaise: amount } });
+          return null;
+        }
+        const [line] = await t.query(
+          `INSERT INTO settlement_lines (tenant_id, order_id, kind, amount_paise, ref) VALUES ($1, $2, 'transfer_reversal', $3, $4) ON CONFLICT (tenant_id, kind, ref) DO NOTHING RETURNING id`,
+          [tenantId(), orderId, -amount, ref],
+        );
+        if (!line) return null;
+        const reversed = Number(p.reversed_paise) + amount;
+        await changeRow(t, 'payments', p.id, p.status, { set: { reversed_paise: reversed, ...(reversed >= Number(p.transfer_paise) ? { transfer_status: 'reversed' } : {}) } });
+        return { payment: p, lineId: line.id };
+      });
+      if (!claim) continue;
+      try {
+        const creds = await settings.credentials('managed', { accountRef: claim.payment.account_ref });
+        await creds.adapter.reverseTransfer(creds.account, claim.payment.transfer_id, { amountPaise: amount, notes: { charge: ref } });
+        taken.push({ ref, amountPaise: amount });
+      } catch (err) {
+        if (!(err instanceof ProviderError) && !(err instanceof PaymentError)) throw err;
+        if (err instanceof PaymentError || err.delivery === 'none') {
+          // Definitely not taken: undone, and tried again with the next check.
+          await db.tx(async (t) => {
+            await lockOrder(t, orderId);
+            const [p] = await t.query('SELECT * FROM payments WHERE tenant_id = $1 AND id = $2 FOR UPDATE', [tenantId(), claim.payment.id]);
+            await t.query('DELETE FROM settlement_lines WHERE tenant_id = $1 AND id = $2', [tenantId(), claim.lineId]);
+            await changeRow(t, 'payments', p.id, p.status, { set: { reversed_paise: Math.max(0, Number(p.reversed_paise) - amount), transfer_status: p.transfer_status === 'reversed' ? 'created' : p.transfer_status } });
+          });
+        } else {
+          await writeGap(db, { kind: 'settlement_missing', ref, details: { reason: 'shipping_reversal_unanswered', amountPaise: amount } });
+        }
+        log.warn('payments.shipping_not_taken', { orderId: Number(orderId), kind: err.kind ?? err.code });
+      }
+    }
+    return taken;
   }
 
   /**
@@ -366,7 +467,7 @@ export function createPayments(ctx) {
     });
   }
 
-  const service = { settings, statement, start, retry, applyGatewayPayment, applyTransfer, confirmReturn, recordCodCollected, voidCod, ensureLines, writeCaptureLines };
+  const service = { settings, statement, start, retry, applyGatewayPayment, applyTransfer, sendTransfer, takeShipping, confirmReturn, recordCodCollected, voidCod, ensureLines, writeCaptureLines };
   service.refunds = createRefunds(ctx, service);
   service.webhooks = createWebhooks(ctx, service);
   service.reconcile = createReconcile(ctx, service);

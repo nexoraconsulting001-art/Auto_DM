@@ -189,7 +189,9 @@ test('the settlement report for one linked account: what a statement is reconcil
   const b = await accountOf('tenant-b');
   const paid = async (account, amountPaise) => {
     const order = await route.createOrder(account, { amountPaise, receipt: `R-${amountPaise}` });
-    return (await sim.post('/pay', { orderId: order.id, webhook: false })).payment;
+    const { payment } = await sim.post('/pay', { orderId: order.id, webhook: false });
+    await route.transferPayment(account, payment.id, { amountPaise: amountPaise - payment.fee });
+    return payment;
   };
   const first = await paid(a, 100000);
   const second = await paid(a, 50000);
@@ -200,13 +202,13 @@ test('the settlement report for one linked account: what a statement is reconcil
 
   const report = await route.settlementReport(a, { year: 2026, month: 11 });
   const transfers = report.filter((row) => row.kind === 'transfer');
-  assert.deepEqual(transfers.map((row) => row.amountPaise).sort((x, y) => x - y), [50000, 100000], 'F-83: the whole of each sale, to this business only');
+  assert.deepEqual(transfers.map((row) => row.amountPaise).sort((x, y) => x - y), [50000 - second.fee, 100000 - first.fee], 'F-83, F-113: each sale less only the gateway fee, to this business only');
   assert.deepEqual(transfers.map((row) => row.paymentId).sort(), [first.id, second.id].sort());
   assert.ok(transfers.every((row) => row.feePaise > 0 && row.taxPaise > 0), 'F-113: the gateway fee at cost is all that is taken');
   assert.deepEqual(transfers.map((row) => row.settled).sort(), [false, true]);
   assert.ok(transfers.find((row) => row.settled).settlementId);
   assert.deepEqual(report.filter((row) => row.kind === 'reversal').map((row) => row.amountPaise), [20000], 'a refund takes its part back');
-  assert.deepEqual((await route.settlementReport(b, { year: 2026, month: 11 })).map((row) => row.amountPaise), [70000], 'another business’s report holds only its own');
+  assert.deepEqual((await route.settlementReport(b, { year: 2026, month: 11 })).map((row) => row.amountPaise), [70000 - 1652], 'another business’s report holds only its own');
   assert.deepEqual(await route.settlementReport(a, { year: 2026, month: 12 }), [], 'and another month is empty');
   await assert.rejects(() => route.settlementReport({ linkedAccountId: 'acc_missing' }, { year: 2026, month: 11 }), (err) => err instanceof ProviderError);
   await assert.rejects(() => route.settlementReport({}, { year: 2026, month: 11 }), /linked account/);

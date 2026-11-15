@@ -65,6 +65,8 @@ async function world() {
       const order = await b.order(amount);
       const gateway = await razorpay.route.createOrder(account, { amountPaise: amount, receipt: `R${tenant.id}-${b.n}` });
       const payment = (await sim.post('/pay', { orderId: gateway.id, webhook: false })).payment;
+      // Phase 4 sends the seller the sale less the gateway fee, after capture (S-70, F-113).
+      await razorpay.route.transferPayment(account, payment.id, { amountPaise: amount - payment.fee });
       b.paid.push({ order, amount, gatewayOrderId: gateway.id, payment });
     };
     /** Our rows for every sale so far, once the simulator has given each its transfer, settled. */
@@ -75,15 +77,15 @@ async function world() {
         if (settle) await sim.post('/transfers/settle', { id: transfer.id });
         const [p] = await q(
           `INSERT INTO payments (tenant_id, order_id, purpose, provider, mode, account_ref, gateway_order_id, gateway_payment_id, amount_paise, status, method, fee_paise, fee_tax_paise, transfer_id, transfer_status, transfer_paise, captured_at)
-           VALUES ($1, $2, 'full', 'razorpay', 'managed', $3, $4, $5, $6, 'captured', 'upi', $7, $8, $9, 'processed', $6, $10::timestamptz) RETURNING id`,
-          [tenant.id, sale.order.id, account.linkedAccountId, sale.gatewayOrderId, sale.payment.id, sale.amount, sale.payment.fee - sale.payment.tax, sale.payment.tax, transfer.id, SOLD_AT],
+           VALUES ($1, $2, 'full', 'razorpay', 'managed', $3, $4, $5, $6, 'captured', 'upi', $7, $8, $9, 'processed', $11, $10::timestamptz) RETURNING id`,
+          [tenant.id, sale.order.id, account.linkedAccountId, sale.gatewayOrderId, sale.payment.id, sale.amount, sale.payment.fee - sale.payment.tax, sale.payment.tax, transfer.id, SOLD_AT, transfer.amount],
         );
         Object.assign(sale, { paymentId: Number(p.id), transferId: transfer.id, fee: sale.payment.fee });
         const ref = `payment:${p.id}`;
         await line(sale.order.id, 'sale', sale.amount, ref);
         await line(sale.order.id, 'gateway_fee', -(sale.payment.fee - sale.payment.tax), ref);
         await line(sale.order.id, 'gateway_fee_tax', -sale.payment.tax, ref);
-        await line(sale.order.id, 'transfer', sale.amount, ref);
+        await line(sale.order.id, 'transfer', transfer.amount, ref);
       }
     };
     /** A full refund through the gateway, which takes the payout back from the seller's account. */
@@ -147,10 +149,10 @@ test('F-83, F-113: a month of 120 orders, 5 refunds and 80 shipments: every line
   assert.equal(statement.refundsPaise, refunds);
   assert.equal(statement.shippingPaise, 80 * 4900);
   assert.equal(statement.commissionPaise, 0, 'Bhava takes no share');
-  assert.equal(statement.payoutsPaise, sales - reversed);
+  assert.equal(statement.payoutsPaise, sales - fees - reversed, 'F-113: each payout is the sale less the gateway fee');
   assert.equal(statement.payouts.length, 120);
   assert.ok(statement.payouts.every((p) => /^trf_/.test(p.transferId)), 'each payout with its Route transfer reference');
-  const closing = sales - refunds - fees - 80 * 4900 - (sales - reversed);
+  const closing = sales - refunds - fees - 80 * 4900 - (sales - fees - reversed);
   assert.deepEqual(statement.closingBalance, { amountPaise: Math.abs(closing), owedTo: closing >= 0 ? 'business' : 'bhava' });
 
   // Reconciled to Razorpay's settlement report for this business and month, and to the courier's charges.
@@ -197,13 +199,14 @@ test('a difference from the report is shown, never hidden: the statement says mi
   const kinds = row.reconciliation_details.differences.map((d) => d.kind).sort();
   assert.deepEqual(kinds, ['payout_not_in_report', 'payout_total', 'shipping_line_missing']);
   const total = row.reconciliation_details.differences.find((d) => d.kind === 'payout_total');
-  assert.deepEqual([total.ourPaise, total.reportPaise], [95000, 90000]);
-  assert.equal(Number(row.payouts_paise), 95000, 'our figure, not adjusted to agree');
+  const feeOf = (list) => list.reduce((s, sale) => s + sale.fee, 0);
+  assert.deepEqual([total.ourPaise, total.reportPaise], [95000 - feeOf(b.paid), 90000 - feeOf(b.paid.slice(0, 3))]);
+  assert.equal(Number(row.payouts_paise), 95000 - feeOf(b.paid), 'our figure, not adjusted to agree');
   assert.equal(Number(row.shipping_paise), 0, 'its courier charges are billed on the invoice, so the payout does not take them');
   assert.equal(row.sent_at, null, 'not sent before the statement day');
   const csv = (await b.inBusiness(() => service.statements.file(Number(row.id), 'csv'))).buffer.toString();
   assert.match(csv, /Reconciliation,mismatch/);
-  assert.match(csv, /Difference,payout_total,,95000,90000/);
+  assert.match(csv, new RegExp(`Difference,payout_total,,${95000 - feeOf(b.paid)},${90000 - feeOf(b.paid.slice(0, 3))}`));
   assert.match(csv, /Shipping charge,B\d+,shipment:\d+,-6100,[^,]+,billed on invoice/);
 
   row = await b.inBusiness(() => service.statements.run(MONTH, { at: new Date(DEC_5) }));
