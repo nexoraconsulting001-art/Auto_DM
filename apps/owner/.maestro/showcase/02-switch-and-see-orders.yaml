@@ -1,0 +1,55 @@
+# One account, two businesses: the switcher lists both, and each business shows its own new order and not the other's.
+# Businesses are reached by their place in the seed manifest (1 and 2), so nothing here names one.
+appId: ${APP_ID}
+name: 'Q-11: Switch between the two sample businesses and see each one''s new order'
+---
+- runFlow:
+    file: ../common/sign-in-with-code.yaml
+    env:
+      PHONE: ${PHONE_OPERATOR}
+- tapOn:
+    id: tab-orders
+- tapOn:
+    id: open-switcher
+- extendedWaitUntil:
+    visible:
+      id: switcher
+    timeout: 30000
+- assertVisible:
+    id: switcher-business-${BUSINESS_1_ID}
+- assertVisible:
+    id: switcher-business-${BUSINESS_2_ID}
+- tapOn:
+    id: switcher-business-${BUSINESS_1_ID}
+- extendedWaitUntil:
+    visible:
+      id: top-bar
+    timeout: 60000
+- tapOn:
+    id: tab-orders
+- extendedWaitUntil:
+    visible:
+      id: order-${ORDER_1_ID}
+    timeout: 60000
+- assertNotVisible:
+    id: order-${ORDER_2_ID}
+- tapOn:
+    id: open-switcher
+- extendedWaitUntil:
+    visible:
+      id: switcher
+    timeout: 30000
+- tapOn:
+    id: switcher-business-${BUSINESS_2_ID}
+- extendedWaitUntil:
+    visible:
+      id: top-bar
+    timeout: 60000
+- tapOn:
+    id: tab-orders
+- extendedWaitUntil:
+    visible:
+      id: order-${ORDER_2_ID}
+    timeout: 60000
+- assertNotVisible:
+    id: order-${ORDER_1_ID}

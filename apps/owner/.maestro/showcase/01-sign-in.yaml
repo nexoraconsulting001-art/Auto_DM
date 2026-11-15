@@ -1,0 +1,12 @@
+# The showcase owner app, installed from the job's own APK: sign in with a WhatsApp code the job's server sent to the
+# WhatsApp simulator. The one account belongs to every sample business, so the business switcher is there.
+appId: ${APP_ID}
+name: 'Q-11: Sign in to the owner app with a WhatsApp code'
+---
+- runFlow:
+    file: ../common/sign-in-with-code.yaml
+    env:
+      PHONE: ${PHONE_OPERATOR}
+- assertVisible:
+    id: open-switcher
+- assertNotVisible: .*[Pp]assword.*

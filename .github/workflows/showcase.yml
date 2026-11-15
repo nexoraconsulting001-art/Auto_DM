@@ -1,15 +1,25 @@
 name: Showcase
 
-# The showcase kit (Phase 8, Q-11): the sample businesses are loaded from their seed files, each one's brand kit is
-# exported to a brand file, a branded APK is built from it with the local driver of `npm run build-brand`, and a test
-# order is completed in that APK on an emulator against the job's own seeded server.
+# The showcase builds (Phase 8, Q-11). No account and no secret anywhere in it.
+#
+#   seed       both sample businesses are loaded from their seed files into the job's own database, with the simulators of
+#              tools/sim, and each one's brand kit is exported as a brand file (made at build time, never committed).
+#   android    each business's installable APK, built from its brand file with the local driver of `npm run build-brand`,
+#              then checked: its package, name, icon and colours, no other business's name and no platform name in it.
+#   owner      the owner app's APK.
+#   ios        each business's app compiled for the iOS simulator on the macOS runner.
+#   flows      on an Android emulator each shopper APK is installed and the flows in apps/shopper/.maestro/showcase run
+#              (browse the seeded catalogue and reels, open a product from a message link, a paid test order, a cash on
+#              delivery order, track it); the owner APK is installed and apps/owner/.maestro/showcase runs (sign in, switch
+#              between the two businesses, see the new orders, confirm the cash on delivery one).
+#   package    the APKs and a short install note, uploaded as one artifact.
 #
 # Which businesses exist is data: seed/showcase/manifest.json names them by a neutral key, and this file names none.
-# Nothing here deploys anywhere or reaches an outside service: every provider is a simulator from tools/sim on the
-# runner. No secret and no account: the Android signing key is made in the job, masked and deleted.
+# Nothing here deploys anywhere or reaches an outside service: every provider is a simulator on the runner. The Android
+# signing key is made by tools/showcase-build for each build, masked, never printed and deleted. A run fails when any build,
+# any check or any flow fails: the last job passes only when every other one did.
 #
-# The steps marked "seed track" and "app track" call commands those tracks build; until they are built a run fails
-# there, by design, and never passes on an empty step.
+# By hand, against another server: set SHOWCASE_API_URL (see tools/showcase-build/index.mjs) and run the same commands.
 
 on:
   workflow_dispatch:
@@ -17,6 +27,10 @@ on:
     paths:
       - 'seed/**'
       - 'tools/build-brand/**'
+      - 'tools/showcase-build/**'
+      - 'apps/shopper/.maestro/**'
+      - 'apps/owner/.maestro/**'
+      - 'test/p8/showcase-apps/**'
       - '.github/workflows/showcase.yml'
 
 permissions:
@@ -35,7 +49,7 @@ env:
   CI: '1'
   NODE_ENV: development
   API_PORT: '3000'
-  MAESTRO_VERSION: '1.41.0'
+  OWNER_APP_ID: com.bhava.business
 
 jobs:
   seed:
@@ -59,18 +73,20 @@ jobs:
           KEYS="$(node -p "JSON.stringify(require('./seed/showcase/manifest.json').businesses.map((b) => b.key))")"
           echo "keys=$KEYS" >> "$GITHUB_OUTPUT"
           echo "Sample businesses: $KEYS"
-      - name: The contract and the seed loader's tests
+      - name: The contract, the seed loader and the showcase build tools
         run: node --import ./tools/net-guard.mjs --test --test-force-exit --test-concurrency=1 "test/p8/**/*.test.js"
-      - name: Load both businesses twice on the built-in database and export a brand file for each (Q-01; seed track)
+      - name: Load both businesses on the built-in database and export a brand file for each
         env:
           ALLOW_PGLITE: '1'
-          DATA_DIR: ${{ runner.temp }}/showcase-data
+          SIM_BASE_PORT: '0'
         run: |
-          npm run showcase -- --no-activity --export-brands "$RUNNER_TEMP/brand-files"
-          npm run showcase -- --no-activity --export-brands "$RUNNER_TEMP/brand-files"
+          node tools/showcase-build/index.mjs brands "$RUNNER_TEMP/brand-files"
           for KEY in $(node -p "JSON.parse(process.argv[1]).join(' ')" '${{ steps.list.outputs.keys }}'); do
             test -f "$RUNNER_TEMP/brand-files/$KEY/brand.json"
+            test -f "$RUNNER_TEMP/brand-files/$KEY/brand-ios.json"
           done
+      - name: No brand file or key is in the repository
+        run: test -z "$(git status --porcelain)"
       - uses: actions/upload-artifact@v4
         with:
           name: showcase-brand-files
@@ -78,7 +94,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  build:
+  android:
     name: Branded APK (${{ matrix.key }})
     needs: seed
     runs-on: ubuntu-24.04
@@ -87,8 +103,6 @@ jobs:
       fail-fast: false
       matrix:
         key: ${{ fromJSON(needs.seed.outputs.keys) }}
-    env:
-      KEY: ${{ matrix.key }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -101,65 +115,99 @@ jobs:
         with:
           name: showcase-brand-files
           path: ${{ runner.temp }}/brand-files
-      - name: Make a signing key for this job only
-        run: |
-          KEY_PASS="$(openssl rand -hex 24)"
-          echo "::add-mask::$KEY_PASS"
-          echo "ANDROID_KEYSTORE_PASSWORD=$KEY_PASS" >> "$GITHUB_ENV"
-          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/ci.keystore" >> "$GITHUB_ENV"
-          echo "ANDROID_KEY_ALIAS=ci" >> "$GITHUB_ENV"
-          keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$RUNNER_TEMP/ci.keystore" -alias ci \
-            -keyalg RSA -keysize 2048 -validity 2 -storepass "$KEY_PASS" -keypass "$KEY_PASS" -dname "CN=CI build, O=CI" > /dev/null
-      - name: Build this business's APK from its exported brand file, with the local driver
+      - name: Build this business's APK from its brand file, and check it is that business's and no other's
         env:
-          # The emulator reaches the job's own server at this address.
-          API_BASE_URL: http://10.0.2.2:${{ env.API_PORT }}
-        run: |
-          npm run build-brand -- "$RUNNER_TEMP/brand-files/$KEY/brand.json" --platform android --driver local --profile preview \
-            --out "$RUNNER_TEMP/brands" --report "$RUNNER_TEMP/report.json" > "$RUNNER_TEMP/build.log" 2>&1 \
-            || { tail -n 300 "$RUNNER_TEMP/build.log"; exit 1; }
-          tail -n 40 "$RUNNER_TEMP/build.log"
-      - name: The build log holds no key, keystore content or password
-        if: always()
-        run: |
-          test -f "$RUNNER_TEMP/build.log" || exit 0
-          node apps/shopper/.maestro/support/scan-binary.mjs log "$RUNNER_TEMP/build.log" --secret ANDROID_KEYSTORE_PASSWORD
-      - name: Throw the signing key away
-        if: always()
-        run: rm -f "$RUNNER_TEMP/ci.keystore"
-      - name: The APK is this business's package under this business's name, and holds no other business's name
-        run: |
-          APK="$(node -p "require('$RUNNER_TEMP/report.json').builds[0].artifact")"
-          echo "APK=$APK" >> "$GITHUB_ENV"
-          BRAND_FILE="$RUNNER_TEMP/brand-files/$KEY/brand.json"
-          AAPT2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)"
-          "$AAPT2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
-          node tools/build-check.mjs apk \
-            --package "$(node -p "require('$BRAND_FILE').android.package")" \
-            --label "$(node -p "require('$BRAND_FILE').shortName")" < "$RUNNER_TEMP/badging.txt"
-          OTHERS=()
-          for FILE in "$RUNNER_TEMP"/brand-files/*/brand.json; do
-            if [ "$FILE" != "$BRAND_FILE" ]; then OTHERS+=(--other "$FILE"); fi
-          done
-          node apps/shopper/.maestro/support/scan-binary.mjs binary "$APK" --brand "$BRAND_FILE" "${OTHERS[@]}"
+          # The emulator reaches the job's own server at this address (SHOWCASE_API_URL changes it).
+          SHOWCASE_API_URL: http://10.0.2.2:${{ env.API_PORT }}
+        run: node tools/showcase-build/index.mjs build "$RUNNER_TEMP/brand-files" "${{ matrix.key }}" --platform android --out "$RUNNER_TEMP/apks"
       - uses: actions/upload-artifact@v4
         with:
           name: showcase-apk-${{ matrix.key }}
-          path: ${{ env.APK }}
+          path: ${{ runner.temp }}/apks/showcase-${{ matrix.key }}.apk
           if-no-files-found: error
           retention-days: 14
 
-  emulator:
-    name: A test order on an emulator (${{ matrix.key }})
-    needs: [seed, build]
+  owner:
+    name: Owner app APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Build the owner app against the job's own server
+        env:
+          SHOWCASE_API_URL: http://10.0.2.2:${{ env.API_PORT }}
+          APP_ID: ${{ env.OWNER_APP_ID }}
+        run: node tools/showcase-build/index.mjs owner --out "$RUNNER_TEMP/apks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: showcase-apk-owner
+          path: ${{ runner.temp }}/apks/showcase-owner.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: iOS simulator build (${{ matrix.key }})
+    needs: seed
+    runs-on: macos-26
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        key: ${{ fromJSON(needs.seed.outputs.keys) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Use Xcode 26 and check what the build runs on
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE/Contents/Developer"; fi
+          { xcodebuild -version; xcodebuild -showsdks; } > "$RUNNER_TEMP/xcode.txt"
+          node tools/build-check.mjs xcode < "$RUNNER_TEMP/xcode.txt"
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: showcase-brand-files
+          path: ${{ runner.temp }}/brand-files
+      - name: Compile this business's app for the iOS simulator, signing off
+        env:
+          SHOWCASE_API_URL: http://localhost:${{ env.API_PORT }}
+        run: node tools/showcase-build/index.mjs build "$RUNNER_TEMP/brand-files" "${{ matrix.key }}" --platform ios --out "$RUNNER_TEMP/ios"
+      - name: The app is this business's, holds no other business's name and no platform name
+        run: |
+          mkdir "$RUNNER_TEMP/unzipped"
+          unzip -q "$RUNNER_TEMP/ios/showcase-${{ matrix.key }}-ios-simulator.zip" -d "$RUNNER_TEMP/unzipped"
+          APP="$(ls -d "$RUNNER_TEMP"/unzipped/*.app | head -1)"
+          BRAND_FILE="$RUNNER_TEMP/brand-files/${{ matrix.key }}/brand-ios.json"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = "$(node -p "require('$BRAND_FILE').ios.bundleId")"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP/Info.plist")" = "$(node -p "require('$BRAND_FILE').shortName")"
+          OTHERS=()
+          for FILE in "$RUNNER_TEMP"/brand-files/*/brand-ios.json; do
+            if [ "$FILE" != "$BRAND_FILE" ]; then OTHERS+=(--other "$FILE"); fi
+          done
+          node apps/shopper/.maestro/support/scan-binary.mjs binary "$APP" --brand "$BRAND_FILE" "${OTHERS[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: showcase-ios-simulator-${{ matrix.key }}
+          path: ${{ runner.temp }}/ios/showcase-${{ matrix.key }}-ios-simulator.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  shopper-flows:
+    name: Shopper flows on an emulator (${{ matrix.key }})
+    needs: [seed, android]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         key: ${{ fromJSON(needs.seed.outputs.keys) }}
-    env:
-      KEY: ${{ matrix.key }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -167,8 +215,23 @@ jobs:
       - run: npm ci
       - uses: actions/download-artifact@v4
         with:
+          name: showcase-brand-files
+          path: ${{ runner.temp }}/brand-files
+      - uses: actions/download-artifact@v4
+        with:
           name: showcase-apk-${{ matrix.key }}
           path: ${{ runner.temp }}/apk
+      - name: Start the server for this business on a new built-in database, seeded, with every simulator
+        env:
+          PORT: ${{ env.API_PORT }}
+          APP_HOST: 10.0.2.2
+          ALLOW_PGLITE: '1'
+        run: |
+          nohup node tools/showcase-build/server.mjs --mode shopper --key "${{ matrix.key }}" --brands "$RUNNER_TEMP/brand-files" --out "$RUNNER_TEMP/flows.env" > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+          for i in $(seq 1 300); do test -s "$RUNNER_TEMP/flows.env" && break; sleep 1; done
+          test -s "$RUNNER_TEMP/flows.env" || { tail -n 100 "$RUNNER_TEMP/server.log"; exit 1; }
+          curl -fs "http://127.0.0.1:$API_PORT/healthz" > /dev/null
       - name: Install Maestro
         run: |
           curl -fsSL "https://get.maestro.mobile.dev" | bash
@@ -178,34 +241,129 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Complete a test order in this business's app, against the job's own seeded server (Q-11; app track)
+      - name: Run the showcase flows in this business's app
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: |
-            node tools/showcase-e2e.mjs --key "$KEY" --apk "$(ls "$RUNNER_TEMP"/apk/*.apk | head -1)" --port "$API_PORT"
+          script: bash tools/showcase-build/run-flows.sh shopper "$RUNNER_TEMP/flows.env" "$RUNNER_TEMP/apk/showcase-${{ matrix.key }}.apk" "$RUNNER_TEMP/maestro.xml"
+      - name: Stop the server
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/server.pid" ]; then kill "$(cat "$RUNNER_TEMP/server.pid")" || true; fi
+          tail -n 60 "$RUNNER_TEMP/server.log" || true
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
-          name: showcase-emulator-${{ matrix.key }}
+          name: showcase-shopper-flows-${{ matrix.key }}
           path: |
+            ${{ runner.temp }}/maestro.xml
             ~/.maestro/tests
-            test-results
           if-no-files-found: ignore
           retention-days: 7
+
+  owner-flows:
+    name: Owner flows on an emulator
+    needs: [seed, owner]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: showcase-apk-owner
+          path: ${{ runner.temp }}/apk
+      - name: Start the server with both businesses, one account in each, and a new cash on delivery order in each
+        env:
+          PORT: ${{ env.API_PORT }}
+          APP_HOST: 10.0.2.2
+          ALLOW_PGLITE: '1'
+        run: |
+          nohup node tools/showcase-build/server.mjs --mode owner --out "$RUNNER_TEMP/flows.env" > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+          for i in $(seq 1 300); do test -s "$RUNNER_TEMP/flows.env" && break; sleep 1; done
+          test -s "$RUNNER_TEMP/flows.env" || { tail -n 100 "$RUNNER_TEMP/server.log"; exit 1; }
+          curl -fs "http://127.0.0.1:$API_PORT/healthz" > /dev/null
+      - name: Install Maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Let the runner use hardware acceleration for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run the showcase flows in the owner app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash tools/showcase-build/run-flows.sh owner "$RUNNER_TEMP/flows.env" "$RUNNER_TEMP/apk/showcase-owner.apk" "$RUNNER_TEMP/maestro.xml" "${{ env.OWNER_APP_ID }}"
+      - name: Stop the server
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/server.pid" ]; then kill "$(cat "$RUNNER_TEMP/server.pid")" || true; fi
+          tail -n 60 "$RUNNER_TEMP/server.log" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: showcase-owner-flows
+          path: |
+            ${{ runner.temp }}/maestro.xml
+            ~/.maestro/tests
+          if-no-files-found: ignore
+          retention-days: 7
+
+  package:
+    name: The APKs and the install note
+    needs: [seed, android, owner, ios, shopper-flows, owner-flows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: showcase-apk-*
+          path: ${{ runner.temp }}/collected
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: showcase-brand-files
+          path: ${{ runner.temp }}/brand-files
+      - name: Write the install note
+        env:
+          SHOWCASE_API_URL: http://10.0.2.2:${{ env.API_PORT }}
+        run: node tools/showcase-build/index.mjs note "$RUNNER_TEMP/brand-files" --apks "$RUNNER_TEMP/collected" --out "$RUNNER_TEMP/collected/INSTALL.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: showcase-apks
+          path: ${{ runner.temp }}/collected
+          if-no-files-found: error
+          retention-days: 14
 
   ready:
     name: Showcase kit ready
     if: always()
-    needs: [seed, build, emulator]
+    needs: [seed, android, owner, ios, shopper-flows, owner-flows, package]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Every job passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
         run: |
-          test "${{ needs.seed.result }}" = success
-          test "${{ needs.build.result }}" = success
-          test "${{ needs.emulator.result }}" = success
+          node -e '
+            const failed = Object.entries(JSON.parse(process.env.RESULTS)).filter(([, job]) => job.result !== "success");
+            for (const [name, job] of failed) console.log(`${name}: ${job.result}`);
+            process.exit(failed.length ? 1 : 0);'
