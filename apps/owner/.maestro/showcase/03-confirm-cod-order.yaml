@@ -1,0 +1,38 @@
+# The seeded cash on delivery order of the first business is confirmed in the app.
+appId: ${APP_ID}
+name: 'Q-11: Confirm the cash on delivery order in the owner app'
+---
+- runFlow:
+    file: ../common/sign-in-with-code.yaml
+    env:
+      PHONE: ${PHONE_OPERATOR}
+- tapOn:
+    id: open-switcher
+- extendedWaitUntil:
+    visible:
+      id: switcher
+    timeout: 30000
+- tapOn:
+    id: switcher-business-${BUSINESS_1_ID}
+- extendedWaitUntil:
+    visible:
+      id: top-bar
+    timeout: 60000
+- tapOn:
+    id: tab-orders
+- extendedWaitUntil:
+    visible: ${ORDER_1_NUMBER}
+    timeout: 60000
+- tapOn: ${ORDER_1_NUMBER}
+- extendedWaitUntil:
+    visible:
+      id: order-action-confirm
+    timeout: 30000
+- tapOn:
+    id: order-action-confirm
+- extendedWaitUntil:
+    visible:
+      id: order-action-done
+    timeout: 30000
+- assertNotVisible:
+    id: order-action-confirm

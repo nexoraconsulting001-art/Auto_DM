@@ -1,0 +1,40 @@
+# The showcase shopper app, installed from the job's own APK: the seeded catalogue and reels show with nothing asked of the
+# shopper. The product is whichever one the seed made for this business (PRODUCT_NAME), so no flow names a business.
+appId: ${APP_ID}
+name: 'Q-11: Browse the seeded catalogue and the reels without signing in'
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: tab-catalog
+    timeout: 120000
+- tapOn:
+    id: tab-catalog
+- extendedWaitUntil:
+    visible:
+      id: product-${PRODUCT_SLUG}
+    timeout: 60000
+- assertVisible: ${PRODUCT_NAME}
+- tapOn:
+    id: tab-reels
+- extendedWaitUntil:
+    visible:
+      id: screen-reels
+    timeout: 30000
+# The seeded reels are there: the empty message is not.
+- assertNotVisible:
+    id: reels-empty
+- tapOn:
+    id: tab-catalog
+- tapOn:
+    id: product-${PRODUCT_SLUG}
+- extendedWaitUntil:
+    visible:
+      id: product-name
+    timeout: 30000
+- assertVisible: ${PRODUCT_NAME}
+- assertVisible:
+    id: add-to-cart
+- assertNotVisible:
+    id: screen-sign-in
