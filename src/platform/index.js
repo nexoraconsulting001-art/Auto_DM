@@ -2,6 +2,7 @@ import { createAnalytics } from './analytics.js';
 import { createCache } from './cache.js';
 import { createConsent } from './consent.js';
 import { createGeo } from './geo.js';
+import { createHealth } from './health.js';
 import { createImages } from './images.js';
 import { createMetrics } from './metrics.js';
 import { createQueue } from './queue.js';
@@ -28,7 +29,7 @@ import { createStorage } from './storage.js';
 export function createPlatform(config, { db }) {
   const transport = config.safeFetchTransport ?? {};
   const gapMs = config.fetchHostGapMs ?? 1000;
-  return {
+  const platform = {
     storage: createStorage(config),
     queue: createQueue(config, { db }),
     analytics: createAnalytics(config, { db }),
@@ -41,6 +42,9 @@ export function createPlatform(config, { db }) {
     fetcher: createSafeFetch({ ...(transport.lookup ? { lookup: transport.lookup } : {}), dial: transport.dial ?? null, hostGate: db ? pgHostGate(db, { gapMs }) : memoryHostGate({ gapMs }) }),
     images: createImages(),
   };
+  // Liveness, readiness and shutdown for both processes (src/platform/health.js): its checks read the drivers above.
+  platform.health = createHealth({ db, platform, config });
+  return platform;
 }
 
 /** Which driver each module uses, for the startup log and health checks. */

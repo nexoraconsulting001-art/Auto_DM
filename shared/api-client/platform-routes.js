@@ -57,6 +57,8 @@ export const PLATFORM_ROUTES = Object.freeze({
   'platform.signupInvites': { method: 'GET', path: '/signup/invites', platformRoles: ['super_admin', 'support'] },
   'platform.createSignupInvite': { method: 'POST', path: '/signup/invites', platformRoles: ['super_admin', 'support'] },
   'platform.revokeSignupInvite': { method: 'POST', path: '/signup/invites/:id/revoke', platformRoles: ['super_admin', 'support'] },
+  'platform.goliveStatus': { method: 'GET', path: '/golive', platformRoles: ['super_admin', 'support'] },
+  'platform.businessOps': { method: 'GET', path: '/tenants/:id/ops', platformRoles: ['super_admin', 'support'] },
   'platform.feedback': { method: 'GET', path: '/feedback', platformRoles: ['super_admin', 'support'] },
   'platform.createFeedback': { method: 'POST', path: '/tenants/:id/feedback', platformRoles: ['super_admin', 'support'] },
   'platform.updateFeedback': { method: 'PATCH', path: '/feedback/:id', platformRoles: ['super_admin', 'support'] },

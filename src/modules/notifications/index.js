@@ -81,7 +81,7 @@ const SEND_BATCH = 8;
 export function createNotify({ db, providers, config = {}, push = createPush(config), secrets, now = () => new Date() }) {
   const platformDb = db?.platform ?? db;
   const bound = { repos: null };
-  const devices = createDevices({ platformDb, secrets: secrets ?? createSecrets({ dataKey: config.dataKey, dataKeyOld: config.dataKeyOld }) });
+  const devices = createDevices({ platformDb, secrets: secrets ?? createSecrets({ dataKey: config.dataKey, dataKeyOld: config.dataKeyOld, secretsFormat: config.secretsFormat }) });
   const pipeline = createPipeline({ platformDb, push, providers, config, clock: now, devices, getRepos: () => bound.repos });
   const timers = new Set();
   let running = null;

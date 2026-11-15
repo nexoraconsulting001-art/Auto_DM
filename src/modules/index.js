@@ -15,6 +15,7 @@ import { audit } from './audit/index.js';
 import { billing } from './billing/index.js';
 import { automations } from './automations/index.js';
 import { brand } from './brand/index.js';
+import { businessOps } from './business-ops/index.js';
 import { cart } from './cart/index.js';
 import { catalog } from './catalog/index.js';
 import { categories } from './categories/index.js';
@@ -29,6 +30,7 @@ import { entitlements } from './entitlements/index.js';
 import { facebook } from './facebook/index.js';
 import { feedback } from './feedback/index.js';
 import { gatewayKeys } from './gateway-keys/index.js';
+import { golive } from './golive/index.js';
 import { impersonation } from './impersonation/index.js';
 import { igAccounts } from './ig-accounts/index.js';
 import { igConnect } from './ig-connect/index.js';
@@ -54,6 +56,7 @@ import { referrals } from './referrals/index.js';
 import { refunds } from './refunds/index.js';
 import { reports } from './reports/index.js';
 import { returns } from './returns/index.js';
+import { secretRotation } from './secret-rotation/index.js';
 import { reviews } from './reviews/index.js';
 import { shipping } from './shipping/index.js';
 import { shopifySync } from './shopify-sync/index.js';
@@ -144,8 +147,13 @@ import { wishlist } from './wishlist/index.js';
  * work: feedback (three Platform Console routes, FEEDBACK_PLATFORM_OWNERS) and migration (the importer of an old
  * single-shop app: createMigration(ctx).plan and .run, used by `npm run migrate-business`; no routes, no jobs).
  */
+/*
+ * Phase 9 (production readiness and go-live; PRD 5.15, 11) adds three folders directly after migration, with the platform's
+ * own work: secret-rotation (the re-wrap job of migration 900), golive (the go-live checklist, PROD_PLATFORM_OWNERS, and
+ * the guard sign-up asks through ctx.signupGuard) and business-ops (one business's operating numbers in the console).
+ */
 export const MODULES = [
-  brand, entitlements, billing, usage, signup, referrals, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, impersonation, managedServices, onboarding, tenantHealth, feedback, migration, igConnect, compliance, automations, links, facebook, aiReplies, whatsappAutomation, domains,
+  brand, entitlements, billing, usage, signup, referrals, igAccounts, audit, alerts, notifications, gatewayKeys, accounts, team, demoTenant, apiAuth, platformConsole, impersonation, managedServices, onboarding, tenantHealth, feedback, migration, secretRotation, golive, businessOps, igConnect, compliance, automations, links, facebook, aiReplies, whatsappAutomation, domains,
   insights, reachGuard, traffic, reports,
   appLinks,
   catalog, imports, categories, pages, themes, creator, leads,

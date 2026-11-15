@@ -2,6 +2,7 @@ import 'dotenv/config';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createSecretSource, readLocalSecrets, secretDriverOf } from './platform/secret-source.js';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -124,6 +125,34 @@ export const config = {
   // Encrypts stored tokens and keys (see src/platform/secrets.js).
   dataKey: process.env.DATA_KEY || '',
   dataKeyOld: process.env.DATA_KEY_OLD || '',
+  // The form encrypt() writes: v1, or v2 (envelope: a data key per value, wrapped by DATA_KEY). Both always read. Production needs v2.
+  secretsFormat: process.env.SECRETS_FORMAT === 'v2' ? 'v2' : 'v1',
+  // Where the settings in SECRET_SETTINGS below come from (src/platform/secret-source.js): env, file (SECRETS_DIR) or http
+  // (SECRETS_URL, SECRETS_TOKEN_FILE, SECRETS_PATH_PREFIX, read again every SECRETS_REFRESH_SECONDS). <SETTING>_FILE always wins.
+  secretsDriver: (process.env.SECRETS_DRIVER || 'env').trim().toLowerCase(),
+  secretsUrl: (process.env.SECRETS_URL || '').replace(/\/+$/, ''),
+  // Which source each secret came from ('env', 'file' or 'http'), by setting name. Filled when secrets are applied; never a value.
+  secretSources: {},
+  // Phase 9. DEPLOY_ENV=production makes the production rules refuse to start (src/platform/production-guard.js); empty or
+  // `qa` only logs them. Only deploy/prod sets it.
+  deployEnv: (process.env.DEPLOY_ENV || '').trim().toLowerCase(),
+  // A short name of the build (a commit or a tag), for the error sink and the start-up log.
+  release: (process.env.RELEASE || '').slice(0, 80),
+  // SIGTERM and SIGINT: stop taking work, finish what is in flight, and exit within this many seconds.
+  shutdownSeconds: positive(process.env.SHUTDOWN_SECONDS, 25),
+  // How long one readiness check may take before its dependency counts as down.
+  healthCheckMs: positive(process.env.HEALTH_CHECK_MS, 2000),
+  // The worker's probes listen here. 127.0.0.1 on a VM; 0.0.0.0 where the platform probes over the network.
+  workerHealthHost: process.env.WORKER_HEALTH_HOST || '127.0.0.1',
+  // Errors beside the log (src/platform/error-sink.js): none, or http with ERROR_SINK_URL and an optional bearer token.
+  errorSink: (process.env.ERROR_SINK || 'none').trim().toLowerCase(),
+  errorSinkUrl: process.env.ERROR_SINK_URL || '',
+  errorSinkToken: process.env.ERROR_SINK_TOKEN || '',
+  errorSinkTimeoutMs: positive(process.env.ERROR_SINK_TIMEOUT_MS, 3000),
+  // Go-live (src/contracts/golive.js). GOLIVE_ENFORCE=1 makes opening sign-up to the public wait for the checklist; it
+  // defaults to on in production and off elsewhere. GOLIVE_ATTESTATIONS names the sign-off file.
+  goliveEnforce: process.env.GOLIVE_ENFORCE !== undefined && process.env.GOLIVE_ENFORCE !== '' ? process.env.GOLIVE_ENFORCE === '1' : String(process.env.NODE_ENV ?? '').trim().toLowerCase() === 'production',
+  goliveAttestations: process.env.GOLIVE_ATTESTATIONS || path.join(rootDir, 'deploy', 'golive', 'attestations.json'),
   // /metrics is served only with this token (Authorization: Bearer <token>).
   metricsToken: process.env.METRICS_TOKEN || '',
   // The store's outside services (PRD 9, src/adapters/store.js). An empty base URL is the provider itself; tests and local runs point each
@@ -241,6 +270,59 @@ export const config = {
   defaultTenant: process.env.DEFAULT_TENANT ?? 'default',
   defaultTenantName: process.env.DEFAULT_TENANT_NAME || 'My store',
 };
+
+/**
+ * The settings that are secrets, each with the config key it fills (Phase 9, PRD 5.15). Every one can come from the
+ * environment, from a mounted file or from a secret manager (src/platform/secret-source.js), and none is ever logged.
+ * A setting that holds a password inside an address (the database, Redis, the analytics database) is a secret too.
+ * The contract test fails when a setting whose name says secret, password, token or key is missing here.
+ */
+export const SECRET_SETTINGS = Object.freeze({
+  APP_SECRET: 'appSecret', VERIFY_TOKEN: 'verifyToken', FB_APP_SECRET: 'fbAppSecret', ADMIN_PASSWORD: 'adminPassword', SESSION_SECRET: 'sessionSecret',
+  DATABASE_URL: 'databaseUrl', DATABASE_OWNER_URL: 'databaseOwnerUrl', REDIS_URL: 'redisUrl', CLICKHOUSE_URL: 'clickhouseUrl',
+  SELLER_GOOGLE_CLIENT_SECRET: 'sellerGoogleClientSecret', GOOGLE_CLIENT_SECRET: 'googleClientSecret', REVIEW_LOGIN_CODE_HASH: 'reviewLoginCodeHash',
+  // Names of config keys, not values. secret-scan:allow
+  S3_ACCESS_KEY_ID: 's3AccessKeyId', S3_SECRET_ACCESS_KEY: 's3SecretAccessKey', BACKUP_S3_ACCESS_KEY_ID: 'backupS3AccessKeyId', BACKUP_S3_SECRET_ACCESS_KEY: 'backupS3SecretAccessKey', // secret-scan:allow
+  DATA_KEY: 'dataKey', DATA_KEY_OLD: 'dataKeyOld', METRICS_TOKEN: 'metricsToken', ERROR_SINK_TOKEN: 'errorSinkToken',
+  RAZORPAY_KEY_SECRET: 'razorpayKeySecret', RAZORPAY_WEBHOOK_SECRET: 'razorpayWebhookSecret', RAZORPAY_PARTNER_CLIENT_SECRET: 'razorpayPartnerClientSecret',
+  RAZORPAY_BILLING_KEY_SECRET: 'razorpayBillingKeySecret', RAZORPAY_BILLING_WEBHOOK_SECRET: 'razorpayBillingWebhookSecret',
+  SHIPROCKET_PASSWORD: 'shiprocketPassword', SHIPROCKET_WEBHOOK_TOKEN: 'shiprocketWebhookToken',
+  WHATSAPP_APP_SECRET: 'whatsappAppSecret', WHATSAPP_VERIFY_TOKEN: 'whatsappVerifyToken', PLATFORM_WHATSAPP_TOKEN: 'platformWhatsappToken',
+  AI_API_KEY: 'aiApiKey', EMAIL_API_KEY: 'emailApiKey', FCM_SERVICE_ACCOUNT: 'fcmServiceAccount', APNS_KEY: 'apnsKey', EXPO_TOKEN: 'expoToken', PLAY_SERVICE_ACCOUNT: 'playServiceAccount',
+});
+
+/** Secrets a production server cannot start without. The error names the setting and never a value. */
+export const REQUIRED_SECRETS = Object.freeze(['DATABASE_URL', 'DATA_KEY', 'SESSION_SECRET', 'APP_SECRET', 'VERIFY_TOKEN', 'METRICS_TOKEN']);
+
+/** Puts secret values into a config, by setting name, and records where each came from. A name with no value changes nothing. */
+export function applySecrets(cfg, { values = {}, sources = {} } = {}) {
+  for (const [name, key] of Object.entries(SECRET_SETTINGS)) {
+    if (values[name] === undefined || values[name] === '') continue;
+    cfg[key] = values[name];
+    cfg.secretSources = { ...cfg.secretSources, [name]: sources[name] ?? 'env' };
+  }
+  return cfg;
+}
+
+// What needs no network is in place as soon as this file is imported: the environment, <SETTING>_FILE and SECRETS_DIR.
+applySecrets(config, readLocalSecrets(Object.keys(SECRET_SETTINGS), process.env));
+
+/**
+ * Loads every secret from its source into `cfg` before anything else starts: src/server.js and src/worker.js call it
+ * first. With SECRETS_DRIVER=http this is where the secret manager is asked; a failure here refuses the start (G-05).
+ * With DEPLOY_ENV=production a missing required secret refuses the start too, naming the setting (G-04).
+ * Returns the source: start(onChange) begins its refresh, stop() ends it, state() is for health.
+ */
+export async function loadSecrets(cfg = config, { env = process.env, source, onAlert } = {}) {
+  const from = source ?? createSecretSource({ names: Object.keys(SECRET_SETTINGS), env, onAlert });
+  applySecrets(cfg, await from.load());
+  cfg.secretsDriver = secretDriverOf(env);
+  if (String(cfg.deployEnv ?? env.DEPLOY_ENV ?? '').trim().toLowerCase() === 'production') {
+    const missing = REQUIRED_SECRETS.filter((name) => !cfg.secretSources?.[name]);
+    if (missing.length) throw new Error(`Required secrets are not set: ${missing.join(', ')}`);
+  }
+  return from;
+}
 
 /** The host where sellers sign in, which belongs to no business: PLATFORM_APP_HOST, or app.PLATFORM_DOMAIN. Empty when neither is set. */
 export function platformAppHostOf(cfg = config) {

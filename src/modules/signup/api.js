@@ -193,6 +193,11 @@ export function signupApi(ctx) {
         const tenant = await tenantOf(run.tenantId);
         return { tenantId: run.tenantId, slug: tenant.slug, host: businessHost(tenant.slug, ctx.config), runToken: token, next: nextStep(new Set((await store.steps(run)).map((s) => s.step))) ?? 'finished' };
       }
+      // The day's cap on new businesses (signup_settings.daily_cap, Phase 9): a soft ceiling for a launch, read before the
+      // business is made, so two sign-ups in the same instant can pass it by one.
+      if (settings.dailyCap !== null && settings.dailyCap !== undefined && (await store.madeToday()) >= settings.dailyCap) {
+        throw new ApiError('forbidden', 'Sign-up is full for today. Please try again tomorrow.', { reason: 'signup.daily_cap' });
+      }
       await limit(SIGNUP_LIMITS.startsPerAddress, req?.ip);
       await limit(SIGNUP_LIMITS.startsPerPerson, personId);
       if (!run) {

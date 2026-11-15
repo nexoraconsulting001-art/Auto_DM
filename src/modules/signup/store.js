@@ -27,15 +27,30 @@ export function signupStore(db) {
     toInvite,
 
     async settings() {
-      const [row] = await p.query('SELECT mode, free_per_instagram, updated_at FROM signup_settings');
-      return { mode: row?.mode ?? 'closed', freePerInstagram: row?.free_per_instagram ?? 1, updatedAt: row?.updated_at ?? new Date(0) };
+      const [row] = await p.query('SELECT mode, free_per_instagram, daily_cap, updated_at FROM signup_settings');
+      return { mode: row?.mode ?? 'closed', freePerInstagram: row?.free_per_instagram ?? 1, dailyCap: row?.daily_cap ?? null, updatedAt: row?.updated_at ?? new Date(0) };
     },
 
-    async setMode(mode, { actor, reason }) {
+    /**
+     * `dailyCap` undefined keeps the cap; null removes it. `forced` is { reason, missing } when a super admin opened sign-up
+     * past the go-live checklist: the second reason and the item ids that were missing go into the audit row.
+     */
+    async setMode(mode, { actor, reason, dailyCap, forced = null }) {
       await p.tx(async (t) => {
-        await t.query('UPDATE signup_settings SET mode = $1, updated_at = now()', [mode]);
-        await t.query(`INSERT INTO audit_log (tenant_id, actor, action, target, details) VALUES (NULL, $1, 'signup.mode_set', 'signup', $2::jsonb)`, [actor, JSON.stringify({ mode, reason })]);
+        if (dailyCap === undefined) await t.query('UPDATE signup_settings SET mode = $1, updated_at = now()', [mode]);
+        else await t.query('UPDATE signup_settings SET mode = $1, daily_cap = $2, updated_at = now()', [mode, dailyCap]);
+        const details = { mode, reason, ...(dailyCap === undefined ? {} : { dailyCap }), ...(forced ? { forced: true, forceReason: forced.reason, missing: forced.missing } : {}) };
+        await t.query(`INSERT INTO audit_log (tenant_id, actor, action, target, details) VALUES (NULL, $1, 'signup.mode_set', 'signup', $2::jsonb)`, [actor, JSON.stringify(details)]);
       });
+    },
+
+    /** Businesses sign-up has made since midnight, India time: what the daily cap is compared with. */
+    async madeToday() {
+      const [row] = await p.query(
+        `SELECT count(*)::int AS n FROM signup_runs r JOIN tenants t ON t.id = r.tenant_id
+          WHERE t.created_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')`,
+      );
+      return row?.n ?? 0;
     },
 
     /** Whether an invite code would be accepted now. Reads only: the use is counted when the business is made. */

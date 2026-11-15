@@ -5,6 +5,8 @@ import { Channel } from '../compliance.js';
 import { AppBuild, AppBuildRequest, AppSubmission } from './apps.js';
 import { BILLING_CYCLES, SIGNUP_MODES, SUBSCRIPTION_STATUSES } from '../billing.js';
 import { BhavaInvoice, BillingItem } from './billing.js';
+import { GoliveStatus } from '../golive.js';
+import { BusinessOps } from '../metrics.js';
 import { PresetSlots } from '../themes.js';
 import { ImpersonationStarted, opsPlatformRoutes } from './platform-ops.js';
 import { Count, Id, IdParams, IdText, ListQuery, Paise, PaiseInput, Timestamp, page, required, text } from './common.js';
@@ -269,8 +271,20 @@ export const FeatureFlagSave = z.object({ key: FlagKey, description: text(300).d
 export const TenantFlagSet = z.object({ key: FlagKey, enabled: z.boolean().nullable(), reason: Reason });
 export const TenantFlags = z.object({ items: z.array(z.object({ key: z.string(), on: z.boolean(), own: z.boolean().nullable() })) });
 
-export const PlatformSignup = z.object({ mode: z.enum(SIGNUP_MODES), freePerInstagram: z.number().int(), updatedAt: Timestamp });
-export const SignupModeSet = z.object({ mode: z.enum(SIGNUP_MODES), reason: Reason });
+/** `dailyCap` (Phase 9): how many businesses sign-up may make in one day, India time; null is no cap. */
+export const PlatformSignup = z.object({ mode: z.enum(SIGNUP_MODES), freePerInstagram: z.number().int(), dailyCap: z.number().int().nullable().default(null), updatedAt: Timestamp });
+/**
+ * A move to `public` while a blocking go-live item is missing is refused (409, with the item ids) unless `force` is true
+ * with its own `forceReason`: a second reason, kept in the audit row beside the first and the ids that were missing.
+ * `dailyCap` left out keeps the cap as it is; null removes it.
+ */
+export const SignupModeSet = z.object({
+  mode: z.enum(SIGNUP_MODES),
+  reason: Reason,
+  force: z.boolean().default(false),
+  forceReason: text(500).optional(),
+  dailyCap: z.number().int().min(1).max(100000).nullable().optional(),
+}).refine((v) => !v.force || Boolean(v.forceReason?.trim()), { path: ['forceReason'], message: 'Give a second reason to open sign-up while the checklist is not clear' });
 export const SignupInvite = z.object({ id: Id, note: z.string(), maxUses: Count, uses: Count, expiresAt: Timestamp.nullable(), revokedAt: Timestamp.nullable(), createdBy: z.string(), createdAt: Timestamp });
 export const SignupInviteCreate = z.object({ note: text(200).default(''), maxUses: z.number().int().min(1).max(10000).default(1), expiresInDays: z.number().int().min(1).max(365).optional() });
 /** The code is in this answer and nowhere else: only its hash is stored. */
@@ -374,6 +388,10 @@ export const platformRoutes = {
   'platform.signupInvites': { method: 'GET', path: '/signup/invites', platformRoles: anyone, query: ListQuery, response: page(SignupInvite) },
   'platform.createSignupInvite': { method: 'POST', path: '/signup/invites', platformRoles: anyone, body: SignupInviteCreate, status: 201, response: SignupInviteCreated },
   'platform.revokeSignupInvite': { method: 'POST', path: '/signup/invites/:id/revoke', platformRoles: anyone, params: IdParams, response: SignupInvite },
+  // Phase 9: answered by src/modules/golive (the go-live checklist, src/contracts/golive.js) and src/modules/business-ops
+  // (one business's errors, Meta usage and queue depth over a window; numbers only, src/contracts/metrics.js).
+  'platform.goliveStatus': { method: 'GET', path: '/golive', platformRoles: anyone, response: GoliveStatus },
+  'platform.businessOps': { method: 'GET', path: '/tenants/:id/ops', platformRoles: anyone, params: IdParams, query: z.object({ hours: z.coerce.number().int().min(1).max(720).default(24) }), response: BusinessOps },
   // Phase 8: answered by src/modules/feedback.
   'platform.feedback': { method: 'GET', path: '/feedback', platformRoles: anyone, query: FeedbackListQuery, response: page(FeedbackItem) },
   'platform.createFeedback': { method: 'POST', path: '/tenants/:id/feedback', platformRoles: anyone, params: IdParams, body: FeedbackCreate, status: 201, response: FeedbackItem },
@@ -393,6 +411,12 @@ export const BILLING_PLATFORM_OWNERS = Object.freeze({
 /** Which module answers each Phase 8 Platform Console route. */
 export const FEEDBACK_PLATFORM_OWNERS = Object.freeze({
   feedback: Object.freeze(['platform.feedback', 'platform.createFeedback', 'platform.updateFeedback']),
+});
+
+/** Which module answers each Phase 9 Platform Console route. */
+export const PROD_PLATFORM_OWNERS = Object.freeze({
+  golive: Object.freeze(['platform.goliveStatus']),
+  'business-ops': Object.freeze(['platform.businessOps']),
 });
 
 export const platformRouteList = Object.freeze(Object.entries(platformRoutes).map(([id, route]) => Object.freeze({ id, ...route })));

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import express from 'express';
 import { pathToFileURL } from 'node:url';
-import { assertStartable, config as defaultConfig, platformAppHostOf } from './config.js';
+import { assertStartable, config as defaultConfig, loadSecrets, platformAppHostOf } from './config.js';
 import { openRuntimeDb } from './db/index.js';
 import { createRepos } from './repos/index.js';
 import { createAppleAdapters } from './adapters/apple/index.js';
@@ -22,12 +22,16 @@ import { createMetaCallObserver } from './modules/meta-calls.js';
 import { wireOrderEvents } from './modules/orders/events.js';
 import { createNotify } from './modules/notifications/index.js';
 import { createShopperMessages } from './modules/shopper-messages/index.js';
+import { createSignupGuard } from './modules/signup/guard.js';
 import { adminRoutes, baseUrlFor, buyerBaseUrl } from './routes/admin.js';
 import { ApiError, isApiV1Url } from './contracts/api/index.js';
 import { sendApiError } from './modules/api-v1/respond.js';
 import { createTenantResolver, currentTenant, normalizeHost, withTenant } from './tenancy.js';
 import { createPlatform, describePlatform } from './platform/index.js';
-import { log, reportError, requestIds } from './platform/log.js';
+import { createErrorSink } from './platform/error-sink.js';
+import { HEALTH_PATHS, createHealth, drainOnSignals } from './platform/health.js';
+import { log, onError, reportError, requestIds } from './platform/log.js';
+import { guardProduction } from './platform/production-guard.js';
 
 export const verifySignature = verifyHubSignature;
 
@@ -67,7 +71,9 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
   const inbound = createInboundHooks({ platform });
   // Everything a seller is told goes through notify; everything a shopper is told goes through shopperMessages.
   const notify = createNotify({ db, providers, config });
-  const ctx = { db, repos, ig, meta, google, apple, eas, appStores, providers, compliance, shopperMessages, inbound, notify, auth, config, platform, modules, tenantResolver: tenants };
+  // What sign-up asks before it opens to the public: the golive module registers its checklist here in setup (Phase 9).
+  const signupGuard = createSignupGuard({ enforce: Boolean(config.goliveEnforce) });
+  const ctx = { db, repos, ig, meta, google, apple, eas, appStores, providers, compliance, shopperMessages, inbound, notify, auth, config, platform, modules, tenantResolver: tenants, signupGuard };
   metaCalls.bind(ctx);
   // The order event bus, then each module's own start-up: its listeners on the bus, the consent provider.
   wireOrderEvents(ctx);
@@ -96,15 +102,18 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
   app.use(express.urlencoded({ extended: false, limit: '200kb' }));
   app.use('/static', express.static(path.join(config.rootDir, 'public'), { maxAge: '1h' }));
 
-  // Liveness: the process is up. Readiness: it can reach the database (load balancers use this).
-  app.get(['/health', '/healthz'], (_req, res) => res.send('ok'));
-  app.get('/readyz', async (_req, res) => {
-    try {
-      await db.query('SELECT 1');
-      res.json({ ok: true, modules: describePlatform(platform) });
-    } catch {
-      res.status(503).json({ ok: false });
-    }
+  // Liveness: the process is up, whatever its dependencies do. Readiness: the database, migrations, queue, storage and
+  // cache, one word each, and false while draining (load balancers use this). Startup: it has finished starting.
+  // None of the three names a business or a setting (src/platform/health.js).
+  const health = platform.health ?? createHealth({ db, platform, config });
+  app.get(['/health', HEALTH_PATHS.live], (_req, res) => res.set('Cache-Control', 'no-store').send('ok'));
+  app.get(HEALTH_PATHS.ready, async (_req, res) => {
+    const state = await health.ready();
+    res.set('Cache-Control', 'no-store').status(state.ok ? 200 : 503).json({ ...state, modules: describePlatform(platform) });
+  });
+  app.get(HEALTH_PATHS.startup, async (_req, res) => {
+    const state = await health.startup();
+    res.set('Cache-Control', 'no-store').status(state.ok ? 200 : 503).json(state);
   });
   platform.metrics.gauge('queue_jobs', async () =>
     Object.entries(await platform.queue.stats()).flatMap(([queue, counts]) =>
@@ -234,7 +243,13 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
 }
 
 async function main(config = defaultConfig) {
+  // Secrets first, from wherever they are kept; then the rules a production configuration must meet.
+  const secretSource = await loadSecrets(config, { onAlert: (alert) => reportError(new Error('secrets.refresh_failed'), { msg: 'secrets.refresh_failed', code: alert.code }) });
   assertStartable(config);
+  const guardProblems = guardProduction(config);
+  if (guardProblems.length) log.warn('production.guard', { rules: guardProblems.map((p) => p.id) });
+  const errorSink = createErrorSink(config, { service: 'web' });
+  onError(errorSink.report);
   const db = await openRuntimeDb(config);
   const platform = createPlatform(config, { db });
   const repos = createRepos(db, { storage: platform.storage, secrets: platform.secrets });
@@ -248,17 +263,24 @@ async function main(config = defaultConfig) {
       modules: describePlatform(platform),
       defaultBusiness: tenant?.slug ?? null,
       ownerFromEnv: Boolean(owner),
-      sessionSecretSet: Boolean(process.env.SESSION_SECRET),
+      sessionSecretSet: Boolean(config.secretSources?.SESSION_SECRET),
+      secrets: secretSource.driver,
+      release: config.release || null,
     });
+    platform.health.markStarted();
   });
-  // On a deploy, finish the requests in progress before stopping.
-  const stop = () => server.close(async () => {
-    await platform.cache.close();
-    await db.close();
-    process.exit(0);
-  });
-  process.once('SIGTERM', stop);
-  process.once('SIGINT', stop);
+  secretSource.start(({ changed }) => log.info('secrets.refreshed', { settings: changed }));
+  // On a deploy (SIGTERM, SIGINT): readiness turns false, no new connection is taken, the requests in flight finish,
+  // and then everything closes, within SHUTDOWN_SECONDS. The runtime track adds its own steps with health.onDrain().
+  platform.health.onDrain('http', () => new Promise((resolve) => {
+    server.close(() => resolve());
+    server.closeIdleConnections?.();
+  }));
+  platform.health.onDrain('secrets', () => secretSource.stop());
+  platform.health.onDrain('errors', () => errorSink.flush());
+  platform.health.onDrain('cache', () => platform.cache.close());
+  platform.health.onDrain('database', () => db.close());
+  drainOnSignals(platform.health, { log, name: 'server' });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

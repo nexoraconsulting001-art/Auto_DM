@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
-import { config as defaultConfig } from './config.js';
+import { config as defaultConfig, loadSecrets } from './config.js';
 import { createAppStores } from './adapters/appstores/index.js';
 import { createEas } from './adapters/eas/index.js';
 import { createGoogleAdapters } from './adapters/google/index.js';
@@ -15,11 +15,15 @@ import { createMetaCallObserver } from './modules/meta-calls.js';
 import { ORDER_EVENTS_QUEUE, wireOrderEvents } from './modules/orders/events.js';
 import { createNotify } from './modules/notifications/index.js';
 import { createShopperMessages } from './modules/shopper-messages/index.js';
+import { createSignupGuard } from './modules/signup/guard.js';
 import { createRepos } from './repos/index.js';
 import { backupStorage, runBackup } from './backup.js';
 import { sweepRawExports } from './modules/platform-console/raw-export.js';
 import { createPlatform, describePlatform } from './platform/index.js';
-import { log, reportError } from './platform/log.js';
+import { createErrorSink } from './platform/error-sink.js';
+import { drainOnSignals } from './platform/health.js';
+import { log, onError, reportError } from './platform/log.js';
+import { guardProduction } from './platform/production-guard.js';
 
 export const HOUSEKEEPING = 'system.housekeeping';
 export const BACKUP = 'system.backup';
@@ -63,7 +67,7 @@ export function registerJobs({ db, platform, config, modules = MODULES, metaCall
   const shopperMessages = createShopperMessages({ db, platform, providers, config, compliance });
   const inbound = createInboundHooks({ platform });
   const notify = createNotify({ db, providers, config });
-  const jobContext = { db, repos, platform, config, ig, meta, google, eas, appStores, providers, compliance, shopperMessages, inbound, notify, modules };
+  const jobContext = { db, repos, platform, config, ig, meta, google, eas, appStores, providers, compliance, shopperMessages, inbound, notify, modules, signupGuard: createSignupGuard({ enforce: Boolean(config.goliveEnforce) }) };
   metaCalls.bind(jobContext);
   // The order event bus: listeners register in each module's setup, and this worker is what delivers.
   const orderEvents = wireOrderEvents(jobContext);
@@ -83,6 +87,12 @@ export function registerJobs({ db, platform, config, modules = MODULES, metaCall
 }
 
 async function main(config = defaultConfig) {
+  // Secrets first, then the production rules, exactly as the web server does.
+  const secretSource = await loadSecrets(config, { onAlert: (alert) => reportError(new Error('secrets.refresh_failed'), { msg: 'secrets.refresh_failed', code: alert.code }) });
+  const guardProblems = guardProduction(config);
+  if (guardProblems.length) log.warn('production.guard', { rules: guardProblems.map((p) => p.id) });
+  const errorSink = createErrorSink(config, { service: 'worker' });
+  onError(errorSink.report);
   const db = await openRuntimeDb(config);
   const platform = createPlatform(config, { db });
   const schedule = registerJobs({ db, platform, config });
@@ -92,24 +102,32 @@ async function main(config = defaultConfig) {
   // Order events are handed to their listeners within a couple of seconds of the change that made them.
   const stopOrderEvents = schedule.context.orderEvents.start({ everyMs: config.orderEventsPollMs });
 
-  const health = http.createServer((req, res) => {
-    res.statusCode = req.url === '/healthz' ? 200 : 404;
-    res.end(req.url === '/healthz' ? 'ok' : '');
-  }).listen(config.workerHealthPort, '127.0.0.1');
+  // /healthz, /readyz and /startupz, as on the web server (src/platform/health.js).
+  const { health } = platform;
+  const probes = http.createServer((req, res) => {
+    if (health.serve(req, res)) return;
+    res.statusCode = 404;
+    res.end('');
+  }).listen(config.workerHealthPort, config.workerHealthHost || '127.0.0.1');
+  health.markStarted();
+  secretSource.start(({ changed }) => log.info('secrets.refreshed', { settings: changed }));
 
-  log.info('worker.started', describePlatform(platform));
+  log.info('worker.started', { ...describePlatform(platform), secrets: secretSource.driver, release: config.release || null });
 
-  const stop = async () => {
+  // On SIGTERM and SIGINT: stop scheduling, let the jobs in progress finish (the queue's close waits for them), then
+  // close, within SHUTDOWN_SECONDS. A job that cannot finish in time stays claimed in the queue and is run again after
+  // its lock ends; the runtime track makes that release explicit with its own health.onDrain() step.
+  health.onDrain('schedule', () => {
     clearInterval(timer);
     stopOrderEvents();
-    health.close();
-    await platform.queue.close(); // finishes the jobs in progress first
-    await platform.cache.close();
-    await db.close();
-    process.exit(0);
-  };
-  process.once('SIGTERM', stop);
-  process.once('SIGINT', stop);
+  });
+  health.onDrain('secrets', () => secretSource.stop());
+  health.onDrain('queue', () => platform.queue.close());
+  health.onDrain('errors', () => errorSink.flush());
+  health.onDrain('cache', () => platform.cache.close());
+  health.onDrain('database', () => db.close());
+  health.onDrain('probes', () => probes.close());
+  drainOnSignals(health, { log, name: 'worker' });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

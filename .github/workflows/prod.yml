@@ -1,0 +1,174 @@
+name: Production readiness
+
+# Phase 9: the production image on both architectures, the production templates, and the three hosting checks of
+# PRD 11 (R-05, R-06, R-07) as scripts. Nothing here deploys anywhere or reaches an outside service: every tool runs from
+# its public container image, and every dependency is a service container on the runner.
+#
+# The job shapes are the contract; the steps call scripts the tracks build (tools/readiness/*.mjs, deploy/prod/*), so a
+# run fails at the first part that is not built yet.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['bhava/**', main]
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'deploy/prod/**'
+      - 'tools/readiness/**'
+      - 'src/platform/**'
+      - 'src/config.js'
+      - 'src/server.js'
+      - 'src/worker.js'
+      - '.github/workflows/prod.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SERVER_INSTALL: npm ci --workspace @bhava/console --workspace @bhava/api-client --include-workspace-root
+
+jobs:
+  image:
+    name: Image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image for ${{ matrix.arch }}
+        run: docker build --platform linux/${{ matrix.arch }} -t bhava:prod-${{ matrix.arch }} .
+      - name: It runs as a non-root user (G-01)
+        run: test "$(docker run --rm bhava:prod-${{ matrix.arch }} id -u)" != "0"
+      - name: Both entry points start on a read-only file system (G-01)
+        run: |
+          for entry in src/server.js src/worker.js; do
+            docker run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
+              bhava:prod-${{ matrix.arch }} node --check "$entry"
+          done
+      - name: The image has the backup tools
+        run: docker run --rm --read-only bhava:prod-${{ matrix.arch }} pg_dump --version
+      - name: The image check of the runtime track (read-only start against service containers)
+        run: node tools/readiness/index.mjs validate --json
+        env:
+          READINESS_IMAGE: bhava:prod-${{ matrix.arch }}
+          READINESS_ONLY: image
+
+  templates:
+    name: Templates validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: The production compose file (docker compose config)
+        working-directory: deploy/prod/compose
+        run: docker compose --env-file .env.example -f compose.yaml config -q
+      - name: The Kubernetes manifests build (kustomize)
+        run: |
+          mkdir -p "$RUNNER_TEMP/k8s"
+          docker run --rm -v "$PWD/deploy/prod/k8s:/k8s:ro" registry.k8s.io/kustomize/kustomize:v5.4.3 build /k8s/overlays/production > "$RUNNER_TEMP/k8s/all.yaml"
+      - name: The Kubernetes manifests are valid (kubeconform)
+        run: docker run --rm -v "$RUNNER_TEMP/k8s:/k8s:ro" ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary /k8s/all.yaml
+      - name: The Terraform templates validate, with no backend
+        run: |
+          docker run --rm -v "$PWD/deploy/prod/terraform:/tf" -w /tf hashicorp/terraform:1.9 fmt -check -recursive
+          docker run --rm -v "$PWD/deploy/prod/terraform:/tf" -w /tf hashicorp/terraform:1.9 init -backend=false -input=false
+          docker run --rm -v "$PWD/deploy/prod/terraform:/tf" -w /tf hashicorp/terraform:1.9 validate
+      - name: The alert rules are valid (promtool check rules)
+        run: docker run --rm -v "$PWD/deploy/prod/monitoring:/m:ro" --entrypoint promtool prom/prometheus:v2.54.1 check rules /m/rules/*.yaml
+      - name: Every alert fires and clears (promtool test rules)
+        run: docker run --rm -v "$PWD/deploy/prod/monitoring:/m:ro" -w /m/rules/tests --entrypoint promtool prom/prometheus:v2.54.1 test rules .
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Install the server, the console and the shared client (no app packages)
+        run: ${{ env.SERVER_INSTALL }}
+      - name: The region is India only, and rules and dashboards name only metrics that exist (G-06 to G-08)
+        run: npm run prod:validate
+
+  readiness:
+    name: ${{ matrix.check }} (${{ matrix.scenario }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers' }
+          - { check: 'check:r06', scenario: 'R-06, two web servers' }
+          - { check: 'check:r07', scenario: 'R-07, backup to a new database' }
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: ci }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8-alpine
+        env: { CLICKHOUSE_USER: ci, CLICKHOUSE_PASSWORD: ci, CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1' }
+        ports: ['8123:8123']
+        options: >-
+          --health-cmd "wget -qO- http://127.0.0.1:8123/ping"
+          --health-interval 5s --health-timeout 3s --health-retries 30
+    # The S3-compatible store (MinIO) is started as a container in a step below: its image needs a command, which a
+    # service container cannot be given.
+    env:
+      TEST_DATABASE_URL: postgres://postgres:ci@localhost:5432/postgres
+      QUEUE_DRIVER: redis
+      CACHE_DRIVER: redis
+      REDIS_URL: redis://localhost:6379
+      ANALYTICS_DRIVER: clickhouse
+      CLICKHOUSE_URL: http://ci:ci@localhost:8123
+      STORAGE_DRIVER: s3
+      S3_BUCKET: bhava-ci
+      S3_REGION: ap-south-1
+      S3_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY_ID: minioci
+      S3_SECRET_ACCESS_KEY: minioci-secret
+      S3_FORCE_PATH_STYLE: '1'
+      BACKUP_S3_BUCKET: bhava-ci-backup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Install pg_dump and pg_restore 16
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - name: Install the server, the console and the shared client (no app packages)
+        run: ${{ env.SERVER_INSTALL }}
+      - name: Start the S3-compatible store (MinIO) and create the two buckets
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioci -e MINIO_ROOT_PASSWORD=minioci-secret \
+            minio/minio:RELEASE.2024-12-18T13-15-44Z server /data
+          for i in $(seq 1 30); do curl -fs http://localhost:9000/minio/health/ready && break; sleep 1; done
+          node --input-type=module -e "
+            import { S3Client, CreateBucketCommand } from '@aws-sdk/client-s3';
+            const s3 = new S3Client({ region: process.env.S3_REGION, endpoint: process.env.S3_ENDPOINT, forcePathStyle: true,
+              credentials: { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY } });
+            for (const Bucket of [process.env.S3_BUCKET, process.env.BACKUP_S3_BUCKET]) await s3.send(new CreateBucketCommand({ Bucket }));"
+      - name: The seller console builds
+        run: npm run build:console
+      - run: npm run ${{ matrix.check }}
+
+  ready:
+    name: Production readiness
+    needs: [image, templates, readiness]
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "The image, the templates and the three hosting checks passed."

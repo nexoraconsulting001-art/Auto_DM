@@ -1,0 +1,22 @@
+{
+  "variable": "region",
+  "note": "The only regions production may run in: data stays in India. Region names by provider family; the Terraform variable accepts exactly these.",
+  "india": [
+    "ap-south-1",
+    "ap-south-2",
+    "asia-south1",
+    "asia-south2",
+    "centralindia",
+    "southindia",
+    "westindia",
+    "jioindiawest",
+    "jioindiacentral",
+    "ap-mumbai-1",
+    "ap-hyderabad-1",
+    "blr1",
+    "in-maa",
+    "in-bom-2",
+    "in-mumbai-1",
+    "in-chennai-1"
+  ]
+}

@@ -43,7 +43,12 @@
     "showcase": "node scripts/showcase.js",
     "load": "node tools/load/index.mjs",
     "drill": "node tools/drill/index.mjs",
-    "migrate-business": "node scripts/migrate-business.js"
+    "migrate-business": "node scripts/migrate-business.js",
+    "golive": "node scripts/golive.js",
+    "check:r05": "node tools/readiness/index.mjs r05",
+    "check:r06": "node tools/readiness/index.mjs r06",
+    "check:r07": "node tools/readiness/index.mjs r07",
+    "prod:validate": "node tools/readiness/index.mjs validate"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1164.0",

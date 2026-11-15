@@ -54,7 +54,7 @@ export function onError(fn) {
 
 export function reportError(err, fields = {}) {
   log.error(fields.msg || err?.message || 'error', { ...fields, err });
-  const context = { ...fields, tenant: currentTenant()?.slug, requestId: currentRequestId() };
+  const context = { ...fields, tenant: currentTenant()?.slug, tenantId: currentTenant()?.id ?? null, requestId: currentRequestId() };
   for (const fn of reporters) {
     try {
       fn(err, context);

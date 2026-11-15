@@ -1,4 +1,5 @@
 import { mountPlatform } from '../app-config/index.js';
+import { ApiError } from '../../contracts/api/index.js';
 import { newInviteCode } from './rules.js';
 import { signupStore } from './store.js';
 
@@ -13,8 +14,15 @@ export function signupConsoleRoutes(router, ctx) {
 
   mountPlatform(router, 'platform.signup', () => s().settings());
 
+  // Opening to the public asks the go-live guard first (ctx.signupGuard, src/modules/signup/guard.js; G-17). While a
+  // blocking item is missing the move is refused with the item ids, unless the super admin forces it with a second reason.
   mountPlatform(router, 'platform.setSignupMode', async ({ body, actor }) => {
-    await s().setMode(body.mode, { actor, reason: body.reason });
+    const verdict = ctx.signupGuard ? await ctx.signupGuard.check({ mode: body.mode, actor }) : { ok: true, missing: [] };
+    if (!verdict.ok && !body.force) {
+      throw new ApiError('conflict', 'Sign-up can’t open to the public yet: the go-live checklist has blocking items missing.', { reason: 'signup.golive_blocked', fields: { golive: verdict.missing.join(' ') } });
+    }
+    const forced = !verdict.ok && body.force ? { reason: body.forceReason, missing: verdict.missing } : null;
+    await s().setMode(body.mode, { actor, reason: body.reason, dailyCap: body.dailyCap, forced });
     return s().settings();
   });
 
