@@ -16,6 +16,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { appConfigFor } from '../src/modules/app-config/index.js';
+import { withTenant } from '../src/tenancy.js';
+import { createClock, run as runActivity } from '../tools/sim/activity/index.mjs';
+import { seedBusiness } from '../tools/sim/activity/seed.mjs';
+import { assertShowcaseAllowed, openShowcaseWorld } from '../tools/sim/activity/world.mjs';
 import {
   SHOWCASE, SeedCatalogue, ShowcaseManifest, ShowcaseSeed, danglingReferences, fromLegacyCatalogue,
 } from '../src/contracts/seed.js';
@@ -23,6 +28,7 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export class ShowcaseError extends Error {}
+export { assertShowcaseAllowed };
 
 const readJson = (file, what) => {
   let text;
@@ -115,16 +121,53 @@ export function loadShowcase({ root = ROOT, manifest = SHOWCASE.manifest, plantS
 
 /**
  * Loads what loadShowcase read into the database: for each business the tenant, its plan, owner, brand kit, app config,
- * made-up Instagram account, categories, products with options and variants, reels and landing pages in order,
- * automations (through the automations module's own save, so the compliance checks run), FAQ entries, coupons and store
- * settings. Everything inside withTenant for that business; nothing is copied from one business to another.
+ * made-up Instagram account, categories, products with options and variants, posts and landing pages in order, automations
+ * (through the automations module's own save, so the compliance checks run), FAQ entries, coupons and store settings. Each
+ * business is loaded as its own owner, on its own address, inside its own tenant; nothing is copied from one to another.
  *
- *   seedShowcase({ db, repos, ctx, businesses }) -> [{ key, tenantId, slug, created: { <kind>: n }, reused: { <kind>: n } }]
+ *   seedShowcase({ db, world, businesses }) -> [{ key, tenantId, slug, created: { <kind>: n }, reused: { <kind>: n }, ... }]
  *
- * Run twice, the second run creates nothing: every `created` is 0 (Q-01). The seed track builds it.
+ * `world` is openShowcaseWorld() (the app, the worker, the simulators); without one, a world is opened on `db` and closed again.
+ * Run twice, the second run creates nothing: every `created` is {} (Q-01).
  */
-export async function seedShowcase() {
-  throw new ShowcaseError('Loading the seed files into the database is not built yet (Phase 8, seed track). Use --check to read and check them.');
+export async function seedShowcase({ db, world, businesses } = {}) {
+  if (!world && !db) throw new ShowcaseError('Give the database to load into (or a world made by openShowcaseWorld).');
+  if (!Array.isArray(businesses) || businesses.length === 0) throw new ShowcaseError('Give the businesses to load: loadShowcase() answers them.');
+  const mine = world ?? await openShowcaseWorld({ db });
+  try {
+    const loaded = [];
+    for (const business of businesses) loaded.push(await seedBusiness(mine, business));
+    return loaded;
+  } finally {
+    if (!world) await mine.close();
+  }
+}
+
+/** What one loaded business says about itself with nothing secret in it: what is printed and what tests read. */
+export const summaryOf = (loaded) => loaded.map(({ key, slug, tenantId, created, reused }) => ({ key, slug, tenantId, created, reused }));
+
+/**
+ * One brand file per business, for `npm run build-brand`: <folder>/<key>/brand.json, from the business's own app details and
+ * brand kit (the app config service's brandFile). Throws ShowcaseError naming the field when the details cannot make one.
+ */
+export async function exportBrands({ world, loaded, folder, platform = 'android' }) {
+  const out = [];
+  for (const business of loaded) {
+    const service = appConfigFor(world.ctx);
+    let file;
+    try {
+      file = await withTenant({ id: business.tenantId, slug: business.slug }, () => service.brandFile({ platform, buildNumber: 1, appVersion: '1.0.0', runtimeVersion: '1.0.0' }));
+    } catch (err) {
+      const first = err?.problems?.[0];
+      throw new ShowcaseError(`The brand file of "${business.key}" cannot be made${first ? `: ${first.field}: ${String(first.message).slice(0, 120)}` : ''}`);
+    }
+    const dir = path.resolve(folder, business.key);
+    fs.mkdirSync(dir, { recursive: true });
+    const target = path.join(dir, 'brand.json');
+    fs.writeFileSync(target, `${JSON.stringify(file, null, 2)}\n`);
+    out.push({ key: business.key, file: target });
+  }
+  return out;
 }
 
 export function parseArgs(argv, env = process.env) {
@@ -149,6 +192,41 @@ export function parseArgs(argv, env = process.env) {
   return options;
 }
 
+/** Whether the database already holds the activity of a business: the second run leaves it alone, so the data is the same. */
+async function hasActivity(world, tenantId) {
+  const [row] = await world.sql('SELECT (SELECT count(*) FROM orders WHERE tenant_id = $1) + (SELECT count(*) FROM inbound_events WHERE tenant_id = $1) AS n', [tenantId]);
+  return Number(row.n) > 0;
+}
+
+/**
+ * Everything `npm run showcase` does after the arguments: refuse a production setting, open the world on `db`, load the
+ * businesses, make the activity (once: a database that already has it is left as it is), and export brand files.
+ */
+export async function runShowcase({ db, businesses, options, env = process.env, log = () => {} }) {
+  try {
+    assertShowcaseAllowed(env);
+  } catch (err) {
+    throw new ShowcaseError(err.message);
+  }
+  const world = await openShowcaseWorld({ db, env });
+  try {
+    const loaded = await seedShowcase({ world, businesses });
+    const report = { businesses: summaryOf(loaded), activity: null, brands: [] };
+    if (options.activity && options.days > 0) {
+      const fresh = [];
+      for (const b of loaded) if (!(await hasActivity(world, b.tenantId))) fresh.push(b);
+      if (fresh.length === loaded.length) {
+        const clock = createClock(new Date(Date.now() - options.days * 86_400_000));
+        report.activity = await runActivity({ businesses: fresh, days: options.days, seed: options.randomSeed, clock, world, log, ...(options.volume ? { volume: options.volume } : {}) });
+      } else log('The database already has activity; it is left as it is.');
+    }
+    if (options.exportBrands) report.brands = await exportBrands({ world, loaded, folder: options.exportBrands });
+    return report;
+  } finally {
+    await world.close();
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const businesses = loadShowcase({ plantSeed: options.plantSeed, only: options.only });
@@ -159,7 +237,22 @@ async function main() {
     console.log('showcase: every seed file fits the contract and every person in them is invented.');
     return;
   }
-  await seedShowcase({ businesses, options });
+  try {
+    assertShowcaseAllowed(process.env);
+  } catch (err) {
+    throw new ShowcaseError(err.message);
+  }
+  const { config } = await import('../src/config.js');
+  const { openRuntimeDb } = await import('../src/db/index.js');
+  const db = await openRuntimeDb(config);
+  try {
+    const report = await runShowcase({ db, businesses, options, log: (line) => console.log(line) });
+    for (const b of report.businesses) console.log(`${b.key}: created ${JSON.stringify(b.created)}, already there ${JSON.stringify(b.reused)}`);
+    if (report.activity) console.log(`activity: ${report.activity.events} events over ${report.activity.days} days, digest ${report.activity.digest.slice(0, 16)}`);
+    for (const b of report.brands) console.log(`brand file: ${path.relative(process.cwd(), b.file)}`);
+  } finally {
+    await db.close();
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
