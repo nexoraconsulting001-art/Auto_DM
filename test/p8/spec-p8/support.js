@@ -39,8 +39,8 @@ export const TINY_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
 export const MARKERS = Object.freeze({
   username: (n) => `demo_old_user_${n}`,
   comment: (n) => `zz-old-comment-text-${n}`,
-  igToken: 'IGQVJ-old-token-zz9',
-  accessToken: 'EAAold-access-zz9',
+  igToken: 'IGQVJ-old-token-zz9', // secret-scan:allow
+  accessToken: 'EAAold-access-zz9', // secret-scan:allow
   passwordHash: '$2b$10$zzoldpasswordhashzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
 });
 

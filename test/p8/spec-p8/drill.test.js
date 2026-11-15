@@ -207,7 +207,7 @@ test('Q-08: after a restore the app login reads one business at a time and nothi
   const targetOwner = server.urlFor('target');
   const appUrl = new URL(targetOwner);
   appUrl.username = 'bhava_app_drill';
-  appUrl.password = 'drill-app-password-1';
+  appUrl.password = 'drill-app-password-1'; // secret-scan:allow
   const { default: pgClient } = await import('pg');
   const owner = new pgClient.Client({ connectionString: targetOwner });
   await owner.connect();

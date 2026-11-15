@@ -26,9 +26,9 @@ test('Q-01 the showcase refuses a real provider address, for every provider the 
   assert.throws(() => assertShowcaseAllowed({ GRAPH_BASE_URL: 'https://graph.instagram.com' }), /real provider address/);
 });
 
-test('Q-01 the showcase refuses a live payment key and a database that is not on this machine', () => {
-  assert.throws(() => assertShowcaseAllowed({ RAZORPAY_KEY_ID: 'rzp_live_AbCdEf123456' }), /live key/);
-  assert.doesNotThrow(() => assertShowcaseAllowed({ RAZORPAY_KEY_ID: 'rzp_test_AbCdEf123456' }));
+test('Q-01 the showcase refuses a live payment key and a database that is not on this machine', () => { // secret-scan:allow
+  assert.throws(() => assertShowcaseAllowed({ RAZORPAY_KEY_ID: 'rzp_live_AbCdEf123456' }), /live key/); // secret-scan:allow
+  assert.doesNotThrow(() => assertShowcaseAllowed({ RAZORPAY_KEY_ID: 'rzp_test_AbCdEf123456' })); // secret-scan:allow
   assert.throws(() => assertShowcaseAllowed({ DATABASE_URL: 'postgres://u:p@db.internal.example.com:5432/bhava' }), /not on this machine/);
   assert.doesNotThrow(() => assertShowcaseAllowed({ DATABASE_URL: 'postgres://u:p@127.0.0.1:5432/bhava' }));
   assert.throws(() => assertShowcaseAllowed({ DATABASE_URL: 'not a url' }), ShowcaseRefusedError);
