@@ -1,13 +1,16 @@
 import { OPS_ROUTE_OWNERS } from '../../contracts/api/ops.js';
-import { OPS_PLATFORM_OWNERS } from '../../contracts/api/platform-ops.js';
+import { OPS_PLATFORM_OWNERS, opsPlatformRoutes } from '../../contracts/api/platform-ops.js';
 import { maskSecrets } from '../../contracts/services.js';
 import { tenantId } from '../../tenancy.js';
+import { operatorStillAllowed } from '../impersonation/index.js';
 import { serviceConsoleRoutes } from './console.js';
 import { serviceEntryRoutes } from './entry.js';
 import { teamFeedApi } from './feed.js';
 
 const API = OPS_ROUTE_OWNERS['managed-services'];
 const PLATFORM = OPS_PLATFORM_OWNERS['managed-services'];
+/** Who may hold a service session: the roles that may start one. */
+const SERVICE_ROLES = opsPlatformRoutes['platform.startServiceSession'].platformRoles;
 
 /** What the API router asks on every request of a service operator's session (PRD 5.17). */
 export function serviceSessionsRepo(db) {
@@ -16,7 +19,7 @@ export function serviceSessionsRepo(db) {
      * The live session with this id in the current business, as req.session.operator, or null: ended, timed out, or the
      * business no longer has the service active (F-92: access ends at once, because this is read on every request). A
      * session started before the service's current period began belongs to an older purchase: buying the service again
-     * never revives it.
+     * never revives it. Nor does a session outlive its operator being turned off or moved to a role that may not hold it.
      */
     async live(id) {
       const [row] = await db.query(
@@ -27,7 +30,7 @@ export function serviceSessionsRepo(db) {
            AND e.active_from <= now() AND (e.active_to IS NULL OR e.active_to > now()) AND s.started_at >= e.active_from`,
         [tenantId(), Number(id)],
       );
-      if (!row) return null;
+      if (!row || !(await operatorStillAllowed(db, row.operator_id, SERVICE_ROLES))) return null;
       return { kind: 'service', id: Number(row.id), operatorId: row.operator_id, operatorName: row.operator_name || 'Bhava team', service: row.service, taskRef: row.task_ref, mode: row.mode, expiresAt: row.expires_at };
     },
   };
