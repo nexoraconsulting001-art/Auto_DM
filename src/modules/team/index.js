@@ -1,13 +1,11 @@
 import { INVITE_DAYS, newToken, subjectHash, toE164, tokenHash } from '../../contracts/accounts.js';
 import { ApiError, SELLER_ROLES } from '../../contracts/api/index.js';
-import { log, reportError } from '../../platform/log.js';
+import { log } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { writeAudit } from '../audit/index.js';
 import { pageOfFetched, readCursor, isRowId } from '../admin-api/paging.js';
-import { accountsFor } from '../accounts/index.js';
 import { maskedAccountPhone } from '../accounts/shared.js';
 import { revokeFamilies } from '../accounts/tokens.js';
-import { acceptInvites, linkMemberships } from './invites.js';
 
 export { acceptInvites, linkMemberships } from './invites.js';
 
@@ -53,12 +51,15 @@ const invitation = (row) => ({
  * route only through its named permission (src/contracts/api/access.js). This module adds no second rule.
  *
  * - Nobody joins by having their number typed in. team.invite stores a keyed hash of the phone or email and a hashed
- *   token, for INVITE_DAYS; the account appears when a person proves that identity (acceptInvites, called by
- *   src/modules/accounts at every sign-in, and here at once for someone who already has).
+ *   token, for INVITE_DAYS; the account appears when the person next signs in with that identity proved (acceptInvites,
+ *   called by src/modules/accounts at every sign-in). Never at once: typing someone's number must not put an account of
+ *   theirs in another business without them doing anything.
  * - A business always has at least one owner: the last owner cannot be demoted or removed, by themselves or anyone
  *   (F-49). The owners' rows are locked while the check and the change are made.
  * - team.remove sets removed_at, deletes the switcher pairs naming the account, and revokes every session it has and
- *   every refresh family of its person, in one transaction: web and app both answer 401 on their next request (F-47).
+ *   the refresh families that are in this account, in one transaction: web and app both answer 401 on their next request
+ *   (F-47). The person's families in their other businesses are theirs and stay: one business never signs a person out
+ *   of another.
  * - team.update changes role and permissions only. Permissions count only for staff and are cleared for any other role.
  * - Every change writes an audit row with ids, roles and permissions: never a number or an email.
  */
@@ -90,23 +91,6 @@ export const team = {
       );
       if (!row) throw new ApiError('not_found');
       return row;
-    }
-
-    /** Someone who has already proved this identity joins at once; anyone else when they sign in with it. */
-    async function takeUpNow(contact) {
-      const people = accountsFor(ctx).people;
-      // An email two people have each proved is left for whichever of them signs in with it.
-      const owners = contact.kind === 'phone'
-        ? await platform().query(`SELECT person_id FROM person_identities WHERE kind = 'phone' AND subject = $1`, [contact.subject])
-        : await platform().query(`SELECT DISTINCT person_id FROM person_identities WHERE kind <> 'phone' AND lower(email) = $1 LIMIT 2`, [contact.subject]);
-      if (owners.length !== 1) return;
-      const [owner] = owners;
-      const personId = Number(owner.person_id);
-      const me = await people.person(personId);
-      if (!me) return;
-      const phones = await people.phonesOf(personId);
-      await acceptInvites(ctx, { personId, name: me.name, phones, emails: contact.kind === 'email' ? [contact.subject] : [], onlyTenant: tenantId() });
-      await linkMemberships(ctx.db, personId);
     }
 
     return {
@@ -147,8 +131,7 @@ export const team = {
           return made;
         });
         log.info('team.invited', { inviteId: row.id, role: body.role });
-        // The invitation is saved either way: if this fails, it is taken up at the person's next sign-in.
-        await takeUpNow(contact).catch((err) => reportError(err, { msg: 'team.take_up_failed', inviteId: row.id }));
+        // Taken up at the person's next sign-in with this identity proved, never here.
         return invitation(row);
       },
 
@@ -181,7 +164,18 @@ export const team = {
           await t.query('UPDATE users SET removed_at = now() WHERE tenant_id = $1 AND id = $2', [tenantId(), target.id]);
           await t.query('DELETE FROM memberships WHERE (tenant_id = $1 AND user_id = $2) OR (member_tenant_id = $1 AND member_user_id = $2)', [tenantId(), target.id]);
           await t.query('UPDATE sessions SET revoked_at = now() WHERE tenant_id = $1 AND user_id = $2 AND revoked_at IS NULL', [tenantId(), target.id]);
-          const families = target.person_id ? await revokeFamilies(t, { personId: Number(target.person_id), reason: 'staff_removed' }) : [];
+          // Only the families in this account: one whose live refresh token is for it, or one with a session here and
+          // nothing live anywhere else. The person's other businesses keep their sessions.
+          const mine = target.person_id ? await t.query(
+            `SELECT f.id FROM token_families f
+              WHERE f.subject_kind = 'user' AND f.person_id = $3 AND f.revoked_at IS NULL AND (
+                EXISTS (SELECT 1 FROM refresh_tokens r WHERE r.family_id = f.id AND r.used_at IS NULL AND r.expires_at > now() AND r.tenant_id = $1 AND r.user_id = $2)
+                OR (EXISTS (SELECT 1 FROM sessions s WHERE s.family_id = f.id AND s.tenant_id = $1 AND s.user_id = $2)
+                    AND NOT EXISTS (SELECT 1 FROM refresh_tokens r WHERE r.family_id = f.id AND r.used_at IS NULL AND r.expires_at > now() AND (r.tenant_id <> $1 OR r.user_id <> $2))
+                    AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.family_id = f.id AND s.revoked_at IS NULL AND s.expires_at > now() AND (s.tenant_id <> $1 OR s.user_id <> $2))))`,
+            [tenantId(), target.id, Number(target.person_id)],
+          ) : [];
+          const families = mine.length ? await revokeFamilies(t, { familyIds: mine.map((f) => Number(f.id)), reason: 'staff_removed' }) : [];
           await writeAudit(t, { actor: `user:${user.id}`, action: 'team.remove', target: `user:${target.id}`, details: { userId: target.id, role: target.role, families: families.length } });
           return target;
         });
