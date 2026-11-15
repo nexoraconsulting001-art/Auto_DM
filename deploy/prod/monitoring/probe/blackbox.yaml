@@ -1,0 +1,26 @@
+# The outside probe (a Prometheus blackbox exporter) that feeds probe_success for the 99.5% monthly objective (UPTIME_SLO in
+# src/contracts/metrics.js). Run it from outside the cluster and the region it watches, so a failure of the platform's own network
+# is seen. It sends no cookie and no credentials, and reads no body beyond the status.
+modules:
+  # The Meta webhook address. Without Meta's verification token it answers 403, which proves it is up and routing; a 5xx or no answer is down.
+  webhook:
+    prober: http
+    timeout: 10s
+    http:
+      method: GET
+      valid_status_codes: [403]
+      valid_http_versions: [HTTP/1.1, HTTP/2.0]
+      fail_if_not_ssl: true
+      no_follow_redirects: true
+      preferred_ip_protocol: ip4
+  # A shopper page: the front page of a showcase store on a platform host. Anything but a 200 is a failure, a redirect included.
+  shopper_page:
+    prober: http
+    timeout: 10s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      valid_http_versions: [HTTP/1.1, HTTP/2.0]
+      fail_if_not_ssl: true
+      no_follow_redirects: true
+      preferred_ip_protocol: ip4

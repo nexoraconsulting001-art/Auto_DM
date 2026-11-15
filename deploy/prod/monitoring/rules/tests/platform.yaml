@@ -1,0 +1,240 @@
+# Unit tests for platform.yaml (promtool test rules): each alert fires on its bad input and is gone after recovery.
+rule_files:
+  - ../platform.yaml
+evaluation_interval: 1m
+tests:
+  - name: BackupTooOld fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "backup_age_seconds"
+        values: "3600+0x4 100000+0x24 600+0x39"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BackupTooOld
+        exp_alerts:
+          - exp_labels:
+              severity: "page"
+              area: "database"
+              alertname: "BackupTooOld"
+            exp_annotations:
+              summary: "The last backup is more than 26 hours old"
+              description: "No backup has finished for more than 26 hours (the nightly one is due every 24)."
+              runbook: "deploy/prod/monitoring/README.md#backuptooold"
+      - eval_time: 40m
+        alertname: BackupTooOld
+        exp_alerts: []
+  - name: BackupNotReporting fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "up{job=\"worker\",instance=\"w1\"}"
+        values: "1+0x1799"
+      - series: "backup_age_seconds"
+        values: "_x1700 100+0x99"
+    alert_rule_test:
+      - eval_time: 1650m
+        alertname: BackupNotReporting
+        exp_alerts:
+          - exp_labels:
+              severity: "ticket"
+              area: "database"
+              alertname: "BackupNotReporting"
+            exp_annotations:
+              summary: "No backup has been reported for 26 hours"
+              description: "The worker has reported no backup at all for 26 hours: backups may be switched off (BACKUP_STORAGE_DRIVER) or the worker is not running."
+              runbook: "deploy/prod/monitoring/README.md#backupnotreporting"
+      - eval_time: 1750m
+        alertname: BackupNotReporting
+        exp_alerts: []
+  - name: DatabaseConnectionsNearLimit fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "db_pool_connections{pool=\"app\",state=\"used\",instance=\"web-1\"}"
+        values: "10+0x4 60+0x24 10+0x39"
+      - series: "db_pool_connections{pool=\"app\",state=\"idle\",instance=\"web-1\"}"
+        values: "10+0x4 30+0x24 10+0x39"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: DatabaseConnectionsNearLimit
+        exp_alerts:
+          - exp_labels:
+              severity: "ticket"
+              area: "database"
+              alertname: "DatabaseConnectionsNearLimit"
+            exp_annotations:
+              summary: "Database connections are near the server's limit"
+              description: "The connections open to the database passed 85, close to the default limit of 100. Raise the limit, shrink the pools or add a pooler before new connections are refused. Adjust the number to 85% of max_connections."
+              runbook: "deploy/prod/monitoring/README.md#databaseconnectionsnearlimit"
+      - eval_time: 40m
+        alertname: DatabaseConnectionsNearLimit
+        exp_alerts: []
+  - name: DatabaseConnectionsWaiting fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "db_pool_connections{pool=\"app\",state=\"waiting\",instance=\"web-1\"}"
+        values: "0+0x4 4+0x14 0+0x39"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: DatabaseConnectionsWaiting
+        exp_alerts:
+          - exp_labels:
+              pool: "app"
+              severity: "ticket"
+              area: "database"
+              alertname: "DatabaseConnectionsWaiting"
+            exp_annotations:
+              summary: "Requests are waiting for a database connection"
+              description: "A pool has had requests waiting for a free connection for 5 minutes."
+              runbook: "deploy/prod/monitoring/README.md#databaseconnectionswaiting"
+      - eval_time: 35m
+        alertname: DatabaseConnectionsWaiting
+        exp_alerts: []
+  - name: MemoryNearLimit fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "container_memory_working_set_bytes{pod=\"web-abc\",container=\"web\"}"
+        values: "400000000+0x4 950000000+0x24 400000000+0x39"
+      - series: "container_spec_memory_limit_bytes{pod=\"web-abc\",container=\"web\"}"
+        values: "1000000000+0x69"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MemoryNearLimit
+        exp_alerts:
+          - exp_labels:
+              pod: "web-abc"
+              severity: "ticket"
+              area: "runtime"
+              alertname: "MemoryNearLimit"
+            exp_annotations:
+              summary: "A pod is using more than 90% of its memory limit"
+              description: "A web or worker pod has used more than 90% of its memory limit for 10 minutes and will be killed when it reaches it. The numbers come from the cluster's container metrics, not from the application."
+              runbook: "deploy/prod/monitoring/README.md#memorynearlimit"
+      - eval_time: 40m
+        alertname: MemoryNearLimit
+        exp_alerts: []
+  - name: ErrorReportsSpiking fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "errors_reported_total{service=\"web\",kind=\"orders\"}"
+        values: "0 120+120x24 3000+0x34"
+    alert_rule_test:
+      - eval_time: 22m
+        alertname: ErrorReportsSpiking
+        exp_alerts:
+          - exp_labels:
+              kind: "orders"
+              severity: "ticket"
+              area: "runtime"
+              alertname: "ErrorReportsSpiking"
+            exp_annotations:
+              summary: "One kind of error is being reported more than once a second"
+              description: "The same kind of error was reported at more than one a second for 10 minutes."
+              runbook: "deploy/prod/monitoring/README.md#errorreportsspiking"
+      - eval_time: 55m
+        alertname: ErrorReportsSpiking
+        exp_alerts: []
+  - name: CertificateExpiringSoon fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "probe_ssl_earliest_cert_expiry{instance=\"shop.example\"}"
+        values: "1123200+0x179 5184000+0x60"
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: CertificateExpiringSoon
+        exp_alerts:
+          - exp_labels:
+              instance: "shop.example"
+              severity: "ticket"
+              area: "runtime"
+              alertname: "CertificateExpiringSoon"
+            exp_annotations:
+              summary: "A certificate expires in less than 14 days"
+              description: "The certificate served on a probed address expires in under 14 days and has not been renewed."
+              runbook: "deploy/prod/monitoring/README.md#certificateexpiringsoon"
+      - eval_time: 200m
+        alertname: CertificateExpiringSoon
+        exp_alerts: []
+  - name: CertificateExpiryImminent fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "probe_ssl_earliest_cert_expiry{instance=\"shop.example\"}"
+        values: "192800+0x20 5184000+0x60"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CertificateExpiryImminent
+        exp_alerts:
+          - exp_labels:
+              instance: "shop.example"
+              severity: "page"
+              area: "runtime"
+              alertname: "CertificateExpiryImminent"
+            exp_annotations:
+              summary: "A certificate expires in less than 3 days"
+              description: "The certificate served on a probed address expires in under 3 days. Renew it now."
+              runbook: "deploy/prod/monitoring/README.md#certificateexpiryimminent"
+      - eval_time: 40m
+        alertname: CertificateExpiryImminent
+        exp_alerts: []
+  - name: SecretRefreshFailing fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "secret_refresh_failures_total{instance=\"web-1\"}"
+        values: "0 1+1x24 25+0x44"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: SecretRefreshFailing
+        exp_alerts:
+          - exp_labels:
+              instance: "web-1"
+              severity: "ticket"
+              area: "runtime"
+              alertname: "SecretRefreshFailing"
+            exp_annotations:
+              summary: "The secret source cannot be refreshed"
+              description: "A process failed to refresh its secrets from the secret source for 10 minutes. It keeps the last good values, but a rotated key will not arrive."
+              runbook: "deploy/prod/monitoring/README.md#secretrefreshfailing"
+      - eval_time: 60m
+        alertname: SecretRefreshFailing
+        exp_alerts: []
+  - name: ScrapeTargetDown fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "up{job=\"web\",instance=\"web-1\"}"
+        values: "1+0x4 0+0x14 1+0x39"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ScrapeTargetDown
+        exp_alerts:
+          - exp_labels:
+              job: "web"
+              instance: "web-1"
+              severity: "page"
+              area: "runtime"
+              alertname: "ScrapeTargetDown"
+            exp_annotations:
+              summary: "A metrics target cannot be scraped"
+              description: "Prometheus could not scrape a target for 5 minutes: the process is down or its metrics token is wrong."
+              runbook: "deploy/prod/monitoring/README.md#scrapetargetdown"
+      - eval_time: 30m
+        alertname: ScrapeTargetDown
+        exp_alerts: []
+  - name: ProcessStillDraining fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "process_draining{service=\"web\",instance=\"web-1\"}"
+        values: "0+0x4 1+0x29 0+0x39"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: ProcessStillDraining
+        exp_alerts:
+          - exp_labels:
+              service: "web"
+              severity: "ticket"
+              area: "runtime"
+              alertname: "ProcessStillDraining"
+            exp_annotations:
+              summary: "A process has been shutting down for 15 minutes"
+              description: "A process reports it is draining for 15 minutes, which is longer than a deploy should take."
+              runbook: "deploy/prod/monitoring/README.md#processstilldraining"
+      - eval_time: 40m
+        alertname: ProcessStillDraining
+        exp_alerts: []

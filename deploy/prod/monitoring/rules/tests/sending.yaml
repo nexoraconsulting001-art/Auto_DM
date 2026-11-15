@@ -1,0 +1,155 @@
+# Unit tests for sending.yaml (promtool test rules): each alert fires on its bad input and is gone after recovery.
+rule_files:
+  - ../sending.yaml
+evaluation_interval: 1m
+tests:
+  - name: SendsFailing fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "compliance_outcomes_total{channel=\"instagram\",outcome=\"sent\",family=\"gate\"}"
+        values: "0 40+40x59"
+      - series: "compliance_outcomes_total{channel=\"instagram\",outcome=\"failed\",family=\"rate\"}"
+        values: "0 20+20x24 500+0x34"
+    alert_rule_test:
+      - eval_time: 22m
+        alertname: SendsFailing
+        exp_alerts:
+          - exp_labels:
+              channel: "instagram"
+              severity: "page"
+              area: "sending"
+              alertname: "SendsFailing"
+            exp_annotations:
+              summary: "Messages are failing to send"
+              description: "More than 10% of send attempts on a channel failed for 10 minutes. Buyers are not getting their replies."
+              runbook: "deploy/prod/monitoring/README.md#sendsfailing"
+      - eval_time: 55m
+        alertname: SendsFailing
+        exp_alerts: []
+  - name: SendsHeld fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "compliance_outcomes_total{channel=\"whatsapp\",outcome=\"blocked\",family=\"held\"}"
+        values: "0 6+6x29 180+0x49"
+    alert_rule_test:
+      - eval_time: 28m
+        alertname: SendsHeld
+        exp_alerts:
+          - exp_labels:
+              channel: "whatsapp"
+              severity: "ticket"
+              area: "sending"
+              alertname: "SendsHeld"
+            exp_annotations:
+              summary: "Messages are being held back"
+              description: "The compliance gate has held messages on a channel (for review or for a plan's message limit) at more than three a minute for 15 minutes."
+              runbook: "deploy/prod/monitoring/README.md#sendsheld"
+      - eval_time: 70m
+        alertname: SendsHeld
+        exp_alerts: []
+  - name: ComplianceGateEngaged fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "compliance_outcomes_total{channel=\"instagram\",outcome=\"sent\",family=\"gate\"}"
+        values: "0 30+30x29 960+60x29"
+      - series: "compliance_outcomes_total{channel=\"instagram\",outcome=\"blocked\",family=\"paused\"}"
+        values: "0 90+90x29 2700+0x29"
+    alert_rule_test:
+      - eval_time: 22m
+        alertname: ComplianceGateEngaged
+        exp_alerts:
+          - exp_labels:
+              channel: "instagram"
+              severity: "page"
+              area: "sending"
+              alertname: "ComplianceGateEngaged"
+            exp_annotations:
+              summary: "The kill switch or the breaker looks engaged"
+              description: "More than half of the send decisions on a channel were refused as paused for 10 minutes: the global kill switch or the circuit breaker is engaged, or every business paused at once. Check the compliance screen before anything else."
+              runbook: "deploy/prod/monitoring/README.md#compliancegateengaged"
+      - eval_time: 60m
+        alertname: ComplianceGateEngaged
+        exp_alerts: []
+  - name: MetaThrottling fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "meta_calls_total{call_class=\"send\",result=\"throttled\"}"
+        values: "0 6+6x24 150+0x34"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MetaThrottling
+        exp_alerts:
+          - exp_labels:
+              call_class: "send"
+              severity: "ticket"
+              area: "sending"
+              alertname: "MetaThrottling"
+            exp_annotations:
+              summary: "Meta is throttling our calls"
+              description: "Meta answered calls of a class with a rate-limit error at more than one a minute for 10 minutes."
+              runbook: "deploy/prod/monitoring/README.md#metathrottling"
+      - eval_time: 55m
+        alertname: MetaThrottling
+        exp_alerts: []
+  - name: MetaUsageHigh fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "meta_usage_ratio{call_class=\"read\"}"
+        values: "0.3+0x4 0.9+0x24 0.2+0x39"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MetaUsageHigh
+        exp_alerts:
+          - exp_labels:
+              call_class: "read"
+              severity: "ticket"
+              area: "sending"
+              alertname: "MetaUsageHigh"
+            exp_annotations:
+              summary: "Meta rate limit use is above 80%"
+              description: "Some account has used more than 80% of a Meta rate limit for 10 minutes. Throttling is likely next."
+              runbook: "deploy/prod/monitoring/README.md#metausagehigh"
+      - eval_time: 50m
+        alertname: MetaUsageHigh
+        exp_alerts: []
+  - name: MetaUsageCritical fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "meta_usage_ratio{call_class=\"send\"}"
+        values: "0.3+0x4 0.98+0x19 0.2+0x39"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MetaUsageCritical
+        exp_alerts:
+          - exp_labels:
+              call_class: "send"
+              severity: "page"
+              area: "sending"
+              alertname: "MetaUsageCritical"
+            exp_annotations:
+              summary: "Meta rate limit use is above 95%"
+              description: "Some account has used more than 95% of a Meta rate limit for 5 minutes. Sends of that class are about to be refused."
+              runbook: "deploy/prod/monitoring/README.md#metausagecritical"
+      - eval_time: 40m
+        alertname: MetaUsageCritical
+        exp_alerts: []
+  - name: MetaTokenFailuresRising fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "meta_calls_total{call_class=\"send\",result=\"token_error\"}"
+        values: "0 3+3x29 90+0x49"
+    alert_rule_test:
+      - eval_time: 22m
+        alertname: MetaTokenFailuresRising
+        exp_alerts:
+          - exp_labels:
+              severity: "ticket"
+              area: "sending"
+              alertname: "MetaTokenFailuresRising"
+            exp_annotations:
+              summary: "Meta is rejecting access tokens"
+              description: "Calls to Meta failed for an invalid or revoked token at more than one every two minutes for 10 minutes. Businesses may need to reconnect, or a refresh is failing."
+              runbook: "deploy/prod/monitoring/README.md#metatokenfailuresrising"
+      - eval_time: 65m
+        alertname: MetaTokenFailuresRising
+        exp_alerts: []

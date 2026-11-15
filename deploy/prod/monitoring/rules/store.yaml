@@ -1,0 +1,27 @@
+# Store, payments and billing. Generated once from the track's spec and edited by hand since; every alert has a case in tests/store.yaml
+# that fires it on bad input and clears it on recovery. Metrics are the catalogue's (src/contracts/metrics.js).
+# Annotations are plain text on purpose: no template reads a label or a value, so nothing in an alert can name a person.
+groups:
+  - name: bhava-store
+    interval: 1m
+    rules:
+      - alert: BillingChargesFailing
+        expr: sum(increase(provider_calls_total{provider="razorpay_billing",result!="ok"}[1h])) / sum(increase(provider_calls_total{provider="razorpay_billing"}[1h])) > 0.3 and sum(increase(provider_calls_total{provider="razorpay_billing",result!="ok"}[1h])) >= 2
+        for: 5m
+        labels:
+          severity: page
+          area: store
+        annotations:
+          summary: "Subscription charges are failing"
+          description: "At least two of Bhava's own Razorpay calls failed in the last hour and they are more than 30% of all such calls. Renewals may not be collected."
+          runbook: "deploy/prod/monitoring/README.md#billingchargesfailing"
+      - alert: StoreErrorRate
+        expr: sum by (group) (rate(http_requests_total{status=~"5.."}[5m])) / sum by (group) (rate(http_requests_total[5m])) > 0.05 and sum by (group) (rate(http_requests_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: page
+          area: store
+        annotations:
+          summary: "A part of the site is answering with errors"
+          description: "More than 5% of the requests of a route class were answered with a 5xx for 5 minutes."
+          runbook: "deploy/prod/monitoring/README.md#storeerrorrate"

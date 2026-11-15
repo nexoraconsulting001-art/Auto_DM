@@ -1,0 +1,141 @@
+# Unit tests for webhooks.yaml (promtool test rules): each alert fires on its bad input and is gone after recovery.
+rule_files:
+  - ../webhooks.yaml
+evaluation_interval: 1m
+tests:
+  - name: WebhookIntakeFailing fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "webhook_received_total{provider=\"meta\",result=\"accepted\"}"
+        values: "0 60+60x59"
+      - series: "webhook_received_total{provider=\"meta\",result=\"refused\"}"
+        values: "0 30+30x19 600+0x39"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: WebhookIntakeFailing
+        exp_alerts:
+          - exp_labels:
+              provider: "meta"
+              severity: "page"
+              area: "webhooks"
+              alertname: "WebhookIntakeFailing"
+            exp_annotations:
+              summary: "A webhook intake is refusing deliveries"
+              description: "More than 5% of a provider's webhook deliveries were refused by us (a fault, not a bad signature) for 5 minutes. The provider retries for a limited time, so events can be lost."
+              runbook: "deploy/prod/monitoring/README.md#webhookintakefailing"
+      - eval_time: 45m
+        alertname: WebhookIntakeFailing
+        exp_alerts: []
+  - name: WebhookIntakeSlow fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "http_request_seconds_bucket{group=\"webhook\",le=\"0.05\"}"
+        values: "0 0+0x19 60+60x39"
+      - series: "http_request_seconds_bucket{group=\"webhook\",le=\"0.25\"}"
+        values: "0 0+0x19 60+60x39"
+      - series: "http_request_seconds_bucket{group=\"webhook\",le=\"2.5\"}"
+        values: "0 0+0x19 60+60x39"
+      - series: "http_request_seconds_bucket{group=\"webhook\",le=\"5\"}"
+        values: "0 60+60x19 1260+60x39"
+      - series: "http_request_seconds_bucket{group=\"webhook\",le=\"+Inf\"}"
+        values: "0 60+60x19 1260+60x39"
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: WebhookIntakeSlow
+        exp_alerts:
+          - exp_labels:
+              severity: "page"
+              area: "webhooks"
+              alertname: "WebhookIntakeSlow"
+            exp_annotations:
+              summary: "Meta webhook requests are slow to answer"
+              description: "The slowest 5% of requests to the Meta webhook take longer than 2 seconds for 10 minutes. Meta times out slow endpoints and may stop delivering."
+              runbook: "deploy/prod/monitoring/README.md#webhookintakeslow"
+      - eval_time: 45m
+        alertname: WebhookIntakeSlow
+        exp_alerts: []
+  - name: WebhookNotStored fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "webhook_received_total{provider=\"meta\",result=\"accepted\"}"
+        values: "0 60+60x59"
+      - series: "webhook_stored_total{provider=\"meta\"}"
+        values: "0 6+6x19 180+60x39"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: WebhookNotStored
+        exp_alerts:
+          - exp_labels:
+              severity: "page"
+              area: "webhooks"
+              alertname: "WebhookNotStored"
+            exp_annotations:
+              summary: "Webhooks are answered 200 but not written down"
+              description: "Accepted webhook deliveries outnumber the events stored for 10 minutes. An event answered with a 200 and not stored is lost for good."
+              runbook: "deploy/prod/monitoring/README.md#webhooknotstored"
+      - eval_time: 55m
+        alertname: WebhookNotStored
+        exp_alerts: []
+  - name: WebhookProcessingFailing fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "webhook_processed_total{provider=\"shopify\",result=\"ok\"}"
+        values: "0 40+40x59"
+      - series: "webhook_processed_total{provider=\"shopify\",result=\"failed\"}"
+        values: "0 20+20x24 500+0x34"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: WebhookProcessingFailing
+        exp_alerts:
+          - exp_labels:
+              provider: "shopify"
+              severity: "ticket"
+              area: "webhooks"
+              alertname: "WebhookProcessingFailing"
+            exp_annotations:
+              summary: "Stored webhook events are failing to process"
+              description: "More than 10% of the stored events of a provider failed when worked through, for 10 minutes. They stay stored and are retried."
+              runbook: "deploy/prod/monitoring/README.md#webhookprocessingfailing"
+      - eval_time: 55m
+        alertname: WebhookProcessingFailing
+        exp_alerts: []
+  - name: PaymentWebhookFailing fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "webhook_received_total{provider=\"razorpay\",result=\"refused\"}"
+        values: "0 3+3x24 75+0x34"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: PaymentWebhookFailing
+        exp_alerts:
+          - exp_labels:
+              severity: "page"
+              area: "store"
+              alertname: "PaymentWebhookFailing"
+            exp_annotations:
+              summary: "Payment webhooks are failing"
+              description: "Razorpay webhooks (store payments or Bhava's own billing) were refused or failed in processing for 10 minutes. Orders may stay unpaid and subscriptions may not renew until they are retried."
+              runbook: "deploy/prod/monitoring/README.md#paymentwebhookfailing"
+      - eval_time: 55m
+        alertname: PaymentWebhookFailing
+        exp_alerts: []
+  - name: CourierWebhookFailing fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "webhook_processed_total{provider=\"shiprocket\",result=\"failed\"}"
+        values: "0 3+3x29 90+0x39"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: CourierWebhookFailing
+        exp_alerts:
+          - exp_labels:
+              severity: "ticket"
+              area: "store"
+              alertname: "CourierWebhookFailing"
+            exp_annotations:
+              summary: "Courier tracking webhooks are failing"
+              description: "Shiprocket tracking webhooks were refused or failed in processing for 15 minutes. Shipment status shown to buyers will lag until they are retried."
+              runbook: "deploy/prod/monitoring/README.md#courierwebhookfailing"
+      - eval_time: 62m
+        alertname: CourierWebhookFailing
+        exp_alerts: []

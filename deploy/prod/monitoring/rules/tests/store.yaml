@@ -1,0 +1,50 @@
+# Unit tests for store.yaml (promtool test rules): each alert fires on its bad input and is gone after recovery.
+rule_files:
+  - ../store.yaml
+evaluation_interval: 1m
+tests:
+  - name: BillingChargesFailing fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "provider_calls_total{provider=\"razorpay_billing\",result=\"ok\"}"
+        values: "0 1+1x119"
+      - series: "provider_calls_total{provider=\"razorpay_billing\",result=\"failed\"}"
+        values: "0 1+1x9 10+0x109"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: BillingChargesFailing
+        exp_alerts:
+          - exp_labels:
+              severity: "page"
+              area: "store"
+              alertname: "BillingChargesFailing"
+            exp_annotations:
+              summary: "Subscription charges are failing"
+              description: "At least two of Bhava's own Razorpay calls failed in the last hour and they are more than 30% of all such calls. Renewals may not be collected."
+              runbook: "deploy/prod/monitoring/README.md#billingchargesfailing"
+      - eval_time: 90m
+        alertname: BillingChargesFailing
+        exp_alerts: []
+  - name: StoreErrorRate fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "http_requests_total{method=\"GET\",group=\"store\",status=\"200\"}"
+        values: "0 120+120x59"
+      - series: "http_requests_total{method=\"GET\",group=\"store\",status=\"500\"}"
+        values: "0 30+30x19 600+0x39"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: StoreErrorRate
+        exp_alerts:
+          - exp_labels:
+              group: "store"
+              severity: "page"
+              area: "store"
+              alertname: "StoreErrorRate"
+            exp_annotations:
+              summary: "A part of the site is answering with errors"
+              description: "More than 5% of the requests of a route class were answered with a 5xx for 5 minutes."
+              runbook: "deploy/prod/monitoring/README.md#storeerrorrate"
+      - eval_time: 40m
+        alertname: StoreErrorRate
+        exp_alerts: []

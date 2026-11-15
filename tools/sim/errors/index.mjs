@@ -13,7 +13,7 @@
  *   const tracker = createErrorTracker({ token: 'sim-errors-token' });
  *   await tracker.start();           // ERROR_SINK=http  ERROR_SINK_URL=`${tracker.url}/events`
  */
-import { SimError, createSim } from '../base.mjs';
+import { SimError, createSim, reply } from '../base.mjs';
 
 const ALLOWED = new Set(['time', 'service', 'release', 'event', 'errorClass', 'code', 'frames', 'requestId', 'tenantId', 'route']);
 
@@ -36,7 +36,7 @@ export function createErrorTracker({ token = '' } = {}) {
         if (extra.length) throw new SimError(422, { error: { code: 'invalid', message: `Fields outside the contract: ${extra.join(', ')}` } });
         const id = `err_sim${++seq}`;
         events.push({ id, ...body });
-        return { id };
+        return reply(202, { id });
       });
     },
     controls: (on) => {

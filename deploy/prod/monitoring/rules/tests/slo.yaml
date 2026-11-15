@@ -1,0 +1,95 @@
+# Unit tests for slo.yaml (promtool test rules): each alert fires on its bad input and is gone after recovery.
+rule_files:
+  - ../slo.yaml
+evaluation_interval: 1m
+tests:
+  - name: UptimeBurnFast fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "probe_success{probe=\"webhook\",instance=\"probe-1\"}"
+        values: "1+0x4 0+0x69 1+0x79"
+      - series: "probe_success{probe=\"shopper_page\",instance=\"probe-1\"}"
+        values: "1+0x154"
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: UptimeBurnFast
+        exp_alerts:
+          - exp_labels:
+              probe: "webhook"
+              severity: "page"
+              area: "slo"
+              alertname: "UptimeBurnFast"
+            exp_annotations:
+              summary: "The monthly uptime budget is burning very fast"
+              description: "The outside probe of webhooks and shopper pages failed so often over 1h (and still over 5m) that a 14.4x burn rate would use the 99.5% monthly objective up early."
+              runbook: "deploy/prod/monitoring/README.md#uptimeburnfast"
+      - eval_time: 130m
+        alertname: UptimeBurnFast
+        exp_alerts: []
+  - name: UptimeBurnSlow fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "probe_success{probe=\"webhook\",instance=\"probe-1\"}"
+        values: "1+0x4 0+0x139 1+0x599"
+      - series: "probe_success{probe=\"shopper_page\",instance=\"probe-1\"}"
+        values: "1+0x744"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: UptimeBurnSlow
+        exp_alerts:
+          - exp_labels:
+              probe: "webhook"
+              severity: "page"
+              area: "slo"
+              alertname: "UptimeBurnSlow"
+            exp_annotations:
+              summary: "The monthly uptime budget is burning fast"
+              description: "The outside probe of webhooks and shopper pages failed so often over 6h (and still over 30m) that a 6x burn rate would use the 99.5% monthly objective up early."
+              runbook: "deploy/prod/monitoring/README.md#uptimeburnslow"
+      - eval_time: 560m
+        alertname: UptimeBurnSlow
+        exp_alerts: []
+  - name: UptimeBurnTicket fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "probe_success{probe=\"webhook\",instance=\"probe-1\"}"
+        values: "1+0x59 0+0x419 1+0x4999"
+      - series: "probe_success{probe=\"shopper_page\",instance=\"probe-1\"}"
+        values: "1+0x5479"
+    alert_rule_test:
+      - eval_time: 600m
+        alertname: UptimeBurnTicket
+        exp_alerts:
+          - exp_labels:
+              probe: "webhook"
+              severity: "ticket"
+              area: "slo"
+              alertname: "UptimeBurnTicket"
+            exp_annotations:
+              summary: "The monthly uptime budget is slowly burning"
+              description: "The outside probe of webhooks and shopper pages failed so often over 3d (and still over 6h) that a 1x burn rate would use the 99.5% monthly objective up early."
+              runbook: "deploy/prod/monitoring/README.md#uptimeburnticket"
+      - eval_time: 5000m
+        alertname: UptimeBurnTicket
+        exp_alerts: []
+  - name: ProbeDown fires on bad input and clears on recovery
+    interval: 1m
+    input_series:
+      - series: "probe_success{probe=\"shopper_page\",instance=\"probe-1\"}"
+        values: "1+0x4 0+0x14 1+0x39"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ProbeDown
+        exp_alerts:
+          - exp_labels:
+              probe: "shopper_page"
+              severity: "page"
+              area: "slo"
+              alertname: "ProbeDown"
+            exp_annotations:
+              summary: "The outside probe fails everywhere"
+              description: "A probed address fails from every probe location for 5 minutes: it is down for everyone."
+              runbook: "deploy/prod/monitoring/README.md#probedown"
+      - eval_time: 30m
+        alertname: ProbeDown
+        exp_alerts: []

@@ -1,0 +1,47 @@
+# The job queue. Generated once from the track's spec and edited by hand since; every alert has a case in tests/queue.yaml
+# that fires it on bad input and clears it on recovery. Metrics are the catalogue's (src/contracts/metrics.js).
+# Annotations are plain text on purpose: no template reads a label or a value, so nothing in an alert can name a person.
+groups:
+  - name: bhava-queue
+    interval: 1m
+    rules:
+      - alert: QueueGrowing
+        expr: sum by (queue) (queue_jobs{status="queued"}) > 500 and sum by (queue) (queue_jobs{status="queued"}) > sum by (queue) (queue_jobs{status="queued"} offset 15m)
+        for: 15m
+        labels:
+          severity: ticket
+          area: queue
+        annotations:
+          summary: "A queue is getting longer"
+          description: "More than 500 jobs are waiting in a queue and there are more than 15 minutes ago, for 15 minutes. Workers are not keeping up."
+          runbook: "deploy/prod/monitoring/README.md#queuegrowing"
+      - alert: QueueOldestJobTooOld
+        expr: max by (queue) (queue_oldest_job_seconds) > 600
+        for: 5m
+        labels:
+          severity: ticket
+          area: queue
+        annotations:
+          summary: "A job has waited more than 10 minutes"
+          description: "The oldest waiting job in a queue is more than 10 minutes old for 5 minutes. Messages and webhooks queued behind it are delayed."
+          runbook: "deploy/prod/monitoring/README.md#queueoldestjobtooold"
+      - alert: QueueStuck
+        expr: max by (queue) (queue_oldest_job_seconds) > 1800
+        for: 5m
+        labels:
+          severity: page
+          area: queue
+        annotations:
+          summary: "A queue has stopped moving"
+          description: "The oldest waiting job in a queue is more than 30 minutes old for 5 minutes. The worker is probably down or wedged."
+          runbook: "deploy/prod/monitoring/README.md#queuestuck"
+      - alert: QueueJobsFailing
+        expr: sum by (queue) (rate(job_runs_total{result="failed"}[10m])) / sum by (queue) (rate(job_runs_total[10m])) > 0.2
+        for: 10m
+        labels:
+          severity: ticket
+          area: queue
+        annotations:
+          summary: "Jobs of a queue are failing"
+          description: "More than 20% of the runs of a queue failed for 10 minutes."
+          runbook: "deploy/prod/monitoring/README.md#queuejobsfailing"

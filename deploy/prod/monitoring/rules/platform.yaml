@@ -1,0 +1,117 @@
+# Database, backups, runtime and certificates. Generated once from the track's spec and edited by hand since; every alert has a case in tests/platform.yaml
+# that fires it on bad input and clears it on recovery. Metrics are the catalogue's (src/contracts/metrics.js).
+# Annotations are plain text on purpose: no template reads a label or a value, so nothing in an alert can name a person.
+groups:
+  - name: bhava-platform
+    interval: 1m
+    rules:
+      - alert: BackupTooOld
+        expr: backup_age_seconds > 93600
+        for: 10m
+        labels:
+          severity: page
+          area: database
+        annotations:
+          summary: "The last backup is more than 26 hours old"
+          description: "No backup has finished for more than 26 hours (the nightly one is due every 24)."
+          runbook: "deploy/prod/monitoring/README.md#backuptooold"
+      - alert: BackupNotReporting
+        expr: absent(backup_age_seconds)
+        for: 26h
+        labels:
+          severity: ticket
+          area: database
+        annotations:
+          summary: "No backup has been reported for 26 hours"
+          description: "The worker has reported no backup at all for 26 hours: backups may be switched off (BACKUP_STORAGE_DRIVER) or the worker is not running."
+          runbook: "deploy/prod/monitoring/README.md#backupnotreporting"
+      - alert: DatabaseConnectionsNearLimit
+        expr: max(sum by (instance) (db_pool_connections{state=~"used|idle"})) > 85
+        for: 10m
+        labels:
+          severity: ticket
+          area: database
+        annotations:
+          summary: "Database connections are near the server's limit"
+          description: "The connections open to the database passed 85, close to the default limit of 100. Raise the limit, shrink the pools or add a pooler before new connections are refused. Adjust the number to 85% of max_connections."
+          runbook: "deploy/prod/monitoring/README.md#databaseconnectionsnearlimit"
+      - alert: DatabaseConnectionsWaiting
+        expr: max by (pool) (db_pool_connections{state="waiting"}) > 0
+        for: 5m
+        labels:
+          severity: ticket
+          area: database
+        annotations:
+          summary: "Requests are waiting for a database connection"
+          description: "A pool has had requests waiting for a free connection for 5 minutes."
+          runbook: "deploy/prod/monitoring/README.md#databaseconnectionswaiting"
+      - alert: MemoryNearLimit
+        expr: max by (pod) (container_memory_working_set_bytes{container=~"web|worker"} / container_spec_memory_limit_bytes{container=~"web|worker"}) > 0.9
+        for: 10m
+        labels:
+          severity: ticket
+          area: runtime
+        annotations:
+          summary: "A pod is using more than 90% of its memory limit"
+          description: "A web or worker pod has used more than 90% of its memory limit for 10 minutes and will be killed when it reaches it. The numbers come from the cluster's container metrics, not from the application."
+          runbook: "deploy/prod/monitoring/README.md#memorynearlimit"
+      - alert: ErrorReportsSpiking
+        expr: sum by (kind) (rate(errors_reported_total[10m])) > 1
+        for: 10m
+        labels:
+          severity: ticket
+          area: runtime
+        annotations:
+          summary: "One kind of error is being reported more than once a second"
+          description: "The same kind of error was reported at more than one a second for 10 minutes."
+          runbook: "deploy/prod/monitoring/README.md#errorreportsspiking"
+      - alert: CertificateExpiringSoon
+        expr: probe_ssl_earliest_cert_expiry - time() < 14 * 86400
+        for: 1h
+        labels:
+          severity: ticket
+          area: runtime
+        annotations:
+          summary: "A certificate expires in less than 14 days"
+          description: "The certificate served on a probed address expires in under 14 days and has not been renewed."
+          runbook: "deploy/prod/monitoring/README.md#certificateexpiringsoon"
+      - alert: CertificateExpiryImminent
+        expr: probe_ssl_earliest_cert_expiry - time() < 3 * 86400
+        for: 5m
+        labels:
+          severity: page
+          area: runtime
+        annotations:
+          summary: "A certificate expires in less than 3 days"
+          description: "The certificate served on a probed address expires in under 3 days. Renew it now."
+          runbook: "deploy/prod/monitoring/README.md#certificateexpiryimminent"
+      - alert: SecretRefreshFailing
+        expr: sum by (instance) (increase(secret_refresh_failures_total[15m])) > 0
+        for: 10m
+        labels:
+          severity: ticket
+          area: runtime
+        annotations:
+          summary: "The secret source cannot be refreshed"
+          description: "A process failed to refresh its secrets from the secret source for 10 minutes. It keeps the last good values, but a rotated key will not arrive."
+          runbook: "deploy/prod/monitoring/README.md#secretrefreshfailing"
+      - alert: ScrapeTargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: page
+          area: runtime
+        annotations:
+          summary: "A metrics target cannot be scraped"
+          description: "Prometheus could not scrape a target for 5 minutes: the process is down or its metrics token is wrong."
+          runbook: "deploy/prod/monitoring/README.md#scrapetargetdown"
+      - alert: ProcessStillDraining
+        expr: max by (service) (process_draining) == 1
+        for: 15m
+        labels:
+          severity: ticket
+          area: runtime
+        annotations:
+          summary: "A process has been shutting down for 15 minutes"
+          description: "A process reports it is draining for 15 minutes, which is longer than a deploy should take."
+          runbook: "deploy/prod/monitoring/README.md#processstilldraining"

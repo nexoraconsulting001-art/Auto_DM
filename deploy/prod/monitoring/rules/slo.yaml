@@ -1,0 +1,47 @@
+# The 99.5% uptime objective. Generated once from the track's spec and edited by hand since; every alert has a case in tests/slo.yaml
+# that fires it on bad input and clears it on recovery. Metrics are the catalogue's (src/contracts/metrics.js).
+# Annotations are plain text on purpose: no template reads a label or a value, so nothing in an alert can name a person.
+groups:
+  - name: bhava-slo
+    interval: 1m
+    rules:
+      - alert: UptimeBurnFast
+        expr: (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[1h]))) > 0.072 and (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[5m]))) > 0.072
+        for: 2m
+        labels:
+          severity: page
+          area: slo
+        annotations:
+          summary: "The monthly uptime budget is burning very fast"
+          description: "The outside probe of webhooks and shopper pages failed so often over 1h (and still over 5m) that a 14.4x burn rate would use the 99.5% monthly objective up early."
+          runbook: "deploy/prod/monitoring/README.md#uptimeburnfast"
+      - alert: UptimeBurnSlow
+        expr: (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[6h]))) > 0.03 and (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[30m]))) > 0.03
+        for: 15m
+        labels:
+          severity: page
+          area: slo
+        annotations:
+          summary: "The monthly uptime budget is burning fast"
+          description: "The outside probe of webhooks and shopper pages failed so often over 6h (and still over 30m) that a 6x burn rate would use the 99.5% monthly objective up early."
+          runbook: "deploy/prod/monitoring/README.md#uptimeburnslow"
+      - alert: UptimeBurnTicket
+        expr: (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[3d]))) > 0.005 and (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[6h]))) > 0.005
+        for: 1h
+        labels:
+          severity: ticket
+          area: slo
+        annotations:
+          summary: "The monthly uptime budget is slowly burning"
+          description: "The outside probe of webhooks and shopper pages failed so often over 3d (and still over 6h) that a 1x burn rate would use the 99.5% monthly objective up early."
+          runbook: "deploy/prod/monitoring/README.md#uptimeburnticket"
+      - alert: ProbeDown
+        expr: avg by (probe) (probe_success{probe=~"webhook|shopper_page"}) == 0
+        for: 5m
+        labels:
+          severity: page
+          area: slo
+        annotations:
+          summary: "The outside probe fails everywhere"
+          description: "A probed address fails from every probe location for 5 minutes: it is down for everyone."
+          runbook: "deploy/prod/monitoring/README.md#probedown"
