@@ -1,27 +1,29 @@
 /**
  * The job's own server for the showcase (Phase 8, Q-11): both sample businesses loaded from their seed files into a new
- * built-in database with `scripts/showcase.js`'s own loader, every outside service a simulator from tools/sim, and then the
- * real server on that database. It writes what the flows need to --out as NAME=value lines. Nothing here names a business:
- * they come from seed/showcase/manifest.json, and a flow reaches one by its place in that list.
+ * built-in database with `scripts/showcase.js`'s own loader, the app and its worker running on that database with every
+ * outside service a simulator from tools/sim, and a front door on the port the emulator or simulator reaches. It writes what
+ * the flows need to --out as NAME=value lines. Nothing here names a business: they come from seed/showcase/manifest.json,
+ * and a flow reaches one by its place in that list.
  *
  *   node tools/showcase-build/server.mjs --mode export --brands <folder>
  *       load both businesses, write <folder>/<key>/brand.json (Android) and <key>/brand-ios.json (iOS simulator), stop.
  *   node tools/showcase-build/server.mjs --mode shopper --key <key> --out <file> [--brands <folder>]
- *       the server for one business's shopper app: the emulator's address answers as that business. With --brands the
- *       business id in that business's brand file must be the one loaded here, or this refuses to start.
+ *       the server for one business's shopper app: the front door answers as that business. With --brands the business id
+ *       in each brand file must be the one loaded here, or this refuses to start (the build sends it on every request).
  *   node tools/showcase-build/server.mjs --mode owner --out <file>
- *       the server for the owner app: its sign-in address is the platform's, one account belongs to every business, and
- *       each business has one cash on delivery order waiting.
+ *       the server for the owner app: the front door answers as the sellers' sign-in address, one account belongs to every
+ *       business, and each business has one cash on delivery order waiting.
  *
- *   PORT=3000 APP_HOST=10.0.2.2 SIM_BASE_PORT=9101 (SIM_BASE_PORT=0 takes any free ports)
+ *   PORT=3000 HOST=127.0.0.1 APP_HOST=10.0.2.2
  *
- * Refuses NODE_ENV=production, DATABASE_URL, and any provider address that is not a simulator. No secret: every key is made
- * up for the run.
+ * The businesses are loaded on an in-memory database inside this process: a database in a folder is far slower to load the
+ * catalogue into, and a sample server is thrown away when the job ends anyway. The front door (a plain forwarder) is the
+ * only thing on PORT; it names the business the request is for, as a domain would. Refuses NODE_ENV=production,
+ * DATABASE_URL, and any provider address that is not a simulator. No secret: every key is made up for the run.
  */
-import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SHOPPER } from '../../apps/shopper/.maestro/support/seed.mjs';
@@ -29,24 +31,13 @@ import { OPERATOR, ShowcaseBuildError, envLines, iosBrandFile, orderNumber, owne
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const load = (rel) => import(pathToFileURL(path.join(ROOT, rel)).href);
-const GATEWAY = Object.freeze({ keyId: 'rzp_test_sim', keySecret: 'sim-key-secret', webhookSecret: 'sim-webhook-secret' });
 const ADDRESS = Object.freeze({ name: 'Test Shopper', phone: '+919800000121', line1: '1 Test Lane', line2: '', landmark: '', city: 'Pune', stateCode: '27', pincode: '411001' });
-
-async function healthy(url, { tries = 240, every = 500 } = {}) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      if ((await fetch(url)).ok) return true;
-    } catch {
-      // not up yet
-    }
-    await new Promise((resolve) => setTimeout(resolve, every));
-  }
-  return false;
-}
+/** The platform's own sender number, for the sellers' sign-in codes: a simulator's number and the token its default account takes. */
+const PLATFORM_SENDER = Object.freeze({ platformWhatsappPhoneId: 'sim-platform-number', platformWhatsappToken: 'sim-whatsapp-token' });
 
 /** A product a shopper can buy straight away: active, in stock, with no option to choose first. */
 async function plainProduct(db, tenantId) {
-  const [row] = await db.query(
+  const [row] = await db.platform.query(
     `SELECT p.id, p.slug, p.name, p.price_paise FROM products p
       WHERE p.tenant_id = $1 AND p.active AND p.in_stock AND (p.stock IS NULL OR p.stock > 0)
         AND NOT EXISTS (SELECT 1 FROM product_options o WHERE o.tenant_id = p.tenant_id AND o.product_id = p.id)
@@ -55,37 +46,6 @@ async function plainProduct(db, tenantId) {
   );
   if (!row) throw new ShowcaseBuildError(`Business ${tenantId} has no product a shopper can buy without choosing an option`);
   return row;
-}
-
-/** A linked account at the payment simulator with KYC passed: online payment is on only for a verified one. */
-async function linkedAccount({ url, keyId, keySecret }, label) {
-  const basic = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
-  const made = await fetch(`${url}/v2/accounts`, {
-    method: 'POST',
-    headers: { authorization: `Basic ${basic}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'sim@showcase.test', phone: '9876500000', legal_business_name: label, reference_id: `showcase-${label}` }),
-  });
-  if (!made.ok) throw new ShowcaseBuildError(`The payment simulator refused the linked account (${made.status})`);
-  const { id } = await made.json();
-  const kyc = await fetch(`${url}/__sim/accounts/kyc`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, status: 'activated' }) });
-  if (!kyc.ok) throw new ShowcaseBuildError(`The payment simulator would not pass KYC (${kyc.status})`);
-  return id;
-}
-
-/** Everything a shopper app needs on the server beyond the seed: cash on delivery and online payment on, and the store's own WhatsApp number (the codes go out from it). */
-async function prepareShopperStore(db, { tenant, secrets, whatsappToken, gateway }) {
-  const linked = await linkedAccount(gateway, tenant.slug);
-  await db.query(
-    `INSERT INTO payment_settings (tenant_id, mode, cod, linked_account_id, kyc_status) VALUES ($1, 'managed', true, $2, 'verified')
-     ON CONFLICT (tenant_id) DO UPDATE SET mode = 'managed', cod = true, linked_account_id = EXCLUDED.linked_account_id, kyc_status = 'verified'`,
-    [tenant.id, linked],
-  );
-  await db.query(
-    'INSERT INTO whatsapp_accounts (tenant_id, waba_id, phone_number_id, access_token_enc) VALUES ($1, $2, $3, $4) ON CONFLICT (tenant_id) DO UPDATE SET access_token_enc = EXCLUDED.access_token_enc, status = \'active\'',
-    [tenant.id, `waba-${tenant.id}`, `pn-${tenant.id}`, secrets.encrypt(whatsappToken)],
-  );
-  const [have] = await db.query("SELECT 1 AS one FROM whatsapp_templates WHERE tenant_id = $1 AND purpose = 'otp' AND status = 'approved'", [tenant.id]);
-  if (!have) await db.query("INSERT INTO whatsapp_templates (tenant_id, purpose, category, name, status) VALUES ($1, 'otp', 'authentication', 'login_code', 'approved')", [tenant.id]);
 }
 
 /** One cash on delivery order, made the way checkout makes one: inserted, then moved to new with cash due through the order state machine. */
@@ -105,6 +65,14 @@ async function codOrder(db, { tenant, product, number, changeOrder }) {
   });
 }
 
+/** The business id each build carries must be the one this server loaded the business as, or the app's requests are refused. Throws naming the key only. */
+export function assertBrandIds(loaded, brandsDir) {
+  for (const business of loaded) {
+    const brand = JSON.parse(fs.readFileSync(path.join(brandsDir, business.key, 'brand.json'), 'utf8'));
+    if (brand.tenantId !== business.tenantId) throw new ShowcaseBuildError(`The brand file of "${business.key}" is for business ${brand.tenantId}, but this server loaded it as ${business.tenantId}`);
+  }
+}
+
 /** Writes every business's brand files under <folder>/<key>/. Answers [{ key, file, iosFile }]. */
 export async function writeBrandFiles({ world, loaded, folder }) {
   const { exportBrands } = await load('scripts/showcase.js');
@@ -117,65 +85,75 @@ export async function writeBrandFiles({ world, loaded, folder }) {
 }
 
 /**
- * Starts the world. Answers { env, port, brands, close }: `env` is what the flows are told, `brands` the brand files written
- * when `brandsOut` is given. mode is 'export' (no server started), 'shopper' (needs `key`) or 'owner'.
+ * The front door: every request on `listen` goes to the app with its Host replaced by `host`, which is how the app tells which
+ * business (or the sellers' sign-in address) a request is for. An emulator reaches the machine at 10.0.2.2, a name no business owns.
  */
-export async function startShowcaseServer({ mode, key = '', brandsDir = '', brandsOut = '', env = process.env, stdio = 'inherit' } = {}) {
+export function frontDoor({ target, host, listen }) {
+  const server = http.createServer((req, res) => {
+    const headers = { ...req.headers, host, 'x-forwarded-host': host };
+    const forward = http.request({ host: '127.0.0.1', port: target, path: req.url, method: req.method, headers }, (answer) => {
+      res.writeHead(answer.statusCode, answer.headers);
+      answer.pipe(res);
+    });
+    forward.on('error', () => {
+      if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' });
+      res.end('The showcase app did not answer.');
+    });
+    req.pipe(forward);
+  });
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(listen.port, listen.host, () => resolve(server));
+  });
+}
+
+/**
+ * Starts the world. Answers { env, port, brands, close }: `env` is what the flows are told, `brands` the brand files written
+ * when `brandsOut` is given; `manifest` is another manifest file than the committed one (tests use a small one). mode is
+ * 'export' (nothing listens), 'shopper' (needs `key`) or 'owner'.
+ */
+export async function startShowcaseServer({ mode, key = '', brandsDir = '', brandsOut = '', manifest = '', env = process.env } = {}) {
   if (!['export', 'shopper', 'owner'].includes(mode)) throw new ShowcaseBuildError('The mode is export, shopper or owner');
   if (String(env.NODE_ENV).toLowerCase() === 'production') throw new ShowcaseBuildError('This starts simulators: it never runs in production');
   if (env.DATABASE_URL) throw new ShowcaseBuildError('DATABASE_URL is set: the showcase runs only on a built-in database');
   if (mode === 'shopper' && !key) throw new ShowcaseBuildError('The shopper server needs --key: the business whose app is under test');
   const port = Number(env.PORT) || 3000;
+  const listenHost = env.HOST || '127.0.0.1';
   const appHost = env.APP_HOST || '10.0.2.2';
-  const simPort = env.SIM_BASE_PORT === '0' ? 0 : Number(env.SIM_BASE_PORT) || 9101;
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'showcase-'));
-  const removeData = () => fs.rmSync(dataDir, { recursive: true, force: true });
 
-  let sims = null;
-  let server = null;
   let db = null;
+  let world = null;
+  let door = null;
+  const close = async () => {
+    await new Promise((resolve) => { if (door) { door.closeAllConnections(); door.close(resolve); } else resolve(); });
+    await world?.close();
+    await db?.close();
+  };
   try {
-    const [{ startAll }, { serverEnv }, { openDb }, { createRepos }, { createSecrets }, { withTenant }, { changeOrder }, showcase, { openShowcaseWorld }] = await Promise.all([
-      load('tools/sim/index.mjs'), load('tools/app-e2e-server.mjs'), load('src/db/index.js'), load('src/repos/index.js'), load('src/platform/secrets.js'),
-      load('src/tenancy.js'), load('src/modules/orders/state.js'), load('scripts/showcase.js'), load('tools/sim/activity/world.mjs'),
+    const [{ openDb }, { withTenant }, { changeOrder }, showcase, { openShowcaseWorld }, { createRepos }, { createSecrets }] = await Promise.all([
+      load('src/db/index.js'), load('src/tenancy.js'), load('src/modules/orders/state.js'), load('scripts/showcase.js'), load('tools/sim/activity/world.mjs'),
+      load('src/repos/index.js'), load('src/platform/secrets.js'),
     ]);
-    const dataKey = crypto.randomBytes(32).toString('base64');
-    const whatsappToken = crypto.randomBytes(24).toString('hex');
-    const simEnv = { ...env, NODE_ENV: 'development' };
-    showcase.assertShowcaseAllowed(simEnv);
-    sims = await startAll({ basePort: simPort, env: simEnv, options: { whatsapp: { token: whatsappToken }, razorpay: GATEWAY } });
-
-    db = await openDb({ dataDir, migrate: true });
-    const secrets = createSecrets({ dataKey });
-    const repos = createRepos(db, { secrets });
-    const businesses = showcase.loadShowcase({ plantSeed: env.SHOWCASE_PLANT_SEED || '' });
-    const world = await openShowcaseWorld({ db, env: { ...simEnv, DATA_KEY: dataKey } });
-    let loaded;
-    let brands = [];
-    try {
-      loaded = await showcase.seedShowcase({ world, businesses });
-      if (brandsOut) brands = await writeBrandFiles({ world, loaded, folder: brandsOut });
-    } finally {
-      await world.close();
+    showcase.assertShowcaseAllowed(env);
+    const businesses = showcase.loadShowcase({ plantSeed: env.SHOWCASE_PLANT_SEED || '', ...(manifest ? { manifest } : {}) });
+    db = await openDb({ migrate: true });
+    world = await openShowcaseWorld({ db, env, overrides: PLATFORM_SENDER });
+    const loaded = await showcase.seedShowcase({ world, businesses });
+    const brands = brandsOut ? await writeBrandFiles({ world, loaded, folder: brandsOut }) : [];
+    if (brandsDir) assertBrandIds(loaded, brandsDir);
+    if (mode === 'export') {
+      await close();
+      return { env: {}, port: 0, brands, close: async () => {} };
     }
 
-    // The business ids the builds carry must be the ones loaded here.
-    if (brandsDir) {
-      for (const business of loaded) {
-        const file = path.join(brandsDir, business.key, 'brand.json');
-        const brand = JSON.parse(fs.readFileSync(file, 'utf8'));
-        if (brand.tenantId !== business.tenantId) throw new ShowcaseBuildError(`The brand file of "${business.key}" is for business ${brand.tenantId}, but this server loaded it as ${business.tenantId}`);
-      }
-    }
-
+    const repos = createRepos(db, { secrets: createSecrets({ dataKey: world.config.dataKey }) });
     const seeded = [];
     for (const [i, business] of loaded.entries()) {
       const tenant = await repos.tenants.getBySlug(business.slug);
       const product = await plainProduct(db, tenant.id);
       const entry = { key: business.key, slug: business.slug, tenantId: Number(tenant.id), name: tenant.name, product, order: null };
-      if (mode === 'shopper' && business.key === key) {
-        await prepareShopperStore(db, { tenant, secrets, whatsappToken, gateway: { url: sims.urls.razorpay, ...GATEWAY } });
-      }
+      // The seed leaves cash on delivery off; the flows place a cash on delivery order, so the business under test takes it.
+      if (mode === 'shopper' && business.key === key) await db.platform.query('UPDATE payment_settings SET cod = true WHERE tenant_id = $1', [tenant.id]);
       if (mode === 'owner') {
         await withTenant(tenant, async () => {
           entry.order = await codOrder(db, { tenant, product, number: orderNumber(i + 1), changeOrder });
@@ -186,60 +164,24 @@ export async function startShowcaseServer({ mode, key = '', brandsDir = '', bran
     }
     const chosen = seeded.find((entry) => entry.key === key);
     if (mode === 'shopper' && !chosen) throw new ShowcaseBuildError(`The manifest has no business with the key "${key}"`);
-    await db.close();
-    db = null;
 
-    if (mode === 'export') {
-      await sims.close();
-      removeData();
-      return { env: {}, port: 0, brands, close: async () => {} };
-    }
-
-    const settings = {
-      ...serverEnv({ urls: sims.urls, env }),
-      PORT: String(port),
-      PUBLIC_BASE_URL: `http://${appHost}:${port}`,
-      DATA_DIR: dataDir,
-      DATA_KEY: dataKey,
-      PLATFORM_WHATSAPP_TOKEN: whatsappToken,
-      ...(mode === 'shopper'
-        ? { PLATFORM_APP_HOST: 'sellers.invalid', DEFAULT_TENANT: chosen.slug, RAZORPAY_KEY_ID: GATEWAY.keyId, RAZORPAY_KEY_SECRET: GATEWAY.keySecret, RAZORPAY_WEBHOOK_SECRET: GATEWAY.webhookSecret }
-        : { PLATFORM_APP_HOST: appHost }),
-    };
-    server = spawn(process.execPath, ['src/server.js'], { cwd: ROOT, env: settings, stdio });
-    const exited = new Promise((resolve) => server.once('exit', resolve));
-    const up = await Promise.race([healthy(`http://127.0.0.1:${port}/healthz`), exited.then(() => false)]);
-    if (!up) throw new ShowcaseBuildError('The server did not come up');
-    if (mode === 'shopper') {
-      // The payment simulator sends the gateway's signed webhooks to this server, as Razorpay would.
-      const hook = await fetch(`${sims.urls.razorpay}/__sim/webhooks/url`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: `http://127.0.0.1:${port}/webhooks/razorpay` }) });
-      if (!hook.ok) throw new ShowcaseBuildError('The payment simulator would not take the webhook address');
-    }
-    const close = async () => {
-      if (server.exitCode === null) {
-        server.kill();
-        await exited;
-      }
-      await sims.close();
-      removeData();
-    };
-    const apiUrl = `http://127.0.0.1:${port}`;
+    const domain = world.config.platformDomain;
+    door = await frontDoor({ target: world.port, host: mode === 'shopper' ? `${chosen.slug}.${domain}` : `app.${domain}`, listen: { port, host: listenHost } });
+    const apiUrl = `http://127.0.0.1:${door.address().port}`;
     const flows = mode === 'owner'
-      ? ownerFlowEnv(seeded, { apiUrl, whatsappUrl: sims.urls.whatsapp, appHost })
-      : shopperFlowEnv(chosen, loaded.find((entry) => entry.key === key), { apiUrl, appHost, simUrls: sims.urls, brandsDir });
-    return { env: flows, port, brands, close };
+      ? ownerFlowEnv(seeded, { apiUrl, whatsappUrl: world.sims.whatsapp.url, appHost })
+      : shopperFlowEnv(chosen, { apiUrl, appHost, simUrls: { whatsapp: world.sims.whatsapp.url, razorpay: world.sims.razorpay.url }, brandsDir: brandsDir || brandsOut });
+    return { env: flows, port: door.address().port, brands, seeded, world, close };
   } catch (error) {
-    if (server && server.exitCode === null) server.kill();
-    await db?.close().catch(() => {});
-    await sims?.close();
-    removeData();
+    await close().catch(() => {});
     throw error;
   }
 }
 
 /** What the shopper flows are told: the app's id and scheme from the business's own brand file when there is one, the product the seed made, local addresses. */
-export function shopperFlowEnv(chosen, loaded, { apiUrl, appHost, simUrls = {}, brandsDir = '' }) {
-  const brand = brandsDir ? JSON.parse(fs.readFileSync(path.join(brandsDir, chosen.key, 'brand.json'), 'utf8')) : null;
+export function shopperFlowEnv(chosen, { apiUrl, appHost, simUrls = {}, brandsDir = '' }) {
+  const file = brandsDir ? path.join(brandsDir, chosen.key, 'brand.json') : '';
+  const brand = file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
   return {
     APP_ID: brand?.android?.package ?? '',
     APP_NAME: brand?.name ?? chosen.name,
@@ -271,15 +213,12 @@ async function main() {
   const brands = option('--brands');
   const world = await startShowcaseServer({ mode, key: option('--key'), brandsOut: mode === 'export' ? path.resolve(brands) : '', brandsDir: mode !== 'export' && brands ? path.resolve(brands) : '' });
   for (const entry of world.brands) console.log(`brand file: ${path.relative(process.cwd(), entry.file)}`);
-  if (mode === 'export') return;
+  if (mode === 'export') process.exit(0);
   fs.writeFileSync(envFile, envLines(world.env));
   const stop = () => world.close().finally(() => process.exit(0));
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
-  // Started by a test with an IPC channel: when the test lets go, everything here stops too (Windows has no SIGTERM).
-  if (process.send) process.once('disconnect', stop);
   console.log(`showcase: ${mode} server ready on port ${world.port}`);
-  process.send?.({ ready: true, port: world.port });
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

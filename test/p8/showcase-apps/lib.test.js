@@ -50,6 +50,12 @@ test('Q-11 an APK with its own icon, name and colours and nothing of the other b
   assert.equal(deflated.ok, true);
 });
 
+test('Q-11 the colours may be in the embedded app config, which is where the running app reads them from', () => {
+  const config = JSON.stringify({ extra: { brand: { colors: brandOf(1).colors } } });
+  const result = verify(1, { without: ['assets/index.android.bundle'], add: [{ name: 'assets/app.config', data: config }] });
+  assert.deepEqual(result.problems, []);
+});
+
 test('Q-11 an APK without a launcher icon, or without the brand\'s colours, fails and says which', () => {
   assert.match(verify(1, { without: ['res/mipmap-hdpi/ic_launcher.png'] }).problems.join('\n'), /launcher icon/);
   const noColours = verify(1, { without: ['resources.arsc', 'assets/index.android.bundle'] });

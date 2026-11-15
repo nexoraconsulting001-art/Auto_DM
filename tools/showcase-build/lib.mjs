@@ -55,7 +55,7 @@ export function verifyApkBrand(entries, brand, { others = [] } = {}) {
   const launcher = entries.filter((entry) => /^res\/[^/]*(?:mipmap|drawable)[^/]*\/(?:ic_launcher|ic_launcher_foreground|ic_launcher_background)[^/]*\.(?:png|webp|xml)$/.test(entry.name));
   if (!launcher.length) problems.push('The APK has no launcher icon');
   const resources = entries.find((entry) => entry.name === 'resources.arsc');
-  const code = entries.filter((entry) => /^assets\/index\.android\.bundle$|^classes\d*\.dex$/.test(entry.name));
+  const code = entries.filter((entry) => /^assets\/(?:index\.android\.bundle|app\.config)$|^classes\d*\.dex$/.test(entry.name));
   const resourceBytes = resources ? resources.read() : null;
   const roles = { splashBackground: brand.splashBackground, ...Object.fromEntries(Object.entries(brand.colors ?? {}).map(([role, hex]) => [`colors.${role}`, hex])) };
   for (const [role, hex] of Object.entries(roles)) {

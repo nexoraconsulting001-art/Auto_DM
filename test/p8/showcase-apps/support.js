@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { inventedPerson } from '../../../src/contracts/seed.js';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
@@ -86,4 +87,38 @@ export function apkFiles(n, { without = [], add = [] } = {}) {
     { name: 'assets/index.android.bundle', data: Buffer.from(`const brand = "${brand.colors.primary}";`) },
   ].filter((file) => !without.includes(file.name));
   return [...files, ...add];
+}
+
+export const KEYS = ['first', 'second'];
+
+/** A manifest of two businesses derived from the committed plant seed, each with its own slug, Instagram account, owner, package and scheme. */
+export function smallManifest(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  // Four products, two of them with no option to choose, and one reel: the same shape as the committed seed, loaded in a fraction of the time.
+  const plants = JSON.parse(read('seed/showcase/plants.json'));
+  plants.products = [plants.products[0], plants.products[1], plants.products[9], plants.products[10]];
+  const used = new Set(plants.products.flatMap((product) => product.categories));
+  plants.categories = plants.categories.filter((category) => used.has(category.name));
+  fs.writeFileSync(path.join(dir, 'plants.json'), JSON.stringify(plants));
+  const names = plants.products.map((product) => product.name);
+  const source = JSON.parse(read('seed/showcase/plant-store.json'));
+  const labels = [['Small One', 'one', 'One'], ['Small Two', 'two', 'Two']];
+  KEYS.forEach((key, i) => {
+    const [name, word, short] = labels[i];
+    const seed = JSON.parse(JSON.stringify(source));
+    const person = inventedPerson(10 + i);
+    Object.assign(seed.business, { slug: `small-${word}`, name, legalName: `${name} (sample business)`, igUsername: person.igUsername, igUserId: person.igUserId });
+    Object.assign(seed.business.owner, { name: person.name, phone: person.phone, email: person.email });
+    Object.assign(seed.app, { appName: name, shortName: short, urlScheme: `small${word}`, androidPackage: `app.sample.small${word}`, supportEmail: `help@small-${word}.example` });
+    seed.settings = { ...seed.settings, store_name: name, support_email: `help@small-${word}.example`, support_whatsapp: person.phone.slice(1) };
+    seed.products = { from: 'file', file: 'plants.json', format: 'bhava' };
+    const reel = { ...seed.reels[0], igMediaId: `90002000000002${i}0`, categories: [], products: names, fill: 0 };
+    seed.reels = [reel];
+    seed.landingPages = [{ ...seed.landingPages[0], reel: reel.key, categories: [], products: names, fill: 0 }];
+    seed.automations = [{ ...seed.automations[0], reel: reel.key, link: { type: 'bhava_page', page: seed.landingPages[0].slug, url: '' } }];
+    fs.writeFileSync(path.join(dir, `${key}.json`), JSON.stringify(seed));
+  });
+  const manifest = path.join(dir, 'manifest.json');
+  fs.writeFileSync(manifest, JSON.stringify({ schema: 1, businesses: KEYS.map((key) => ({ key, file: `${key}.json` })) }));
+  return manifest;
 }

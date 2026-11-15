@@ -138,7 +138,7 @@ test('Q-11 every value a flow reads is one the job\'s server hands it, and every
   const { shopperFlowEnv } = await import('../../../tools/showcase-build/server.mjs');
   const { ownerFlowEnv } = await import('../../../tools/showcase-build/lib.mjs');
   const given = {
-    shopper: new Set(Object.keys(shopperFlowEnv({ key: 'k', name: 'n', tenantId: 1, product: { name: 'p', slug: 's' } }, {}, { apiUrl: 'x', appHost: 'y' }))),
+    shopper: new Set(Object.keys(shopperFlowEnv({ key: 'k', name: 'n', tenantId: 1, product: { name: 'p', slug: 's' } }, { apiUrl: 'x', appHost: 'y' }))),
     owner: new Set([...Object.keys(ownerFlowEnv([{ tenantId: 1, name: 'a', order: { id: 1, number: 'n' } }, { tenantId: 2, name: 'b', order: { id: 2, number: 'm' } }], { apiUrl: 'x', whatsappUrl: 'y', appHost: 'z' })), 'APP_ID']),
   };
   for (const kind of ['shopper', 'owner']) {
