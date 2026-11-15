@@ -84,7 +84,7 @@ export function codeIn(message) {
 
 // ---- the world ----------------------------------------------------------------------------------------------------------
 
-export async function openP5World({ overrides = {}, worker = true } = {}) {
+export async function openP5World({ overrides = {}, worker = true, signupMode = 'public' } = {}) {
   const push = createPush();
   const apple = createApple({ audience: APPLE_AUDIENCE });
   const sellerGoogle = createGoogle({ sellerClientId: SELLER_GOOGLE_CLIENT });
@@ -127,6 +127,9 @@ export async function openP5World({ overrides = {}, worker = true } = {}) {
     await Promise.all(sims.map((s) => s.close()));
     throw err;
   }
+  // F-109 (a first sign-in gets a working Free business) holds while sign-up is open (PRD 5.20, auth-2). These scenarios
+  // run on a launched platform, so sign-up is public unless a suite asks for the database's own default (null).
+  if (signupMode) await world.sql('UPDATE signup_settings SET mode = $1', [signupMode]);
   const closeP4 = world.close;
   const extra = [];
   let service = null;

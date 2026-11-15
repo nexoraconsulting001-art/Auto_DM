@@ -66,8 +66,8 @@ export function signupApi(ctx) {
   }
 
   /**
-   * The empty Free business a first sign-in made for this person (F-109, the accounts module), which this sign-up becomes
-   * instead of making a second one: theirs alone, on Free, with no sign-up run, no Instagram account, no automation and no
+   * The empty Free business a first sign-in made for this person (F-109, the accounts module), held or not (auth-2),
+   * which this sign-up becomes instead of making a second one: theirs alone, on Free, with no sign-up run, no Instagram account, no automation and no
    * product. Null otherwise.
    */
   async function adoptable(t, personId) {
@@ -110,7 +110,7 @@ export function signupApi(ctx) {
           const adopted = Boolean(tenantId);
           let userId;
           if (adopted) {
-            await t.query('UPDATE tenants SET slug = $2, name = $3, account_type = $4 WHERE id = $1', [tenantId, slug, name.slice(0, 80), body.accountType]);
+            await t.query('UPDATE tenants SET slug = $2, name = $3, account_type = $4, signup_held = false WHERE id = $1', [tenantId, slug, name.slice(0, 80), body.accountType]);
             [{ id: userId }] = await t.query(`SELECT id FROM users WHERE tenant_id = $1 AND person_id = $2 AND role = 'owner' ORDER BY id LIMIT 1`, [tenantId, personId]);
           } else {
             [{ id: tenantId }] = await t.query(`INSERT INTO tenants (slug, name, plan, account_type) VALUES ($1, $2, 'free', $3) RETURNING id`, [slug, name.slice(0, 80), body.accountType]);

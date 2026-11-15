@@ -11,7 +11,7 @@ export const PLATFORM_HOST = 'admin.bhava.test';
 const linkOk = async () => new Response(null, { status: 200 });
 
 export async function world({ overrides = {} } = {}) {
-  const app = await accountsApp({ overrides: { linkCheckFetch: linkOk, ...overrides } });
+  const app = await accountsApp({ overrides: { linkCheckFetch: linkOk, ...overrides }, signupMode: null });
   const sql = (text, params) => app.db.platform.query(text, params);
   let consoleSession;
 

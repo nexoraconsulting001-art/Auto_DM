@@ -3,6 +3,7 @@ import { ApiError } from '../../contracts/api/index.js';
 import { isSameOrigin } from '../../auth.js';
 import { log } from '../../platform/log.js';
 import { currentTenant, withTenant } from '../../tenancy.js';
+import { signupStore } from '../signup/store.js';
 import { businessesOf, describeSession } from './describe.js';
 import { platformOf } from './shared.js';
 
@@ -12,7 +13,9 @@ import { platformOf } from './shared.js';
  *
  * Which account opens: on a business's own address, the person's account there and nothing else; elsewhere (the
  * sign-in host) the business asked for with `tenantId`, or the one they used last. A person with no seller account
- * anywhere gets a creator business on the Free plan (F-109), and the answer says `created`. Signing in again cancels a
+ * anywhere gets a creator business on the Free plan (F-109), and the answer says `created`, but only while sign-up is open
+ * (signup_settings: mode 'public' and the day's cap not reached). Otherwise that first row is held (auth-2): the person is
+ * signed in, and can only go on to sign up (an invite code, or later), never use a business. Signing in again cancels a
  * request to delete the account.
  *
  * Transport "bearer" is the owner app: a refresh family, a refresh token and a fresh access session. Transport
@@ -21,6 +24,16 @@ import { platformOf } from './shared.js';
  */
 export function sessionOpener(ctx, { people, tokens, devices }) {
   const db = () => platformOf(ctx.db);
+  let store;
+  const signup = () => (store ??= signupStore(ctx.db));
+
+  /** Whether sign-up would make a business for anyone right now (PRD 5.20): the same mode and cap signup.start checks. */
+  async function signupOpen() {
+    const settings = await signup().settings();
+    if (settings.mode !== 'public') return false;
+    if (settings.dailyCap === null || settings.dailyCap === undefined) return true;
+    return (await signup().madeToday()) < settings.dailyCap;
+  }
 
   async function chooseAccount({ req, personId, tenantId, review }) {
     if (review) return { account: review, created: false };
@@ -37,7 +50,7 @@ export function sessionOpener(ctx, { people, tokens, devices }) {
     }
     const [last] = await people.accounts(personId);
     if (last) return { account: last, created: false };
-    return { account: await people.makeFirstBusiness(personId), created: true };
+    return { account: await people.makeFirstBusiness(personId, { held: !(await signupOpen()) }), created: true };
   }
 
   /**
