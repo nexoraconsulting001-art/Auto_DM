@@ -10,34 +10,71 @@ permissions:
 
 # One lockfile serves the server and the apps. These jobs install only the server's workspaces, so React Native and
 # Expo never reach them or the image; the apps are built and tested in apps.yml.
+#
+# The heavy test jobs run as shards: tools/ci-shard.mjs splits the test files of `npm run test:ci` (and Playwright's
+# files) into whole-file shards, every file in exactly one. The first job checks that split and hands each job its
+# list of shards, so a shard can never be left out of a matrix. Each shard runs test:ci's own node flags on its files.
 env:
   SERVER_INSTALL: npm ci --workspace @bhava/console --workspace @bhava/api-client --include-workspace-root
 
 jobs:
-  test:
-    name: Tests (built-in database)
+  shards:
+    name: Test shards (coverage guard)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 5
+    outputs:
+      node: ${{ steps.plan.outputs.node }}
+      postgres: ${{ steps.plan.outputs.postgres }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Every test file is in exactly one shard; the counts
+        id: plan
+        run: node tools/ci-shard.mjs plan
+
+  test:
+    name: Tests (built-in database) [${{ matrix.shard }}/${{ matrix.of }}]
+    needs: shards
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.shards.outputs.node) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - name: Install the server, the console and the shared client (no app packages)
+        id: install
         run: ${{ env.SERVER_INSTALL }}
+      # The checks run once, in the first shard. A failing check fails that shard, but its tests still run.
       - name: No secrets or server addresses in tracked files
+        if: matrix.shard == 1
         run: npm run secret-scan
       - name: One structure for every business (PRD 5.18)
+        if: ${{ matrix.shard == 1 && !cancelled() && steps.install.outcome == 'success' }}
         run: npm run policy-check
       - name: The seller console builds
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run build:console
       - name: No React Native in the server's install
+        if: ${{ matrix.shard == 1 && !cancelled() && steps.install.outcome == 'success' }}
         run: test ! -e node_modules/react-native && test ! -e node_modules/expo
-      - run: npm run test:ci
+      - name: The shard's tests (npm run test:ci on this shard's files)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run test:shard -- ${{ matrix.suite }} ${{ matrix.shard }}/${{ matrix.of }}
 
   postgres:
-    name: Tests (real Postgres)
+    name: ${{ matrix.suite == 'e2e' && 'Browser tests (real Postgres)' || 'Tests (real Postgres)' }} [${{ matrix.shard }}/${{ matrix.of }}]
+    needs: shards
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.shards.outputs.postgres) }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -56,12 +93,25 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - name: Install the server, the console and the shared client (no app packages)
         run: ${{ env.SERVER_INSTALL }}
-      - run: npm run test:ci
+      # The browser tests (e2e/, which the gate runs too) need the console built and Chromium.
+      - name: The seller console builds (browser tests)
+        if: matrix.suite == 'e2e'
+        run: npm run build:console
+      - name: Install Chromium for Playwright (browser tests)
+        if: matrix.suite == 'e2e'
+        run: npx playwright install --with-deps chromium
+      - name: The shard's tests
+        run: npm run test:shard -- ${{ matrix.suite }} ${{ matrix.shard }}/${{ matrix.of }}
 
   production-profile:
-    name: All tests on production drivers
+    name: All tests on production drivers [${{ matrix.shard }}/${{ matrix.of }}]
+    needs: shards
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.shards.outputs.node) }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -103,18 +153,21 @@ jobs:
         with: { node-version: 22, cache: npm }
       - name: Install the server, the console and the shared client (no app packages)
         run: ${{ env.SERVER_INSTALL }}
+      # minio/minio is no longer on Docker Hub (MinIO stopped publishing images); this is Bitnami's last MinIO build.
       - name: Start MinIO (S3) and create the bucket
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioci -e MINIO_ROOT_PASSWORD=minioci-secret \
-            minio/minio:RELEASE.2024-12-18T13-15-44Z server /data
-          for i in $(seq 1 30); do curl -fs http://localhost:9000/minio/health/ready && break; sleep 1; done
+            bitnamilegacy/minio:2025.7.23-debian-12-r5
+          for i in $(seq 1 60); do curl -fs http://localhost:9000/minio/health/ready && break; sleep 1; done
+          curl -fs http://localhost:9000/minio/health/ready || { docker logs minio; exit 1; }
           node --input-type=module -e "
             import { S3Client, CreateBucketCommand } from '@aws-sdk/client-s3';
             const s3 = new S3Client({ region: 'us-east-1', endpoint: 'http://localhost:9000', forcePathStyle: true,
               credentials: { accessKeyId: 'minioci', secretAccessKey: 'minioci-secret' } });
             await s3.send(new CreateBucketCommand({ Bucket: 'bhava-ci' }));"
-      - run: npm run test:ci
+      - name: The shard's tests (npm run test:ci on this shard's files)
+        run: npm run test:shard -- ${{ matrix.suite }} ${{ matrix.shard }}/${{ matrix.of }}
 
   docker:
     name: Docker image builds
@@ -127,4 +180,4 @@ jobs:
         run: docker run --rm bhava:ci pg_dump --version
       - name: The QA compose file is valid
         working-directory: deploy/bhava
-        run: POSTGRES_PASSWORD=ci docker compose --env-file /dev/null config -q || (cp .env.example .env && POSTGRES_PASSWORD=ci docker compose config -q)
+        run: POSTGRES_PASSWORD=ci POSTGRES_APP_PASSWORD=ci docker compose --env-file /dev/null config -q || (cp .env.example .env && POSTGRES_PASSWORD=ci POSTGRES_APP_PASSWORD=ci docker compose config -q)
