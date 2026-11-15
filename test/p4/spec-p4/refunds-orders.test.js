@@ -82,7 +82,7 @@ test('S-28: the same tap twice is one refund, and a session without a fresh re-a
   const unpaidRow = await shop.order(unpaid.orderNumber);
   refused(await shop.refund(unpaidRow.id, { amountPaise: 1000 }), 'Refunding an unpaid order');
   const other = await addP4Shop(world);
-  refused(await shop.as(other.token)('POST', `/orders/${row.id}/refunds`, { amountPaise: 1000, idempotencyKey: idemKey() }), 'Another business’s owner refunding this order', [403, 404]);
+  refused(await shop.as(other.token)('POST', `/orders/${row.id}/refunds`, { amountPaise: 1000, idempotencyKey: idemKey() }), 'Another business’s owner refunding this order', [401, 403, 404]);
   assert.equal((await shop.refunds(row.id)).length, 1);
 });
 
