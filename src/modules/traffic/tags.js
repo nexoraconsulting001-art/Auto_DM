@@ -17,9 +17,10 @@ const OFF = Object.freeze({ meta: { on: false, pixelId: '' }, ga4: { on: false, 
 /** The browser event each tag event comes from. Purchase comes from the order itself, never from a page. */
 const TAG_FOR_BEACON = { page_view: 'page_view', product_view: 'view_content', add_to_cart: 'add_to_cart', checkout_started: 'initiate_checkout' };
 
-const CONTENT_POLICY = (hosts) => [
+const CONTENT_POLICY = (hosts, origins) => [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${hosts.length ? ` ${hosts.join(' ')}` : ''}`,
+  `script-src 'self' 'unsafe-inline'${[...hosts, ...origins.script].map((h) => ` ${h}`).join('')}`,
+  ...(origins.frame.length ? [`frame-src 'self' ${origins.frame.join(' ')}`] : []),
   `connect-src 'self'${hosts.length ? ` ${hosts.join(' ')}` : ''}`,
   "style-src 'self' 'unsafe-inline' https:",
   "font-src 'self' data: https:",
@@ -31,9 +32,14 @@ const CONTENT_POLICY = (hosts) => [
   "frame-ancestors 'self'",
 ].join('; ');
 
-/** A buyer page's policy. It names Meta's or Google's hosts only for a tag that is on for this business (7.14). */
-export function contentSecurityPolicy(state = OFF) {
-  return CONTENT_POLICY([...(state.meta.on ? TAG_HOSTS.meta : []), ...(state.ga4.on ? TAG_HOSTS.ga4 : [])]);
+/**
+ * A buyer page's policy. It names Meta's or Google's hosts only for a tag that is on for this business (7.14), and a
+ * payment gateway's origins only on a page that loads the payment script (`origins` { script, frame }, from the page itself:
+ * src/modules/storefront/shell.js SCRIPT_ORIGINS).
+ */
+export function contentSecurityPolicy(state = OFF, origins = null) {
+  const own = { script: [...(origins?.script ?? [])], frame: [...(origins?.frame ?? [])] };
+  return CONTENT_POLICY([...(state.meta.on ? TAG_HOSTS.meta : []), ...(state.ga4.on ? TAG_HOSTS.ga4 : [])], own);
 }
 
 const toView = (row, { available, consentReady }) => ({

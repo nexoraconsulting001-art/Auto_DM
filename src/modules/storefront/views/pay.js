@@ -15,8 +15,8 @@
  * server answered when it is one of this store's own paths. A failed or closed payment screen lets Pay be tapped again,
  * with the reason in words in the page's [data-pay-error] box.
  *
- * Not mounted yet: serving it needs a route beside the order page's own script, and the order page's scripts list
- * (both in src/modules/checkout/pages.js, outside this folder).
+ * Served at PAY_SCRIPT by src/modules/checkout/pages.js, which loads it on the checkout and order pages; the store shell
+ * (src/modules/storefront/shell.js SCRIPT_ORIGINS) adds GATEWAY_ORIGINS to those pages' policy.
  */
 export const PAY_SCRIPT = '/store/pay.js';
 export const GATEWAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';

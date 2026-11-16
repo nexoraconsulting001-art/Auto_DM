@@ -7,6 +7,7 @@ import { html, raw } from '../../views/html.js';
 import { safeHref, section } from '../../views/buyer/index.js';
 import { shopperFrom, storeOn } from '../storefront/http.js';
 import { CHECKOUT_SCRIPT, policyLinks, sendStoreNotFound, sendStorePage } from '../storefront/shell.js';
+import { PAY_JS, PAY_SCRIPT } from '../storefront/views/pay.js';
 import { CHECKOUT_JS } from './assets.js';
 
 /**
@@ -186,6 +187,11 @@ export function checkoutPages(ctx) {
     if (!(await storeOn(repos))) return next();
     res.set('Cache-Control', 'public, max-age=3600').type('text/javascript').send(ORDER_JS);
   });
+  // The payment screen (PRD 9.6): the checkout opens it after placing a prepaid or part-advance order; the order page's Pay button after that.
+  r.get(PAY_SCRIPT, async (req, res, next) => {
+    if (!(await storeOn(repos))) return next();
+    res.set('Cache-Control', 'public, max-age=3600').type('text/javascript').send(PAY_JS);
+  });
 
   r.get(STORE_ROUTES.checkout.path, async (req, res, next) => {
     try {
@@ -194,7 +200,7 @@ export function checkoutPages(ctx) {
       const [addresses, version] = await Promise.all([savedAddresses(db, shopper), noticeVersion(platform)]);
       res.set('Cache-Control', 'no-store');
       return await sendStorePage(ctx, req, res, {
-        kind: 'checkout', ref: 'checkout', title: 'Checkout', scripts: [CHECKOUT_SCRIPT],
+        kind: 'checkout', ref: 'checkout', title: 'Checkout', scripts: [CHECKOUT_SCRIPT, PAY_SCRIPT],
         data: { noticeVersion: version }, main: checkoutMain({ shopper, addresses }),
       });
     } catch (err) {
@@ -218,7 +224,7 @@ export function checkoutPages(ctx) {
       const canCancel = Boolean(shopper && order.shopper_id === shopper.id && canCancelBeforeShipment(order));
       res.set('Cache-Control', 'no-store');
       return await sendStorePage(ctx, req, res, {
-        kind: 'checkout', ref: 'order', title: `Order ${order.order_number}`, scripts: [ORDER_SCRIPT],
+        kind: 'checkout', ref: 'order', title: `Order ${order.order_number}`, scripts: [ORDER_SCRIPT, PAY_SCRIPT],
         main: orderMain({ order, items, state: orderState(order, latest), canCancel }),
       });
     } catch (err) {
