@@ -1090,6 +1090,8 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     if (kind === 'buc_throttled') {
       const until = await budgets.bucThrottled(channel, accountId, usage);
       await budgets.startSlowMode(channel, accountId, 'buc_80002', new Date(+until + SLOW_MODE_AFTER_REGAIN_MS));
+      // Reads pause and slow mode starts: a decision about this account, logged like the send path's (PRD 4.16).
+      await log.record({ channel, kind: 'usage', decision: 'held', reason: 'rate.usage_header', details: { code: 80002 }, at: now() }).catch(swallow('compliance.log_failed'));
     }
   }
 
@@ -1190,6 +1192,19 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
 
     /** Reading the rate state, for anything that calls Meta for reasons other than messaging (PRD 4.3). callClass is in gate.js. */
     callAllowed: hasCapacity,
+    /**
+     * The gate for a read a seller asked for (the media grid, a Page's posts): { allow, reason }, as callAllowed, and a read held back
+     * by the usage header or an 80002 pause is logged with its reason (PRD 4.16), so "why can't I see my posts" has an answer.
+     */
+    async readAllowed(channel, accountId, callClass) {
+      tenantId();
+      const verdict = await hasCapacity(channel, accountId, callClass);
+      if (!verdict.allow) {
+        await log.record({ channel, kind: 'read', decision: 'held', reason: verdict.reason, details: { callClass }, at: now() }).catch(swallow('compliance.log_failed'));
+      }
+      return verdict;
+    },
+    /** What a call to Meta said about this account's limits: the usage header and 80002 (PRD 4.3). Every call reports here (onMetaCall). */
     observeCall,
     /** What meta.client.insightsFor(account, guard) takes: every insights call asks check(callClass) first and reports through observe. */
     insightsGuard: (channel, accountId) => ({

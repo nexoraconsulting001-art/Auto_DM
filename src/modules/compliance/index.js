@@ -1,4 +1,5 @@
 import { reportError } from '../../platform/log.js';
+import { currentTenant } from '../../tenancy.js';
 import { complianceApi } from './api.js';
 import { registerPlatformRoutes } from './platform-routes.js';
 import { registerIntake } from './intake.js';
@@ -48,6 +49,16 @@ export const compliance = {
   },
 
   api: (ctx) => complianceApi(ctx),
+
+  /**
+   * Every call to Meta, whoever made it, reports its usage header and an 80002 to the account's rate state (PRD 4.3), so a media
+   * grid or Page read counts the same as a send. Only a call made inside its business has one to report to.
+   */
+  onMetaCall(call, ctx) {
+    if (!ctx.compliance || !currentTenant() || !call.channel || !call.accountId) return undefined;
+    if (!call.usage && call.kind !== 'buc_throttled') return undefined;
+    return ctx.compliance.observeCall(call.channel, call.accountId, { kind: call.kind, usage: call.usage });
+  },
 
   /** One short job at a time on the platform queue: intake pokes it, a turn wakes the next one, and schedule() is the safety net every minute. */
   jobs(ctx) {
