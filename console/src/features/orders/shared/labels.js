@@ -26,7 +26,7 @@ export const HAND_MOVE_DONE = Object.freeze({ packed: 'Marked as packed.', shipp
 export const COD_RISK = Object.freeze({ none: null, elevated: { label: 'Some refusal risk', tone: 'warn' }, high: { label: 'High refusal risk', tone: 'bad' } });
 
 export const PAYMENT_ATTEMPT = tones({ created: 'Started', authorized: 'Authorised', captured: 'Captured', failed: 'Failed', cancelled: 'Cancelled' }, { created: 'neutral', authorized: 'neel', captured: 'good', failed: 'bad', cancelled: 'neutral' });
-export const PAYMENT_PURPOSE = Object.freeze({ full: 'Full payment', advance: 'Advance', cod: 'Collected at the door' });
+export const PAYMENT_PURPOSE = Object.freeze({ full: 'Full payment', advance: 'Advance', cod: 'Collected at the door', duplicate: 'Paid twice (to give back)' });
 export const TRANSFER = Object.freeze({ none: '', created: 'Transfer started', processed: 'Transferred', settled: 'Settled to your bank', failed: 'Transfer failed', reversed: 'Transfer reversed' });
 export const REFUND = tones({ requested: 'Requested', processed: 'Refunded', failed: 'Failed' }, { requested: 'neel', processed: 'good', failed: 'bad' });
 export const REVERSAL = Object.freeze({ none: '', pending: 'Taking it back from your transfer', reversed: 'Taken back from your transfer', failed: 'Reversal failed', recover: 'Recovered from your next payout' });

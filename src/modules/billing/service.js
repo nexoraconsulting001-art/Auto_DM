@@ -25,7 +25,8 @@ import { creditLines, discountFor, taxedLine, totalsOf } from './money.js';
  * Every change of state runs in one transaction under a per-business advisory lock, so two requests or a request and a
  * webhook for one business are applied one after the other. Inside such a transaction nothing but that transaction is used:
  * the database handle, the platform handle and the repos wait for it (one connection in tests). The provider is called inside
- * it where its answer decides what is written (a new subscription), and after it where it only follows (a queued line).
+ * it where its answer decides what is written: a new subscription, and a queued add-on line (queueItem), whose "find by key,
+ * else add" at the provider is not one step and so must never run twice at once for one line.
  */
 const LOCK_SPACE = 70_701;
 const DAY = 86_400_000;
@@ -486,24 +487,36 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     return ended.length;
   }
 
-  /** Queues one line with the provider for the next charge. The same key always answers the same line, so a retry never doubles it. */
+  /**
+   * Queues one line with the provider for the next charge, under the business's billing lock (atk-money-1). The provider
+   * cannot make "find the line by its key, else add it" one step (Razorpay add-ons take no idempotency header), so two
+   * callers at once would each add a line. Under the lock the line is read again: one another caller queued, a charge
+   * billed, or a removal ended since the caller read it is left alone. The same key always answers the same line, so a
+   * retry after a lost answer never doubles it.
+   */
   async function queueItem(item, key, { settings, months }) {
-    const s = await subOf(db);
-    if (!s?.provider_subscription_id || s.status === 'cancelled') return null;
-    // A line removed in the meantime is never queued (money-4).
-    const [running] = await db.query('SELECT 1 FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND (ends_at IS NULL OR ends_at > now())', [tenantId(), item.id]);
-    if (!running) return null;
-    const addons = await addonsByCode(db);
-    const offer = asOffer(await offerRow(db, s.offer_code));
-    const buyer = await buyerOf(db, settings);
-    const line = itemLine(item, addons.get(item.addon_code), { offer, settings, placeOfSupply: buyer.stateCode, months });
-    if (line.totalPaise <= 0) {
-      await db.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL', [tenantId(), item.id, `free:${item.id}`]);
-      return null;
-    }
-    const added = await provider().addCharge(s.provider_subscription_id, { name: line.description, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: key });
-    await db.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL', [tenantId(), item.id, added.id]);
-    return added.id;
+    return locked(async (t) => {
+      const s = await subOf(t);
+      if (!s?.provider_subscription_id || s.status === 'cancelled') return null;
+      // Still waiting to be queued, as the caller saw it; a line removed in the meantime is never queued (money-4).
+      const [now] = await t.query(
+        `SELECT * FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL AND billed_through IS NOT DISTINCT FROM $3::timestamptz
+           AND (ends_at IS NULL OR ends_at > now())`,
+        [tenantId(), item.id, iso(item.billed_through)],
+      );
+      if (!now) return null;
+      const addons = await addonsByCode(t);
+      const offer = asOffer(await offerRow(t, s.offer_code));
+      const buyer = await buyerOf(t, settings);
+      const line = itemLine(now, addons.get(now.addon_code), { offer, settings, placeOfSupply: buyer.stateCode, months });
+      if (line.totalPaise <= 0) {
+        await t.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL', [tenantId(), now.id, `free:${now.id}`]);
+        return null;
+      }
+      const added = await provider().addCharge(s.provider_subscription_id, { name: line.description, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: key });
+      await t.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL', [tenantId(), now.id, added.id]);
+      return added.id;
+    });
   }
 
   /**

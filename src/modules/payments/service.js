@@ -56,12 +56,14 @@ export function createPayments(ctx) {
   const kick = () => ctx.orderEvents?.kick?.();
 
   async function sumCaptured(t, orderId) {
-    const [{ paid }] = await t.query(`SELECT COALESCE(sum(amount_paise), 0) AS paid FROM payments WHERE tenant_id = $1 AND order_id = $2 AND status = 'captured'`, [tenantId(), orderId]);
+    const [{ paid }] = await t.query(`SELECT COALESCE(sum(amount_paise), 0) AS paid FROM payments WHERE tenant_id = $1 AND order_id = $2 AND status = 'captured' AND purpose <> 'duplicate'`, [tenantId(), orderId]);
     return Number(paid);
   }
 
   /** The statement's lines for a captured payment (9.6): the sale, and the gateway's fee and the GST on it, each at cost. */
   async function writeCaptureLines(t, payment) {
+    // A shopper's second payment for the same part of an order is not a sale: it is given back, never paid out (atk-money-2).
+    if (payment.purpose === 'duplicate') return;
     const ref = `payment:${payment.id}`;
     const at = payment.captured_at ?? null;
     const status = payment.needs_review ? 'review' : 'ok';
@@ -141,13 +143,42 @@ export function createPayments(ctx) {
     };
   }
 
-  /** Money taken twice for one order: a person decides which to give back. Raised once per payment row. */
-  async function flagDuplicate(t, order, row) {
-    if (row.needs_review) return;
-    await changeRow(t, 'payments', row.id, row.status, { set: { needs_review: true } });
-    const message = `Order ${order.order_number} was paid twice at the gateway. Check it and refund the extra payment.`;
-    for (const audience of ['owner', 'ops']) await raiseAlert(t, { kind: 'payment.duplicate_capture', severity: 'critical', message, target: `order:${order.id}`, dedupeKey: `payment-dup:${row.id}`, audience });
-    await writeGap(t, { kind: 'amount_mismatch', ref: `payment:${row.id}`, details: { reason: 'duplicate_capture' } });
+  /**
+   * Money taken twice for one part of an order (atk-money-2). The extra capture is its own payment row, purpose 'duplicate':
+   * captured and held for review, but never counted in what the order was paid, never a sale line and never sent to the
+   * seller, so the order's refund gives exactly it back by its own gateway payment id and the sale, its Route transfer and its
+   * GST invoice stay as they are. `gp` is the extra capture; `row` is the payment row it came in on: the sale's own row (a
+   * second payment on the sale's gateway order) or another attempt's row (then that row becomes the duplicate). The owner and
+   * ops are told once per duplicate, and its gap names the gateway payment. A capture that can't be kept as a row (not INR,
+   * no amount) is still a gap and an alert, for a person. -> the duplicate's row, or null
+   */
+  async function recordDuplicate(t, order, row, gp, salePaymentId) {
+    const amount = paiseOf(gp.amountPaise);
+    const keepable = Boolean(amount && amount > 0 && gp.currency === 'INR');
+    const tax = Math.min(gp.taxPaise, gp.feePaise);
+    const fields = { gateway_payment_id: gp.id, method: gp.method, fee_paise: gp.feePaise - tax, fee_tax_paise: tax, needs_review: true, error_code: 'duplicate_capture', transfer_paise: 0 };
+    let dup = null;
+    if (keepable && Number(row.id) !== Number(salePaymentId)) {
+      // Another attempt's own row, captured after the sale's: it is the duplicate, for what the gateway took on it.
+      const moved = await changeRow(t, 'payments', row.id, 'captured', { ifAllowed: true, set: { ...fields, purpose: 'duplicate', amount_paise: amount, captured_at: new Date() } });
+      dup = moved.changed ? moved.row : null;
+    } else if (keepable) {
+      [dup] = await t.query(
+        `INSERT INTO payments (tenant_id, order_id, purpose, provider, mode, account_ref, gateway_order_id, gateway_payment_id, amount_paise, status, method, fee_paise, fee_tax_paise, needs_review, error_code, captured_at)
+         VALUES ($1, $2, 'duplicate', $3, $4, $5, $6, $7, $8, 'captured', $9, $10, $11, true, 'duplicate_capture', now()) ON CONFLICT DO NOTHING RETURNING *`,
+        [tenantId(), order.id, row.provider, row.mode, row.account_ref, row.gateway_order_id, gp.id, amount, fields.method, fields.fee_paise, fields.fee_tax_paise],
+      );
+      // The same extra capture told again: already kept.
+      if (!dup) [dup] = await t.query(`SELECT * FROM payments WHERE tenant_id = $1 AND order_id = $2 AND purpose = 'duplicate' AND gateway_payment_id = $3`, [tenantId(), order.id, gp.id]);
+    }
+    const key = dup ? dup.id : `gw-${gp.id}`;
+    const message = dup
+      ? `Order ${order.order_number} was paid twice at the gateway: ${rupees(dup.amount_paise)} too much. Refund it from the order: the extra payment is given back first, and the sale stays as it is.`
+      : `Order ${order.order_number} was paid twice at the gateway, in a way that can't be refunded from the order. We are checking it.`;
+    for (const audience of dup ? ['owner', 'ops'] : ['ops']) await raiseAlert(t, { kind: 'payment.duplicate_capture', severity: 'critical', message, target: `order:${order.id}`, dedupeKey: `payment-dup:${key}`, audience });
+    await writeGap(t, { kind: 'amount_mismatch', ref: `payment:${key}`, details: { reason: 'duplicate_capture', gatewayPaymentId: gp.id, salePaymentId: Number(salePaymentId), amountPaise: amount ?? 0, currencyOk: gp.currency === 'INR' } });
+    log.warn('payments.duplicate_capture', { orderId: order.id, paymentId: dup ? Number(dup.id) : null });
+    return dup;
   }
 
   /**
@@ -179,11 +210,21 @@ export function createPayments(ctx) {
       if (gp.status !== 'captured') return { outcome: 'not_handled' };
 
       if (row.status === 'captured') {
-        if (row.gateway_payment_id && row.gateway_payment_id !== gp.id) {
-          await flagDuplicate(t, order, row);
+        if (row.purpose !== 'duplicate' && row.gateway_payment_id && row.gateway_payment_id !== gp.id) {
+          await recordDuplicate(t, order, row, gp, row.id);
           return { outcome: 'duplicate_capture' };
         }
         return { outcome: 'stale' };
+      }
+
+      // Another attempt for the same part of this order was captured already: the shopper paid twice, and this is the extra.
+      const [twin] = await t.query(
+        `SELECT * FROM payments WHERE tenant_id = $1 AND order_id = $2 AND purpose = $3 AND status = 'captured' AND id <> $4 ORDER BY id LIMIT 1`,
+        [tenantId(), order.id, row.purpose, row.id],
+      );
+      if (twin) {
+        await recordDuplicate(t, order, row, gp, twin.id);
+        return { outcome: 'duplicate_capture' };
       }
 
       if (gp.amountPaise !== Number(row.amount_paise) || gp.currency !== row.currency) {
@@ -206,13 +247,6 @@ export function createPayments(ctx) {
       if (!moved.changed) return { outcome: 'stale' };
       await writeCaptureLines(t, moved.row);
 
-      // Another attempt for the same part of this order was captured already: the shopper paid twice.
-      const [twin] = await t.query(
-        `SELECT * FROM payments WHERE tenant_id = $1 AND order_id = $2 AND purpose = $3 AND status = 'captured' AND id <> $4 ORDER BY id LIMIT 1`,
-        [tenantId(), order.id, row.purpose, row.id],
-      );
-      if (twin) await flagDuplicate(t, order, moved.row);
-
       const paid = await sumCaptured(t, order.id);
       const target = row.purpose === 'advance' ? 'advance_paid' : 'paid';
       const changed = await changeOrder(t, order.id, { payment: target, fulfilment: 'new', actor, reason: 'payment captured', set: { paid_paise: paid }, ifAllowed: true });
@@ -221,7 +255,7 @@ export function createPayments(ctx) {
         await holdOrder(t, order.id, 'review', { actor, reason: 'paid after the order was cancelled' });
         await raiseAlert(t, { kind: 'payment.after_cancel', severity: 'critical', message: `Order ${order.order_number} was paid after it was cancelled. Refund ${rupees(row.amount_paise)} to the shopper.`, target: `order:${order.id}`, dedupeKey: `payment-late:${row.id}` });
       }
-      return { outcome: 'processed', order: changed.order, transferFor: row.mode === 'managed' && !twin ? Number(row.id) : null };
+      return { outcome: 'processed', order: changed.order, transferFor: row.mode === 'managed' ? Number(row.id) : null };
     });
     const { transferFor, ...answer } = result;
     if (transferFor) await sendTransfer(transferFor).catch((err) => log.warn('payments.transfer_unsent', { paymentId: transferFor, kind: err?.kind ?? err?.code ?? 'error' }));
@@ -233,11 +267,11 @@ export function createPayments(ctx) {
    * Managed: the Route transfer of one captured payment to the seller's linked account, for transfer_paise (the sale less
    * the gateway fee). Outside any transaction. The adapter answers a transfer already made from this payment instead of a
    * second one, so calling this again after a lost answer never pays the seller twice. A payment held for review, or a
-   * second capture of the same part of an order, is left for a person. -> the payment row
+   * second capture of the same part of an order (purpose duplicate), is left for a person. -> the payment row
    */
   async function sendTransfer(paymentId) {
     const [row] = await db.query(`SELECT * FROM payments WHERE tenant_id = $1 AND id = $2 AND mode = 'managed' AND status = 'captured'`, [tenantId(), paymentId]);
-    if (!row || row.transfer_id || row.needs_review || !row.gateway_payment_id) return row ?? null;
+    if (!row || row.transfer_id || row.needs_review || !row.gateway_payment_id || row.purpose === 'duplicate') return row ?? null;
     const net = Number(row.transfer_paise);
     if (net < 100) return row; // Route moves at least a rupee
     let made;

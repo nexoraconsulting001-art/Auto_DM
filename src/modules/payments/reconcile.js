@@ -68,7 +68,7 @@ export function createReconcile(ctx, service) {
     // Managed payments captured but with no Route transfer yet (its answer was lost, or Route was down), and courier
     // charges still to be taken from a payout: sent again, a couple of minutes apart.
     const untransferred = await platformDb.query(
-      `SELECT tenant_id, id, order_id FROM payments WHERE mode = 'managed' AND status = 'captured' AND transfer_id IS NULL AND NOT needs_review
+      `SELECT tenant_id, id, order_id FROM payments WHERE mode = 'managed' AND status = 'captured' AND purpose <> 'duplicate' AND transfer_id IS NULL AND NOT needs_review
          AND gateway_payment_id IS NOT NULL AND updated_at < now() - interval '2 minutes' AND captured_at > now() - interval '7 days' ORDER BY updated_at LIMIT $1`,
       [limit],
     );
@@ -136,7 +136,7 @@ export function createReconcile(ctx, service) {
 
     // Statement lines a capture should have written: written now (they are keyed, so this is harmless).
     const missing = await db.query(
-      `SELECT p.* FROM payments p WHERE p.tenant_id = $1 AND p.status = 'captured'
+      `SELECT p.* FROM payments p WHERE p.tenant_id = $1 AND p.status = 'captured' AND p.purpose <> 'duplicate'
          AND NOT EXISTS (SELECT 1 FROM settlement_lines l WHERE l.tenant_id = p.tenant_id AND l.kind = 'sale' AND l.ref = 'payment:' || p.id)
        ORDER BY p.id LIMIT 500`,
       [tenantId()],
@@ -148,7 +148,7 @@ export function createReconcile(ctx, service) {
 
     // Route: a captured payment whose transfer never reached the seller in a day, or failed.
     const transfers = await db.query(
-      `SELECT id, transfer_status FROM payments WHERE tenant_id = $1 AND mode = 'managed' AND status = 'captured'
+      `SELECT id, transfer_status FROM payments WHERE tenant_id = $1 AND mode = 'managed' AND status = 'captured' AND purpose <> 'duplicate'
          AND (transfer_status = 'failed' OR (transfer_status IN ('none', 'created') AND captured_at < now() - interval '1 day'))
        ORDER BY id LIMIT 500`,
       [tenantId()],
