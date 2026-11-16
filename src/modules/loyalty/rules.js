@@ -11,6 +11,9 @@ export const REFERRAL_CODE = /^[A-Z0-9]{6,12}$/;
 export const MAX_POINTS = 100_000_000;
 /** How far up a chain of referrals the loop check looks. */
 export const LOOP_DEPTH = 25;
+/** The friend's browser remembers the code it was invited with; the referrer's browser is marked as theirs. */
+export const REF_COOKIE = '_ref';
+export const REF_DEVICE_COOKIE = '_refdev';
 
 export const DEFAULT_SETTINGS = Object.freeze({
   enabled: false,

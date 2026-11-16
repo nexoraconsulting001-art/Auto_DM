@@ -3,7 +3,7 @@
  *
  * Admin REST, for sync (PRD 9.11): the app token exchange, the shop, products (paged by Link header), one product, inventory
  * levels and setting one, a variant's price, creating an order (which takes stock down, and with an Idempotency-Key is the
- * same order when repeated), listing orders and registering webhooks. POST /__sim/products and POST /__sim/orders seed them.
+ * same order when repeated), reading and cancelling one (restock puts its units back), listing orders and registering webhooks. POST /__sim/products and POST /__sim/orders seed them.
  * Admin calls are limited to 2 a second per shop when POST /__sim/admin/limit { on: true } is set: the third is a 429
  * with Retry-After, lifting on the controlled clock.
  *
@@ -275,6 +275,28 @@ export function createShopify({ token = 'sim-shopify-token', clientId = 'sim-sho
         orders.push(order);
         if (key) orderKeys.set(key, order.id);
         return reply(201, { order });
+      });
+      on('GET', '/admin/api/:version/orders/:id.json', (req) => {
+        requireToken(req);
+        const order = orders.find((o) => String(o.id) === String(req.params.id));
+        if (!order) throw shopifyError(404, 'Not Found');
+        return { order };
+      });
+      // Cancelling an order: refused when already cancelled (422, as Shopify does); with restock its units go back to stock.
+      on('POST', '/admin/api/:version/orders/:id/cancel.json', (req) => {
+        requireToken(req);
+        const order = orders.find((o) => String(o.id) === String(req.params.id));
+        if (!order) throw shopifyError(404, 'Not Found');
+        if (order.cancelled_at) throw shopifyError(422, { base: ['Order has already been cancelled'] });
+        order.cancelled_at = new Date(sim.clock.now()).toISOString();
+        order.cancel_reason = req.body?.reason ?? 'other';
+        if (req.body?.restock) {
+          for (const line of order.line_items) {
+            const found = adminVariant(line.variant_id);
+            if (found && Number.isInteger(found.variant.inventory_quantity)) found.variant.inventory_quantity += line.quantity;
+          }
+        }
+        return { order };
       });
       on('POST', '/admin/api/:version/webhooks.json', (req) => {
         requireToken(req);

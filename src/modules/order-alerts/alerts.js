@@ -3,7 +3,7 @@ import { log, reportError } from '../../platform/log.js';
 import { tenantId, withTenant } from '../../tenancy.js';
 import { consentLinks } from '../consent/index.js';
 import { businessOf } from './business.js';
-import { orderMessage } from './messages.js';
+import { orderMessage, TRACKED_EVENTS } from './messages.js';
 
 /**
  * Order alerts to shoppers (PRD 9.16): one row per order event and channel in order_alerts, whose unique key is what makes
@@ -162,7 +162,8 @@ export function createOrderAlerts(ctx, settings) {
         reportError(err, { msg: 'order_alert.unsubscribe_link_failed' });
       }
     }
-    const message = orderMessage({ channel: row.channel, event: row.event, order, items, business, unsubscribeUrl });
+    const trackingUrl = TRACKED_EVENTS.has(row.event) ? (await ctx.shipping?.trackingUrl?.(order.id)) || '' : '';
+    const message = orderMessage({ channel: row.channel, event: row.event, order, items, business, unsubscribeUrl, trackingUrl });
     message.dedupeKey = `order-alert-${tenantId()}-${row.id}`;
     return shopperMessages.send(message);
   }

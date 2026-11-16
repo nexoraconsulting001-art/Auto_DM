@@ -14,6 +14,10 @@ import { isSimulatorUrl, refuseSimulatorUrl } from '../../../tools/sim/guard.mjs
  *   updateVariant(id, { pricePaise?, compareAtPricePaise? })      (two-way mode)
  *   createOrder({ orderNumber, lines: [{ variantId, qty, pricePaise }], shipTo, email, totalPaise, paid, idempotencyKey }) -> { id, name }
  *       Pushes an order placed here; Shopify takes the stock down itself (S-37). Repeating it with the same key is the same order.
+ *   cancelOrder(id, { reason? })                       -> { cancelled: true }
+ *       Cancels a pushed order with its stock put back at Shopify (restock), so Shopify's count, which both sides sell from,
+ *       gets the units back and says so (inventory_levels/update). An order Shopify already shows as cancelled counts as done,
+ *       so repeating a call whose answer was lost is safe. (REST restock flag: to confirm against Shopify's current version.)
  *   orders({ since?, pageInfo? })                      -> { items, nextPageInfo }
  *   registerWebhooks({ address, topics })              -> [{ id, topic }]
  *
@@ -99,6 +103,18 @@ export function createShopify(config = {}, { env = process.env } = {}) {
         };
         const { body } = await request('POST', '/orders.json', { headers: { ...headers, 'idempotency-key': idempotencyKey }, json: { order } });
         return { id: String(body.order.id), name: body.order.name ?? '' };
+      },
+      async cancelOrder(id, { reason = 'customer' } = {}) {
+        const path = `/orders/${encodeURIComponent(id)}`;
+        try {
+          await request('POST', `${path}/cancel.json`, { headers, json: { reason, restock: true, email: false } });
+        } catch (err) {
+          if (err?.kind !== 'rejected') throw err;
+          // Shopify refuses to cancel an order twice: one it already shows as cancelled is done.
+          const { body } = await request('GET', `${path}.json`, { headers, query: { fields: 'id,cancelled_at' }, retries: 2 });
+          if (!body?.order?.cancelled_at) throw err;
+        }
+        return { cancelled: true };
       },
       orders: ({ since, pageInfo, limit = 250 } = {}) => list('/orders.json', 'orders', pageInfo ? { page_info: pageInfo, limit } : { updated_at_min: since ? new Date(since).toISOString() : undefined, status: 'any', limit }),
       async registerWebhooks({ address, topics }) {

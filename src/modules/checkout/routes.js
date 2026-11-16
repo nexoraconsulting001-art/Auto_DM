@@ -16,8 +16,8 @@ import { buildQuote, toE164 } from './quote.js';
 async function quoteAddress(ctx, body, shopper) {
   if (body.address) return { ...body.address, phone: toE164(body.address.phone) ?? '' };
   if (body.addressId && shopper) {
-    const [row] = await ctx.db.query('SELECT phone, pincode, state_code FROM shopper_addresses WHERE tenant_id = $1 AND shopper_id = $2 AND id = $3', [tenantId(), shopper.id, body.addressId]);
-    if (row) return { phone: row.phone, pincode: row.pincode, stateCode: row.state_code };
+    const [row] = await ctx.db.query('SELECT phone, line1, pincode, state_code FROM shopper_addresses WHERE tenant_id = $1 AND shopper_id = $2 AND id = $3', [tenantId(), shopper.id, body.addressId]);
+    if (row) return { phone: row.phone, line1: row.line1, pincode: row.pincode, stateCode: row.state_code };
   }
   return null;
 }
@@ -32,7 +32,7 @@ export function checkoutRoutes(ctx) {
     const address = await quoteAddress(ctx, body, shopper);
     const { quote } = await buildQuote(ctx.db, ctx, {
       lines: body.lines, address, phone: address?.phone || shopper?.phone || '', paymentMode: body.paymentMode, couponCode: body.couponCode,
-      redeemPoints: body.redeemPoints, shopperId: shopper?.id ?? null,
+      redeemPoints: body.redeemPoints, shopperId: shopper?.id ?? null, referral: ctx.loyalty?.referrals?.fromRequest?.(req, body) ?? null,
     });
     return { body: Quote.parse(quote) };
   }));

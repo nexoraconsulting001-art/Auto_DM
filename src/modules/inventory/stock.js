@@ -166,12 +166,32 @@ export async function raiseLowStock(alerts, low = []) {
 }
 
 /**
+ * The stock rows whose sold units of this order Shopify holds: the order was pushed to Shopify (PRD 9.11) and the row is
+ * linked to a Shopify inventory item (a variant by its id, a product with no options by minus its id, as shopify_links keeps
+ * them). Shopify's count is the one both sides sell from, so units it holds come back with its next count, not here.
+ */
+async function heldAtShopify(t, orderId) {
+  const rows = await t.query(
+    `SELECT l.local_id FROM shopify_order_pushes p
+       JOIN shopify_links l ON l.tenant_id = p.tenant_id AND l.kind = 'inventory_item'
+     WHERE p.tenant_id = $1 AND p.order_id = $2 AND p.status = 'pushed'`,
+    [tenantId(), orderId],
+  );
+  return new Set(rows.map((r) => Number(r.local_id)));
+}
+const stockKey = (row) => (row.variant_id ? Number(row.variant_id) : -Number(row.product_id));
+
+/**
  * Gives an order's stock back. kind 'cancel': a hold is freed, sold units go back on hand. kind 'rto': the parcel came back, so
  * sold units go back on hand. Doing it twice changes nothing.
+ * A cancelled order's sold units that Shopify holds (heldAtShopify) are not added here: the order is cancelled in Shopify with
+ * restock (shopify-sync push.js), and Shopify's count brings them back. Adding them here as well would sell units Shopify
+ * still counts against the open order.
  */
 export async function giveBack(t, orderId, kind = 'cancel', { actor = 'system', events = null } = {}) {
   const tid = tenantId();
   const rows = await lockReservations(t, orderId);
+  const atShopify = kind === 'cancel' && rows.some((r) => r.status === 'committed') ? await heldAtShopify(t, orderId) : new Set();
   let returned = 0;
   for (const row of rows) {
     const where = target(row);
@@ -179,6 +199,8 @@ export async function giveBack(t, orderId, kind = 'cancel', { actor = 'system', 
       await t.query(`UPDATE ${where.table} SET reserved = GREATEST(reserved - $3, 0) WHERE tenant_id = $1 AND id = $2`, [tid, where.id, row.qty]);
       await markReservation(t, row.id, 'released');
       returned += 1;
+    } else if (row.status === 'committed' && atShopify.has(stockKey(row))) {
+      await markReservation(t, row.id, 'released');
     } else if (row.status === 'committed') {
       const [moved] = await move(t, row, row.qty, kind === 'rto' ? 'rto' : 'cancel', actor);
       if (moved) await t.query(`UPDATE ${where.table} SET stock = stock + $3 WHERE tenant_id = $1 AND id = $2 AND stock IS NOT NULL`, [tid, where.id, row.qty]);
