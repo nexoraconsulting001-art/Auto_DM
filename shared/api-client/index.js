@@ -67,13 +67,16 @@ async function toError(response) {
  * @param {{ name: 'owner' | 'shopper', version: string, platform: 'android' | 'ios' }} [options.app] sent as X-App, X-App-Version and X-App-Platform
  * @param {(error: ApiError) => void} [options.onUnauthorized] called on any 401
  * @param {(error: ApiError) => void} [options.onUpdateRequired] called on 426 `update_required`; error.storeUrl is the store link
- * @param {(error: ApiError) => void} [options.onReauthRequired] called on 403 `reauth_required`: re-auth, then repeat the request
+ * @param {(error: ApiError) => (boolean|void|Promise<boolean|void>)} [options.onReauthRequired] called on 403 `reauth_required`. To
+ *   re-auth and repeat the request, resolve true once the session is fresh again: the request is sent once more and its
+ *   answer is the caller's. A rejection (the person closed the re-auth) is what the caller gets; anything else lets the
+ *   refusal through. It is asked once per request, so a server that still refuses never loops.
  * @param {typeof fetch} [options.fetch] replaces the global fetch
  */
 export function createApiClient({ baseUrl = '/api/v1', getToken, getTenantId, app, onUnauthorized, onUpdateRequired, onReauthRequired, fetch: send = (...args) => globalThis.fetch(...args) } = {}) {
   let csrf = ''; // the cookie session's token, learned from auth.login and auth.me
 
-  async function request(method, path, { json, form } = {}) {
+  async function request(method, path, { json, form } = {}, repeated = false) {
     const headers = { accept: 'application/json' };
     const token = await getToken?.();
     if (token) headers.authorization = `Bearer ${token}`;
@@ -98,7 +101,7 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, getTenantId, ap
       const error = await toError(response);
       if (response.status === 401) onUnauthorized?.(error);
       if (error.code === 'update_required') onUpdateRequired?.(error);
-      if (error.code === 'reauth_required') onReauthRequired?.(error);
+      if (error.code === 'reauth_required' && !repeated && (await onReauthRequired?.(error)) === true) return request(method, path, { json, form }, true);
       throw error;
     }
     return response.status === 204 ? null : response.json();

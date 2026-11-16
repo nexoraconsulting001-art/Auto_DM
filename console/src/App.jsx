@@ -4,6 +4,7 @@ import { Outlet, RouterProvider, createBrowserRouter, useLocation } from 'react-
 import { SELLER_ROLES, isAllowed } from '@contracts/access.js';
 import { Button, EmptyState, Spinner } from './design/index.jsx';
 import { FeedbackProvider } from './components/feedback.jsx';
+import { FreshProvider } from './features/account/fresh.jsx';
 import { features } from './features/index.js';
 import { queryClient } from './lib/api/index.js';
 import { SessionProvider, useSession } from './lib/session.jsx';
@@ -67,7 +68,7 @@ function SignedIn() {
       </CenteredPage>
     );
   }
-  return <AppShell><Screen /></AppShell>;
+  return <FreshProvider><AppShell><Screen /></AppShell></FreshProvider>;
 }
 
 function Allowed({ access, children }) {

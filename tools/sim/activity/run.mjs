@@ -345,7 +345,7 @@ export async function run(options) {
         if (rngS.chance(0.14) && record.mode === 'prepaid') {
           const [row] = await world.sql('SELECT total_paise FROM orders WHERE tenant_id = $1 AND id = $2', [b.tenantId, id]);
           const amountPaise = Math.max(100, Math.floor(Number(row.total_paise) * rngS.pick([0.25, 0.5, 1])));
-          const refund = await b.api.post(`/orders/${id}/refunds`, { amountPaise, reason: 'Item damaged on arrival', idempotencyKey: `sc-refund-${b.slug}-${id}`, password: b.owner.password }, { allow: [400, 409] });
+          const refund = await b.api.post(`/orders/${id}/refunds`, { amountPaise, reason: 'Item damaged on arrival', idempotencyKey: `sc-refund-${b.slug}-${id}` }, { allow: [400, 409] });
           if (refund.status === 201) note(day, b, 'refund', record.n);
         }
         record.stage = 'done';

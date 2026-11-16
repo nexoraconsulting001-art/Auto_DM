@@ -32,6 +32,8 @@ const SEND_CONCURRENCY = 4;
 const LOCK_GROUPS = 52101;
 const DIRECT_REPORT_RETRY_MS = 30 * 60_000;
 const EMAIL = /^[^\s@<>()]+@[^\s@<>()]+\.[^\s@<>()]+$/;
+/** {account} in a notification's words: the channel's own name, never a handle. */
+const ACCOUNT_NAMES = Object.freeze({ instagram: 'Instagram', facebook: 'Facebook', whatsapp: 'WhatsApp' });
 
 const isSeller = (user) => Boolean(user) && SELLER_ROLES.includes(user.role);
 
@@ -247,8 +249,10 @@ export function createPipeline({ platformDb, push, providers, config, clock, dev
   async function alertData(t, alert) {
     const data = { alertId: Number(alert.id) };
     const target = String(alert.target ?? '');
-    const channel = /^(instagram|facebook):/.exec(target)?.[1];
-    if (channel) data.account = channel === 'instagram' ? 'Instagram' : 'Facebook';
+    // The channel is the target's prefix (instagram:<id>), or, for a token loss the compliance gate or the Facebook repo
+    // raised with the bare account id as target, the channel in its dedupe key (token.rejected:<channel>:<id>:<version>).
+    const channel = /^(instagram|facebook|whatsapp):/.exec(target)?.[1] ?? /^token\.[a-z_]+:(instagram|facebook|whatsapp):/.exec(String(alert.dedupe_key ?? ''))?.[1];
+    if (channel) data.account = ACCOUNT_NAMES[channel];
     const days = /^expiry_(\d{1,3})d:/.exec(String(alert.dedupe_key ?? ''))?.[1];
     if (days) data.days = Number(days);
     const orderId = /^order:(\d{1,10})$/.exec(target)?.[1];

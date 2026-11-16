@@ -1,5 +1,6 @@
 import { createApiClient } from '@bhava/api-client';
 import { QueryClient } from '@tanstack/react-query';
+import { confirmFresh } from '../fresh-gate.js';
 
 export { ApiError, allPages } from '@bhava/api-client';
 
@@ -13,5 +14,11 @@ export const queryClient = new QueryClient({
   },
 });
 
-/** The one client the console uses. A session that ends mid-use sends the person back to sign-in. */
-export const api = createApiClient({ onUnauthorized: () => queryClient.setQueryData(SESSION_KEY, null) });
+/**
+ * The one client the console uses. A session that ends mid-use sends the person back to sign-in. A fresh route refused
+ * with `reauth_required` opens the one re-auth sheet (lib/fresh-gate.js) and, once confirmed, is sent again.
+ */
+export const api = createApiClient({
+  onUnauthorized: () => queryClient.setQueryData(SESSION_KEY, null),
+  onReauthRequired: () => confirmFresh(),
+});

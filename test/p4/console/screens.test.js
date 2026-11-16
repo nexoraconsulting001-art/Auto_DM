@@ -162,9 +162,10 @@ test('S-29: the refund button is offered to the owner only, wherever it appears'
   assert.match(money, /action=\{isOwner && canRefund \? <RefundButton order=\{order\} \/> : null\}/);
   assert.match(money, /\{isOwner && refund\.status === 'failed'/);
   assert.equal(routes['refunds.create'].fresh, true, 'a refund needs a fresh re-auth (5.11)');
-  assert.match(money, /fresh\.run\(\(\) => api\.refunds\.create\(order\.id, body\)\)/, 'the refund asks for the fresh check when the server wants it (5.11)');
+  assert.equal(routes['refunds.retry'].fresh, true, 'a refund retry needs a fresh re-auth (5.11)');
+  assert.match(money, /api\.refunds\.create\(order\.id, body\)/, 'the refund is sent through the shared client, whose re-auth hook asks "Confirm it is you" when the server wants it (5.11)');
+  assert.match(money, /api\.refunds\.retry\(/,'refunds.retry goes through the same client and gate (5.11)');
   assert.doesNotMatch(money, /password/, 'sellers sign in without a password, so a refund never asks for one');
-  assert.match(money, /fresh\.run\(\(\) => api\.refunds\.retry\(/, 'refunds.retry runs after the fresh check (5.11)');
   assert.match(money, /idempotencyKey: key/);
   const order = source('orders/OrderPage.jsx');
   assert.match(order, /\{isOwner && <RefundButton order=\{order\} suggestedPaise=\{order\.refundDuePaise\}/, 'S-31: the refund prompt');

@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { isCancelled } from './fresh-gate.js';
 
 const CHECK_THE_FORM = 'Please check the highlighted details.';
 
@@ -44,6 +45,7 @@ export function useForm(initial, { rename } = {}) {
       await action();
       return true;
     } catch (error) {
+      if (isCancelled(error)) return false; // the person closed "Confirm it’s you": nothing went wrong
       const failure = describeFailure(error, rename);
       setErrors(failure.fields);
       setMessage(failure.message);

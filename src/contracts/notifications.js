@@ -227,6 +227,9 @@ export const isReservedKind = (kind) => RESERVED_PREFIXES.some((prefix) => Strin
  *
  *   alerts             repos.alerts.raise rows with audience 'owner' and notified_at empty. `alerts` maps the alert's kind to
  *                      a notification kind; an alert kind not listed stays in-app in the alerts list only. Key `alert:<id>`.
+ *                      Its keys are the kinds the modules really raise (a test holds that): a lost connection is raised as
+ *                      the compliance token decisions token.rejected and token.deauthorized (src/contracts/compliance.js),
+ *                      and both are the owner's token.invalid, at once by every channel (PRD 4.2).
  *   reportDeliveries   report_deliveries rows still queued with notified_at empty, to their one reader ({ userId }), on the
  *                      row's own channel. Key `report_delivery:<id>`. The kind follows the report's period.
  *   orderEvents        the order event bus (ctx.orderEvents.on in setup). `order.confirmed` is "a new order": a cash on
@@ -239,7 +242,8 @@ export const NOTIFY_SOURCES = Object.freeze({
     'reach_guard.permission_needed': 'reach_guard.alert',
     'return.requested': 'return.requested',
     'token.expiring': 'token.expiring',
-    'token.invalid': 'token.invalid',
+    'token.rejected': 'token.invalid',
+    'token.deauthorized': 'token.invalid',
   }),
   orderEvents: Object.freeze({ 'order.confirmed': 'order.new', 'payment.failed': 'payment.failed' }),
   reportPeriods: Object.freeze({ weekly: 'report.weekly', monthly: 'report.monthly' }),

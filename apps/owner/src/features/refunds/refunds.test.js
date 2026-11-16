@@ -62,6 +62,31 @@ test('S-28 a refund sends only the amount the person typed, refuses more than ca
   expect(sent[1].body).toEqual({ amountPaise: 49950, reason: '', idempotencyKey: sent[0].body.idempotencyKey });
 });
 
+test('seller-ui-2 a refund on a session past its re-auth is refused, asks "Confirm it is you", then sends the same refund again, with no password', async () => {
+  let confirmed = false;
+  const routes = {
+    'POST /auth/reauth/verify': () => {
+      confirmed = true;
+      return { freshUntil: new Date(Date.now() + 300_000).toISOString() };
+    },
+    'GET /orders/:id': () => ORDER,
+    'GET /orders/:id/payments': () => ({ items: [PAYMENT] }),
+    'POST /orders/:id/refunds': (call) => (!confirmed ? [403, { error: 'Confirm it is you', code: 'reauth_required' } ] : [201, { id: 41, orderId: 3, paymentId: 21, amountPaise: call.body.amountPaise, status: 'requested', method: 'gateway', reference: '', reason: call.body.reason, reversalStatus: 'none', reversalPaise: 0, createdAt: AT, processedAt: null }]),
+  };
+  const { server } = await openApp({ list: [orders, refunds], path: '/orders/3/refund', routes });
+  await fireEvent.changeText(await screen.findByTestId('refund-amount'), '200');
+  await fireEvent.press(screen.getByTestId('refund-submit'));
+  await fireEvent.press(await screen.findByTestId('reauth-send'));
+  expect(writes(server).filter((c) => c.path === '/orders/3/refunds')).toHaveLength(1); // only the refused try, before the check
+  await fireEvent.changeText(await screen.findByTestId('reauth-code'), '654321');
+  await fireEvent.press(screen.getByTestId('reauth-verify'));
+  expect(await screen.findByTestId('refund-done')).toBeTruthy();
+  const sent = writes(server).filter((c) => c.path === '/orders/3/refunds');
+  expect(sent).toHaveLength(2); // the refused try and the same refund again
+  expect(sent[1].body.idempotencyKey).toBe(sent[0].body.idempotencyKey);
+  expect(sent[1].body).toEqual({ amountPaise: 20000, reason: '', idempotencyKey: sent[0].body.idempotencyKey });
+});
+
 test('S-29 a manager opening the refund screen by a link cannot refund', async () => {
   const { MANAGER } = require('../orders/kit/testing.js');
   const routes = { 'GET /orders/:id': () => ORDER, 'GET /orders/:id/payments': () => ({ items: [PAYMENT] }) };

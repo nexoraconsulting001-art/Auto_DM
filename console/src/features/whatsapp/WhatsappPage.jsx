@@ -69,7 +69,6 @@ function Connection({ status, owner, onPlan }) {
           </>
         )}
       </div>
-      {fresh.sheet}
     </Panel>
   );
 }

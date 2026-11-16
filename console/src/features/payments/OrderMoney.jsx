@@ -7,7 +7,6 @@ import { formatDateTime, formatPaise, paiseToRupees, rupeesToPaise } from '../..
 import { useForm } from '../../lib/forms.js';
 import { useAllowed, useRefresh } from '../../lib/query.js';
 import { useFeedback } from '../../components/feedback.jsx';
-import { isCancelled, useFresh } from '../account/fresh.jsx';
 import { PAYMENT_ATTEMPT, PAYMENT_PURPOSE, REFUND, REVERSAL, TRANSFER, statusOf } from '../orders/shared/labels.js';
 import { refundable } from '../orders/shared/rules.js';
 import { Badges, RupeeField, StoreScreen, freshKey, useAction } from '../orders/shared/ui.jsx';
@@ -61,9 +60,9 @@ export function OrderPayments({ order }) {
 }
 
 /**
- * The owner's refund, in a sheet: the amount, why, and how it was paid back for cash on delivery. refunds.create needs a
- * fresh re-auth (5.11: a WhatsApp code or the device unlock), asked for first when the session is not fresh. One key per
- * opening, so a second tap is the same refund.
+ * The owner's refund, in a sheet: the amount, why, and how it was paid back for cash on delivery. The route is fresh (5.11),
+ * so a session past its re-auth window gets "Confirm it’s you" from the console's client, and the refund then goes
+ * through. One key per opening, so a second tap is the same refund.
  */
 export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund', variant = 'outline', onDone }) {
   const sheet = useRef(null);
@@ -71,7 +70,6 @@ export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund'
   const refresh = useRefresh();
   const most = refundable(order);
   const start = suggestedPaise > 0 ? Math.min(suggestedPaise, most) : most;
-  const fresh = useFresh();
   const form = useForm({ amount: paiseToRupees(start), reason: '', reference: '', paymentId: '' }, { rename: { amountPaise: 'amount' } });
   const [key, setKey] = useState(() => freshKey('refund'));
   const payments = useQuery({ queryKey: paymentsKey(order.id), queryFn: () => api.payments.forOrder(order.id) });
@@ -100,16 +98,10 @@ export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund'
       ...(returnId ? { returnId } : {}),
     };
     let refund = null;
-    let cancelled = false;
     const done = await form.run(async () => {
-      try {
-        refund = await fresh.run(() => api.refunds.create(order.id, body));
-      } catch (error) {
-        if (!isCancelled(error)) throw error;
-        cancelled = true;
-      }
+      refund = await api.refunds.create(order.id, body);
     });
-    if (done && !cancelled) {
+    if (done) {
       sheet.current?.close();
       toast(refund?.status === 'failed' ? 'The gateway refused the refund. Try it again from Refunds.' : `Refund of ${formatPaise(amountPaise)} started.`);
       await refresh();
@@ -143,7 +135,6 @@ export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund'
           </div>
         </form>
       </Sheet>
-      {fresh.sheet}
     </>
   );
 }
@@ -153,22 +144,7 @@ export function OrderRefunds({ order }) {
   const isOwner = allowed(OWNER_ONLY);
   const refunds = useQuery({ queryKey: refundsKey(order.id), queryFn: () => api.refunds.forOrder(order.id) });
   const action = useAction();
-  const fresh = useFresh();
   const canRefund = order.flow === 'checkout' && refundable(order) > 0;
-
-  /** Sends a failed refund to the gateway again, after a fresh re-auth (5.11). Closing the check is not a problem. */
-  async function retry(refund) {
-    let cancelled = false;
-    await action.run(`retry-${refund.id}`, async () => {
-      try {
-        return await fresh.run(() => api.refunds.retry(refund.id));
-      } catch (error) {
-        if (isCancelled(error)) cancelled = true;
-        throw error;
-      }
-    }, 'Refund sent again.');
-    if (cancelled) action.setProblem('');
-  }
 
   return (
     <Panel title="Refunds" action={isOwner && canRefund ? <RefundButton order={order} /> : null}>
@@ -191,7 +167,7 @@ export function OrderRefunds({ order }) {
                   </span>
                   {isOwner && refund.status === 'failed' && refund.method === 'gateway' && (
                     <div className="row-actions">
-                      <Button variant="soft" loading={action.busy === `retry-${refund.id}`} onClick={() => retry(refund)}>Try again</Button>
+                      <Button variant="soft" loading={action.busy === `retry-${refund.id}`} onClick={() => action.run(`retry-${refund.id}`, () => api.refunds.retry(refund.id), 'Refund sent again.')}>Try again</Button>
                     </div>
                   )}
                 </div>
@@ -202,7 +178,6 @@ export function OrderRefunds({ order }) {
           <EmptyState title="No refunds">{canRefund ? 'A refund goes back the way the customer paid.' : 'Nothing has been paid that could be refunded.'}</EmptyState>
         ))}
       </StoreScreen>
-      {fresh.sheet}
     </Panel>
   );
 }

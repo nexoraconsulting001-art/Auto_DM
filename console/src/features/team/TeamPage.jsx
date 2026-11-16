@@ -273,7 +273,6 @@ export default function TeamPage() {
           </>
         )}
       </Loadable>
-      {fresh.sheet}
     </>
   );
 }

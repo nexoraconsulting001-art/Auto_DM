@@ -1,35 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Banner, Button, FieldGroup, Sheet, TextField } from '../../design/index.jsx';
 import { SESSION_KEY, api } from '../../lib/api/index.js';
+import { Cancelled, confirmFresh, isCancelled, setFreshOpener } from '../../lib/fresh-gate.js';
 import { useSession } from '../../lib/session.jsx';
+import { OPTIONS_KEY, signInOptions } from './options.js';
 import { CODE_DIGITS, googleStartUrl, isCode, isFresh } from './signin.js';
 
-/** What a caller gets when the person closes the re-auth sheet: nothing to report. */
-export class Cancelled extends Error {
-  constructor() {
-    super('Cancelled');
-    this.cancelled = true;
-  }
-}
-
-export const isCancelled = (error) => Boolean(error?.cancelled);
+export { Cancelled, isCancelled };
 
 const here = () => `${window.location.pathname}${window.location.search}`;
 
 /**
- * Sensitive actions (PRD 5.11): the team, linking a way to sign in, deleting the account. The server refuses them with
- * `reauth_required` unless the session signed in or re-authed in the last few minutes, so this asks for a fresh
- * WhatsApp code first when the session says it is not fresh, and again if the server refuses anyway.
- *
- *   const fresh = useFresh();
- *   await fresh.run(() => api.team.update(id, body));   // throws Cancelled if the person closes the sheet
- *   return <>{...}{fresh.sheet}</>;
- *
- * `google` says whether "Sign in again with Google" may be offered, for someone whose account has no phone to send to.
+ * The one "Confirm it’s you" sheet for the whole signed-in console (PRD 5.11). Every route the contract marks `fresh`
+ * (money, keys, connections, the team, deleting the account) is refused with `reauth_required` unless the session signed
+ * in or re-authed in the last few minutes. The console's API client hands any such refusal to lib/fresh-gate.js, which
+ * opens this sheet, and repeats the call once a fresh WhatsApp code is confirmed. So every page is covered without
+ * asking. "Sign in again with Google" is offered to someone with no phone to send to, when this server offers Google.
  */
-export function useFresh({ google = false } = {}) {
-  const { session } = useSession();
+export function FreshProvider({ children }) {
   const queries = useQueryClient();
   const dialog = useRef(null);
   const waiting = useRef(null);
@@ -63,13 +52,20 @@ export function useFresh({ google = false } = {}) {
     }
   }, []);
 
-  /** Opens the sheet and resolves once the session is fresh again. */
-  const confirm = useCallback(() => new Promise((resolve, reject) => {
-    waiting.current?.reject(new Cancelled());
-    waiting.current = { resolve, reject };
+  /** Opens the sheet and resolves once the session is fresh again. Calls refused together share one sheet. */
+  const confirm = useCallback(() => {
+    if (waiting.current) return waiting.current.promise;
+    const pending = {};
+    pending.promise = new Promise((resolve, reject) => Object.assign(pending, { resolve, reject }));
+    waiting.current = pending;
     setStep('sending');
     send();
-  }), [send]);
+    return pending.promise;
+  }, [send]);
+
+  useEffect(() => setFreshOpener(confirm), [confirm]);
+  const options = useQuery({ queryKey: OPTIONS_KEY, queryFn: signInOptions, staleTime: Infinity, retry: false, enabled: step === 'no-phone' });
+  const google = Boolean(options.data?.google);
 
   useEffect(() => {
     if (step !== 'idle' && dialog.current && !dialog.current.open) dialog.current.showModal();
@@ -95,18 +91,9 @@ export function useFresh({ google = false } = {}) {
     }
   }
 
-  const run = useCallback(async (action) => {
-    if (isFresh(session?.freshUntil) === false) await confirm();
-    try {
-      return await action();
-    } catch (error) {
-      if (error?.code !== 'reauth_required') throw error;
-      await confirm();
-      return action();
-    }
-  }, [session?.freshUntil, confirm]);
-
-  const sheet = (
+  return (
+    <>
+      {children}
     <Sheet ref={dialog} title="Confirm it’s you" onClose={() => settle(false)}>
       {step === 'sending' && <p className="sheet-text" role="status">Sending a code to your WhatsApp…</p>}
       {step === 'code' && (
@@ -141,7 +128,24 @@ export function useFresh({ google = false } = {}) {
         </div>
       )}
     </Sheet>
+    </>
   );
+}
 
-  return { run, sheet };
+/**
+ * For a page that knows its action is sensitive: asks first when the session already says it is not fresh, so the
+ * person is not refused mid-way through a multi-step change. A refusal from the server is handled by the client anyway.
+ *
+ *   const fresh = useFresh();
+ *   await fresh.run(() => api.team.update(id, body));   // throws Cancelled if the person closes the sheet
+ *
+ * The sheet itself is FreshProvider's, mounted once for the whole console.
+ */
+export function useFresh() {
+  const { session } = useSession();
+  const run = useCallback(async (action) => {
+    if (isFresh(session?.freshUntil) === false && !(await confirmFresh())) throw new Cancelled();
+    return action();
+  }, [session?.freshUntil]);
+  return { run };
 }

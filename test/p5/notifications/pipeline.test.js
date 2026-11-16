@@ -40,7 +40,7 @@ test('F-57: the same alert five times in five minutes is sent once, with two wor
   await reset();
   const [a, b] = [w.worker(), w.worker()];
   // Five raises of one alert, and the same event emitted six times at once, while both workers drain.
-  for (let i = 0; i < 5; i++) await w.inTenant(() => w.app.repos.alerts.raise({ kind: 'token.invalid', severity: 'critical', message: 'Reconnect', target: 'instagram:ME', dedupeKey: 'token.rejected:ME:1' }));
+  for (let i = 0; i < 5; i++) await w.inTenant(() => w.app.repos.alerts.raise({ kind: 'token.rejected', severity: 'critical', message: 'Reconnect', target: 'instagram:ME', dedupeKey: 'token.rejected:ME:1' }));
   const [ids] = await Promise.all([
     Promise.all(Array.from({ length: 6 }, () => emit({ event: 'dm.usage_100', key: 'usage:2026-11' }))),
     a.drain(), b.drain(),

@@ -4,6 +4,7 @@ import { useFeedback } from '../../components/feedback.jsx';
 import { Badge, Banner, Button, EmptyState, FieldGroup, PageHeader, Panel, TextField, Toggle } from '../../design/index.jsx';
 import { api } from '../../lib/api/index.js';
 import { formatDateTime } from '../../lib/format.js';
+import { isCancelled } from '../../lib/fresh-gate.js';
 import { useSession } from '../../lib/session.jsx';
 import { ANALYTICS_LIMITS, FIGURE_TEXT } from '../insights/shared/catalog.js';
 import { tagsBody } from '../insights/shared/figures.js';
@@ -54,6 +55,7 @@ function TagForm({ settings }) {
       await queries.invalidateQueries({ queryKey: ['tags', 'health'] });
     },
     onError: (error) => {
+      if (isCancelled(error)) return; // the person closed "Confirm it’s you"
       const fields = {};
       for (const [path, message] of Object.entries(error.fields ?? {})) fields[path.split('.').at(-1)] = message;
       setErrors(fields);

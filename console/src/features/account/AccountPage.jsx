@@ -308,7 +308,7 @@ function DeleteAccount({ fresh }) {
 export default function AccountPage() {
   const options = useSignInOptions();
   const google = Boolean(options.data?.google);
-  const fresh = useFresh({ google });
+  const fresh = useFresh();
   return (
     <>
       <PageHeader eyebrow="Settings" title="Your account" />
@@ -316,7 +316,6 @@ export default function AccountPage() {
       <Businesses />
       <WaysIn google={google} fresh={fresh} />
       <DeleteAccount fresh={fresh} />
-      {fresh.sheet}
     </>
   );
 }
