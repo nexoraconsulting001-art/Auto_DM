@@ -4,7 +4,7 @@ import { ApiError } from '../../contracts/api/index.js';
 import { OAuthCallbackQuery, PROVIDER_PATHS } from '../../contracts/api/provider.js';
 import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
-import { DISCONNECTED_BY_OWNER } from '../ig-accounts/index.js';
+import { claimConnection, tellPassedOver } from '../ig-accounts/claim.js';
 import { tenantBaseUrl } from '../admin-api/urls.js';
 import { messagePage } from './pages.js';
 import { SCOPES_TO_GO_LIVE, SCOPE_INSIGHTS, READ_RECEIPTS_FIELD, WEBHOOK_FIELD_SCOPES, nextRefreshAt } from './rules.js';
@@ -64,20 +64,10 @@ export function createConnect({ db, repos, meta, config, platform, gates }) {
   }
 
   /**
-   * Puts the account on this business, or says it can't be. An account belongs to one business, because webhooks route by its id alone.
-   * A row another business left behind by disconnecting is cleared; any other is theirs.
+   * Puts the account on this business, or says it can't be (null). An account sends for one business at a time, because webhooks
+   * route by its id alone. A row another business released by disconnecting stays theirs, with its history (tenancy-1); any other is theirs.
    */
-  async function claimAccount(tenant, login) {
-    return platformDb.tx(async (t) => {
-      const [row] = await t.query('SELECT tenant_id, access_token_enc, status_reason FROM ig_accounts WHERE ig_user_id = $1 FOR UPDATE', [login.igUserId]);
-      if (row && row.tenant_id !== tenant.id) {
-        if (row.access_token_enc !== '' || row.status_reason !== DISCONNECTED_BY_OWNER) return false;
-        await t.query('DELETE FROM ig_accounts WHERE ig_user_id = $1', [login.igUserId]);
-      }
-      await t.query('INSERT INTO ig_accounts (ig_user_id, tenant_id, username) VALUES ($1, $2, $3) ON CONFLICT (ig_user_id) DO NOTHING', [login.igUserId, tenant.id, login.username]);
-      return true;
-    });
-  }
+  const claimAccount = (tenant, login) => claimConnection(platformDb, 'instagram', { tenantId: tenant.id, accountId: login.igUserId, name: login.username });
 
   /** Under Unified Login the subscription belongs to the Page behind the account. */
   const subscriptionTarget = (detail, account) => (detail?.loginKind === 'unified' && detail.pageId ? { pageId: detail.pageId, token: account.token } : account);
@@ -150,12 +140,14 @@ export function createConnect({ db, repos, meta, config, platform, gates }) {
       return 'failed';
     }
     const tenant = { id: state.tenant_id };
-    if (!(await claimAccount(tenant, login))) {
+    const claim = await claimAccount(tenant, login);
+    if (!claim) {
       log.warn('ig_connect.account_taken', { igUserId: login.igUserId });
       await repos.audit.record({ actor: `user:${person.id}`, action: 'instagram.connect_refused', target: `instagram:${login.igUserId}`, details: { reason: 'other_business' } });
       return 'taken';
     }
     const { account } = await repos.igAccounts.saveConnection({ ...login, connectedBy: person.id, nextRefreshAt: nextRefreshAt(Date.now(), login.expiresAt) });
+    await tellPassedOver({ db, repos }, 'instagram', login.igUserId, claim.passedOver);
     await retireOthers(account.igUserId, `user:${person.id}`);
     await subscribe(account.igUserId);
     await applyInsightsChoice(account);

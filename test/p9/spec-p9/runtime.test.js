@@ -436,6 +436,7 @@ const UNSAFE = {
   'metrics.token': { remove: ['METRICS_TOKEN'], files: { METRICS_TOKEN: 'short' } },
   'hosts.platform': { env: { PUBLIC_BASE_URL: 'http://localhost:3000', PLATFORM_DOMAIN: '' } },
   'sending.live': { env: { DRY_RUN: '1' } },
+  'tenancy.no_default': { env: { DEFAULT_TENANT: 'phantom-shop' } },
 };
 test('G-09: every production rule has a start test here (secrets.session and fetch.no_transport are not settable from the environment)', () => {
   const covered = new Set([...Object.keys(UNSAFE), 'secrets.session', 'fetch.no_transport']);

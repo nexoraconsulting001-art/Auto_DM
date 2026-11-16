@@ -6,7 +6,7 @@ import { log } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { tenantBaseUrl } from '../admin-api/urls.js';
 import { messagePage } from '../ig-connect/pages.js';
-import { DISCONNECTED_BY_OWNER } from '../ig-accounts/index.js';
+import { claimConnection, tellPassedOver } from '../ig-accounts/claim.js';
 
 const PROVIDER = 'facebook';
 const STATE_TTL_MS = 10 * 60_000;
@@ -68,18 +68,11 @@ export function createFacebookConnect({ db, repos, meta, config, platform }) {
     return row ?? null;
   }
 
-  /** Puts the Page on this business, or says it can't be. A row another business left behind by disconnecting is cleared; any other is theirs. */
-  async function claimPage(tenant, page) {
-    return platformDb.tx(async (t) => {
-      const [row] = await t.query('SELECT tenant_id, access_token_enc, status_reason FROM fb_pages WHERE page_id = $1 FOR UPDATE', [page.pageId]);
-      if (row && row.tenant_id !== tenant.id) {
-        if (row.access_token_enc !== '' || row.status_reason !== DISCONNECTED_BY_OWNER) return false;
-        await t.query('DELETE FROM fb_pages WHERE page_id = $1', [page.pageId]);
-      }
-      await t.query('INSERT INTO fb_pages (page_id, tenant_id, name) VALUES ($1, $2, $3) ON CONFLICT (page_id) DO NOTHING', [page.pageId, tenant.id, page.name]);
-      return true;
-    });
-  }
+  /**
+   * Puts the Page on this business, or says it can't be (null). A row another business released by disconnecting stays theirs,
+   * with its history (tenancy-1); any other is theirs.
+   */
+  const claimPage = (tenant, page) => claimConnection(platformDb, 'facebook', { tenantId: tenant.id, accountId: page.pageId, name: page.name });
 
   /** Tells Meta to send this Page's events here, only the fields its granted permissions allow. False leaves it for the hourly retry. */
   async function subscribe(pageId) {
@@ -135,8 +128,10 @@ export function createFacebookConnect({ db, repos, meta, config, platform }) {
 
     const tenant = { id: state.tenant_id };
     let page = null;
+    let claim = null;
     for (const candidate of candidates) {
-      if (await claimPage(tenant, candidate)) {
+      claim = await claimPage(tenant, candidate);
+      if (claim) {
         page = candidate;
         break;
       }
@@ -146,6 +141,7 @@ export function createFacebookConnect({ db, repos, meta, config, platform }) {
     if (!page) return 'taken';
 
     await repos.fbPages.saveConnection({ pageId: page.pageId, name: page.name, igUserId: page.igUserId, token: page.token, scopes: login.scopes, connectedBy: person.id });
+    await tellPassedOver({ db, repos }, 'facebook', page.pageId, claim.passedOver);
     // Only one Page sends for a business. Connecting a different one ends the old one.
     for (const other of await repos.fbPages.othersWithTokens(page.pageId)) await disconnect(other, `user:${person.id}`);
     await subscribe(page.pageId);

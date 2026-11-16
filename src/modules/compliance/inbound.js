@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { CommentValue, FeedValue, MessagingEvent, WebhookChange, WebhookEntry } from '../../contracts/api/provider.js';
 import { log as logger, reportError } from '../../platform/log.js';
 import { currentTenant, tenantId, withTenant } from '../../tenancy.js';
+import { RELEASED_BY_OWNER } from '../../repos/connections.js';
 import { buyerBaseUrl, reelStoreUrl } from '../admin-api/urls.js';
 import { matchesKeywords } from '../automations/match.js';
 import { hasNegativeIntent, isOptOut, isStart, isTooShort, wantsHuman } from './words.js';
@@ -121,13 +122,19 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
 
   // ---- storing a delivery -----------------------------------------------------------------------------------------
 
+  /**
+   * Which business each account's deliveries go to. Each business keeps its own row (tenancy-1) and at most one is live: rows
+   * come released first and live last, so the business holding the account now is the one kept; a row its owner released is
+   * only used when no business holds the account.
+   */
   async function routeAccounts(channel, ids) {
     const facebook = channel === 'facebook';
     const rows = await db.platform.query(
       `SELECT a.${facebook ? 'page_id' : 'ig_user_id'} AS account_id, t.id, t.slug, t.name, t.status
        FROM ${facebook ? 'fb_pages' : 'ig_accounts'} a JOIN tenants t ON t.id = a.tenant_id
-       WHERE a.${facebook ? 'page_id' : 'ig_user_id'} IN (SELECT jsonb_array_elements_text($1::jsonb))`,
-      [JSON.stringify(ids)],
+       WHERE a.${facebook ? 'page_id' : 'ig_user_id'} IN (SELECT jsonb_array_elements_text($1::jsonb))
+       ORDER BY (a.access_token_enc = '' AND a.status_reason = $2) DESC, a.status_changed_at ASC NULLS FIRST`,
+      [JSON.stringify(ids), RELEASED_BY_OWNER],
     );
     return new Map(rows.map((r) => [r.account_id, r]));
   }

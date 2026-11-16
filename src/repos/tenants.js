@@ -1,10 +1,11 @@
 import { ValidationError, slugify } from '../util.js';
 import { normalizeHost } from '../tenancy.js';
+import { RELEASED_BY_OWNER, isLiveAccountClash } from './connections.js';
 import { hashSessionToken, operatorRef } from './sessions.js';
 
 const COLS = 'id, slug, name, status, plan, created_at';
 /** The verified primary domain goes with the business, because the links a DM carries are built on it. */
-const WITH_PRIMARY = `t.id, t.slug, t.name, t.status, t.plan, t.created_at, t.account_type,
+export const WITH_PRIMARY = `t.id, t.slug, t.name, t.status, t.plan, t.created_at, t.account_type,
   (SELECT p.domain FROM tenant_domains p WHERE p.tenant_id = t.id AND p.is_primary AND p.status = 'verified') AS primary_domain`;
 
 /** Addresses Bhava keeps for itself; no business can take one. */
@@ -89,23 +90,31 @@ export function tenantsRepo(handle) {
       const session = await this.findSession(token, ['bearer']);
       return session ? { tenant: session.tenant, userId: session.userId } : null;
     },
-    /** The business that owns this Instagram account, or null. */
+    /**
+     * The business that holds this Instagram account, or null. Each business keeps its own row (tenancy-1) and at most one is
+     * live; a row its owner released by disconnecting is only chosen when no business holds the account now.
+     */
     async getByIgAccount(igUserId) {
       const [row] = await db.query(
         `SELECT ${WITH_PRIMARY} FROM ig_accounts a JOIN tenants t ON t.id = a.tenant_id
-         WHERE a.ig_user_id = $1`,
-        [String(igUserId)],
+         WHERE a.ig_user_id = $1
+         ORDER BY (a.access_token_enc = '' AND a.status_reason = $2), a.status_changed_at DESC NULLS LAST LIMIT 1`,
+        [String(igUserId), RELEASED_BY_OWNER],
       );
       return row || null;
     },
+    /** Puts an account on a business. Refused while another business holds it live; a row another business released stays theirs. */
     async linkIgAccount(tenantId, igUserId, username = '') {
-      const [row] = await db.query(
-        `INSERT INTO ig_accounts (ig_user_id, tenant_id, username) VALUES ($1, $2, $3)
-         ON CONFLICT (ig_user_id) DO UPDATE SET username = EXCLUDED.username
-         WHERE ig_accounts.tenant_id = EXCLUDED.tenant_id RETURNING tenant_id`,
-        [String(igUserId), Number(tenantId), String(username)],
-      );
-      if (!row) throw new ValidationError('This Instagram account is already connected to another business');
+      try {
+        await db.query(
+          `INSERT INTO ig_accounts (ig_user_id, tenant_id, username) VALUES ($1, $2, $3)
+           ON CONFLICT (tenant_id, ig_user_id) DO UPDATE SET username = EXCLUDED.username`,
+          [String(igUserId), Number(tenantId), String(username)],
+        );
+      } catch (err) {
+        if (isLiveAccountClash(err)) throw new ValidationError('This Instagram account is already connected to another business');
+        throw err;
+      }
     },
     async list() {
       return db.query(`SELECT ${COLS} FROM tenants ORDER BY created_at`);

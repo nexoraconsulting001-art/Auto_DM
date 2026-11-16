@@ -61,9 +61,14 @@ test('a reel cannot use another business’s products or Instagram post', async 
   const { products } = await seedReel(a);
   await assert.rejects(() => b.reels.save('999', { headline: 'Steal', keywords: 'LINK', productIds: [products[0].id] }), /no longer exists/);
   const own = await b.products.create({ name: 'Plant pot', price: '199', active: 'on' });
-  await assert.rejects(() => b.reels.save(REEL_ID, { headline: 'Mine', keywords: 'LINK', productIds: [own.id] }), /another business/);
-  assert.equal((await a.reels.get(REEL_ID)).headline, 'Brunch edit');
-  assert.equal(await b.reels.get(REEL_ID), null);
+  // Reels are keyed per business (D-5): B writing the same post id makes B's own row and never changes or reads A's reel.
+  // That a post is B's own is asked of B's Instagram by the API (test/final/tenancy/reel-ownership.test.js).
+  const theirs = await b.reels.save(REEL_ID, { headline: 'Mine', keywords: 'LINK', productIds: [own.id] });
+  assert.deepEqual(theirs.products.map((p) => p.id), [own.id]);
+  await assert.rejects(() => b.reels.save(REEL_ID, { headline: 'Mine', keywords: 'LINK', productIds: [products[0].id] }), /no longer exists/);
+  const ours = await a.reels.get(REEL_ID);
+  assert.equal(ours.headline, 'Brunch edit');
+  assert.deepEqual(ours.products.map((p) => p.id), products.map((p) => p.id));
 });
 
 test('the database refuses links between two businesses even if code forgot to check', async () => {

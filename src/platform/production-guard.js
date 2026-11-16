@@ -78,6 +78,8 @@ export const PRODUCTION_RULES = Object.freeze([
   { id: 'hosts.platform', settings: ['PLATFORM_DOMAIN', 'PLATFORM_HOST', 'PUBLIC_BASE_URL'], must: 'the platform domain and host set, and an https public address', ok: (c) => Boolean(text(c.platformDomain)) && Boolean(text(c.platformHost) || text(c.platformDomain)) && /^https:\/\//.test(text(c.publicBaseUrl)) && !looksLikeSimulator(c.publicBaseUrl) },
   { id: 'sending.live', settings: ['DRY_RUN'], must: 'DRY_RUN off', ok: (c) => !c.dryRun },
   { id: 'fetch.no_transport', settings: [], must: 'no test transport on the fetcher', ok: (c) => !c.safeFetchTransport },
+  // D-6: a fallback business serves every unknown address and takes webhooks for accounts no business holds.
+  { id: 'tenancy.no_default', settings: ['DEFAULT_TENANT'], must: 'empty: every business is found by its own address, and none stands in for the rest', ok: (c) => !text(c.defaultTenant) },
 ].map(Object.freeze));
 
 /** The rules the config breaks: [{ id, settings, must }]. No value of any setting is in the answer. */

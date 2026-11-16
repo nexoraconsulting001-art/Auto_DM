@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { verifySignedRequest } from '../../adapters/meta/index.js';
 import { DeletionStatus, PROVIDER_PATHS, SignedRequestBody, SignedRequestPayload } from '../../contracts/api/provider.js';
 import { log, reportError } from '../../platform/log.js';
+import { RELEASED_BY_OWNER } from '../../repos/connections.js';
 import { withTenant } from '../../tenancy.js';
 import { HEALTH_PROBE } from './gates.js';
 import { deletionStatusPage } from './pages.js';
@@ -34,8 +35,10 @@ export function createCallbacks({ db, repos, config, gates }) {
   /** Meta's id for who is asking may be the account id webhooks carry or its app-scoped id (PRD 4.3 row 21: to confirm). */
   async function findAccount(userId) {
     const [row] = await platformDb.query(
-      `SELECT ig_user_id, tenant_id FROM ig_accounts WHERE ig_user_id = $1 OR (app_scoped_id <> '' AND app_scoped_id = $1) ORDER BY (ig_user_id = $1) DESC LIMIT 1`,
-      [userId],
+      // Each business keeps its own row (tenancy-1): the one holding the account now comes first, then the latest to let it go.
+      `SELECT ig_user_id, tenant_id FROM ig_accounts WHERE ig_user_id = $1 OR (app_scoped_id <> '' AND app_scoped_id = $1)
+       ORDER BY (ig_user_id = $1) DESC, (access_token_enc = '' AND status_reason = $2), status_changed_at DESC NULLS LAST LIMIT 1`,
+      [userId, RELEASED_BY_OWNER],
     );
     return row ?? null;
   }

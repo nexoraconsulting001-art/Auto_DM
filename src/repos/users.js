@@ -4,6 +4,7 @@ import { PERMISSIONS, SELLER_ROLES } from '../contracts/api/access.js';
 import { reportError } from '../platform/log.js';
 import { ValidationError, normalizePhone } from '../util.js';
 import { tenantId } from '../tenancy.js';
+import { WITH_PRIMARY } from './tenants.js';
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -132,11 +133,15 @@ export function usersRepo(db) {
       if (!row) throw new ValidationError('Only a staff member can be given permissions');
       return row;
     },
-    /** The seller's account at another business, or null when they aren't a member there. Read on every call, so a removal counts at once. */
+    /**
+     * The seller's account at another business, or null when they aren't a member there. Read on every call, so a removal counts at once.
+     * The business comes with the same columns as every other way in, verified primary domain included, so links built in a
+     * switched request are the ones the business's own sign-in gives (tenancy-2).
+     */
     async memberOf(user, otherTenantId) {
       if (!SELLER_ROLES.includes(user.role)) return null;
       const [row] = await platform.query(
-        `SELECT t.id, t.slug, t.name, t.status, t.plan, t.created_at, t.account_type, u.id AS member_user_id
+        `SELECT ${WITH_PRIMARY}, u.id AS member_user_id
          FROM memberships m
          JOIN users u ON u.tenant_id = m.member_tenant_id AND u.id = m.member_user_id
          JOIN tenants t ON t.id = m.member_tenant_id

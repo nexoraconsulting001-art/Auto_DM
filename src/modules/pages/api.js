@@ -90,10 +90,17 @@ export function pagesApi(ctx) {
     return id.toLowerCase();
   }
 
-  /** The post as Instagram describes it, read with this business's own token, which also proves the post is theirs. */
+  /**
+   * The post as Instagram describes it, read with this business's own token, which also proves the post is theirs. A Facebook
+   * post id is "<page id>_<post id>", so it is this business's own only when it is on the Page this business connected with
+   * its own Page token (D-5). Anything else reads the same as a post that doesn't exist.
+   */
   async function lookUpMedia(channel, mediaId) {
     if (channel === 'facebook') {
       if (!config.facebookPages) throw invalidField('channel', 'Facebook isn’t switched on for this business');
+      const page = await repos.fbPages.current();
+      if (!page?.token) throw new ApiError('conflict', 'Connect your Facebook Page before adding a page.');
+      if (!/^\d+_\d+$/.test(mediaId) || !mediaId.startsWith(`${page.pageId}_`)) throw invalidField('mediaId', 'Pick a post from your Page');
       return {};
     }
     const account = await repos.igAccounts.current();
@@ -142,8 +149,7 @@ export function pagesApi(ctx) {
     },
 
     'pages.create': async ({ body, user, req }) => {
-      // Another business's post is "not found" here like any other id of theirs.
-      if (await repos.landingPages.heldElsewhere(body.mediaId)) throw new ApiError('not_found');
+      // Only this business's rows are looked at (D-5): whether the post is its own is asked of its own account in lookUpMedia.
       if ((await repos.landingPages.idsByMedia([body.mediaId])).size) throw new ApiError('conflict', 'This post already has a page.');
       const productIds = await checkedProducts(body.productIds);
       const categoryIds = await checkedCategories(body.categoryIds ?? []);

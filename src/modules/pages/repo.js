@@ -53,8 +53,6 @@ async function retrying(fn, times = 3) {
 }
 
 export function landingPagesRepo(db) {
-  const platform = db.platform ?? db;
-
   async function productsOf(t, mediaId, { liveOnly = false } = {}) {
     const rows = await t.query(
       `SELECT ${PRODUCT_COLS}, rp.position FROM reel_products rp JOIN products p ON p.tenant_id = rp.tenant_id AND p.id = rp.product_id
@@ -162,12 +160,6 @@ export function landingPagesRepo(db) {
       if (!mediaIds.length) return new Map();
       const rows = await db.query('SELECT id, ig_media_id FROM reels WHERE tenant_id = $1 AND ig_media_id = ANY($2::text[])', [tenantId(), mediaIds.map(String)]);
       return new Map(rows.map((r) => [r.ig_media_id, r.id]));
-    },
-
-    /** Media ids are unique across Instagram, so whether another business holds one has to look across businesses. */
-    async heldElsewhere(mediaId) {
-      const [row] = await platform.query('SELECT tenant_id FROM reels WHERE ig_media_id = $1', [String(mediaId)]);
-      return Boolean(row && row.tenant_id !== tenantId());
     },
 
     /** Which of `ids` are this business's products. */

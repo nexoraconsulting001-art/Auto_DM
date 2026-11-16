@@ -18,8 +18,8 @@ export const SECRET_KINDS = Object.freeze(['token', 'gateway', 'courier', 'shopi
 const column = (table, name, key, kind, tenant = true) => Object.freeze({ table, column: name, key: Object.freeze(key), kind, tenant });
 
 export const SECRET_COLUMNS = Object.freeze([
-  column('ig_accounts', 'access_token_enc', ['ig_user_id'], 'token'),
-  column('fb_pages', 'access_token_enc', ['page_id'], 'token'),
+  column('ig_accounts', 'access_token_enc', ['tenant_id', 'ig_user_id'], 'token'),
+  column('fb_pages', 'access_token_enc', ['tenant_id', 'page_id'], 'token'),
   column('whatsapp_accounts', 'access_token_enc', ['tenant_id'], 'token'),
   column('gateway_keys', 'key_secret_enc', ['tenant_id', 'provider'], 'gateway'),
   column('payment_settings', 'oauth_access_enc', ['tenant_id'], 'gateway'),

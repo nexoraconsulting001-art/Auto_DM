@@ -202,7 +202,11 @@ test('FB-06: a Page on one business can\'t be taken by another; one its owner di
   assert.equal((await b.call('/facebook/connection', 200)).status, 'not_connected');
   assert.equal((await a.api('/facebook/connection', { method: 'DELETE' })).status, 204);
   assert.equal(landedWith(await finishConsent(b, await consent(b, { pageIds: [pageId] }))), 'connected');
-  assert.deepEqual((await a.sql('SELECT tenant_id FROM fb_pages WHERE page_id = $1', [pageId])).map((r) => r.tenant_id), [b.tenantId]);
+  // The Page sends for B only; A keeps its own released row, so its history stays (tenancy-1).
+  assert.deepEqual((await a.sql(`SELECT tenant_id FROM fb_pages WHERE page_id = $1 AND access_token_enc <> ''`, [pageId])).map((r) => r.tenant_id), [b.tenantId]);
+  assert.deepEqual((await a.sql(`SELECT tenant_id, access_token_enc FROM fb_pages WHERE page_id = $1 AND tenant_id = $2`, [pageId, a.tenantId])).map((r) => r.access_token_enc), ['']);
+  assert.equal((await b.call('/facebook/connection', 200)).status, 'active');
+  assert.equal((await a.call('/facebook/connection', 200)).status, 'not_connected');
 });
 
 test('FB-06: a business with Instagram only sees an empty Facebook, and Instagram runs as before', async () => {
