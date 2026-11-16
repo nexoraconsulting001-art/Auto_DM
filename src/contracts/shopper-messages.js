@@ -56,6 +56,8 @@ export const MESSAGE_REASONS = Object.freeze({
   /** WhatsApp only: the kill switch is engaged, or this business is paused. Asked of the compliance gate before every send. */
   pausedGlobal: 'paused.global',
   pausedBusiness: 'paused.tenant',
+  /** WhatsApp only: the business's WhatsApp breaker is open (PRD 4.12). Once its wait is over, one send goes as its probe. */
+  pausedBreaker: 'paused.breaker',
   /** The text names the platform. Buyer messages carry the seller's brand only. */
   platformName: 'content.platform_name',
   /** A marketing email with no unsubscribe link. */

@@ -1,3 +1,4 @@
+import { externalId } from '../../contracts/api/common.js';
 import { DEFAULT_TIMEOUT_MS, ProviderError, createHttp, hmac, providerUrl, sameBytes } from '../http.js';
 
 /**
@@ -53,23 +54,25 @@ export function verifyWebhook(rawBody, signatureHeader, appSecret) {
   return sameBytes(signatureHeader.slice(7), hmac(appSecret, rawBody));
 }
 
+/** An id or number from a delivery as text, or '' when it is missing or a JSON number past 2^53 (rounded onto a neighbour's: ExternalId). */
+const idText = (value) => externalId(value) ?? '';
 const changes = (body) => (Array.isArray(body?.entry) ? body.entry : []).flatMap((e) => (Array.isArray(e?.changes) ? e.changes : [])).map((c) => c?.value).filter(Boolean);
 
 export function parseStatuses(body) {
   return changes(body).flatMap((value) => (Array.isArray(value.statuses) ? value.statuses : []).map((s) => ({
-    messageId: String(s.id ?? ''),
+    messageId: idText(s.id),
     status: String(s.status ?? ''),
     at: new Date(Number(s.timestamp) * 1000 || Date.now()),
     errorCode: String(s.errors?.[0]?.code ?? ''),
-    phoneNumberId: String(value.metadata?.phone_number_id ?? ''),
+    phoneNumberId: idText(value.metadata?.phone_number_id),
     costCategory: String(s.pricing?.category ?? ''),
   }))).filter((s) => s.messageId);
 }
 
 export function parseInbound(body) {
   return changes(body).flatMap((value) => (Array.isArray(value.messages) ? value.messages : []).map((m) => ({
-    phoneNumberId: String(value.metadata?.phone_number_id ?? ''),
-    from: String(m.from ?? ''),
+    phoneNumberId: idText(value.metadata?.phone_number_id),
+    from: idText(m.from),
     text: String(m.text?.body ?? m.button?.text ?? ''),
   }))).filter((m) => m.from);
 }
@@ -77,15 +80,15 @@ export function parseInbound(body) {
 /** Every inbound message of a delivery, routed by value.metadata.phone_number_id. Reactions and receipts carry no text. */
 export function parseMessages(body) {
   return changes(body).flatMap((value) => {
-    const names = new Map((Array.isArray(value.contacts) ? value.contacts : []).map((c) => [String(c?.wa_id ?? ''), String(c?.profile?.name ?? '')]));
+    const names = new Map((Array.isArray(value.contacts) ? value.contacts : []).map((c) => [idText(c?.wa_id), String(c?.profile?.name ?? '')]));
     return (Array.isArray(value.messages) ? value.messages : []).map((m) => ({
-      phoneNumberId: String(value.metadata?.phone_number_id ?? ''),
-      messageId: String(m.id ?? ''),
-      from: String(m.from ?? ''),
+      phoneNumberId: idText(value.metadata?.phone_number_id),
+      messageId: idText(m.id),
+      from: idText(m.from),
       text: String(m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? ''),
       type: String(m.type ?? 'text'),
       at: new Date(Number(m.timestamp) * 1000 || Date.now()),
-      name: names.get(String(m.from ?? '')) ?? '',
+      name: names.get(idText(m.from)) ?? '',
     }));
   }).filter((m) => m.from && m.messageId && m.phoneNumberId);
 }
@@ -111,15 +114,15 @@ export function createWhatsApp(config = {}, { env = process.env } = {}) {
     },
     async templates(account) {
       const { body } = await request('GET', `/${encodeURIComponent(account.wabaId)}/message_templates`, { headers: auth(account), query: { limit: 200 }, retries: 2 });
-      return (body?.data ?? []).map((t) => ({ id: String(t.id), name: t.name, language: t.language, category: String(t.category ?? '').toLowerCase(), status: String(t.status ?? '').toLowerCase() }));
+      return (body?.data ?? []).filter((t) => externalId(t.id)).map((t) => ({ id: externalId(t.id), name: t.name, language: t.language, category: String(t.category ?? '').toLowerCase(), status: String(t.status ?? '').toLowerCase() }));
     },
     async createTemplate(account, { name, language = 'en', category, components }) {
       const { body } = await request('POST', `/${encodeURIComponent(account.wabaId)}/message_templates`, { headers: auth(account), json: { name, language, category: String(category).toUpperCase(), components } });
-      return { id: String(body.id), status: String(body.status ?? 'PENDING').toLowerCase() };
+      return { id: externalId(body?.id) ?? '', status: String(body?.status ?? 'PENDING').toLowerCase() };
     },
     async phoneNumber(account) {
       const { body } = await request('GET', `/${encodeURIComponent(account.phoneNumberId)}`, { headers: auth(account), retries: 2 });
-      return { id: String(body.id), displayNumber: body.display_phone_number ?? '', verifiedName: body.verified_name ?? '', quality: body.quality_rating ?? '' };
+      return { id: externalId(body?.id) ?? '', displayNumber: body.display_phone_number ?? '', verifiedName: body.verified_name ?? '', quality: body.quality_rating ?? '' };
     },
     async sendText(account, { to, text, previewUrl = true }) {
       if (!/^[1-9][0-9]{7,14}$/.test(String(to))) throw new Error('WhatsApp needs the number in international format, digits only');

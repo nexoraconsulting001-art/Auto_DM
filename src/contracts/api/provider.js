@@ -1,13 +1,14 @@
 import { z } from 'zod';
 import { PKCE_CHALLENGE } from '../accounts.js';
-import { Timestamp, text } from './common.js';
+import { ExternalId, Timestamp, text } from './common.js';
 
 /**
  * What Meta and Caddy call, outside /api/v1 and before any business is known. Mount these in a module's beforeTenant
  * at these paths: Meta's dashboard, the simulator and the connect flow all use them.
  * Parse each entry and each change on its own, so one malformed item never takes the rest of a delivery with it.
  */
-const ObjectId = z.union([z.string().min(1), z.number().transform(String)]);
+// Never a lossy number: an id past 2^53 is refused (ExternalId), so a webhook or a deletion request can't land on a neighbouring id.
+const ObjectId = ExternalId;
 const Person = z.object({ id: ObjectId, username: z.string().optional(), name: z.string().optional() });
 
 export const WebhookEnvelope = z.object({ object: z.string(), entry: z.array(z.unknown()).max(5000) });

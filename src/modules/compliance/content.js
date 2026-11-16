@@ -1,4 +1,5 @@
 import { COMPLIANCE_LIMITS as LIMITS } from '../../contracts/compliance.js';
+import { INVISIBLE } from '../automations/match.js';
 
 /**
  * The content rules (PRD 4.10), used when a template is saved and again at send. Owned by the compliance track;
@@ -43,8 +44,12 @@ const HINGLISH_PRICE_BEFORE = '(?<!(?:sahi|kam|achh?a|achh?e|acch?a|acch?e|ache|
 const PROMO = [
   /(?<![\p{L}\p{N}\p{M}])(?:www\.)?(?:get|use|try)?bhava(?:hq)?\.(?:app|in|co\.in|com|co|net|org|store|shop|link|io|ai|me|to|site)(?![\p{L}\p{N}\p{M}])/iu,
   /(?<![\p{L}\p{N}\p{M}])@(?:get|use|try|join)?[._]?bhava(?:[._]?(?:hq|app|official|india|in))?(?![\p{L}\p{N}\p{M}])/iu,
-  /(?<![\p{L}\p{N}\p{M}])(?:on|with|by|via|using|try|join|from|powered\s+by|made\s+with|built\s+with|built\s+on|sell\s+on|shop\s+on|download|install)\s+bhava(?:\s+app)?(?![\p{L}\p{N}\p{M}])/iu,
-  /(?<![\p{L}\p{N}\p{M}])bhava\s+(?:app|platform|store\s+builder|hq)(?![\p{L}\p{N}\p{M}])/iu,
+  // The domain spelled out so it reads as one: "bhava dot app", "bhava(dot)in", "bhava [.] com".
+  /(?<![\p{L}\p{N}\p{M}])(?:get|use|try)?bhava(?:hq)?(?:\s+dot\s+|\s*[([{]\s*(?:dot|\.)\s*[)\]}]\s*)(?:app|in|co|com|net|org|store|shop|link|io|ai|me|to|site)(?![\p{L}\p{N}\p{M}])/iu,
+  // A hashtag is a handle by another name: "#BhavaApp", "#getbhava", "#bhava_official".
+  /(?<![\p{L}\p{N}\p{M}])#(?:get|use|try|join|shop)?[._]?bhava(?:[._]?(?:hq|app|official|india|in|store|shop))?(?![\p{L}\p{N}\p{M}])/iu,
+  /(?<![\p{L}\p{N}\p{M}])(?:on|at|with|by|via|using|try|join|from|powered\s+by|made\s+with|built\s+with|built\s+on|sell\s+on|shop\s+on|download|install)\s+bhava(?:\s+app)?(?![\p{L}\p{N}\p{M}])/iu,
+  /(?<![\p{L}\p{N}\p{M}])bhava[\s_-]*(?:app|platform|store\s+builder|hq|powered)(?![\p{L}\p{N}\p{M}])/iu,
   // Hinglish: "Bhava se kharido", "Bhava app pe order karo". A price word before it is the ordinary "bhav": "sahi bhava pe milega" (C-61).
   new RegExp(`${HINGLISH_PRICE_BEFORE}(?<![\\p{L}\\p{N}\\p{M}])bhava\\s+(?:app\\s+)?(?:se|par|pe|pr)\\s+(?:${HINGLISH_SHOP_WORDS})(?![\\p{L}\\p{N}\\p{M}])`, 'iu'),
   new RegExp(`(?<![\\p{L}\\p{N}\\p{M}])(?:${HINGLISH_SHOP_WORDS})\\s+bhava\\s+(?:app\\s+)?(?:se|par|pe|pr)(?![\\p{L}\\p{N}\\p{M}])`, 'iu'),
@@ -99,7 +104,7 @@ const CONFUSABLE = new RegExp(`[${[...CONFUSABLES.keys()].join('')}]`, 'gu');
 export function readable(text) {
   return String(text)
     .normalize('NFKC')
-    .replace(/[\p{Cf}\u034f\u115f\u1160\u3164\uffa0]/gu, '')
+    .replace(INVISIBLE, '')
     .replace(CONFUSABLE, (ch) => CONFUSABLES.get(ch))
     .normalize('NFD')
     .replace(/(\p{Script=Latin})\p{Mn}+/gu, '$1')
@@ -143,20 +148,40 @@ export function checkContent({ text = '', buttonTitle = '', url = '', quickRepli
 export const DISCLOSURE_LINE = 'Automated reply';
 export const withDisclosure = (text) => `${text}\n\n${DISCLOSURE_LINE}`;
 
-const REPLY_LINK = /https?:\/\/|www\.|\b[a-z0-9-]+\.(?:com|in|net|org|co|io|shop|store|link|ly|me|app)\b/i;
+const REPLY_LINK = /https?:\/\/|www\./i;
 const REPLY_PHONE = /(?:\+?\d[\s-]?){10,}/;
-const REPLY_PRICE = /₹|\brs\.?\s*\d|\binr\s*\d|\d\s*\/-/i;
+// A number with a currency word on either side, in English, Hinglish or Hindi: "₹499", "Rs 499", "499 rupees", "499/-", "४९९ रुपये",
+// or after a price word: "price 499", "keemat hai 499".
+const CURRENCY = '(?:₹|rs\\.?|inr|mrp|rupees?|rupaye|rupaiye|rupay|rupiya|rupiye|rupaya|रुपये|रुपए|रुपया|रुपैया|रु\\.?)';
+const PRICE_WORD = '(?:price|prices|priced|cost|costs|keemat|kimat|daam|कीमत|दाम)(?:\\s+(?:is|at|hai|only|just|of))?';
+const REPLY_PRICE = new RegExp(`₹|(?<![\\p{L}\\p{N}\\p{M}])(?:${CURRENCY}|${PRICE_WORD})\\s*[:.-]?\\s*\\d|\\d[\\d,.]*\\s*(?:\\/-|${CURRENCY}(?![\\p{L}\\p{N}\\p{M}]))`, 'iu');
+
+/** Every decimal digit as its ASCII one: Devanagari "९८७६", Bengali, full-width and the rest read as "9876" for the number rules. */
+function asciiDigits(text) {
+  return String(text).normalize('NFKC').replace(/\p{Nd}/gu, (digit) => {
+    // Unicode's decimal digits come in runs of ten, zero first: the digit's value is its place in its run.
+    let cp = digit.codePointAt(0);
+    let place = 0;
+    while (/\p{Nd}/u.test(String.fromCodePoint(cp - 1))) {
+      cp--;
+      place++;
+    }
+    return String(place % 10);
+  });
+}
 
 /**
- * Why this public reply can't go, as [{ reason, message }] (PRD 4.9). The brand kit checks the same at save, so this only
- * fires if a variant reached the database some other way. The reason enum has no code for a phone number or a price in a public
- * reply; content.financial_request is the nearest and keeps it out of the send path.
+ * Why this public reply can't go, as [{ reason, message }] (PRD 4.9: no links, phone numbers or price). The brand kit runs this
+ * same function at save, so at send it only fires for a variant that reached the database some other way. A link is anything a
+ * buyer's app would make tappable (linksIn, the rule DMs use), and digits are read in any script. The reason enum has no code for a
+ * phone number or a price in a public reply; content.financial_request is the nearest and keeps it out of the send path.
  */
 export function checkPublicReply(text) {
   const problems = [];
+  const digits = asciiDigits(readable(text));
   if (chars(text) > LIMITS.publicReplyMaxChars) problems.push({ reason: 'content.too_long', message: `Keep a public reply to ${LIMITS.publicReplyMaxChars} characters.` });
-  if (REPLY_LINK.test(text)) problems.push({ reason: 'link.not_allowlisted', message: 'A public reply can’t contain a link.' });
-  if (REPLY_PHONE.test(text) || REPLY_PRICE.test(text)) problems.push({ reason: 'content.financial_request', message: 'A public reply can’t contain a phone number or a price.' });
+  if (REPLY_LINK.test(text) || linksIn(text).length) problems.push({ reason: 'link.not_allowlisted', message: 'A public reply can’t contain a link.' });
+  if (REPLY_PHONE.test(digits) || REPLY_PRICE.test(digits)) problems.push({ reason: 'content.financial_request', message: 'A public reply can’t contain a phone number or a price.' });
   if (promotes(text)) problems.push({ reason: 'content.bhava_promo', message: 'A public reply can’t name the platform.' });
   return problems;
 }
@@ -165,7 +190,8 @@ export function checkPublicReply(text) {
 export const urlsIn = (text) => [...String(text).matchAll(/\bhttps?:\/\/[^\s<>"']+/gi)].map(([u]) => u.replace(/[),.;!?]+$/, ''));
 
 // A host written without a scheme (www.shop.example, bit.ly/x, wa.me/91...): not an email address, a handle or part of a longer word.
-const BARE_LINK = /(?<![\p{L}\p{N}\p{M}@._/:\\-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}\.?(?![\p{L}\p{N}\p{M}_-])(?::\d{1,5})?(?:[/?#][^\s<>"']*)?/giu;
+// A colon before it does not hide it: "Link:bit.ly/x" is tappable. Addresses with a scheme are taken out before this runs.
+const BARE_LINK = /(?<![\p{L}\p{N}\p{M}@._/\\-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}\.?(?![\p{L}\p{N}\p{M}_-])(?::\d{1,5})?(?:[/?#][^\s<>"']*)?/giu;
 
 /**
  * Every address a buyer's app would make tappable (PRD 4.11). Instagram, Messenger and WhatsApp link "bit.ly/x" and "www.shop.example"

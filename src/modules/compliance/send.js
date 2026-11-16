@@ -1101,10 +1101,28 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     /** Another channel for the gate (PRD 6.12: WhatsApp), registered by its module in setup(ctx). The definition is in channels.js. */
     registerChannel: (name, definition) => channels.register(name, definition),
     channels: () => channels.names(),
-    /** '' or the reason nothing may go out on this channel now (paused.global, paused.tenant): what ctx.shopperMessages asks before a WhatsApp send. */
+    /**
+     * '' or the reason nothing may go out on this channel now (paused.global, paused.tenant, and with { breaker: true }
+     * paused.breaker): what ctx.shopperMessages asks before a WhatsApp send.
+     */
     async sendingPaused(channel, options) {
       tenantId();
       return gate.sendingPaused(channel, options);
+    },
+    /**
+     * For a sender outside this queue (ctx.shopperMessages) that found the breaker open: true when its wait is over and this caller
+     * won the one probe send, as a job of this queue would (PRD 4.12). Whoever gets true must call breakerProbeDone once: 'sent' closes
+     * the breaker, 'failed' reopens it with a doubled wait, 'unused' (the provider was never called) leaves it for the next sender.
+     */
+    async takeBreakerProbe(channel) {
+      tenantId();
+      return breaker.tryProbe(channel, limits.leaseMs);
+    },
+    async breakerProbeDone(channel, outcome) {
+      tenantId();
+      if (outcome === 'sent') return breaker.probeSucceeded(channel);
+      if (outcome === 'failed') return breaker.probeFailed(channel);
+      return breaker.probeUnused(channel);
     },
 
     /** Failures are thrown here, because that is what src/handler.js is written against. Nothing in production calls it any more. */

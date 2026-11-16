@@ -20,6 +20,21 @@ export const text = (max) => noNul(z.string().trim().max(max, `Use ${max} charac
 export const required = (max, message = 'This is required') => text(max).min(1, message);
 
 export const Id = z.number().int().positive().max(INT32_MAX);
+
+/**
+ * An id another system sends (Meta, WhatsApp, Shopify), kept as text. A JSON number is taken only while it is exact: past 2^53
+ * JSON.parse has already rounded it, and the rounded value can be another business's or another person's id
+ * (17841400000000011 reads as 17841400000000012). Such a number is refused, never guessed at.
+ */
+export const ExternalId = z.union([
+  z.string().min(1),
+  z.number().refine((n) => Number.isSafeInteger(n) && n >= 0, 'An id sent as a number past 2^53 has lost digits').transform(String),
+]);
+/** ExternalId for code that reads a provider's answer without a schema: the id as text, or null when it is missing or inexact. */
+export const externalId = (value) => {
+  const parsed = ExternalId.safeParse(value);
+  return parsed.success ? parsed.data : null;
+};
 export const Count = z.number().int().min(0);
 export const Paise = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 export const PaiseInput = z.number().int('Use whole paise').min(0, 'Can’t be negative').max(INT32_MAX, 'That amount is too large');

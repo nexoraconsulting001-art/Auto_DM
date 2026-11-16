@@ -118,6 +118,9 @@ export function igAccountsRepo(db, { secrets }) {
     [tenantId(), igUserId, status, reason, expectedVersion],
   );
 
+  /** True while any Instagram account of this business still holds a token: it is live, and its data is not the deleted account's. */
+  const stillConnected = async (t) => (await t.query(`SELECT 1 FROM ig_accounts WHERE tenant_id = $1 AND access_token_enc <> '' LIMIT 1`, [tenantId()])).length > 0;
+
   return {
     /** Stores a token for an account this business has linked (tenants.linkIgAccount). Its expiry is unknown until its first refresh, a day later. */
     async setToken(igUserId, token) {
@@ -345,15 +348,17 @@ export function igAccountsRepo(db, { secrets }) {
     },
 
     /**
-     * The first half of a deletion request (PRD 4.14), done before Meta gets its answer: the token is gone, nothing queued will
-     * send, and the business's Instagram automations stop. eraseAccount removes the data.
+     * The first half of a deletion request (PRD 4.14), done before Meta gets its answer: the token is gone and nothing queued will
+     * send. The business's Instagram automations stop only when this was its last connected account: a request about an account the
+     * seller switched away from leaves the live one running. eraseAccount removes the data.
      */
     async stopForDeletion(igUserId) {
       const id = String(igUserId);
       return db.tx(async (t) => {
         await removeToken(t, id, 'deauthorized', DELETION_REQUESTED);
         const cancelled = await cancelJobs(t, id);
-        const stopped = await t.query(
+        const live = await stillConnected(t);
+        const stopped = live ? [] : await t.query(
           `UPDATE automations SET state = 'paused', paused_reason = $2, updated_at = now()
            WHERE tenant_id = $1 AND state IN ('live', 'test')
              AND id IN (SELECT automation_id FROM automation_triggers WHERE tenant_id = $1 AND channel = 'instagram') RETURNING id`,
@@ -365,7 +370,9 @@ export function igAccountsRepo(db, { secrets }) {
         await raiseAlert(t, {
           kind: DELETION_REQUESTED,
           severity: 'critical',
-          message: 'Your Instagram data is being deleted, as requested through Meta. Your Instagram automations have stopped.',
+          message: live
+            ? 'Data from an Instagram account you used before is being deleted, as requested through Meta. Your connected account keeps running.'
+            : 'Your Instagram data is being deleted, as requested through Meta. Your Instagram automations have stopped.',
           target: targetOf(id),
           dedupeKey: `${DELETION_REQUESTED}:${id}:${new Date().toISOString().slice(0, 10)}`,
         });
@@ -374,10 +381,14 @@ export function igAccountsRepo(db, { secrets }) {
     },
 
     /**
-     * Removes everything that came from Instagram for this account (PRD 4.14). Tables with no account column hold one business's
-     * Instagram data as a whole, so those go whole. What stays: the opt-out list, which must outlive this, the logs that hold no
-     * personal data, and the media id on a store page, which is the key of the seller's own page. If the seller reconnected
-     * in the meantime, the new connection is kept and only the old data goes.
+     * Removes everything that came from Instagram for this account (PRD 4.14). What stays: the opt-out list, which must outlive this,
+     * the logs that hold no personal data, and the media id on a store page, which is the key of the seller's own page.
+     *
+     * Rows with an account (threads, jobs, events, rate state) go by account, and a cap claim goes with the job that made it. Tables
+     * with no account column (link taps, activity, reel triggers, reels, unclaimed cap claims) can't say which account a row came
+     * from. While another connection of the business still holds a token, those rows can be its live state (a cap claim that stops
+     * a second DM, a reel trigger), so they stay; once none does, they came from accounts that are gone and go whole. If the seller
+     * reconnected in the meantime, the new connection is kept and only the old data goes.
      */
     async eraseAccount(igUserId) {
       const id = String(igUserId);
@@ -385,25 +396,30 @@ export function igAccountsRepo(db, { secrets }) {
       return db.tx(async (t) => {
         const threads = `(SELECT id FROM inbox_threads WHERE tenant_id = $1 AND ig_user_id = $2)`;
         const jobs = `(SELECT id FROM outbound_jobs WHERE tenant_id = $1 AND ig_user_id = $2)`;
+        const live = await stillConnected(t);
         await t.query(
           `DELETE FROM needs_human_items WHERE tenant_id = $1 AND channel = 'instagram'
-             AND (thread_id IN ${threads} OR job_id IN ${jobs} OR (thread_id IS NULL AND job_id IS NULL))`,
+             AND (thread_id IN ${threads} OR job_id IN ${jobs}${live ? '' : ' OR (thread_id IS NULL AND job_id IS NULL)'})`,
           [business, id],
         );
+        // Before the jobs: deleting a job clears cap_claims.job_id, and the job is what ties a claim to this account.
+        await t.query(`DELETE FROM cap_claims WHERE tenant_id = $1 AND channel = 'instagram' AND job_id IN ${jobs}`, [business, id]);
         await t.query(`DELETE FROM inbox_threads WHERE tenant_id = $1 AND ig_user_id = $2`, [business, id]);
         await t.query(`DELETE FROM outbound_jobs WHERE tenant_id = $1 AND ig_user_id = $2`, [business, id]);
         await t.query(`DELETE FROM inbound_events WHERE tenant_id = $1 AND channel = 'instagram' AND account_id = $2`, [business, id]);
         await t.query(`DELETE FROM account_rate_state WHERE tenant_id = $1 AND channel = 'instagram' AND account_id = $2`, [business, id]);
         await t.query(`DELETE FROM send_budgets WHERE tenant_id = $1 AND channel = 'instagram' AND account_id = $2`, [business, id]);
         await t.query(`DELETE FROM token_alerts WHERE tenant_id = $1 AND channel = 'instagram' AND account_id = $2`, [business, id]);
-        await t.query(`DELETE FROM link_taps WHERE tenant_id = $1 AND channel = 'instagram'`, [business]);
-        await t.query(`DELETE FROM cap_claims WHERE tenant_id = $1 AND channel = 'instagram'`, [business]);
-        await t.query(`DELETE FROM activity WHERE tenant_id = $1`, [business]);
-        await t.query(`DELETE FROM automation_triggers WHERE tenant_id = $1 AND channel = 'instagram' AND media_id <> ''`, [business]);
-        await t.query(`UPDATE automation_triggers SET active = false, permalink = '', thumbnail_url = '', caption = '' WHERE tenant_id = $1 AND channel = 'instagram'`, [business]);
-        await t.query(`UPDATE reels SET active = false, permalink = '', thumbnail_url = '', video_url = '', caption = '' WHERE tenant_id = $1`, [business]);
+        if (!live) {
+          await t.query(`DELETE FROM link_taps WHERE tenant_id = $1 AND channel = 'instagram'`, [business]);
+          await t.query(`DELETE FROM cap_claims WHERE tenant_id = $1 AND channel = 'instagram'`, [business]);
+          await t.query(`DELETE FROM activity WHERE tenant_id = $1`, [business]);
+          await t.query(`DELETE FROM automation_triggers WHERE tenant_id = $1 AND channel = 'instagram' AND media_id <> ''`, [business]);
+          await t.query(`UPDATE automation_triggers SET active = false, permalink = '', thumbnail_url = '', caption = '' WHERE tenant_id = $1 AND channel = 'instagram'`, [business]);
+          await t.query(`UPDATE reels SET active = false, permalink = '', thumbnail_url = '', video_url = '', caption = '' WHERE tenant_id = $1`, [business]);
+        }
         await t.query(`DELETE FROM ig_accounts WHERE tenant_id = $1 AND ig_user_id = $2 AND access_token_enc = ''`, [business, id]);
-        await logDecision(t, { kind: 'data', decision: 'deletion.completed', details: { igUserId: id } });
+        await logDecision(t, { kind: 'data', decision: 'deletion.completed', details: { igUserId: id, sharedDataKept: Boolean(live) } });
         await writeAudit(t, { actor: 'meta:deletion', action: 'instagram.deletion_completed', target: targetOf(id) });
       });
     },

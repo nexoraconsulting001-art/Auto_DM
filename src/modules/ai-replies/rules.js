@@ -1,4 +1,5 @@
 import { AI_LIMITS, sourceId, unknownSources } from '../../contracts/addons.js';
+import { linksIn } from '../compliance/content.js';
 import { hasNegativeIntent, wantsHuman } from '../compliance/words.js';
 
 /**
@@ -183,7 +184,9 @@ export function checkDraft(answer, { faq = [], products = [], question = '', mod
     if (!allowed.has(link)) return { ok: false, why: 'link' };
     rest = rest.replace(raw, ' ');
   }
-  if (BARE_LINK.test(rest)) return { ok: false, why: 'link' };
+  // linksIn is what the send path reads as a link (any host a buyer's app makes tappable, whatever its ending); BARE_LINK adds
+  // the hosts after an @ that it leaves to the email rules.
+  if (BARE_LINK.test(rest) || linksIn(rest).length) return { ok: false, why: 'link' };
 
   // Names, outside the one link it may carry (a seller's own product page can sit on the platform's domain).
   if (PLATFORM.test(rest)) return { ok: false, why: 'name' };
