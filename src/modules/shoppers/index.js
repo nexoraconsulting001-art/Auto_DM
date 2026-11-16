@@ -19,6 +19,7 @@ import { createSharedProfiles } from './shared.js';
  * What other modules use:
  *   req.shopper, req.shopperCsrf (also on res.locals)   set on every request inside a business by session.js; null when
  *                                                       nobody is signed in. Never req.user: a shopper is not a seller.
+ *   ctx.shoppers                                        shopperServices(ctx).service, set in setup for the app and the worker
  *   shopperServices(ctx)                                { service, shared, google, customers } for this app or worker:
  *     service.addresses.list(shopperId)                 saved addresses, default first (S-13)
  *     service.otps.codVerified({ phone, checkoutKey })  true for 30 minutes after the cash-on-delivery code (9.5)
@@ -58,6 +59,9 @@ export const shoppers = {
   name: 'shoppers',
 
   setup(ctx) {
+    // Other modules reach this business's shoppers through ctx.shoppers (checkout: the cash-on-delivery code and "save my
+    // details"). Set here, so the web app and the worker both have it.
+    ctx.shoppers = shopperServices(ctx).service;
     // The cash-on-delivery risk label (9.22, S-103) counts parcels delivered and parcels sent back, with no business on the row.
     ctx.orderEvents?.on(['order.delivered', 'order.rto_initiated'], 'shoppers.cod-signal', async (event) => {
       const { shared } = shopperServices(ctx);

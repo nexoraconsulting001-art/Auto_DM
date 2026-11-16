@@ -133,6 +133,12 @@ export const CHECKOUT_JS = `(() => {
       if (res.ok && res.data.token) {
         B.clear();
         try { sessionStorage.removeItem(KEY); } catch {}
+        // A prepaid or part-advance order is paid now, on the gateway's own screen (9.6). Once paid, the payment script brings
+        // the shopper to the order page; closed or not available, the order page's Pay button is there to try again.
+        if (res.data.next === 'pay' && res.data.gateway && typeof window.StorePay?.open === 'function') {
+          const outcome = await window.StorePay.open(res.data.gateway, res.data.token);
+          if (outcome === 'paid') return;
+        }
         location.assign('/order/' + encodeURIComponent(res.data.token));
         return;
       }

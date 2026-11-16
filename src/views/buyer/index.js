@@ -31,9 +31,11 @@ const PAGE_KINDS = new Set(['landing', 'category', 'product', 'store', 'link_in_
 /**
  * Sends a buyer page. `page` { kind, ref } is what the traffic counter records for it (src/modules/traffic reads res.locals.page),
  * needed where the address alone can't tell, such as the creator page at /<slug>. Buyer pages are never cached by a shared cache.
+ * `origins` { script, frame } are other sites this page's own scripts need; the traffic module adds them to its policy.
  */
-export function sendBuyerPage(res, view, { status = 200, page = null } = {}) {
+export function sendBuyerPage(res, view, { status = 200, page = null, origins = null } = {}) {
   if (page && PAGE_KINDS.has(page.kind)) res.locals.page = { kind: page.kind, ref: String(page.ref ?? '').slice(0, 200) };
+  if (origins) res.locals.pageOrigins = origins;
   res.set('Cache-Control', 'private, no-cache');
   return res.status(status).type('html').send(String(view));
 }

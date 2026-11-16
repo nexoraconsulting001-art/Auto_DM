@@ -120,9 +120,7 @@ test('buying: the server prices, a double tap makes one order, Paid comes only f
     assert.equal(paid.state.paymentStatus, 'paid');
     assert.equal(s.cart.count, 0);
 
-    // The server's checkout asks ctx.shoppers.otps.codVerified, which nothing wires to the real service yet (reported in the handoff), so this
-    // stands in for it the way the checkout tests do: it answers true once the code for this attempt was entered and used.
-    w.app.ctx.shoppers = { otps: { codVerified: async ({ checkoutKey }) => (await q(w.app, "SELECT 1 FROM shopper_otps WHERE tenant_id = $1 AND purpose = 'cod' AND checkout_key = $2 AND consumed_at IS NOT NULL", [w.app.tenant.id, checkoutKey])).length > 0 } };
+    // The server's checkout asks the real ctx.shoppers.otps.codVerified (wired by the shoppers module's setup): nothing stands in for it.
 
     // Cash on delivery asks for a WhatsApp code to the phone on the order; without it the order is refused.
     await s.cart.add({ productId: lamp.id, qty: 1 });
