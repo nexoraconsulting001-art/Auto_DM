@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createCartReminders } from '../../../src/modules/abandoned-cart/reminders.js';
 import { orderAlertsFor } from '../../../src/modules/order-alerts/index.js';
 import { withTenant } from '../../../src/tenancy.js';
-import { alertsApp, consentOf, daytime, hit, lastIst, product, q, shopper, shopperCsrf } from '../../p4/alerts-sync/support.js';
+import { alertsApp, consentOf, daytime, hit, product, q, shopper, shopperCsrf } from '../../p4/alerts-sync/support.js';
 
 /** A signed-in shopper who said yes to WhatsApp marketing, with a cart left long enough ago for a reminder to be planned. */
 async function leftCart(app, phone, name) {
@@ -15,7 +15,7 @@ async function leftCart(app, phone, name) {
   const put = await hit(app, '/api/store/cart', { method: 'PUT', cookie: who.cookie, headers: shopperCsrf(app, who.cookie), body: { lines: [{ productId: item.id, variantId: null, qty: 1 }] } });
   assert.equal(put.status, 200, put.text);
   const [cart] = await q(app, `SELECT id FROM carts WHERE tenant_id = $1 AND shopper_id = $2 AND status = 'active'`, [app.tenant.id, who.id]);
-  await q(app, 'UPDATE carts SET last_activity_at = $3 WHERE tenant_id = $1 AND id = $2', [app.tenant.id, cart.id, lastIst(10, new Date(Date.now() - 2 * 3_600_000))]);
+  await q(app, 'UPDATE carts SET last_activity_at = $3 WHERE tenant_id = $1 AND id = $2', [app.tenant.id, cart.id, new Date(Date.now() - 2 * 3_600_000)]);
   return { ...who, phone, cartId: cart.id };
 }
 const scheduled = async (app, who) => q(app, `SELECT id FROM cart_reminders WHERE tenant_id = $1 AND shopper_id = $2 AND channel = 'whatsapp' AND status = 'scheduled'`, [app.tenant.id, who.id]);
