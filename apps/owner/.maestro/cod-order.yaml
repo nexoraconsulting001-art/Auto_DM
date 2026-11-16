@@ -1,7 +1,7 @@
 # Business a's cash on delivery order, seeded new with cash due. A second owner of a then reads it the way the web
 # console does on refresh (support/console-order.js).
 appId: ${APP_ID}
-name: 'P-18: Confirm a cash on delivery order in the app, and the web console shows the same status'
+name: 'P-18 - Confirm a cash on delivery order in the app, and the web console shows the same status'
 ---
 - runFlow:
     file: common/sign-in-with-code.yaml

@@ -3,6 +3,7 @@ import { SIGNATURE_HEADERS } from '../../contracts/store-routes.js';
 import { log, reportError } from '../../platform/log.js';
 import { isOptOut } from '../compliance/words.js';
 import { tenantId, withTenant } from '../../tenancy.js';
+import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
 
 /**
  * WhatsApp's webhooks (PRD 9.16): delivery reports for what was sent, and shoppers' replies, of which only STOP matters.
@@ -102,6 +103,7 @@ export function createWhatsappWebhook(ctx) {
        ON CONFLICT (provider, scope, event_id) DO NOTHING RETURNING id`,
       [`sha256:${sha256(raw)}`, payload.stops.length ? 'messages' : 'statuses', JSON.stringify(payload)],
     );
+    countWebhookStored(platform?.metrics, 'whatsapp');
     res.status(200).json({ ok: true });
     if (row) kick();
   }
@@ -177,12 +179,14 @@ export function createWhatsappWebhook(ctx) {
          WHERE id = $1 AND status = 'received'`,
         [row.id, known ? 'processed' : 'ignored', known ? '' : 'unknown_account', firstTenant],
       );
+      countWebhookProcessed(platform?.metrics, 'whatsapp', known ? 'processed' : 'ignored');
     } catch (err) {
       reportError(err, { msg: 'whatsapp.webhook_failed', event: Number(row.id) });
-      await platformDb.query(
-        `UPDATE provider_webhook_events SET attempts = attempts + 1, last_error = $2, status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE status END WHERE id = $1 AND status = 'received'`,
+      const [after] = await platformDb.query(
+        `UPDATE provider_webhook_events SET attempts = attempts + 1, last_error = $2, status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE status END WHERE id = $1 AND status = 'received' RETURNING status`,
         [row.id, String(err?.code ?? err?.name ?? 'error').slice(0, 300), MAX_ATTEMPTS],
       );
+      countWebhookProcessed(platform?.metrics, 'whatsapp', after?.status === 'failed' ? 'failed' : 'retry');
     }
   }
 

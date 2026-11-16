@@ -1,7 +1,7 @@
 # The seller signs in on the emulator, then on a second phone ("Pixel 8") through the API. Revoking Pixel 8 in
 # Settings > Devices signs it out; revoking this phone signs the app out and it stays out.
 appId: ${APP_ID}
-name: 'P-08: Revoke Pixel 8 in Settings > Devices and it is signed out; revoke this phone and the app signs out'
+name: 'P-08 - Revoke Pixel 8 in Settings - Devices and it is signed out; revoke this phone and the app signs out'
 ---
 - runFlow:
     file: common/sign-in-with-code.yaml

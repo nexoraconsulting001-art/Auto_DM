@@ -1,6 +1,6 @@
 # Catalog and Reels show with nothing asked of the shopper, and a product opens from the shop.
 appId: ${APP_ID}
-name: 'P-27: Browse the shop, the reels and a product without signing in'
+name: 'P-27 - Browse the shop, the reels and a product without signing in'
 ---
 - launchApp:
     clearState: true

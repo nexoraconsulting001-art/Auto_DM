@@ -18,6 +18,7 @@ import { config as baseConfig } from '../../../src/config.js';
 import { ROLLUP_STORES, TRAFFIC_PATHS, VISITOR_COOKIE } from '../../../src/contracts/analytics.js';
 import { createInstagram } from '../../../src/instagram.js';
 import { createAnalytics } from '../../../src/platform/analytics.js';
+import { createConsent } from '../../../src/platform/consent.js';
 import { createPlatform } from '../../../src/platform/index.js';
 import { createSecrets } from '../../../src/platform/secrets.js';
 import { createRepos } from '../../../src/repos/index.js';
@@ -138,18 +139,45 @@ const freePort = () => new Promise((resolve, reject) => {
   });
 });
 
-/** Stands in for shopper consent (PRD 9.18), which is built in Phase 4. Says what a test tells it, and nothing until then. */
+/**
+ * Stands in for the consent module's provider (PRD 9.18). The world registers it through the real interface
+ * (src/platform/consent.js createConsent().use), so platform.consent is built, the consent module does not register over it,
+ * and every question is still checked and asked inside a business. Analytics and ads consent (7.14) says what a test tells it;
+ * the other purposes answer from what was recorded and revoked at that business, and nothing is assumed.
+ */
 function consentDouble() {
   let answer = () => ({ granted: false, answered: false, reason: 'spec.unanswered' });
+  const ledger = [];
+  const KEYS = ['shopperId', 'phone', 'email', 'visitorId'];
+  const same = (a = {}, b = {}) => KEYS.some((k) => a[k] !== undefined && a[k] !== null && a[k] !== '' && String(a[k]) === String(b[k]));
+  const write = (subject, choices, source) => {
+    const tenant = tenantId();
+    for (const c of choices) ledger.push({ tenant, subject: { ...subject }, purpose: c.purpose, channel: c.channel ?? null, granted: c.granted, source, at: new Date() });
+    return { recorded: true };
+  };
   return {
-    built: false,
+    ledger,
     grant() { answer = () => ({ granted: true, answered: true, reason: 'spec.accepted' }); },
     decline() { answer = () => ({ granted: false, answered: true, reason: 'spec.declined' }); },
     unanswered() { answer = () => ({ granted: false, answered: false, reason: 'spec.unanswered' }); },
     set(fn) { answer = fn; },
-    async analyticsAndAds(who) {
+    async allows({ purpose, channel, ...who }) {
+      const tenant = tenantId();
+      if (purpose === 'analytics_ads') return answer(who);
+      const last = ledger.filter((r) => r.tenant === tenant && r.purpose === purpose && (r.channel ?? null) === (channel ?? null) && same(who, r.subject)).at(-1);
+      return last ? { granted: last.granted, answered: true, reason: last.granted ? 'spec.recorded' : 'spec.declined' } : { granted: false, answered: false, reason: 'spec.unanswered' };
+    },
+    async record({ subject, choices, source }) { return write(subject, choices, source); },
+    async revoke({ subject, purpose, channel, source }) { return write(subject, [{ purpose, channel, granted: false }], source); },
+    async status(subject) {
+      const tenant = tenantId();
+      const held = new Map();
+      for (const r of ledger) if (r.tenant === tenant && same(subject, r.subject)) held.set(`${r.purpose}:${r.channel ?? ''}`, r);
+      return [...held.values()].map((r) => ({ purpose: r.purpose, channel: r.channel, granted: r.granted, noticeVersion: 1, at: r.at }));
+    },
+    async notice() {
       tenantId();
-      return answer(who ?? {});
+      return { version: 1, bodyEn: 'How this shop uses your details.', bodyHi: 'यह दुकान आपकी जानकारी का उपयोग कैसे करती है।' };
     },
   };
 }
@@ -177,6 +205,8 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
   const secrets = createSecrets({ dataKey: TEST_DATA_KEY });
   const platform = createRepos(rawDb, { secrets });
   const consent = consentDouble();
+  const consentInterface = createConsent();
+  consentInterface.use(consent);
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const config = {
@@ -221,7 +251,7 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
     ...overrides,
   };
   const ig = createInstagram(config);
-  const webDrivers = { ...createPlatform(config, { db: rawDb }), consent };
+  const webDrivers = { ...createPlatform(config, { db: rawDb }), consent: consentInterface };
   const app = createApp({ db: rawDb, ig, config, platform: webDrivers });
   const server = await new Promise((resolve) => {
     const s = app.listen(port, '127.0.0.1', () => resolve(s));
@@ -231,7 +261,7 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
   const gate = { open: true, waiters: [] };
   const workers = [];
   function addWorker() {
-    const drivers = { ...createPlatform(config, { db: rawDb }), consent };
+    const drivers = { ...createPlatform(config, { db: rawDb }), consent: consentInterface };
     const queue = {
       ...drivers.queue,
       work: (name, handler, options) => drivers.queue.work(name, async (job) => {
@@ -344,7 +374,7 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
   const fanId = (base) => String(base + BigInt(crypto.randomInt(1_000_000_000)));
   let closed = false;
   const world = {
-    meta, google, consent, db: rawDb, rawDb, platform, config, ig, base, port, secrets, server, gate,
+    meta, google, consent, webDrivers, db: rawDb, rawDb, platform, config, ig, base, port, secrets, server, gate,
     rollups: createAnalytics({ analyticsDriver: 'pg' }, { db: rawDb }).rollups,
     tick, tickTogether, settle, travel, webhook, addWorker,
     stopWorker() { gate.open = false; },

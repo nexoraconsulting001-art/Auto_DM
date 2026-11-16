@@ -1,6 +1,6 @@
 # One tap on a past order puts its items back in the cart at today's price.
 appId: ${APP_ID}
-name: 'P-64: Reorder a past order with one tap and find its items in the cart'
+name: 'P-64 - Reorder a past order with one tap and find its items in the cart'
 ---
 - runFlow:
     file: common/sign-in.yaml

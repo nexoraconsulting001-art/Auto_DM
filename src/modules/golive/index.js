@@ -5,7 +5,6 @@ import { reportError } from '../../platform/log.js';
 import { createGolive } from './checklist.js';
 
 export { createGolive, readAttestations, settingProblem, settingReader, DETAIL, GOLIVE_EXTRA_DETAILS } from './checklist.js';
-export { NEXT_STEPS, OWNER_LABELS, PHASE_LABELS, STATE_LABELS, nextStepFor } from './next-steps.js';
 
 /**
  * The go-live checklist (Phase 10; G-15 to G-17). Track: golive.

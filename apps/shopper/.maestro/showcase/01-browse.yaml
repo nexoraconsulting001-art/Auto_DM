@@ -1,7 +1,7 @@
 # The showcase shopper app, installed from the job's own APK: the seeded catalogue and reels show with nothing asked of the
 # shopper. The product is whichever one the seed made for this business (PRODUCT_NAME), so no flow names a business.
 appId: ${APP_ID}
-name: 'Q-11: Browse the seeded catalogue and the reels without signing in'
+name: 'Q-11 - Browse the seeded catalogue and the reels without signing in'
 ---
 - launchApp:
     clearState: true

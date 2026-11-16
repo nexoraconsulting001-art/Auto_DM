@@ -20,6 +20,25 @@ import { isSimulatorUrl, refuseSimulatorUrl } from '../../tools/sim/guard.mjs';
  */
 export const DEFAULT_TIMEOUT_MS = 10_000;
 
+const callListeners = new Set();
+/**
+ * Every attempt of a call through createHttp, as { provider, result }: result is 'ok' or the ProviderError kind. Monitoring
+ * counts them as provider_calls_total (src/modules/ops-metrics). Returns a function that stops listening.
+ */
+export function onProviderCall(listener) {
+  callListeners.add(listener);
+  return () => callListeners.delete(listener);
+}
+function reportCall(provider, result) {
+  for (const listener of callListeners) {
+    try {
+      listener({ provider, result });
+    } catch {
+      // A listener never changes the call.
+    }
+  }
+}
+
 export class ProviderHostBlockedError extends Error {
   constructor(name) {
     super(`${name} is not an allowed address for this provider`);
@@ -89,11 +108,15 @@ export function createHttp({ provider, baseUrl, timeoutMs = DEFAULT_TIMEOUT_MS, 
             if (res.ok) throw new ProviderError({ provider, kind: 'malformed', status: res.status, delivery: 'unknown' });
           }
         }
-        if (res.ok) return { status: res.status, body, headers: res.headers };
+        if (res.ok) {
+          reportCall(provider, 'ok');
+          return { status: res.status, body, headers: res.headers };
+        }
         failure = new ProviderError({ provider, kind: kindOf(res.status), status: res.status, code: codeOf(body) ?? '', delivery: res.status >= 500 ? 'unknown' : 'none' });
       } catch (err) {
         failure = err instanceof ProviderError ? err : new ProviderError({ provider, kind: err?.name === 'TimeoutError' ? 'timeout' : 'network', delivery: 'unknown' });
       }
+      reportCall(provider, failure.kind);
       if (!failure.retryable || attempt >= retries) throw failure;
       await sleep(200 * 2 ** attempt);
     }

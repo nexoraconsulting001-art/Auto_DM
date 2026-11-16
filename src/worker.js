@@ -17,9 +17,10 @@ import { createNotify } from './modules/notifications/index.js';
 import { createShopperMessages } from './modules/shopper-messages/index.js';
 import { createSignupGuard } from './modules/signup/guard.js';
 import { createRepos } from './repos/index.js';
-import { backupStorage, runBackup } from './backup.js';
+import { backupStorage, lastBackupSuccess, runBackup } from './backup.js';
 import { sweepRawExports } from './modules/platform-console/raw-export.js';
 import { createPlatform, describePlatform } from './platform/index.js';
+import { secretRefreshFailed } from './platform/metrics.js';
 import { createErrorSink } from './platform/error-sink.js';
 import { drainOnSignals } from './platform/health.js';
 import { log, onError, reportError } from './platform/log.js';
@@ -28,6 +29,50 @@ import { guardProduction } from './platform/production-guard.js';
 export const HOUSEKEEPING = 'system.housekeeping';
 export const BACKUP = 'system.backup';
 const HOUR = 3_600_000;
+/** How long the worker trusts what it last read of the recorded backup time before reading it again (a CronJob may have run). */
+const BACKUP_READ_MS = 5 * 60_000;
+
+/**
+ * backup_last_success_seconds (and so backup_age_seconds): when the last backup finished, as recorded with the backups by
+ * whichever process ran it (this worker's job or the backup CronJob, src/backup.js). Nothing recorded: no series, so
+ * BackupMissing fires rather than a fresh 0. succeeded() is called by this worker's own job when a backup finishes.
+ */
+export function watchBackups(metrics, storage, { now = () => Date.now() } = {}) {
+  let known = null;
+  let readAt = -Infinity;
+  const current = async () => {
+    if (now() - readAt >= BACKUP_READ_MS) {
+      const recorded = await lastBackupSuccess(storage);
+      readAt = now();
+      if (recorded !== null && (known === null || recorded > known)) known = recorded;
+    }
+    return known;
+  };
+  metrics.gauge('backup_last_success_seconds', async () => {
+    const at = await current();
+    return at === null ? [] : [{ labels: {}, value: at }];
+  });
+  return {
+    async succeeded({ at = new Date(now()) } = {}) {
+      const seconds = Math.floor(new Date(at).getTime() / 1000);
+      if (known === null || seconds > known) known = seconds;
+    },
+  };
+}
+
+/**
+ * The worker's own HTTP listener: /healthz, /readyz and /startupz (src/platform/health.js) and /metrics with METRICS_TOKEN,
+ * as on the web server, so the 'worker' scrape job reads what this process records. Anything else is 404.
+ */
+export function createWorkerProbes({ platform, config }) {
+  const { health, metrics } = platform;
+  return http.createServer((req, res) => {
+    if (health.serve(req, res)) return;
+    if (metrics.serve(req, res, config.metricsToken)) return;
+    res.statusCode = 404;
+    res.end('');
+  });
+}
 
 /** Removes data past its retention: finished jobs, dead sessions, compliance events over 13 months, raw export files past 7 days. */
 export async function housekeeping({ db: handle, queue, storage }) {
@@ -48,9 +93,10 @@ export function registerJobs({ db, platform, config, modules = MODULES, metaCall
 
   const storage = backupStorage(config);
   if (storage) {
+    const backups = watchBackups(metrics, storage);
     queue.work(BACKUP, async () => {
       const { key, bytes } = await runBackup({ databaseUrl: ownerDatabaseUrl(config), storage });
-      metrics.gauge('backup_last_success_seconds', () => [{ labels: {}, value: Math.floor(Date.now() / 1000) }]);
+      await backups.succeeded({ at: new Date() });
       log.info('backup.done', { key, bytes });
     });
   } else {
@@ -88,13 +134,14 @@ export function registerJobs({ db, platform, config, modules = MODULES, metaCall
 
 async function main(config = defaultConfig) {
   // Secrets first, then the production rules, exactly as the web server does.
-  const secretSource = await loadSecrets(config, { onAlert: (alert) => reportError(new Error('secrets.refresh_failed'), { msg: 'secrets.refresh_failed', code: alert.code }) });
+  let platform = null;
+  const secretSource = await loadSecrets(config, { onAlert: secretRefreshFailed(() => platform?.metrics) });
   const guardProblems = guardProduction(config);
   if (guardProblems.length) log.warn('production.guard', { rules: guardProblems.map((p) => p.id) });
   const errorSink = createErrorSink(config, { service: 'worker' });
   onError(errorSink.report);
   const db = await openRuntimeDb(config);
-  const platform = createPlatform(config, { db });
+  platform = createPlatform(config, { db, service: 'worker' });
   const schedule = registerJobs({ db, platform, config });
   const tick = () => schedule().catch((err) => reportError(err, { msg: 'worker.schedule_failed' }));
   await tick();
@@ -102,13 +149,9 @@ async function main(config = defaultConfig) {
   // Order events are handed to their listeners within a couple of seconds of the change that made them.
   const stopOrderEvents = schedule.context.orderEvents.start({ everyMs: config.orderEventsPollMs });
 
-  // /healthz, /readyz and /startupz, as on the web server (src/platform/health.js).
+  // /healthz, /readyz, /startupz and /metrics, as on the web server.
   const { health } = platform;
-  const probes = http.createServer((req, res) => {
-    if (health.serve(req, res)) return;
-    res.statusCode = 404;
-    res.end('');
-  }).listen(config.workerHealthPort, config.workerHealthHost || '127.0.0.1');
+  const probes = createWorkerProbes({ platform, config }).listen(config.workerHealthPort, config.workerHealthHost || '127.0.0.1');
   health.markStarted();
   secretSource.start(({ changed }) => log.info('secrets.refreshed', { settings: changed }));
 

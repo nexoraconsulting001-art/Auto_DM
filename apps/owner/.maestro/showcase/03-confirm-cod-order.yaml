@@ -1,6 +1,6 @@
 # The seeded cash on delivery order of the first business is confirmed in the app.
 appId: ${APP_ID}
-name: 'Q-11: Confirm the cash on delivery order in the owner app'
+name: 'Q-11 - Confirm the cash on delivery order in the owner app'
 ---
 - runFlow:
     file: ../common/sign-in-with-code.yaml

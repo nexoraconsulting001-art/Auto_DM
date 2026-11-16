@@ -11,7 +11,8 @@ import { useSyncExternalStore } from 'react';
 import { MutationCache, QueryClient, hydrate, onlineManager } from '@tanstack/react-query';
 
 export const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const KEY = 'bhava.cache';
+// No platform name: this module ships inside every seller's shopper app (P-01).
+const KEY = 'offline.cache';
 const INDEX = `${KEY}.index`;
 
 // ---- What never goes into the cache ----

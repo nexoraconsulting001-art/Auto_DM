@@ -1,6 +1,6 @@
 # A DM-style link opens the app on the product itself, on the business's own link scheme: a direct link, nothing in between.
 appId: ${APP_ID}
-name: 'Q-11: A link from a message opens the seeded product in the app'
+name: 'Q-11 - A link from a message opens the seeded product in the app'
 ---
 - launchApp:
     clearState: true

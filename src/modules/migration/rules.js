@@ -44,7 +44,10 @@ const LEGACY_ORDER_STATUSES = new Set(['awaiting_payment', 'payment_submitted', 
 
 const OLD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MEDIA_LINK = /^\/media\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+// A picture that names an old media row by its old id. PRD 5.16: ids are remapped, so it is any old id, a UUID or not.
+const MEDIA_LINK = /^\/media\/([A-Za-z0-9_-]{1,64})$/;
+/** The id-map key a picture link gives: a UUID in lower case (as Postgres writes them), any other old id as written. */
+const mediaKey = (id) => (UUID.test(id) ? id.toLowerCase() : id);
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** The export holds a row the product would refuse. Nothing is written. `field` is `<table>.<old id>.<field>`. */
@@ -119,7 +122,7 @@ export function makeCheck(table, ref) {
     }).filter(Boolean);
   };
   /**
-   * A picture or link: an old /media/<uuid> (resolved through the id map when written), an http(s) address the product
+   * A picture or link: an old /media/<old media id> (resolved through the id map when written), an http(s) address the product
    * would show, or nothing. A path, a script or a data: address is refused.
    */
   const linkOf = (value, name) => {
@@ -128,7 +131,7 @@ export function makeCheck(table, ref) {
     const s = value.trim();
     if (!s) return null;
     const media = MEDIA_LINK.exec(s);
-    if (media) return { media: media[1].toLowerCase() };
+    if (media) return { media: mediaKey(media[1]) };
     const url = /^https?:\/\//i.test(s) ? cleanUrl(s) : null;
     return url ? { url } : refuse(name);
   };
@@ -236,7 +239,6 @@ export function prepare(source, look, { tenantId, reels: reelChoice } = {}) {
             : table === 'reels' ? idOf('ig_media_id') : idOf('id');
       if (seen.has(oldId) && !['product_categories', 'reel_products'].includes(table)) at.refuse('id');
       const check = makeCheck(table, oldId);
-      if (table === 'media' && !UUID.test(oldId)) check.refuse('id');
       const duplicate = seen.has(oldId);
       seen.add(oldId);
       const handler = HANDLERS[table];

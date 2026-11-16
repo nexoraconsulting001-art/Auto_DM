@@ -14,7 +14,7 @@ const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_
 
 /** `prefix` keeps two apps, or two builds of one, apart: 'bhava.owner' for the owner app. */
 export function createSecureStore({ prefix, secureStore = SecureStore, crypto = Crypto } = {}) {
-  if (!/^[a-z][a-z0-9.]{2,40}$/.test(prefix ?? '')) throw new Error('A storage prefix is required, such as "bhava.owner"');
+  if (!/^[a-z][a-z0-9.]{2,40}$/.test(prefix ?? '')) throw new Error('A storage prefix is required, such as "app.owner"');
   const options = { keychainAccessible: secureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
   const key = (name) => `${prefix}.${name}`;
   const read = (name) => secureStore.getItemAsync(key(name), options).catch(() => null);

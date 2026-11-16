@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { FORBIDDEN_LABELS, METRICS, metricProblem } from '../contracts/metrics.js';
+import { FORBIDDEN_LABELS, METRICS, METRIC_LABELS, metricProblem } from '../contracts/metrics.js';
+import { reportError } from './log.js';
 
 /**
  * Counters, gauges and timings in Prometheus text format at /metrics, so any monitoring tool can scrape them (Phase 9).
@@ -13,7 +14,8 @@ import { FORBIDDEN_LABELS, METRICS, metricProblem } from '../contracts/metrics.j
  *   `createMetrics({ strict: true })` throws instead (the tests), and also refuses a name the catalogue does not have. rejected() lists what was refused.
  * - Each metric holds at most `maxSeries` label combinations; a new one beyond that is dropped, so no label can grow without bound.
  * - Label values never carry a business, person, address or text (FORBIDDEN_LABELS), so /metrics holds no personal data.
- * - /metrics answers only with its token (handler); without one configured it does not exist.
+ * - /metrics answers only with its token; without one configured it does not exist. handler(token) is the web server's
+ *   (Express) and serve(req, res, token) the worker's probe server's (node:http): both give the same answer.
  * - The middleware also counts webhook requests by provider and outcome, and requests in flight.
  * - Setting `backup_last_success_seconds` also gives `backup_age_seconds`.
  */
@@ -53,6 +55,42 @@ export function metaCallResult({ status = 0, kind } = {}) {
   if (kind === 'timeout' || kind === 'network') return 'timeout';
   if (kind || status >= 400 || status === 0) return 'error';
   return 'ok';
+}
+
+/** The compliance gate's outcomes (src/contracts/compliance.js OUTCOMES) as compliance_outcomes_total's five. */
+const SEND_OUTCOMES = Object.freeze({
+  sent: 'sent', sent_fallback: 'sent', queued: 'queued', held: 'blocked', failed: 'failed', unknown: 'failed',
+  cancelled: 'skipped', expired: 'skipped', skipped: 'skipped', would_send: 'skipped',
+});
+
+/**
+ * The labels one send decision is counted under: compliance_outcomes_total { channel, outcome, family } (family is the
+ * reason code's first part, 'none' without one) and, when a provider took the message, sends_accepted_total. null for a
+ * channel outside the label set.
+ */
+export function sendOutcomeLabels(channel, { outcome, reason = '' } = {}) {
+  if (!METRIC_LABELS.channel.values.includes(channel)) return null;
+  const family = String(reason || '').split('.')[0] || 'none';
+  const mapped = SEND_OUTCOMES[outcome] ?? 'failed';
+  return { channel, outcome: mapped, family: /^[a-z][a-z_]{0,20}$/.test(family) ? family : 'other', accepted: mapped === 'sent' };
+}
+
+/** One webhook delivery written down before the 200 (webhook_stored_total; WebhookNotStored compares it with the accepted ones). */
+export function countWebhookStored(metrics, provider) {
+  metrics?.inc('webhook_stored_total', { provider });
+}
+
+/** One stored webhook event worked through (webhook_processed_total): its final status, 'retry' when it will be tried again, or 'failed' when given up. */
+export function countWebhookProcessed(metrics, provider, result) {
+  metrics?.inc('webhook_processed_total', { provider, result });
+}
+
+/** The onAlert of loadSecrets() for both processes: reported, and counted once the platform's metrics exist. */
+export function secretRefreshFailed(metricsOf) {
+  return (alert = {}) => {
+    reportError(new Error('secrets.refresh_failed'), { msg: 'secrets.refresh_failed', code: alert.code });
+    metricsOf()?.inc('secret_refresh_failures_total');
+  };
 }
 
 /** A log entry's name as a bounded label: its first dotted part, lower snake case, 30 characters at most. */
@@ -187,16 +225,32 @@ export function createMetrics({ strict = false, maxSeries = DEFAULT_MAX_SERIES, 
         next();
       };
     },
+    /** The answer to a scrape: 200 and the text with the right token (Bearer), 404 otherwise or when no token is set. */
+    async answer(authorization, token) {
+      const header = String(authorization || '');
+      const sent = header.startsWith('Bearer ') ? header.slice(7) : '';
+      const ok = Boolean(token) && sent.length === token.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(token));
+      return ok ? { status: 200, type: 'text/plain; version=0.0.4', body: await self.render() } : { status: 404, type: 'text/plain', body: 'Not Found' };
+    },
     /** Express handler for /metrics, protected by METRICS_TOKEN (Bearer). Hidden when no token is set. */
     handler(token) {
       return async (req, res) => {
-        const header = req.get('authorization') || '';
-        const sent = header.startsWith('Bearer ') ? header.slice(7) : '';
-        const ok = token && sent.length === token.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(token));
+        const { status, type, body } = await self.answer(req.get('authorization'), token);
         res.set('Cache-Control', 'no-store');
-        if (!ok) return res.sendStatus(404);
-        res.type('text/plain; version=0.0.4').send(await self.render());
+        res.status(status).type(type).send(body);
       };
+    },
+    /** The same on a node:http server (the worker's probe server): answers /metrics and returns true; false for any other path. */
+    serve(req, res, token) {
+      if (new URL(req.url, 'http://x').pathname !== '/metrics') return false;
+      self.answer(req.headers.authorization, token).then(({ status, type, body }) => {
+        res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
+        res.end(req.method === 'HEAD' ? undefined : body);
+      }, () => {
+        res.writeHead(500, { 'cache-control': 'no-store' });
+        res.end();
+      });
+      return true;
     },
   };
   return self;

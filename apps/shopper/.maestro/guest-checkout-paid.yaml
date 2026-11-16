@@ -1,6 +1,6 @@
 # A guest pays online with the payment simulator's test card and the app says Paid, because the server says so.
 appId: ${APP_ID}
-name: 'P-29: Check out as a guest, pay with the test card and see Paid in the app'
+name: 'P-29 - Check out as a guest, pay with the test card and see Paid in the app'
 ---
 - launchApp:
     clearState: true

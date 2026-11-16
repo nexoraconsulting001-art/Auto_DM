@@ -4,7 +4,7 @@ import { Badge, Banner, Button, Chip, ChipRow, PageHeader, Panel, SelectField, T
 import { ActionSheet, Can, Facts, QueryState, When, useAct, useOne } from '../../kit.jsx';
 import { word } from '../../lib/rules.js';
 import { api } from '../../api.js';
-import { OWNER_LABELS, PHASE_LABELS, STATE_LABELS, nextStepFor } from '../../../../../src/modules/golive/next-steps.js';
+import { OWNER_LABELS, PHASE_LABELS, STATE_LABELS, nextStepFor } from './next-steps.js';
 import './golive.css';
 
 /**

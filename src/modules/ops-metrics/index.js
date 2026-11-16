@@ -1,6 +1,7 @@
 import { PROD_PLATFORM_OWNERS } from '../../contracts/api/platform.js';
 import { BUSINESS_OPS_EVENTS } from '../../contracts/metrics.js';
 import { log, onError } from '../../platform/log.js';
+import { onProviderCall } from '../../adapters/http.js';
 import { errorKind, instrumentQueue, metaCallClass, metaCallResult } from '../../platform/metrics.js';
 import { currentTenant, withTenant } from '../../tenancy.js';
 import { Refusal, mountRoute } from '../platform-console/mount.js';
@@ -14,6 +15,7 @@ import { readBusinessOps } from './read.js';
  *   meta_calls_total, meta_usage_ratio     from onMetaCall: the class of the call and how it ended; the highest share of a limit used in the last 10 minutes
  *   errors_reported_total                  from every reportError(): the service and the first part of the log entry's name
  *   job_runs_total, job_failures_total     from the queue's drain()
+ *   provider_calls_total                   from onProviderCall: every call through src/adapters/http.js, by provider and result
  *   queue_oldest_job_seconds               the age of the oldest job waiting, per queue
  *   db_pool_connections                    connections to the database by pool and state, as the database counts them
  *   businesses                             by plan and status (web only, so a sum over both services is not doubled)
@@ -113,6 +115,8 @@ export function createOpsMetrics(ctx, { now = () => Date.now() } = {}) {
       metrics.gauge('process_draining', () => [{ labels: { service }, value: ctx.platform.health?.draining ? 1 : 0 }]);
       instrumentQueue(metrics, ctx.platform.queue);
       onError((_err, context = {}) => this.error(context));
+      // Every call to another outside service through the shared adapter (src/adapters/http.js), by provider and result.
+      onProviderCall(({ provider, result }) => metrics.inc('provider_calls_total', { provider, result }));
     },
 
     /** One error passed to reportError(): counted by kind, and put in its business's own numbers when it has one. */

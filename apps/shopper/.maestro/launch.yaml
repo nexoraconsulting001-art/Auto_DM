@@ -3,7 +3,7 @@
 # it starts with that requirement's id (tools/gate-lib.mjs); the gate does not run flows, CI does.
 # Every value a flow looks for comes from the brand file the build was made from: no flow names a brand.
 appId: ${APP_ID}
-name: 'The app opens on its tabs with no sign-in: home, shop, reels, cart and account are one tap away'
+name: 'The app opens on its tabs with no sign-in - home, shop, reels, cart and account are one tap away'
 tags:
   - smoke
 ---

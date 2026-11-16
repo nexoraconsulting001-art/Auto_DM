@@ -6,6 +6,7 @@ import { matchesKeywords } from '../automations/match.js';
 import { isOptOut, isStart, wantsHuman } from '../compliance/words.js';
 import { directLink } from '../links/rules.js';
 import { isStop, stopWhatsappMarketing } from '../order-alerts/webhook.js';
+import { countWebhookProcessed } from '../../platform/metrics.js';
 
 /**
  * What a stored WhatsApp message means (PRD 6.12), worked through once. intake.js stores each message as an inbound_events
@@ -77,9 +78,11 @@ export function createProcessor(ctx) {
   async function finish(row, err) {
     if (!err) {
       await db.query(`UPDATE inbound_events SET status = 'done', lease_until = NULL, processed_at = $3::timestamptz WHERE tenant_id = $1 AND id = $2`, [tenantId(), row.id, now()]);
+      countWebhookProcessed(ctx.platform?.metrics, 'whatsapp', 'done');
       return;
     }
     const giveUp = row.attempts >= MAX_ATTEMPTS;
+    countWebhookProcessed(ctx.platform?.metrics, 'whatsapp', giveUp ? 'failed' : 'retry');
     await db.query(
       `UPDATE inbound_events SET status = $3, lease_until = $4::timestamptz, processed_at = $5::timestamptz WHERE tenant_id = $1 AND id = $2`,
       [tenantId(), row.id, giveUp ? 'failed' : 'pending', giveUp ? null : new Date(+now() + 2 ** row.attempts * 1000), giveUp ? now() : null],
