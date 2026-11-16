@@ -11,7 +11,9 @@ import { tenantId, withTenant } from '../../tenancy.js';
  * order in Shopify with the store's order number in its idempotency key, so repeating a push whose answer was lost (a
  * timeout, a dropped connection, a 5xx) is the same Shopify order, and Shopify takes its stock down once. A push Shopify
  * refuses for a while (429, 5xx) waits and tries again with backoff; one it refuses outright (a variant it doesn't know)
- * fails and the owner is told. An order cancelled before it was pushed is not pushed. Only lines linked to Shopify go.
+ * fails and the owner is told. An order cancelled before it was pushed is not pushed; one cancelled after is cancelled in
+ * Shopify too, with restock (cancelOne, retried like a push; if Shopify refuses, the owner is told). Only lines linked to
+ * Shopify go.
  *
  * Claiming a row is one statement (attempts + 1 and a two-minute lease on next_attempt_at), so two workers never push the
  * same order at once; a lease that runs out with nothing recorded is simply pushed again, with the same key.
@@ -42,11 +44,98 @@ export function createPushes(ctx, { connection, products }) {
       [tenantId(), order.id],
     );
     if (made && conn.status === 'active') await pushOne(order.id);
+    if (!made) await keepInShopify(order.id);
   }
 
-  /** order.cancelled: an order not yet in Shopify stays out of it. One already there is left for the owner to cancel there. */
+  /**
+   * order.reinstated of an order whose Shopify cancel was asked for: one not yet made is called off (the Shopify order stays,
+   * as it should); one already made can't be undone, so the owner is told to add the order in Shopify again.
+   */
+  async function keepInShopify(orderId) {
+    const [row] = await db.query(
+      `UPDATE shopify_order_pushes p SET cancel_status = CASE WHEN p.cancel_status = 'pending' THEN 'none' ELSE p.cancel_status END, cancel_next_at = NULL
+       FROM shopify_order_pushes old WHERE old.tenant_id = p.tenant_id AND old.order_id = p.order_id
+         AND p.tenant_id = $1 AND p.order_id = $2 AND p.status = 'pushed' AND p.cancel_status IN ('pending', 'done', 'failed')
+       RETURNING old.cancel_status AS was`,
+      [tenantId(), orderId],
+    );
+    if (!row || row.was === 'pending') return;
+    const [order] = await db.query('SELECT order_number FROM orders WHERE tenant_id = $1 AND id = $2', [tenantId(), orderId]);
+    await repos.alerts.raise({
+      kind: 'shopify.order_back', severity: 'warning',
+      message: `Order ${order?.order_number ?? ''} is going ahead again, but it was cancelled in your Shopify store. Add it there again by hand so your Shopify stock stays right.`,
+      target: `order:${orderId}`, dedupeKey: `shopify-order-back:${orderId}`,
+    }).catch((alertErr) => reportError(alertErr, { msg: 'shopify.alert_failed' }));
+  }
+
+  /**
+   * order.cancelled: an order not yet in Shopify stays out of it. One already there is cancelled there too, with its stock put
+   * back at Shopify (cancelOne), since Shopify's count is the one both sides sell from: inventory leaves those units to come
+   * back with Shopify's next count (stock.js giveBack) rather than adding them here while Shopify still holds them.
+   */
   async function onOrderCancelled(event) {
     await db.query(`UPDATE shopify_order_pushes SET status = 'skipped', last_error = 'cancelled' WHERE tenant_id = $1 AND order_id = $2 AND status = 'pending'`, [tenantId(), event.orderId]);
+    const [due] = await db.query(
+      `UPDATE shopify_order_pushes SET cancel_status = 'pending', cancel_attempts = 0, cancel_next_at = now()
+       WHERE tenant_id = $1 AND order_id = $2 AND status = 'pushed' AND cancel_status IN ('none', 'failed') RETURNING order_id`,
+      [tenantId(), event.orderId],
+    );
+    if (due) await cancelOne(event.orderId);
+  }
+
+  const cancelAlert = (orderId, orderNumber) => repos.alerts.raise({
+    kind: 'shopify.order_not_cancelled', severity: 'warning',
+    message: `Order ${orderNumber} was cancelled here but is still open in your Shopify store. Cancel it in Shopify too, and put its stock back there, so it isn't sent and your stock stays right.`,
+    target: `order:${orderId}`, dedupeKey: `shopify-cancel-failed:${orderId}`,
+  }).catch((alertErr) => reportError(alertErr, { msg: 'shopify.alert_failed' }));
+
+  /** Cancels one pushed order in Shopify now, if it is due and nobody else has it. Returns its cancel_status after. */
+  async function cancelOne(orderId) {
+    const [row] = await db.query(
+      `WITH due AS (SELECT order_id FROM shopify_order_pushes WHERE tenant_id = $1 AND order_id = $2 AND cancel_status = 'pending' AND cancel_next_at <= now() FOR UPDATE SKIP LOCKED)
+       UPDATE shopify_order_pushes p SET cancel_attempts = p.cancel_attempts + 1, cancel_next_at = now() + ${LEASE}
+       FROM due WHERE p.tenant_id = $1 AND p.order_id = due.order_id RETURNING p.*`,
+      [tenantId(), orderId],
+    );
+    if (!row) return null;
+    const set = (fields) => finish(orderId, fields);
+    const [order] = await db.query('SELECT order_number, fulfilment_status FROM orders WHERE tenant_id = $1 AND id = $2', [tenantId(), orderId]);
+    if (!order || order.fulfilment_status !== 'cancelled') {
+      await set({ cancel_status: 'none', cancel_next_at: null });
+      return 'none';
+    }
+    if (!row.shopify_order_id) {
+      await set({ cancel_status: 'failed', cancel_next_at: null, last_error: 'cancel:no_shopify_id' });
+      await cancelAlert(orderId, order.order_number);
+      return 'failed';
+    }
+    const conn = await connection.active();
+    if (!conn) {
+      await set({ cancel_next_at: new Date(Date.now() + 3_600_000), last_error: 'cancel:not_connected' });
+      return 'pending';
+    }
+    try {
+      await conn.client.cancelOrder(row.shopify_order_id, { reason: 'customer' });
+      await set({ cancel_status: 'done', cancel_next_at: null, last_error: '' });
+      log.info('shopify.order_cancelled', { orderId, attempts: row.cancel_attempts });
+      return 'done';
+    } catch (err) {
+      if (!(err instanceof ProviderError)) {
+        reportError(err, { msg: 'shopify.cancel_error', orderId });
+        await set({ cancel_next_at: new Date(Date.now() + backoffSeconds(row.cancel_attempts) * 1000), last_error: 'cancel:error' });
+        return 'pending';
+      }
+      const why = `cancel:${err.kind}:${err.status}:${err.code}`.slice(0, 200);
+      log.warn('shopify.cancel_failed', { orderId, kind: err.kind, status: err.status, attempt: row.cancel_attempts });
+      if (err.kind === 'auth') await connection.needsReconnect('auth');
+      if ((err.retryable || err.kind === 'auth') && row.cancel_attempts < MAX_PUSH_ATTEMPTS) {
+        await set({ cancel_next_at: new Date(Date.now() + (err.kind === 'auth' ? 3_600_000 : backoffSeconds(row.cancel_attempts) * 1000)), last_error: why });
+        return 'pending';
+      }
+      await set({ cancel_status: 'failed', cancel_next_at: null, last_error: why });
+      await cancelAlert(orderId, order.order_number);
+      return 'failed';
+    }
   }
 
   async function claim(orderId) {
@@ -125,6 +214,9 @@ export function createPushes(ctx, { connection, products }) {
       await finish(orderId, { status: 'pushed', shopify_order_id: shopifyId, pushed_at: new Date(), last_error: '' });
       if (shopifyId) await products.setLink('order', orderId, shopifyId);
       log.info('shopify.order_pushed', { orderId, attempts: row.attempts });
+      // Cancelled here while Shopify was making it: it is cancelled there as well, like any pushed order.
+      const [now] = await db.query('SELECT fulfilment_status FROM orders WHERE tenant_id = $1 AND id = $2', [tenantId(), orderId]);
+      if (now?.fulfilment_status === 'cancelled') await onOrderCancelled({ orderId });
       return 'pushed';
     } catch (err) {
       if (!(err instanceof ProviderError)) {
@@ -168,7 +260,20 @@ export function createPushes(ctx, { connection, products }) {
         reportError(err, { msg: 'shopify.push_sweep_failed', orderId });
       }
     }
-    return { due: due.length, pushed };
+    const cancels = await platformDb.query(
+      `SELECT p.tenant_id, p.order_id FROM shopify_order_pushes p JOIN shopify_connections c ON c.tenant_id = p.tenant_id AND c.status = 'active'
+       WHERE p.cancel_status = 'pending' AND p.cancel_next_at <= now() ORDER BY p.cancel_next_at LIMIT $1`,
+      [limit],
+    );
+    let cancelled = 0;
+    for (const { tenant_id: tenant, order_id: orderId } of cancels) {
+      try {
+        if ((await withTenant(tenant, () => cancelOne(orderId))) === 'done') cancelled++;
+      } catch (err) {
+        reportError(err, { msg: 'shopify.cancel_sweep_failed', orderId });
+      }
+    }
+    return { due: due.length, pushed, cancelsDue: cancels.length, cancelled };
   }
 
   /** The reconcile gives a push that failed for a reason that may have passed (Shopify was down, the limit) one more day of tries. */
@@ -219,5 +324,5 @@ export function createPushes(ctx, { connection, products }) {
     return sent;
   }
 
-  return { onOrderConfirmed, onOrderCancelled, pushOne, sweep, retryFailed, pushPrices };
+  return { onOrderConfirmed, onOrderCancelled, cancelOne, pushOne, sweep, retryFailed, pushPrices };
 }
