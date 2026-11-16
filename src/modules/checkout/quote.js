@@ -116,7 +116,9 @@ export async function buildQuote(q, ctx, { lines: linesIn, address = null, phone
   }
 
   const options = await paymentOptions(q);
-  const online = onlineReady(options);
+  // Online payment is also a plan feature (store.payments), as payments.settings.checkout and payments.start have it: a
+  // store without it is never offered a way to pay that payments.start would then refuse (money-8).
+  const online = onlineReady(options) && (await entitlementsRepo(q).can('store.payments'));
   const pincode = address?.pincode ?? '';
   const reach = await serviceability(ctx, pincode);
   if (!reach.serviceable) notices.push('We don’t deliver to this PIN code yet. Try another address.');

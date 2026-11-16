@@ -30,8 +30,10 @@ export function createStatements(ctx, { at }) {
   /** Which default paths the business is on. A business with no settings row is on Bhava's default. */
   async function paths() {
     const [pay] = await db.query('SELECT mode, linked_account_id FROM payment_settings WHERE tenant_id = $1', [tenantId()]);
-    const [ship] = await db.query('SELECT mode FROM shipping_settings WHERE tenant_id = $1', [tenantId()]);
-    return { payments: (pay?.mode ?? 'managed') === 'managed', shipping: (ship?.mode ?? 'managed') === 'managed', linkedAccount: pay?.linked_account_id ?? null };
+    const [ship] = await db.query('SELECT mode, charge_billing FROM shipping_settings WHERE tenant_id = $1', [tenantId()]);
+    const shipping = (ship?.mode ?? 'managed') === 'managed';
+    // Courier charges billed monthly are on Bhava's invoice (9.10, money-3), so the payout and the balance never take them.
+    return { payments: (pay?.mode ?? 'managed') === 'managed', shipping, shippingOnPayout: shipping && (ship?.charge_billing ?? 'payout') === 'payout', linkedAccount: pay?.linked_account_id ?? null };
   }
 
   /** What the gateway says it paid out to the linked account that month, or null when it can't be asked. */
@@ -71,7 +73,7 @@ export function createStatements(ctx, { at }) {
     const sales = Math.max(0, total('sale'));
     const refunds = Math.max(0, -total('refund'));
     const fees = p.payments ? Math.max(0, -(total('gateway_fee') + total('gateway_fee_tax'))) : 0;
-    const shipping = p.shipping ? Math.max(0, -total('shipping_charge')) : 0;
+    const shipping = p.shippingOnPayout ? Math.max(0, -total('shipping_charge')) : 0;
     const payouts = Math.max(0, total('transfer') + total('transfer_reversal'));
     const closing = opening + sales - refunds - fees - shipping - payouts;
     const gateway = p.payments ? await settledByGateway(p.linkedAccount, month) : null;

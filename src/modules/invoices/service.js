@@ -297,7 +297,8 @@ export function createInvoices(ctx) {
   /**
    * A part-advance order is invoiced in full when the advance is paid (9.13). When it is cancelled, or the parcel comes back
    * to origin, the balance is never collected at the door: a credit note against the invoice takes that balance off, once per
-   * order (migration 913). What was paid online is credited by its own refund's credit note, as for any refund.
+   * order (migration 913). What was paid online is credited by its own refund's credit note, as for any refund. An order
+   * invoiced only after it was cancelled (a late advance) is credited when that advance is refunded (onEvent).
    */
   async function creditBalanceFor(orderId) {
     const result = await once(async (t) => {
@@ -348,7 +349,14 @@ export function createInvoices(ctx) {
   }
 
   async function onEvent(event) {
-    if (event.type === 'refund.processed') return creditNoteFor(event.entityId);
+    if (event.type === 'refund.processed') {
+      // A cancelled part-advance order may have been invoiced only after it was cancelled (its advance came late, S-41), so
+      // the cancellation found nothing to credit. Its advance being refunded settles that it goes no further (money-9).
+      const result = await creditNoteFor(event.entityId);
+      const orderId = event.orderId ?? result?.invoice?.order_id;
+      if (orderId) await creditBalanceFor(orderId);
+      return result;
+    }
     if (event.type === 'order.cancelled' || event.type === 'order.rto_delivered') return creditBalanceFor(event.orderId);
     return issueFor(event.orderId);
   }
