@@ -1,6 +1,7 @@
 import { formatRupees } from '../../contracts/catalog.js';
 import { INDIAN_STATES } from '../../contracts/orders.js';
 import { buyerPage, safeHref } from '../../views/buyer/index.js';
+import { storeStyles } from '../storefront/shell.js';
 import { html, jsonScript, raw } from '../../views/html.js';
 import { maskPhone } from './keys.js';
 
@@ -50,12 +51,14 @@ const tokens = ({ shopperCsrf = '', sellerCsrf = '' }) => html`<div id="tokens" 
 // One helper every page's script shares: JSON to this store with both CSRF tokens, answering { ok, status, body }.
 const CALL = `function call(method,url,body){var t=document.getElementById('tokens');var h={'content-type':'application/json'};if(t){if(t.dataset.shopperCsrf)h['x-shopper-csrf']=t.dataset.shopperCsrf;if(t.dataset.csrf)h['x-csrf-token']=t.dataset.csrf;}return fetch(url,{method:method,headers:h,credentials:'same-origin',body:body===undefined?undefined:JSON.stringify(body)}).then(function(r){return r.json().catch(function(){return {};}).then(function(b){return {ok:r.ok,status:r.status,body:b};});}).catch(function(){return {ok:false,status:0,body:{error:'We couldn’t reach the store. Check your connection and try again.'}};});}`;
 
+/** `layout.chrome` is the store's header and footer for this request (storefront/shell.js storeChrome), set by the routes. */
 function page(layout, { title, main, description = '' }) {
   return buyerPage({
     theme: layout.theme,
     business: layout.business,
     meta: { title: `${title} · ${layout.business.name || 'Shop'}`, description, indexable: false },
-    main: html`${STYLE}${main}`,
+    main: html`${storeStyles()}${STYLE}${main}`,
+    ...(layout.chrome ?? {}),
   });
 }
 
@@ -241,7 +244,7 @@ ${orders.length ? html`<ul class="list">${orders.map((o) => html`<li><a class="o
 }
 
 /** One order (9.17): what was bought, where it goes (the address as it was when ordered, S-14), invoices, and what can be done now. */
-export function orderDetailPage(layout, { order, shopperCsrf, sellerCsrf = '' }) {
+export function orderDetailPage(layout, { order, returnHref = null, trackHref = '', shopperCsrf, sellerCsrf = '' }) {
   const a = order.shipping_address ?? { name: order.customer_name, line1: order.address, city: order.city, state: order.state, pincode: order.pincode };
   const canCancel = order.flow === 'checkout' && CANCELLABLE.has(order.fulfilment_status) && !order.shipped_at;
   const script = canCancel ? raw(`<script>(function(){${CALL}
@@ -255,10 +258,10 @@ document.getElementById('cancel').addEventListener('click',function(){if(!confir
 <div class="panel"><h2>Items</h2><ul class="list">${order.items.map((i) => html`<li class="row"><span>${i.name}${i.option_value ? html` · ${i.option_value}` : ''} × ${i.qty}</span><span>${formatRupees(Number(i.price_paise) * i.qty)}</span></li>`)}</ul>
 <div class="row"><strong>Total</strong><strong>${formatRupees(order.total_paise)}</strong></div></div>
 <div class="panel"><h2>Delivery address</h2><p style="white-space:pre-line;margin:0">${addressText({ ...a, state: a.state || INDIAN_STATES[a.stateCode] || '' })}</p></div>
-${order.shipments.length ? html`<div class="panel"><h2>Tracking</h2>${order.shipments.filter((s) => s.kind === 'forward').map((s) => html`<p class="muted">${s.courier_name || 'Courier'}${s.awb ? html` · ${s.awb}` : ''}</p>`)}<a class="btn-quiet" href="/order/${encodeURIComponent(order.public_token)}">Track this order</a></div>` : ''}
+${trackHref ? html`<div class="panel"><h2>Tracking</h2>${order.shipments.filter((s) => s.kind === 'forward' && s.status !== 'cancelled').map((s) => html`<p class="muted">${s.courier_name || 'Courier'}${s.awb ? html` · ${s.awb}` : ''}</p>`)}<a class="btn-quiet" href="${trackHref}">Track this order</a></div>` : ''}
 ${order.invoices.length ? html`<div class="panel"><h2>Invoices</h2><ul class="list">${order.invoices.map((inv) => html`<li><a href="/order/${encodeURIComponent(order.public_token)}/invoice/${encodeURIComponent(inv.number)}">${inv.doc_type === 'credit_note' ? 'Credit note' : 'Invoice'} ${inv.number}</a></li>`)}</ul></div>` : ''}
 ${order.returns.length ? html`<div class="panel"><h2>Returns</h2>${order.returns.map((r) => html`<p class="muted">Return requested ${dateText(r.created_at)}: ${r.status.replace(/_/g, ' ')}</p>`)}</div>` : ''}
-<div class="row">${canCancel ? html`<button class="btn" type="button" id="cancel">Cancel order</button>` : ''}${order.fulfilment_status === 'delivered' ? html`<a class="btn-quiet" href="/account/orders/${encodeURIComponent(order.order_number)}/return">Return an item</a>` : ''}
+<div class="row">${canCancel ? html`<button class="btn" type="button" id="cancel">Cancel order</button>` : ''}${returnHref ? html`<a class="btn-quiet" href="${returnHref}">Return an item</a>` : ''}
 <a class="btn-quiet" href="/account/orders">All orders</a></div>
 </section>${script}`,
   });

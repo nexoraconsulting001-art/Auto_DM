@@ -135,6 +135,15 @@ export function trackingToken(tenantId, orderId, publicToken) {
   return `${Number(orderId).toString(36)}.${mac}`;
 }
 
+/**
+ * The one address of an order's tracking page (S-78, F-89): a path on the business's own store address, or '' for an order
+ * with no public token. Every link to it (shipping messages, the shopper's account, the order page, the apps) is made here.
+ */
+export function trackingPath(tenantId, orderId, publicToken) {
+  const token = trackingToken(tenantId, orderId, publicToken);
+  return token ? `/track/${token}` : '';
+}
+
 const TOKEN = /^([0-9a-z]{1,7})\.([A-Za-z0-9_-]{22})$/;
 /** { orderId, mac } from a token, or null when it isn't one. */
 export function readTrackingToken(token) {

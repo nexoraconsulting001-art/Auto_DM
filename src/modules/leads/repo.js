@@ -143,14 +143,16 @@ export function leadsRepo(db) {
           );
           id = row.id;
         }
-        // Each channel is its own purpose. Agreeing again after withdrawing is fresh consent for the channels this contact reaches.
+        // Each channel is its own purpose. The form proves nobody owns the phone or email typed into it, so a send can add
+        // consent for a channel this contact never had, but a channel the person withdrew stays withdrawn (9.18: withdrawal
+        // stops sends; D-15). Only the person's own verified step can turn it back on.
         const [held] = await t.query('SELECT phone, email FROM leads WHERE tenant_id = $1 AND id = $2', [t0(), id]);
         for (const channel of lead.channels) {
           const reachable = channel === 'email' ? Boolean(lead.email) && held.email === lead.email : Boolean(lead.phone) && held.phone === lead.phone;
           if (!reachable) continue;
           await t.query(
             `INSERT INTO lead_consents (tenant_id, lead_id, channel) VALUES ($1, $2, $3)
-             ON CONFLICT (tenant_id, lead_id, channel) DO UPDATE SET granted_at = now(), withdrawn_at = NULL`,
+             ON CONFLICT (tenant_id, lead_id, channel) DO UPDATE SET granted_at = now() WHERE lead_consents.withdrawn_at IS NULL`,
             [t0(), id, channel],
           );
         }

@@ -5,6 +5,7 @@ import { STORE_ROUTES } from '../../contracts/store-routes.js';
 import { tenantId } from '../../tenancy.js';
 import { html, raw } from '../../views/html.js';
 import { safeHref, section } from '../../views/buyer/index.js';
+import { trackingPath } from '../shipping/util.js';
 import { shopperFrom, storeOn } from '../storefront/http.js';
 import { CHECKOUT_SCRIPT, policyLinks, sendStoreNotFound, sendStorePage } from '../storefront/shell.js';
 import { GATEWAY_ORIGINS, PAY_JS, PAY_SCRIPT } from '../storefront/views/pay.js';
@@ -69,6 +70,7 @@ ${section({ theme, id: 'checkout-h', kicker: 'Checkout', title: 'Your order', bo
 <form class="stack" data-checkout-form novalidate>
 <div class="panel"><ul class="lines" data-lines></ul><p class="notice-box" data-notices hidden></p></div>
 <div class="panel"><h2 style="font-size:20px">Delivery</h2>
+${shopper ? '' : html`<p class="muted small">Shopped here before? <a href="/login?next=%2Fcheckout">Sign in</a> to use your saved details, or carry on as a guest.</p>`}
 ${savedChoice(addresses)}
 ${addressFields(shopper)}
 <label>Email for your receipt (optional) <input name="email" type="email" autocomplete="email" maxlength="254" value="${shopper?.email ?? ''}">${errorFor('email')}</label>
@@ -127,7 +129,7 @@ function orderState(order, latestPayment) {
   return { title: 'Order confirmed', body: 'Thank you! We’re getting your order ready.' };
 }
 
-function orderMain({ order, items, state, canCancel }) {
+function orderMain({ order, items, state, canCancel, trackHref = '' }) {
   const address = order.shipping_address ?? {};
   const row = (label, paise, show = true) => (show ? html`<span>${label}</span><span>${formatRupees(Number(paise))}</span>` : '');
   return ({ theme }) => html`<div data-order-page data-token="${order.public_token}" data-number="${order.order_number}">
@@ -141,6 +143,7 @@ ${row('Cash on delivery fee', order.cod_fee_paise, Number(order.cod_fee_paise) >
 <span class="grand">Total</span><span class="grand">${formatRupees(Number(order.total_paise))}</span>
 ${row('Paid online', order.advance_paise, order.payment_mode === 'part_advance')}${row('Pay on delivery', order.balance_paise, Number(order.balance_paise) > 0)}
 </div></div>
+${trackHref ? html`<a class="btn wide" href="${trackHref}">Track your parcel</a>` : ''}
 <div class="panel"><h2 style="font-size:18px">Delivering to</h2><p>${address.name ?? order.customer_name}<br>${[address.line1, address.line2, address.landmark].filter(Boolean).join(', ')}<br>${[address.city, INDIAN_STATES[address.stateCode] ?? order.state, address.pincode ?? order.pincode].filter(Boolean).join(', ')}</p></div>
 ${canCancel ? html`<button class="chip" type="button" data-cancel>Cancel this order</button><p class="error" data-cancel-error hidden></p>` : ''}
 <a class="btn wide" href="/shop">Keep shopping</a>` })}
@@ -222,15 +225,18 @@ export function checkoutPages(ctx) {
       if (!order) return sendStoreNotFound(ctx, req, res, 'We couldn’t find that order.');
       if (order.flow !== 'checkout') return next(); // a Phase 0 order keeps its own page
       const shopper = await shopperFrom(req, db);
-      const [items, [latest]] = await Promise.all([
+      const [items, [latest], [parcel]] = await Promise.all([
         db.query('SELECT name, image, option_value, qty, price_paise FROM order_items WHERE tenant_id = $1 AND order_id = $2 ORDER BY id', [tenantId(), order.id]),
         db.query('SELECT status FROM payments WHERE tenant_id = $1 AND order_id = $2 ORDER BY id DESC LIMIT 1', [tenantId(), order.id]),
+        db.query(`SELECT 1 FROM shipments WHERE tenant_id = $1 AND order_id = $2 AND kind = 'forward' AND status <> 'cancelled' LIMIT 1`, [tenantId(), order.id]),
       ]);
+      // Once a parcel is on its way, the seller's own tracking page (S-78, F-89) is one tap from here.
+      const trackHref = parcel ? trackingPath(tenantId(), order.id, order.public_token) : '';
       const canCancel = Boolean(shopper && order.shopper_id === shopper.id && canCancelBeforeShipment(order));
       res.set('Cache-Control', 'no-store');
       return await sendStorePage(ctx, req, res, {
         kind: 'checkout', ref: 'order', title: `Order ${order.order_number}`, ...paying(ORDER_SCRIPT),
-        main: orderMain({ order, items, state: orderState(order, latest), canCancel }),
+        main: orderMain({ order, items, state: orderState(order, latest), canCancel, trackHref }),
       });
     } catch (err) {
       return next(err);

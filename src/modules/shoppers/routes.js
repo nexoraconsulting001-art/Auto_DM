@@ -5,7 +5,10 @@ import { OtpSend, OtpVerify } from '../../contracts/store-routes.js';
 import { log, reportError } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { ValidationError } from '../../util.js';
-import { loadBuyerLayout } from '../../views/buyer/index.js';
+import { loadBuyerLayout, sendBuyerPage } from '../../views/buyer/index.js';
+import { returnOption } from '../returns/index.js';
+import { trackingPath } from '../shipping/util.js';
+import { storeChrome, withStoreHead } from '../storefront/shell.js';
 import { platformHostOf } from '../platform-console/host.js';
 import { csrfFor, field, newToken, originOf, readCookie, readToken, safeEqual, signToken } from './keys.js';
 import { OtpError } from './service.js';
@@ -98,10 +101,15 @@ export function shopperRoutes(ctx, { service, shared, google }) {
     return { to: ticket ? `${platformOrigin(req)}/shared/remember?t=${encodeURIComponent(ticket)}` : to, token };
   }
 
+  /**
+   * A shopper's own page, sent like every store page: in the store's frame (header chips, footer, head tags) and through
+   * sendBuyerPage (compressed, 8.12). These pages hold a person's details, so no cache keeps them, the browser's included.
+   */
   async function page(res, build, status = 200) {
     const layout = await loadBuyerLayout(repos);
-    // A shopper's own pages are never kept by any cache, the browser's included (sendBuyerPage allows the browser's).
-    return res.status(status).set('Cache-Control', 'no-store').type('html').send(String(build(layout)));
+    const view = build({ ...layout, chrome: storeChrome(res.req, layout) });
+    res.set('Cache-Control', 'no-store');
+    return sendBuyerPage(res, withStoreHead(res.req, view), { status });
   }
   const signInFirst = (req, res) => res.redirect(`/login?next=${encodeURIComponent(req.originalUrl)}`);
 
@@ -279,7 +287,11 @@ export function shopperRoutes(ctx, { service, shared, google }) {
     if (!req.shopper) return signInFirst(req, res);
     const order = await service.orders.get(req.shopper.id, req.params.orderNumber);
     if (!order) return page(res, (layout) => messagePage(layout, { title: 'Not found', message: 'We couldn’t find that order in your account.', action: { href: '/account/orders', label: 'Your orders' } }), 404);
-    return page(res, (layout) => orderDetailPage(layout, { order, shopperCsrf: req.shopperCsrf, sellerCsrf: req.csrf ?? '' }));
+    // The return link shows only while a return can be asked for now: returns on, inside the window, something eligible (S-57).
+    const returnHref = await returnOption(ctx, order);
+    // Tracking is the seller's own tracking page (S-78), once a parcel is on its way.
+    const trackHref = order.shipments.some((s) => s.kind === 'forward' && s.status !== 'cancelled') ? trackingPath(tenantId(), order.id, order.public_token) : '';
+    return page(res, (layout) => orderDetailPage(layout, { order, returnHref, trackHref, shopperCsrf: req.shopperCsrf, sellerCsrf: req.csrf ?? '' }));
   }));
 
   // ---- saved addresses (9.4) ----

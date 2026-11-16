@@ -1,11 +1,14 @@
 import { formatRupees } from '../../contracts/catalog.js';
+import { tenantId } from '../../tenancy.js';
 import { html, raw } from '../../views/html.js';
+import { trackingPath } from '../shipping/util.js';
 import { firstName } from './business.js';
 
 /**
  * What a shopper receives about an order (PRD 9.16), by WhatsApp (an approved Utility template) or email. In the seller's
  * brand only: the store's name, colour and own address; never the platform's. Links are direct links to the store's own
- * order page, or for a shipping update its own tracking page. Built from ids and the order row; nothing here is logged.
+ * pages: the tracking page for a shipping update (S-78, F-89), else the order page. Built from ids and the order row;
+ * nothing here is logged.
  */
 export const TEMPLATE_OF = Object.freeze({
   placed: 'order_placed', paid: 'order_paid', shipped: 'order_shipped', delivered: 'order_delivered', cancelled: 'order_cancelled', refunded: 'order_refunded',
@@ -25,11 +28,18 @@ export const TRACKED_EVENTS = Object.freeze(new Set(['shipped', 'delivered']));
 
 export const orderLink = (business, order) => (business.base && order.public_token ? `${business.base}/order/${encodeURIComponent(order.public_token)}` : '');
 
+/** The one link a message carries for an event: the tracking page for a parcel on its way, else the order page. */
+export function messageLink(business, order, event) {
+  const path = TRACKED_EVENTS.has(event) && business.base ? trackingPath(tenantId(), order.id, order.public_token) : '';
+  return path ? `${business.base}${path}` : orderLink(business, order);
+}
+
 /** The message for one alert. `unsubscribeUrl` is the shopper's one-tap way to stop order emails. */
 export function orderMessage({ channel, event, order, items = [], business, unsubscribeUrl = '', trackingUrl = '' }) {
   const to = { shopperId: order.shopper_id ?? undefined, phone: order.phone || undefined, email: order.email || undefined };
   // Shipping updates go to the seller's tracking page when there is one (F-89, S-78); every other update to the order page.
-  const link = (TRACKED_EVENTS.has(event) && trackingUrl) || orderLink(business, order);
+  const link = (TRACKED_EVENTS.has(event) && trackingUrl) || messageLink(business, order, event);
+  const linkText = TRACKED_EVENTS.has(event) ? 'Track your order' : 'See your order';
   const base = { channel, purpose: 'order_update', to, orderId: order.id };
   if (channel === 'whatsapp') {
     return { ...base, template: { purpose: TEMPLATE_OF[event], params: [firstName(order.customer_name), order.order_number, business.name, link || business.name] } };
@@ -46,7 +56,7 @@ export function orderMessage({ channel, event, order, items = [], business, unsu
     `Order ${order.order_number}`,
     ...lines,
     `${event === 'refunded' ? 'Refunded' : 'Total'}: ${formatRupees(amount)}`,
-    ...(link ? ['', `See your order: ${link}`] : []),
+    ...(link ? ['', `${linkText}: ${link}`] : []),
     '',
     business.name,
     ...(unsubscribeUrl ? ['', `Stop order emails: ${unsubscribeUrl}`] : []),
@@ -61,7 +71,7 @@ ${business.logo ? html`<p style="margin:0 0 12px"><img src="${business.logo}" al
 <p style="margin:0 0 8px;font-weight:bold">Order ${order.order_number}</p>
 ${lines.length ? html`<ul style="margin:0 0 12px;padding-left:18px">${lines.map((l) => html`<li>${l}</li>`)}</ul>` : ''}
 <p style="margin:0 0 20px">${event === 'refunded' ? 'Refunded' : 'Total'}: <strong>${formatRupees(amount)}</strong></p>
-${link ? html`<p style="margin:0 0 8px"><a href="${link}" style="display:inline-block;background:${raw(business.color)};color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px">See your order</a></p>` : ''}
+${link ? html`<p style="margin:0 0 8px"><a href="${link}" style="display:inline-block;background:${raw(business.color)};color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px">${linkText}</a></p>` : ''}
 </div>
 <p style="font-size:12px;color:#6b6b70;margin:16px 0 0">You are receiving this because you ordered from ${business.name}.${unsubscribeUrl ? html` <a href="${unsubscribeUrl}" style="color:#6b6b70">Stop order emails</a>` : ''}</p>
 </div></body></html>`;

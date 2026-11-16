@@ -60,10 +60,25 @@ const STORE_CSS = [
 
 export const storeStyles = () => html`<style>${raw(STORE_CSS)}</style>`;
 
-const header = () => html`<nav class="row" aria-label="Store">
+/**
+ * Where the account chip leads (9.3, 9.17): a signed-in shopper's account, else sign-in that brings the shopper back to the
+ * page they were on (S-07: back to checkout with the bag intact). Sign-in itself never asks to return to sign-in.
+ */
+function accountChip(req) {
+  if (req?.shopper?.id) return { href: '/account', label: 'Account', aria: 'Your account' };
+  const here = String(req?.originalUrl ?? '');
+  const back = here.startsWith('/') && !here.startsWith('//') && !here.startsWith('/login') && here.length <= 300 ? `?next=${encodeURIComponent(here)}` : '';
+  return { href: `/login${back}`, label: 'Sign in', aria: 'Sign in' };
+}
+
+const header = (req) => {
+  const chip = accountChip(req);
+  return html`<nav class="row" aria-label="Store">
 <a class="chip" href="/search" aria-label="Search">Search</a>
+<a class="chip" href="${chip.href}" aria-label="${chip.aria}">${chip.label}</a>
 <a class="chip bag-link" href="/cart" aria-label="Your bag">Bag<span data-bag-count></span></a>
 </nav>`;
+};
 
 const POLICY_LABELS = Object.freeze({ terms: 'Terms', refund: 'Refunds', shipping: 'Shipping', privacy: 'Privacy' });
 /** The policy pages the consent module serves (9.18), one link each. */
@@ -76,6 +91,14 @@ function whatsappHref(settings) {
   if (digits.length === 10) return `https://wa.me/91${digits}`;
   if (digits.length >= 11 && digits.length <= 15) return `https://wa.me/${digits}`;
   return '';
+}
+
+/**
+ * The store's frame around a page: its header chips and footer, for buyerPage. Every store page takes it from here, the
+ * shopper's own pages (shoppers/views.js) as much as renderStorePage's, so no page of the store is drawn without them.
+ */
+export function storeChrome(req, { business, settings }) {
+  return { headerEnd: header(req), footer: { note: `© ${business.name}`, whatsappHref: whatsappHref(settings), links: FOOTER_LINKS } };
 }
 
 /** Adds the store's tags to the head of a finished document. */
@@ -93,9 +116,13 @@ export async function renderStorePage(ctx, req, { title, description = '', main,
     business,
     meta: { title: title ? `${title} · ${business.name}` : business.name, description: description || settings.tagline || '', url: url || `${baseOf(req)}${req.path}`, indexable, image: image ?? undefined },
     main: html`${storeStyles()}${main}`,
-    headerEnd: header(),
-    footer: { note: `© ${business.name}`, whatsappHref: whatsappHref(settings), links: FOOTER_LINKS },
+    ...storeChrome(req, { business, settings }),
   });
+  return withStoreHead(req, view, { scripts, data });
+}
+
+/** The store's head tags (manifest, the request's tokens, the bag's script and any page scripts), added to a finished page. */
+export function withStoreHead(req, view, { scripts = [], data = null } = {}) {
   const tags = [
     '<link rel="manifest" href="/manifest.webmanifest">',
     req.csrf ? `<meta name="csrf-token" content="${esc(req.csrf)}">` : '',
