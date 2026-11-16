@@ -79,6 +79,77 @@ function pgQueue(db, config) {
   const listeners = runListeners();
   let closed = false;
 
+  // How the work loops find work. A loop with nothing to run waits here, and one probe every pollMs asks the jobs table once
+  // which of the waiting loops' queues have a ready job, so idle polling costs one read a poll for the whole process, not a
+  // write per queue: with ~60 queues worked, per-queue claim polling (and a stale sweep on each) used most of the database.
+  // Stale running jobs are swept on a clock of their own: a lease can't expire faster than leaseMs, so a sweep every tenth of
+  // it finds a dead worker's job just as soon as before.
+  const idle = new Map(); // queue -> Set of resolve functions of the loops waiting on it
+  let probeTimer = null;
+  let probing = null;
+  let lastSweep = 0;
+  const sweepEveryMs = Math.max(pollMs, Math.floor(leaseMs / 10));
+
+  async function sweepIfDue() {
+    const at = Date.now();
+    if (at - lastSweep < sweepEveryMs) return;
+    lastSweep = at;
+    await recoverStale();
+  }
+
+  function wake(queue) {
+    const waiting = idle.get(queue);
+    if (!waiting) return;
+    idle.delete(queue);
+    for (const resolve of waiting) resolve();
+  }
+
+  async function probe() {
+    try {
+      await sweepIfDue();
+      const names = [...idle.keys()];
+      if (!names.length) return;
+      const rows = await db.query(`SELECT DISTINCT queue FROM jobs WHERE status = 'queued' AND run_at <= now() AND queue = ANY($1::text[])`, [names]);
+      for (const row of rows) wake(row.queue);
+    } catch (err) {
+      reportError(err, { msg: 'queue.poll_failed' });
+    }
+  }
+
+  function scheduleProbe() {
+    if (probeTimer || closed) return;
+    probeTimer = setTimeout(async () => {
+      probing = probe();
+      await probing;
+      probing = null;
+      probeTimer = null;
+      if (idle.size && !closed) scheduleProbe();
+    }, pollMs);
+  }
+
+  function waitForWork(queue) {
+    return new Promise((resolve) => {
+      if (!idle.has(queue)) idle.set(queue, new Set());
+      idle.get(queue).add(resolve);
+      scheduleProbe();
+    });
+  }
+
+  /** Claims up to `limit` ready jobs of one queue and runs them, one after another. Returns how many ran. */
+  async function runReady(queue, handler, limit) {
+    const rows = await claim(queue, limit);
+    for (const row of rows) {
+      const job = { id: String(row.id), queue, tenantId: row.tenant_id, payload: row.payload, attempt: row.attempts };
+      try {
+        await runJob(listeners, handler, job, { maxAttempts: row.max_attempts });
+        await finish(row);
+      } catch (err) {
+        await finish(row, err);
+      }
+    }
+    return rows.length;
+  }
+
   /** Running jobs whose worker stopped renewing them: rerun if safe, otherwise mark unknown. */
   async function recoverStale() {
     await db.query(
@@ -127,33 +198,26 @@ function pgQueue(db, config) {
          RETURNING id`,
         [queue, tenantId, JSON.stringify(payload), delayMs, dedupeKey, maxAttempts, retryInFlight],
       );
+      // A loop of this process waiting on the queue starts now; other processes' loops find it at their next probe.
+      if (row && !(delayMs > 0)) wake(queue);
       return row ? String(row.id) : null;
     },
-    /** Runs ready jobs once (also used by tests). Returns how many ran. */
+    /** Runs ready jobs once (also used by tests), after sweeping stale running jobs. Returns how many ran. */
     async drain(queue, handler, { limit = 100 } = {}) {
       await recoverStale();
-      const rows = await claim(queue, limit);
-      for (const row of rows) {
-        const job = { id: String(row.id), queue, tenantId: row.tenant_id, payload: row.payload, attempt: row.attempts };
-        try {
-          await runJob(listeners, handler, job, { maxAttempts: row.max_attempts });
-          await finish(row);
-        } catch (err) {
-          await finish(row, err);
-        }
-      }
-      return rows.length;
+      return runReady(queue, handler, limit);
     },
     work(queue, handler, { concurrency = 1 } = {}) {
       const loop = async () => {
         while (!closed) {
           let ran = 0;
           try {
-            ran = await this.drain(queue, handler, { limit: concurrency });
+            await sweepIfDue();
+            ran = await runReady(queue, handler, concurrency);
           } catch (err) {
             reportError(err, { msg: 'queue.poll_failed', queue });
           }
-          if (!ran && !closed) await new Promise((r) => setTimeout(r, pollMs));
+          if (!ran && !closed) await waitForWork(queue);
         }
       };
       loops.push(loop());
@@ -184,7 +248,11 @@ function pgQueue(db, config) {
     },
     async close() {
       closed = true;
+      clearTimeout(probeTimer);
+      probeTimer = null;
+      for (const queue of [...idle.keys()]) wake(queue);
       await Promise.all(loops);
+      await probing;
     },
   };
 }
