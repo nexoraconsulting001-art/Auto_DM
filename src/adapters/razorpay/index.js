@@ -49,8 +49,9 @@ import { DEFAULT_TIMEOUT_MS, createHttp, hmac, providerUrl, sameBytes } from '..
  *                                                                                                  (plan_prices), so the caller keeps the id in provider_plans
  *   createSubscription({ customerId, planId, totalCount?, startAt?, notes }) -> subscription        notes carry our business id; nothing else names it
  *   changeSubscription(id, { planId, at: 'now' | 'cycle_end' })             -> subscription        an upgrade is 'now', a downgrade 'cycle_end'
- *   addCharge(id, { name, amountPaise, quantity?, idempotencyKey })         -> { id, amountPaise, quantity }   a one-off line on the next charge. The
- *                                                                                                  same key answers the same line: it is looked for first
+ *   addCharge(id, { name, amountPaise, quantity?, idempotencyKey, since? }) -> { id, amountPaise, quantity }   a one-off line on the next charge. The
+ *                                                                                                  same key answers the same line: it is looked for first,
+ *                                                                                                  among add-ons made from `since` (the first attempt) on
  *   cancel(id, { atCycleEnd? })                                             -> subscription
  *   fetch(id)                                                               -> subscription
  *   verifyWebhook(rawBody, signatureHeader)                                 with RAZORPAY_BILLING_WEBHOOK_SECRET; false on anything missing
@@ -279,6 +280,7 @@ function createPartner(config, request, authRequest) {
 
 const ADDON_PAGE = 100;
 const ADDON_PAGES = 50;
+const ADDON_SINCE_SLACK_MS = 86_400_000;
 
 /** Subscriptions on Bhava's own account: what a business pays Bhava (PRD 5.12). */
 function createBilling(config, request) {
@@ -291,11 +293,15 @@ function createBilling(config, request) {
   /**
    * The add-on of one subscription carrying `key` in its notes, or null. Razorpay's list of add-ons is the whole account's,
    * newest first, in pages (count at most 100), and documents no subscription filter: every page is read until one comes
-   * back short, and the subscription is matched here. ADDON_PAGES bounds it.
+   * back short, and the subscription is matched here. The account's list only grows, so the search starts at `since`, the
+   * earliest a line with this key can have been made (the caller's first attempt; a day earlier for clock differences), with
+   * Razorpay's documented `from` (money-6). ADDON_PAGES bounds it; without `since` the whole list is read.
    */
-  async function findAddon(subscriptionId, key) {
+  async function findAddon(subscriptionId, key, since = null) {
+    const fromMs = since === null || since === undefined ? NaN : +new Date(since);
+    const from = Number.isFinite(fromMs) ? { from: Math.max(0, Math.floor((fromMs - ADDON_SINCE_SLACK_MS) / 1000)) } : {};
     for (let page = 0; page < ADDON_PAGES; page++) {
-      const { body } = await request('GET', '/v1/addons', { headers: auth(), query: { count: ADDON_PAGE, skip: page * ADDON_PAGE }, retries: 2 });
+      const { body } = await request('GET', '/v1/addons', { headers: auth(), query: { count: ADDON_PAGE, skip: page * ADDON_PAGE, ...from }, retries: 2 });
       const items = body?.items ?? [];
       const found = items.find((addon) => addon.subscription_id === subscriptionId && addon.notes?.key === key);
       if (found) return found;
@@ -326,10 +332,10 @@ function createBilling(config, request) {
       const { body } = await request('PATCH', sub(id), { headers: auth(), json: { plan_id: need(planId, 'a plan id'), schedule_change_at: at, customer_notify: 0 } });
       return toSubscription(body);
     },
-    async addCharge(id, { name, amountPaise, quantity = 1, idempotencyKey }) {
+    async addCharge(id, { name, amountPaise, quantity = 1, idempotencyKey, since = null }) {
       const key = need(idempotencyKey, 'an idempotency key');
       // Razorpay has no idempotency header for add-ons, so the key rides in the notes and is looked for before a new line is made.
-      const found = await findAddon(need(id, 'a subscription id'), key);
+      const found = await findAddon(need(id, 'a subscription id'), key, since);
       const made = found ?? (await request('POST', `${sub(id)}/addons`, { headers: auth(), json: { item: { name, amount: wholePaise(amountPaise), currency: 'INR' }, quantity, notes: { key } } })).body;
       return { id: made.id, amountPaise: made.item?.amount ?? amountPaise, quantity: made.quantity ?? quantity };
     },
@@ -337,8 +343,8 @@ function createBilling(config, request) {
      * Takes back a line not yet charged: by its id, or, when the answer that named it was lost, by its key. Answers whether a
      * line was deleted. A line the provider already charged is refused (a ProviderError, delivery 'none').
      */
-    async removeCharge(id, { addonId = null, idempotencyKey = null } = {}) {
-      const target = addonId ?? (idempotencyKey ? (await findAddon(need(id, 'a subscription id'), idempotencyKey))?.id : null);
+    async removeCharge(id, { addonId = null, idempotencyKey = null, since = null } = {}) {
+      const target = addonId ?? (idempotencyKey ? (await findAddon(need(id, 'a subscription id'), idempotencyKey, since))?.id : null);
       if (!target) return false;
       await request('DELETE', `/v1/addons/${encodeURIComponent(target)}`, { headers: auth() });
       return true;

@@ -45,6 +45,11 @@ const INVOICED_PASS_THROUGH = Object.freeze({
 
 const iso = (value) => (value ? new Date(value).toISOString() : null);
 const day = (value) => (value ? new Date(value).toISOString().slice(0, 10) : null);
+/** The moment a usage month ('YYYY-MM') closes, in India: the first instant of the next month. */
+const monthEnd = (month) => {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 1) - 330 * 60_000);
+};
 const n = (value) => (value === null || value === undefined ? null : Number(value));
 const monthsOf = (cycle) => (cycle === 'yearly' ? 12 : 1);
 
@@ -487,7 +492,11 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
   }
 
   /** Queues one line with the provider for the next charge. The same key always answers the same line, so a retry never doubles it. */
-  async function queueItem(item, key, { settings, months }) {
+  /**
+   * `since` is the earliest the provider can have made a line with this key (money-6): the item's creation for its first
+   * charge, the start of the queueing window for a renewal. The provider's repeat check looks no further back.
+   */
+  async function queueItem(item, key, { settings, months, since = item.created_at }) {
     const s = await subOf(db);
     if (!s?.provider_subscription_id || s.status === 'cancelled') return null;
     // A line removed in the meantime is never queued (money-4).
@@ -501,7 +510,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       await db.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL', [tenantId(), item.id, `free:${item.id}`]);
       return null;
     }
-    const added = await provider().addCharge(s.provider_subscription_id, { name: line.description, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: key });
+    const added = await provider().addCharge(s.provider_subscription_id, { name: line.description, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: key, since });
     await db.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL', [tenantId(), item.id, added.id]);
     return added.id;
   }
@@ -518,7 +527,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     if (!pid && item.billed_through) return true; // charged already, and nothing queued since
     if (s?.provider_subscription_id) {
       try {
-        await provider().removeCharge(s.provider_subscription_id, pid ? { addonId: pid } : { idempotencyKey: `item:${item.id}:first` });
+        await provider().removeCharge(s.provider_subscription_id, pid ? { addonId: pid } : { idempotencyKey: `item:${item.id}:first`, since: item.created_at });
       } catch (err) {
         if (!(err instanceof ProviderError)) throw err;
         log.warn('billing.drop_deferred', { item: Number(item.id), kind: err.kind, delivery: err.delivery });
@@ -878,7 +887,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
                  AND (ends_at IS NULL OR ends_at > $2::timestamptz) ORDER BY id`,
               [tenantId(), iso(end)],
             );
-            for (const item of due) if (await queueItem(item, `item:${item.id}:${+end}`, { settings, months })) done.queued += 1;
+            for (const item of due) if (await queueItem(item, `item:${item.id}:${+end}`, { settings, months, since: new Date(+end - QUEUE_AHEAD_MS) })) done.queued += 1;
             done.passThrough += await queuePassThrough(s, settings);
           }
         } catch (err) {
@@ -932,7 +941,8 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       // WhatsApp and AI keep the key they always had (one per kind and month); a month's courier charges are named by their last row.
       const key = kind === 'shipping' ? `pt:${tenantId()}:shipping:${month}:${group.last}` : `pt:${tenantId()}:${kind}:${month}`;
       try {
-        const made = await provider().addCharge(s.provider_subscription_id, { name, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: key });
+        // A closed month is charged only once it has closed, so no line for it can be older than the month's end (money-6).
+        const made = await provider().addCharge(s.provider_subscription_id, { name, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: key, since: monthEnd(month) });
         await db.query('UPDATE pass_through_charges SET provider_charge_id = $3 WHERE tenant_id = $1 AND id = ANY($2::bigint[])', [tenantId(), claimed.map((r) => Number(r.id)), made?.id ? String(made.id).slice(0, 80) : null]);
       } catch (err) {
         await db.query('UPDATE pass_through_charges SET queued_at = NULL WHERE tenant_id = $1 AND id = ANY($2::bigint[]) AND invoice_id IS NULL', [tenantId(), claimed.map((r) => Number(r.id))]);
