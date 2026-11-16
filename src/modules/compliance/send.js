@@ -378,7 +378,7 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
       message: `${label === 'Whatsapp' ? 'WhatsApp' : label} stopped accepting this account's connection. Reconnect it to start sending again.`,
       dedupeKey: `token.rejected:${action.channel}:${action.accountId}:${account?.tokenVersion ?? 0}`,
     }).catch(swallow('compliance.token_alert_failed'));
-    await breaker.trip(action.channel, 'token.rejected').catch(swallow('compliance.breaker_failed'));
+    await breaker.trip(action.channel, 'token.rejected', { ownerAlert: false }).catch(swallow('compliance.breaker_failed'));
   }
 
   /** What Meta's refusal means for this job. Reported, never thrown. */

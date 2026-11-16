@@ -368,7 +368,8 @@ test('a 190 with no new token holds the job, asks for a reconnect and tells the 
   assert.deepEqual((await w.jobs()).map((j) => [j.status, j.reason]), [['held', 'paused.reconnect']]);
   const [account] = await w.inTenant('SELECT status FROM ig_accounts WHERE tenant_id = $1', [w.tenant.id]);
   assert.equal(account.status, 'reconnect_needed');
-  assert.deepEqual((await w.alerts()).map((a) => a.kind).sort(), ['breaker.open', 'token.rejected']);
+  assert.deepEqual((await w.alerts()).map((a) => a.kind), ['token.rejected'], 'One alert for one cause: the breaker opens without a second one');
+  assert.equal((await w.inTenant(`SELECT state FROM breakers WHERE tenant_id = $1 AND channel = 'instagram'`, [w.tenant.id]))[0]?.state, 'open');
   assert.ok((await w.reasons()).includes('token.rejected'));
 });
 

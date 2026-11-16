@@ -46,7 +46,12 @@ export function createBreaker({ db, repos, now, gate }) {
     return true;
   }
 
-  async function trip(channel, reason) {
+  /**
+   * Opens the breaker. ownerAlert false: the cause has already told the owner what to do (a refused token raises token.rejected,
+   * "reconnect"), so a second alert saying "we'll retry shortly" would only contradict it (PRD 4.2: one alert for the token). Ops'
+   * cross-tenant guard still counts the trip.
+   */
+  async function trip(channel, reason, { ownerAlert = true } = {}) {
     await ensure(channel);
     const time = at();
     const rows = await db.query(
@@ -57,7 +62,7 @@ export function createBreaker({ db, repos, now, gate }) {
     gate.invalidate();
     if (!rows.length) return false;
     try {
-      await repos.alerts?.raise({
+      if (ownerAlert) await repos.alerts?.raise({
         kind: 'breaker.open', severity: 'critical', target: channel,
         message: `Sending on ${CHANNEL_NAMES[channel] ?? 'your account'} is paused while we check a problem with your account. Automated messages are held, and we’ll retry shortly.`,
         dedupeKey: `breaker:${channel}:${+time}`,
