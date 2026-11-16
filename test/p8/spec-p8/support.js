@@ -103,10 +103,18 @@ export async function emptyBusiness(app, slug, name = `Shop ${slug}`) {
   return { tenant, slug, name, host: `${slug}.shops.example`, id: tenant.id };
 }
 
+/** The running app's platform drivers, which the importer reads media and stores files through. */
+export function importerPlatform(app) {
+  const platform = ctxOf(app)?.platform;
+  if (!platform?.images || !platform?.storage) throw new Error("The spec world has no platform drivers for the importer");
+  return platform;
+}
+
 /** The importer, built as the command line builds it. */
 export async function importerOf(app) {
   const { createMigration } = await import('../../../src/modules/migration/index.js');
-  return createMigration({ db: app.db, repos: app.platform, config: app.config });
+  // As scripts/migrate-business.js builds it: the database and the platform drivers (storage and images keep the media, PRD 5.16).
+  return createMigration({ db: app.db, platform: importerPlatform(app), repos: app.platform, config: app.config });
 }
 
 const sql = (app, text, params = []) => app.db.platform.query(text, params);

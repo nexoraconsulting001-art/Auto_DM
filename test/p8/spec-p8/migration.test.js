@@ -11,7 +11,7 @@ import { world as shopperWorld } from '../../p4/shoppers/support.js';
 import { browser } from '../../p4/shoppers/support.js';
 import {
   FULL, MARKERS, RECORD_KEEPING, addBusiness, addOrder, addProduct, altered, api, captureLogs, countOf, emptyBusiness, faultyDb, hit, importerOf, legacyExport, need, signIn, snapshot,
-  closeShared, sharedWorld, sql, u, whereFound,
+  closeShared, importerPlatform, sharedWorld, sql, u, whereFound,
 } from './support.js';
 
 after(closeShared);
@@ -95,7 +95,7 @@ async function failAt(t, which, source) {
   const app = await sharedWorld();
   const counting = { at: 0, seen: 0 };
   const measureShop = await emptyBusiness(app, u('measure'));
-  const measured = await (await import('../../../src/modules/migration/index.js')).createMigration({ db: faultyDb(app.db, WRITES, counting), repos: app.platform, config: app.config });
+  const measured = await (await import('../../../src/modules/migration/index.js')).createMigration({ db: faultyDb(app.db, WRITES, counting), platform: importerPlatform(app), repos: app.platform, config: app.config });
   const ok = await measured.run(source, { tenantId: measureShop.id });
   assert.equal(ok.blocked, false, 'the measuring run goes through');
   const writes = counting.seen;
@@ -103,7 +103,7 @@ async function failAt(t, which, source) {
   const at = { first: 1, middle: Math.ceil(writes / 2), last: writes }[which];
   const target = await emptyBusiness(app, u(`fails-${which}`));
   const fault = { at, seen: 0 };
-  const importer = (await import('../../../src/modules/migration/index.js')).createMigration({ db: faultyDb(app.db, WRITES, fault), repos: app.platform, config: app.config });
+  const importer = (await import('../../../src/modules/migration/index.js')).createMigration({ db: faultyDb(app.db, WRITES, fault), platform: importerPlatform(app), repos: app.platform, config: app.config });
   const before = await snap(app, target.id);
   const result = await outcome(importer.run(source, { tenantId: target.id }));
   assert.ok(result.error, `write ${at} of ${writes} failed and the run must not report success`);
@@ -134,7 +134,7 @@ test('F-69: a failure at row 5,000 of an import rolls everything back', { skip: 
   const app = await sharedWorld();
   const target = await emptyBusiness(app, u('row-5000'));
   const fault = { at: 5000, seen: 0 };
-  const importer = (await import('../../../src/modules/migration/index.js')).createMigration({ db: faultyDb(app.db, /INSERT\s+INTO\s+"?products"?\b/i, fault), repos: app.platform, config: app.config });
+  const importer = (await import('../../../src/modules/migration/index.js')).createMigration({ db: faultyDb(app.db, /INSERT\s+INTO\s+"?products"?\b/i, fault), platform: importerPlatform(app), repos: app.platform, config: app.config });
   const before = await snap(app, target.id);
   const result = await outcome(importer.run(source, { tenantId: target.id }));
   if (fault.seen < 5000) assert.ok(fault.seen > 0, 'the importer batches its product writes: the fault is at its last batch'); // a batch holds many rows
