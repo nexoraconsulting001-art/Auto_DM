@@ -1,7 +1,7 @@
 # Cash on delivery asks for a code sent to the phone on WhatsApp; with it the order is placed, shows under Orders, and
 # its tracking opens.
 appId: ${APP_ID}
-name: 'P-28: Check out with cash on delivery using a WhatsApp code, then find the order under Orders with its tracking'
+name: 'P-28 - Check out with cash on delivery using a WhatsApp code, then find the order under Orders with its tracking'
 ---
 - runFlow:
     file: common/sign-in.yaml

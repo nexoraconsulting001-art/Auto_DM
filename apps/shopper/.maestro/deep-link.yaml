@@ -1,6 +1,6 @@
 # The link a message carries opens the app on the product itself, on the brand's own link scheme. Nothing is asked first.
 appId: ${APP_ID}
-name: 'P-50: A link to a product opens the app on that product'
+name: 'P-50 - A link to a product opens the app on that product'
 ---
 - launchApp:
     clearState: true

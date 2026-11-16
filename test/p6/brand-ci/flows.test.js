@@ -107,7 +107,7 @@ describe('the flows, read', () => {
 
   test('P-27 to P-30, P-46, P-50, P-64: there is a flow for each journey of the brand app, at the top of .maestro where Maestro runs them', () => {
     const names = top.map((flow) => String(flow.header.name));
-    for (const id of ['P-27', 'P-28', 'P-29', 'P-30', 'P-46', 'P-50', 'P-64']) assert.ok(names.some((name) => name.startsWith(`${id}:`)), `no flow is named for ${id}`);
+    for (const id of ['P-27', 'P-28', 'P-29', 'P-30', 'P-46', 'P-50', 'P-64']) assert.ok(names.some((name) => name.startsWith(`${id} - `)), `no flow is named for ${id}`);
     assert.ok(top.some((flow) => path.basename(flow.file) === 'launch.yaml'), 'the opening smoke flow is still there');
     for (const flow of everything) {
       assert.equal(flow.header.appId, '${APP_ID}', `${path.basename(flow.file)}: the app id comes from the job`);

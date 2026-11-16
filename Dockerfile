@@ -12,6 +12,8 @@
 # - Production dependencies only: the installs name the server's workspaces, so React Native and Expo are never
 #   downloaded, and dev tools (test runners, bundlers, linters) are omitted. .dockerignore keeps the apps, the tests,
 #   the docs and the simulators (tools/sim, apart from the guard the adapters import) out of the build context.
+#   The deps guard looks for an installed package (its package.json), not a folder: npm leaves an empty scope folder
+#   such as node_modules/@playwright behind for an omitted scoped dev package.
 # - A non-root user (node, uid 1000) that owns nothing in /app: run it with a read-only root file system and a
 #   writable /tmp (compose: read_only + tmpfs; Kubernetes: readOnlyRootFilesystem + an emptyDir at /tmp).
 # - tini is PID 1, so SIGTERM reaches node and the drain in src/platform/health.js runs within SHUTDOWN_SECONDS.
@@ -45,7 +47,9 @@ COPY shared/api-client/package.json shared/api-client/
 RUN npm ci --omit=dev --workspace @bhava/console --workspace @bhava/api-client --include-workspace-root \
   && npm cache clean --force \
   && for p in react-native expo @expo vite jest playwright @playwright eslint typescript; do \
-       if [ -e "node_modules/$p" ]; then echo "a dev or app package reached the image: $p"; exit 1; fi; \
+       for f in "node_modules/$p/package.json" node_modules/$p/*/package.json; do \
+         if [ -e "$f" ]; then echo "a dev or app package reached the image: $p"; exit 1; fi; \
+       done; \
      done
 
 # ---- what both targets share -------------------------------------------------------------------------------------------

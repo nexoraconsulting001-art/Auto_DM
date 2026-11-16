@@ -1,6 +1,6 @@
 # Browsing never asks for notifications. After the first order the store's own words come first, then the phone's prompt.
 appId: ${APP_ID}
-name: 'P-46: Notifications are asked for only after the first order, in the store''s own words'
+name: 'P-46 - Notifications are asked for only after the first order, in the store''s own words'
 ---
 - runFlow:
     file: common/sign-in.yaml

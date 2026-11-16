@@ -1,7 +1,7 @@
 # One account, two businesses: the switcher lists both, and each business shows its own new order and not the other's.
 # Businesses are reached by their place in the seed manifest (1 and 2), so nothing here names one.
 appId: ${APP_ID}
-name: 'Q-11: Switch between the two sample businesses and see each one''s new order'
+name: 'Q-11 - Switch between the two sample businesses and see each one''s new order'
 ---
 - runFlow:
     file: ../common/sign-in-with-code.yaml

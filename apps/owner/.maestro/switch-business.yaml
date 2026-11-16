@@ -1,6 +1,6 @@
 # A seller with accounts in businesses a and b, and none in c. Each business has one cash on delivery order.
 appId: ${APP_ID}
-name: 'P-10: Switch business on Orders: exactly the seller''s two businesses are listed, and only the chosen one''s orders show'
+name: 'P-10 - Switch business on Orders - exactly the seller''s two businesses are listed, and only the chosen one''s orders show'
 ---
 - runFlow:
     file: common/sign-in-with-code.yaml

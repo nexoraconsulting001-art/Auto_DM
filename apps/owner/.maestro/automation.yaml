@@ -1,6 +1,6 @@
 # The builder with the one trigger every plan has (a DM keyword), so the flow needs no Instagram connection.
 appId: ${APP_ID}
-name: 'Create an automation in the app: a DM keyword reply, saved and listed'
+name: 'Create an automation in the app - a DM keyword reply, saved and listed'
 ---
 - runFlow:
     file: common/sign-in-with-code.yaml

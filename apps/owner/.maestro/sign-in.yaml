@@ -2,7 +2,7 @@
 # (support/server.mjs). A flow's `name` counts toward a requirement when it starts with that requirement's id
 # (tools/gate-lib.mjs); the gate does not run flows, CI does.
 appId: ${APP_ID}
-name: 'P-11: Sign in with a WhatsApp code from Bhava; there is no password field and no SMS option'
+name: 'P-11 - Sign in with a WhatsApp code from Bhava; there is no password field and no SMS option'
 tags:
   - smoke
 ---

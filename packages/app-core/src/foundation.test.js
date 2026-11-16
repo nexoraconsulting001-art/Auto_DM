@@ -409,7 +409,7 @@ describe('the offline cache and the query client', () => {
     await cache.flush();
     cache.persister.persistClient({ timestamp: 2, buster: '', clientState: { queries: [], mutations: [] } }); // queryClient.clear() on the switch
     await cache.flush();
-    expect(JSON.parse(storage.items.get('bhava.cache.1')).clientState.queries).toHaveLength(1);
+    expect(JSON.parse(storage.items.get('offline.cache.1')).clientState.queries).toHaveLength(1);
   });
 
   test('the saved rows of the business in use come back before its screens draw, and nobody else’s', async () => {
@@ -419,7 +419,7 @@ describe('the offline cache and the query client', () => {
     const cache = createOfflineCache({ storage, getTenantId: () => tenantId, buster: '1.4.0', now: () => clock });
     const source = new QueryClient();
     source.setQueryData(['orders'], { items: ['A-1'] });
-    await storage.setItem('bhava.cache.1', JSON.stringify({ timestamp: clock, buster: '1.4.0', clientState: dehydrate(source) }));
+    await storage.setItem('offline.cache.1', JSON.stringify({ timestamp: clock, buster: '1.4.0', clientState: dehydrate(source) }));
     source.setQueryData(['orders'], { items: ['B-1'] });
     await storage.setItem('bhava.cache.2', JSON.stringify({ timestamp: clock, buster: '1.3.0', clientState: dehydrate(source) })); // an older build's
 

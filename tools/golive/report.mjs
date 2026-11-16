@@ -1,7 +1,7 @@
 // The go-live checklist as text and as Markdown (G-15). Both read only a GoliveStatus: ids, titles, states, fixed-phrase
-// details and the next step for each item (src/modules/golive/next-steps.js). No value of any setting can reach them.
+// details and the next step for each item (console/src/platform/features/golive/next-steps.js). No value of any setting can reach them.
 import { GOLIVE_OWNERS } from '../../src/contracts/golive.js';
-import { OWNER_LABELS, PHASE_LABELS, STATE_LABELS, nextStepFor } from '../../src/modules/golive/next-steps.js';
+import { OWNER_LABELS, PHASE_LABELS, STATE_LABELS, nextStepFor } from '../../console/src/platform/features/golive/next-steps.js';
 
 const MARK = Object.freeze({ ready: 'ready      ', missing: 'MISSING    ', unknown: 'NOT CHECKED' });
 const STATE_ORDER = Object.freeze({ missing: 0, unknown: 1, ready: 2 });

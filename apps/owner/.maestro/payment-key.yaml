@@ -1,7 +1,7 @@
 # Business a takes money in its own gateway account. The key typed here is made up and short enough that it can never
 # be a real one; the server stores it without calling the gateway.
 appId: ${APP_ID}
-name: 'P-17: Replace the payment key in the app: a fresh WhatsApp code is asked for, and the secret is never shown back'
+name: 'P-17 - Replace the payment key in the app - a fresh WhatsApp code is asked for, and the secret is never shown back'
 ---
 - runFlow:
     file: common/sign-in-with-code.yaml

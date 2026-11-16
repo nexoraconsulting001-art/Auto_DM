@@ -1,6 +1,7 @@
 /**
  * What to do next for each go-live item that is not ready (G-15), and the labels the report and the Platform Console use.
- * Plain data with no imports, so the console's page reads the same words as `npm run golive`. Nothing here holds a value
+ * Plain data with no imports, kept in the Platform Console (the Docker console stage copies only console/src, shared and
+ * src/contracts), so the console's page reads the same words as `npm run golive` (tools/golive/report.mjs). Nothing here holds a value
  * of any setting: a step names the setting, the file or the console where the work is done.
  */
 export const OWNER_LABELS = Object.freeze({ us: 'Bhava team', user: 'Founder' });
