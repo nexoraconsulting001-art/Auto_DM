@@ -15,7 +15,7 @@ function guardScript() {
   const deps = dockerfile.slice(dockerfile.indexOf('AS deps'), dockerfile.indexOf('AS runtime'));
   const run = deps.slice(deps.indexOf('RUN npm ci'));
   const loop = run.slice(run.indexOf('for p in'));
-  const script = loop.slice(0, loop.lastIndexOf('done') + 4).replace(/\\n/g, '\n');
+  const script = loop.slice(0, loop.lastIndexOf('done') + 4).replace(/\\\n/g, '\n');
   assert.match(script, /react-native expo @expo vite jest playwright @playwright eslint typescript/, 'the guard still names every refused package');
   return script;
 }
