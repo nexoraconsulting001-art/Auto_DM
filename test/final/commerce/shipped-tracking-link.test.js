@@ -21,6 +21,14 @@ test('commerce-4: shipped and delivered alerts link to /track/, the paid alert t
     const mails = await emailsTo(app, 'tara@mail.example');
     const shipped = mails.find((m) => /shipped/i.test(m.subject));
     assert.match(shipped.html, /\/track\//);
+    // Without the store's address there is no absolute link to give: the tracking URL is empty, never a bare /track/ path.
+    const saved = { platformDomain: app.ctx.config.platformDomain, publicBaseUrl: app.ctx.config.publicBaseUrl };
+    Object.assign(app.ctx.config, { platformDomain: '', publicBaseUrl: '' });
+    try {
+      assert.equal(await inTenant(app, () => app.ctx.shipping.trackingUrl(order.id)), '');
+    } finally {
+      Object.assign(app.ctx.config, saved);
+    }
   } finally {
     await app.close();
   }

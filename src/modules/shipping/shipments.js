@@ -108,7 +108,8 @@ export function createShipments(ctx, { settings, kick = () => {} }) {
   async function trackingUrl(orderId) {
     const [order] = await db.query('SELECT id, public_token FROM orders WHERE tenant_id = $1 AND id = $2', [tenantId(), orderId]);
     const path = order ? pathFor(order.id, order.public_token) : '';
-    return path ? `${await baseUrl()}${path}` : '';
+    const base = path ? await baseUrl() : '';
+    return base ? `${base}${path}` : ''; // absolute or nothing: a message can't carry a link without the store's address
   }
 
   async function present(rows, { withEvents = true } = {}) {

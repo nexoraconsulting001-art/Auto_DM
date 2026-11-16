@@ -14,6 +14,7 @@ import { splitDiscount } from '../checkout/pricing.js';
  *       Counts the use and writes the redemption, in the order's transaction. The count goes up only while it is under the
  *       limit, and the database's own check (used_count <= max_uses) is the second lock.
  *   release(t, orderId)   a cancelled order's use stops counting, once.
+ *   reapply(t, orderId)   a reinstated order's use counts again, once (never over max_uses; overLimit says it was not counted).
  *
  * A customer is known by a keyed hash of the phone number, so a guest's uses count too (S-46) and no number is copied.
  *
@@ -126,33 +127,44 @@ export async function redeem(t, { coupon, orderId, shopperId = null, phone, disc
   );
 }
 
-/** A cancelled order's use stops counting. Safe to call twice: only an applied redemption is released. */
+/**
+ * A cancelled order's use stops counting. Safe to call twice: only an applied redemption is released, and used_count goes
+ * down only if this use was in it (see reapply).
+ */
 export async function release(t, orderId) {
   const tid = tenantId();
   const [row] = await t.query(
-    `UPDATE coupon_redemptions SET status = 'released', released_at = now() WHERE tenant_id = $1 AND order_id = $2 AND status = 'applied' RETURNING coupon_id`,
+    `UPDATE coupon_redemptions SET status = 'released', released_at = now() WHERE tenant_id = $1 AND order_id = $2 AND status = 'applied'
+      RETURNING coupon_id, counted`,
     [tid, orderId],
   );
   if (!row) return { released: false };
-  await t.query('UPDATE coupons SET used_count = GREATEST(used_count - 1, 0), updated_at = now() WHERE tenant_id = $1 AND id = $2', [tid, row.coupon_id]);
+  if (row.counted) await t.query('UPDATE coupons SET used_count = GREATEST(used_count - 1, 0), updated_at = now() WHERE tenant_id = $1 AND id = $2', [tid, row.coupon_id]);
   return { released: true };
 }
 
 /**
- * A cancelled order that came back (paid late) keeps its discount, so its use counts again. Only a released redemption is
- * taken back, once. If the code has been used up since, the order stays as it is and used_count stays within max_uses (the
- * database check); the caller tells the owner (overLimit).
+ * A cancelled order that came back (paid late, order.reinstated) keeps its discount, so its use counts again. Only a released
+ * redemption is taken back, once. The coupon row is locked first, like a checkout's redemption. If the code has been used up
+ * since, the order stays as it is and its use counts for the customer, but used_count stays within max_uses (the database
+ * check) and the redemption is marked not counted; the caller tells the owner (overLimit).
  */
 export async function reapply(t, orderId) {
   const tid = tenantId();
-  const [row] = await t.query(
-    `UPDATE coupon_redemptions SET status = 'applied', released_at = NULL WHERE tenant_id = $1 AND order_id = $2 AND status = 'released' RETURNING coupon_id`,
+  const [held] = await t.query(
+    `SELECT r.coupon_id FROM coupon_redemptions r WHERE r.tenant_id = $1 AND r.order_id = $2 AND r.status = 'released'`,
     [tid, orderId],
   );
-  if (!row) return { reapplied: false, overLimit: false };
+  if (!held) return { reapplied: false, overLimit: false };
+  await t.query('SELECT id FROM coupons WHERE tenant_id = $1 AND id = $2 FOR UPDATE', [tid, held.coupon_id]);
   const [counted] = await t.query(
     'UPDATE coupons SET used_count = used_count + 1, updated_at = now() WHERE tenant_id = $1 AND id = $2 AND (max_uses IS NULL OR used_count < max_uses) RETURNING id',
-    [tid, row.coupon_id],
+    [tid, held.coupon_id],
   );
+  const [row] = await t.query(
+    `UPDATE coupon_redemptions SET status = 'applied', released_at = NULL, counted = $3 WHERE tenant_id = $1 AND order_id = $2 AND status = 'released' RETURNING id`,
+    [tid, orderId, Boolean(counted)],
+  );
+  if (!row) throw new Error('coupon redemption changed while it was being taken back');
   return { reapplied: true, overLimit: !counted };
 }

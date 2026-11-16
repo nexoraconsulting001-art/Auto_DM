@@ -50,6 +50,12 @@ test('commerce-3: if the code was used up meanwhile, the revived order is kept, 
     assert.deepEqual((await state(app)).status.sort(), ['applied', 'applied']);
     const alerts = await q(app, `SELECT kind FROM alerts WHERE tenant_id = $1 AND kind = 'coupon.over_limit'`, [app.tenant.id]);
     assert.equal(alerts.length, 1);
+    // Cancelling the revived order again gives back only what it took: its use was not in used_count, so the code stays used up.
+    await expire(app, first.id);
+    assert.equal((await state(app)).used, 1, 'the second order still holds the only use');
+    const third = await place(app, placeBody(lamp.id, { couponCode: 'LONE' }));
+    assert.equal(third.status, 409, third.text);
+    assert.match(third.json.error, /used up/);
   } finally {
     app.close();
   }

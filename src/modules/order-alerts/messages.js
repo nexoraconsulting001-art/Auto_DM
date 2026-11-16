@@ -5,7 +5,7 @@ import { firstName } from './business.js';
 /**
  * What a shopper receives about an order (PRD 9.16), by WhatsApp (an approved Utility template) or email. In the seller's
  * brand only: the store's name, colour and own address; never the platform's. Links are direct links to the store's own
- * order page. Built from ids and the order row; nothing here is logged.
+ * order page, or for a shipping update its own tracking page. Built from ids and the order row; nothing here is logged.
  */
 export const TEMPLATE_OF = Object.freeze({
   placed: 'order_placed', paid: 'order_paid', shipped: 'order_shipped', delivered: 'order_delivered', cancelled: 'order_cancelled', refunded: 'order_refunded',
@@ -20,7 +20,8 @@ const WORDS = Object.freeze({
   refunded: { subject: (n) => `A refund for order ${n}`, lead: 'We have processed a refund for your order.' },
 });
 
-const TRACKED = new Set(['shipped', 'delivered']);
+/** Alerts that link to the seller's tracking page (F-89, S-78) when the order has one. */
+export const TRACKED_EVENTS = Object.freeze(new Set(['shipped', 'delivered']));
 
 export const orderLink = (business, order) => (business.base && order.public_token ? `${business.base}/order/${encodeURIComponent(order.public_token)}` : '');
 
@@ -28,7 +29,7 @@ export const orderLink = (business, order) => (business.base && order.public_tok
 export function orderMessage({ channel, event, order, items = [], business, unsubscribeUrl = '', trackingUrl = '' }) {
   const to = { shopperId: order.shopper_id ?? undefined, phone: order.phone || undefined, email: order.email || undefined };
   // Shipping updates go to the seller's tracking page when there is one (F-89, S-78); every other update to the order page.
-  const link = (TRACKED.has(event) && trackingUrl) || orderLink(business, order);
+  const link = (TRACKED_EVENTS.has(event) && trackingUrl) || orderLink(business, order);
   const base = { channel, purpose: 'order_update', to, orderId: order.id };
   if (channel === 'whatsapp') {
     return { ...base, template: { purpose: TEMPLATE_OF[event], params: [firstName(order.customer_name), order.order_number, business.name, link || business.name] } };
