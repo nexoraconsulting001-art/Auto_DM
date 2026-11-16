@@ -77,6 +77,16 @@ export function onError(fn) {
   reporters.push(fn);
 }
 
+/**
+ * The route pattern of a request for logs (e.g. /order/:token), never the concrete path: buyer links carry
+ * secret tokens. With no matched route, only the first path segment is kept.
+ */
+export function routeOf(req) {
+  if (typeof req?.route?.path === 'string') return `${req.baseUrl || ''}${req.route.path}`.slice(0, 200);
+  const first = String(req?.path ?? '').split('/')[1] || '';
+  return /^[a-z-]{1,20}$/.test(first) ? `/${first}/*` : '/*';
+}
+
 export function reportError(err, fields = {}) {
   log.error(fields.msg || err?.message || 'error', { ...fields, err });
   const context = { ...fields, tenant: currentTenant()?.slug, tenantId: currentTenant()?.id ?? null, requestId: currentRequestId() };

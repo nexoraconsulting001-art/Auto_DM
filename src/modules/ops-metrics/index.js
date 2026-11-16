@@ -14,9 +14,9 @@ import { readBusinessOps } from './read.js';
  * What the whole platform shows at /metrics (bounded labels only, METRICS in src/contracts/metrics.js):
  *   meta_calls_total, meta_usage_ratio     from onMetaCall: the class of the call and how it ended; the highest share of a limit used in the last 10 minutes
  *   errors_reported_total                  from every reportError(): the service and the first part of the log entry's name
- *   job_runs_total, job_failures_total     from the queue's drain()
+ *   job_runs_total, job_failures_total     from the queue's onRun(), in either queue driver
  *   provider_calls_total                   from onProviderCall: every call through src/adapters/http.js, by provider and result
- *   queue_oldest_job_seconds               the age of the oldest job waiting, per queue
+ *   queue_oldest_job_seconds               the age of the oldest job waiting, per queue, from the queue's oldestWaiting()
  *   db_pool_connections                    connections to the database by pool and state, as the database counts them
  *   businesses                             by plan and status (web only, so a sum over both services is not doubled)
  *   process_draining
@@ -98,11 +98,13 @@ export function createOpsMetrics(ctx, { now = () => Date.now() } = {}) {
       if (state.wired || !metrics) return;
       state.wired = true;
       const platformDb = ctx.db?.platform;
+      const queue = ctx.platform.queue;
+      if (typeof queue?.oldestWaiting === 'function') {
+        // From the queue itself, so it reads the driver in use (BullMQ in production), not the Postgres jobs table.
+        metrics.gauge('queue_oldest_job_seconds', async () =>
+          Object.entries(await queue.oldestWaiting()).map(([name, age]) => ({ labels: { queue: name }, value: age })));
+      }
       if (platformDb) {
-        metrics.gauge('queue_oldest_job_seconds', async () => {
-          const rows = await platformDb.query("SELECT queue, extract(epoch FROM now() - min(run_at))::float AS age FROM jobs WHERE status = 'queued' AND run_at <= now() GROUP BY queue");
-          return rows.map((r) => ({ labels: { queue: r.queue }, value: Math.max(0, Number(r.age)) }));
-        });
         metrics.gauge('db_pool_connections', () => readConnections(ctx.db));
         if (service === 'web') {
           metrics.gauge('businesses', async () => {

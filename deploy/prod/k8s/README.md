@@ -4,7 +4,7 @@ Plain manifests with kustomize, for any conformant cluster. Nothing here names a
 
 | Folder | What it holds |
 |---|---|
-| `base/` | `bhava-web` (2+ replicas, rolling with `maxUnavailable: 0`) and `bhava-worker` Deployments, their Services, an Ingress whose default backend is web (sellers' own domains), PodDisruptionBudgets, autoscalers (web on CPU and memory; worker on the queue: external metric `queue_jobs{status="waiting"}`), the `bhava-backup` CronJob, NetworkPolicies, a ServiceAccount with no token, and the `bhava-config` ConfigMap of settings that are not secret. |
+| `base/` | `bhava-web` (2+ replicas, rolling with `maxUnavailable: 0`) and `bhava-worker` Deployments, their Services, an Ingress whose default backend is web (sellers' own domains), PodDisruptionBudgets, autoscalers (web on CPU and memory; worker on the queue: external metric `queue_jobs{status="queued"}`), the `bhava-backup` CronJob, NetworkPolicies, a ServiceAccount with no token, and the `bhava-config` ConfigMap of settings that are not secret. |
 | `jobs/migrate/` | The migration Job (`node scripts/move-to-cloud.js schema`), applied on its own before each rollout. |
 | `overlays/production/` | The image tags, replica counts, hosts, `DEPLOY_ENV=production`, the object storage addresses: placeholders (`example.com`, `set-me`) to fill, or let Terraform set. |
 | `overlays/production-migrate/` | The migration Job with the same namespace and image. |

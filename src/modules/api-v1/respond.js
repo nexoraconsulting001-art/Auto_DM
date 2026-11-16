@@ -1,5 +1,5 @@
 import { ApiError } from '../../contracts/api/index.js';
-import { currentRequestId, reportError } from '../../platform/log.js';
+import { currentRequestId, reportError, routeOf } from '../../platform/log.js';
 import { ValidationError } from '../../util.js';
 
 /** The ApiError for what other layers throw (repos, the body and upload parsers), or null for a real fault. */
@@ -16,7 +16,7 @@ function known(err) {
 export function sendApiError(err, req, res) {
   let failure = known(err);
   if (!failure) {
-    reportError(err, { msg: 'http.error', method: req.method, path: req.path });
+    reportError(err, { msg: 'http.error', method: req.method, path: routeOf(req) });
     failure = new ApiError('internal');
   }
   if (res.headersSent) return;
