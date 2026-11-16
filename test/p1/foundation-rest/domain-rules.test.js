@@ -35,6 +35,28 @@ test('every reserved label is reserved under the neutral domain, and nothing els
   assert.ok(!isReservedHost('admin.example', { platformDomain: '', platformHost: '' }));
 });
 
+test('every host the platform answers on, outside the neutral domain too, is the platform\'s own and reserved (atk-tenancy-3)', () => {
+  const wide = {
+    platformDomain: 'shops.example', platformHost: 'ops.team.example', platformAppHost: 'sellers.hub.example', publicBaseUrl: 'https://www.hub.example/',
+    metaCallbackBaseUrl: 'https://hooks.hub.example', platformSiteUrl: 'https://site.hub.example/start', signupHostSuffix: 'stores.hub.example',
+    emailNeutralDomain: 'mail.neutral.example',
+  };
+  for (const host of ['ops.team.example', 'sellers.hub.example', 'www.hub.example', 'hooks.hub.example', 'site.hub.example', 'stores.hub.example', 'mail.neutral.example', 'edge.shops.example']) {
+    assert.ok(isPlatformAddress(host, wide), `${host} is the platform's`);
+    assert.ok(isPlatformAddress(`deep.${host}`, wide), `deep.${host} is under the platform's`);
+    assert.ok(isReservedHost(host, wide), `${host} is reserved`);
+    assert.throws(() => cleanDomain(host, wide), ValidationError, host);
+  }
+  for (const host of ['x.sellers.hub.example', 'x.hooks.hub.example', 'x.mail.neutral.example']) assert.ok(isReservedHost(host, wide), host);
+  for (const label of ['admin', 'www', 'edge']) assert.ok(isReservedHost(`${label}.stores.hub.example`, wide), `${label} under the sign-up suffix`);
+  assert.ok(!isReservedHost('kesar.stores.hub.example', wide), 'a business\'s own address under the sign-up suffix');
+  assert.ok(!isReservedHost('kesar.shops.example', wide), 'a business\'s own address under the neutral domain');
+  assert.ok(!isPlatformAddress('hub.example', wide) && !isReservedHost('hub.example', wide), 'the parent of a platform host is not the platform\'s');
+  assert.equal(cleanDomain('shop.hub.example', wide), 'shop.hub.example', 'a sibling of a platform host is still a seller\'s to claim');
+  // When the public address is the neutral domain itself, each business's own address under it is still not reserved.
+  assert.ok(!isReservedHost('kesar.shops.example', { ...wide, publicBaseUrl: 'https://shops.example' }));
+});
+
 test('an apex is the registered name, including under two-part endings', () => {
   for (const apex of ['kesar.example', 'kesar.in', 'kesar.co.in', 'kesar.co.uk']) assert.ok(isApex(apex), apex);
   for (const sub of ['shop.kesar.example', 'shop.kesar.co.in', 'www.kesar.in']) assert.ok(!isApex(sub), sub);

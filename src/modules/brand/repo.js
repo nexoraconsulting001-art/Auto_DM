@@ -1,4 +1,5 @@
 import { tenantId } from '../../tenancy.js';
+import { requireOwnMedia } from '../../repos/media.js';
 import { ValidationError } from '../../util.js';
 import { ThemeTextUpdate, resolveSlots } from '../../contracts/themes.js';
 import { COLOR_KEYS, FONTS, contrastRatio, isHexColor } from './theme.js';
@@ -147,7 +148,9 @@ export function brandKitRepo(db) {
 
       const next = { logo_url: '', logo_dark_url: '', favicon_url: '', heading_font: '', body_font: '', ...current };
       for (const [field, column] of Object.entries(LINK_FIELDS)) {
-        if (input[field] !== undefined) next[column] = cleanLink(input[field], field);
+        if (input[field] === undefined) continue;
+        next[column] = cleanLink(input[field], field);
+        await requireOwnMedia(db, field, next[column]);
       }
       if (!samePreset) Object.assign(next, { heading_font: '', body_font: '' });
       for (const [field, column] of Object.entries(FONT_FIELDS)) {

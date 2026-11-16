@@ -260,6 +260,51 @@ test('tenancy attack: the brand kit and categories cannot point at the other bus
   assert.deepEqual(kept, [], `A stored links to B's upload:\n${kept.join('\n')}`);
 });
 
+test('tenancy attack: every stored upload link names a file of this business: another\'s is refused by field, its own is kept (atk-tenancy-1)', async (t) => {
+  const { app, b, aToken, bToken } = await twoStores(t);
+  const theirUp = await uploadFile(app, { host: b.host }, bToken);
+  const myUp = await uploadFile(app, { host: A_HOST }, aToken);
+  assert.deepEqual([theirUp.status, myUp.status], [201, 201], `${theirUp.text.slice(0, 120)} ${myUp.text.slice(0, 120)}`);
+  const [theirs, mine] = [`/media/${theirUp.json().id}`, `/media/${myUp.json().id}`];
+  const aApi = ownerApi(app, A_HOST, aToken);
+  const banner = (imageUrl) => ({ surface: 'store_home', blocks: [{ block: 'banner', settings: { text: 'New in', imageUrl, linkUrl: '/' } }] });
+  const [mineProduct] = await app.db.platform.query('SELECT id FROM products WHERE tenant_id = $1 ORDER BY id LIMIT 1', [app.tenant.id]);
+  const writes = [
+    ['POST', '/products', (link) => ({ name: 'Photo test', pricePaise: 1000, images: [link] }), 'images'],
+    ['PATCH', `/products/${mineProduct.id}`, (link) => ({ images: ['https://cdn.example.test/a.jpg', link] }), 'images'],
+    ['PATCH', '/brand-kit', (link) => ({ logoUrl: link }), 'logoUrl'],
+    ['PATCH', '/brand-kit', (link) => ({ logoDarkUrl: link }), 'logoDarkUrl'],
+    ['PATCH', '/brand-kit', (link) => ({ faviconUrl: link }), 'faviconUrl'],
+    ['POST', '/categories', (link) => ({ name: `Shelf ${link.slice(-6)}`, imageUrl: link }), 'imageUrl'],
+    ['PUT', '/page-blocks', banner, 'blocks.0.settings.imageUrl'],
+  ];
+  for (const [method, path, body, field] of writes) {
+    for (const bad of [theirs, theirs.toUpperCase().replace('/MEDIA/', '/media/')]) {
+      const res = await aApi(method, path, body(bad));
+      assert.equal(res.status, 400, `${method} ${path} with ${bad}: ${res.status} ${res.text.slice(0, 200)}`);
+      assert.equal(res.json?.code, 'validation_failed', `${method} ${path}: ${res.text.slice(0, 200)}`);
+      assert.ok(res.json?.fields?.[field], `${method} ${path} names ${field}: ${res.text.slice(0, 200)}`);
+    }
+    const good = await aApi(method, path, body(mine));
+    assert.ok(good.status >= 200 && good.status < 300, `control: ${method} ${path} with A's own upload: ${good.status} ${good.text.slice(0, 200)}`);
+    assert.ok(good.text.includes(myUp.json().id), `control: ${method} ${path} keeps A's own upload: ${good.text.slice(0, 200)}`);
+  }
+  // The Phase 0 repos write the same columns and apply the same check.
+  const viaRepo = async (write) => withTenant(app.tenant, write).then(() => 'stored', (err) => err?.fields ?? err?.message);
+  assert.deepEqual(await viaRepo(() => app.platform.products.create({ name: 'Old form', price: '10', images: [theirs] })), { images: 'Upload the image first' });
+  assert.deepEqual(await viaRepo(() => app.platform.categories.save(null, { name: 'Old shelf', image_url: theirs })), { imageUrl: 'Upload the image first' });
+  assert.deepEqual(await viaRepo(() => app.platform.categories.save(null, { name: 'Old shelf card', image_url: `${theirs}/card` })), { imageUrl: 'Upload the image first' }, 'a size of their file is their file');
+  assert.equal(await viaRepo(() => app.platform.products.create({ name: 'Old form mine', price: '10', images: [mine] })), 'stored');
+  const leaked = await app.db.platform.query(
+    `SELECT 'products' AS t FROM products WHERE tenant_id = $1 AND images::text LIKE $2
+     UNION ALL SELECT 'categories' FROM categories WHERE tenant_id = $1 AND image_url LIKE $2
+     UNION ALL SELECT 'brand_kits' FROM brand_kits WHERE tenant_id = $1 AND (logo_url LIKE $2 OR logo_dark_url LIKE $2 OR favicon_url LIKE $2)
+     UNION ALL SELECT 'page_blocks' FROM page_blocks WHERE tenant_id = $1 AND settings::text LIKE $2`,
+    [app.tenant.id, `%${theirUp.json().id}%`],
+  );
+  assert.deepEqual(leaked, [], 'no row of A names B\'s upload');
+});
+
 test('tenancy attack: the other store\'s order link, number and token answer nothing on this store', async (t) => {
   const { app, b, bProduct } = await twoStores(t);
   const buyer = await shopper(app, { phone: '+919876543210', tenant: b.tenant });

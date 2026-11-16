@@ -86,7 +86,7 @@ test('no one can squat on an unverified domain, and only the token really in DNS
   const claimed = await them.added('wanted.kesarhome.example');
   assert.notEqual(claimed.records[0].value, mine.records[0].value);
   assert.equal((await them.check(claimed.id)).json().status, 'pending', 'someone else\'s TXT proves nothing');
-  assert.deepEqual(await list(), [], 'the row has moved');
+  assert.deepEqual((await list()).map((d) => [d.domain, d.status]), [['wanted.kesarhome.example', 'pending']], 'a later claim takes nothing from the owner');
 
   const again = await added('wanted.kesarhome.example');
   assert.equal(again.records[0].value, mine.records[0].value, 'the owner\'s token is the same as before, so their TXT still counts');

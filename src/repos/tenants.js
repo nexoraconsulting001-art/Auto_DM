@@ -55,12 +55,17 @@ export function tenantsRepo(handle) {
       if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) {
         throw new ValidationError(`“${host}” is not a valid domain`);
       }
-      const [row] = await db.query(
-        `INSERT INTO tenant_domains (domain, tenant_id) VALUES ($1, $2)
-         ON CONFLICT (domain) DO UPDATE SET tenant_id = tenant_domains.tenant_id RETURNING tenant_id`,
-        [domain, Number(tenantId)],
-      );
-      if (row.tenant_id !== Number(tenantId)) throw new ValidationError(`${domain} already belongs to another business`);
+      // Added by hand, so verified at once (the column default). One verified row per name (migration 940): a name another business
+      // has verified is refused, and a name this business already has is left as it is.
+      const [held] = await db.query(`SELECT tenant_id FROM tenant_domains WHERE domain = $1 AND (status = 'verified' OR tenant_id = $2) ORDER BY (tenant_id = $2) LIMIT 1`, [domain, Number(tenantId)]);
+      if (held && held.tenant_id !== Number(tenantId)) throw new ValidationError(`${domain} already belongs to another business`);
+      if (held) return domain;
+      try {
+        await db.query('INSERT INTO tenant_domains (domain, tenant_id) VALUES ($1, $2)', [domain, Number(tenantId)]);
+      } catch (err) {
+        if (err?.code === '23505') throw new ValidationError(`${domain} already belongs to another business`);
+        throw err;
+      }
       return domain;
     },
     /**

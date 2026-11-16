@@ -1,5 +1,6 @@
 import { PRICE_BANDS, ValidationError, parseRupees, slugify } from '../util.js';
 import { tenantId } from '../tenancy.js';
+import { requireOwnMedia } from './media.js';
 
 export const MAX_IMAGES = 6;
 
@@ -173,6 +174,7 @@ export function productsRepo(db) {
       const p = normalizeProduct(input);
       const slug = await uniqueSlug(p.name);
       return db.tx(async (t) => {
+        await requireOwnMedia(t, 'images', p.images);
         const [row] = await t.query(
           `INSERT INTO products (tenant_id, name, slug, description, price_paise, mrp_paise, images, option_label, option_values, stock, active, featured)
            VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING ${COLS}`,
@@ -187,6 +189,7 @@ export function productsRepo(db) {
       const p = normalizeProduct(input);
       const slug = await uniqueSlug(p.name, Number(id));
       return db.tx(async (t) => {
+        await requireOwnMedia(t, 'images', p.images);
         const [row] = await t.query(
           `UPDATE products SET name = $2, slug = $3, description = $4, price_paise = $5, mrp_paise = $6, images = $7,
              option_label = $8, option_values = $9, stock = $10, active = $11, featured = $12, updated_at = now()

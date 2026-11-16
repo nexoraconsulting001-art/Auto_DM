@@ -1,4 +1,5 @@
 import { tenantId } from '../../tenancy.js';
+import { requireOwnMedia } from '../../repos/media.js';
 import { ValidationError, slugify } from '../../util.js';
 import { CATALOG_LIMITS as L, displayPrice, paiseFromDb } from '../../contracts/catalog.js';
 import { BUYER_BLOCKS, DEFAULT_BLOCKS } from '../../contracts/buyer-pages.js';
@@ -353,6 +354,7 @@ export function pageBlocksRepo(db) {
     /** Replaces the surface's whole layout. The blocks are already validated. */
     async save(surface, blocks, { actor }) {
       await db.tx(async (t) => {
+        for (const [i, b] of blocks.entries()) await requireOwnMedia(t, `blocks.${i}.settings.imageUrl`, b.settings?.imageUrl ?? '');
         await t.query('DELETE FROM page_blocks WHERE tenant_id = $1 AND surface = $2', [tenantId(), surface]);
         for (const [position, b] of blocks.entries()) {
           await t.query('INSERT INTO page_blocks (tenant_id, surface, block, position, visible, settings) VALUES ($1, $2, $3, $4, $5, $6)', [

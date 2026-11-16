@@ -90,10 +90,15 @@ test('a product’s images: six at most, alt text kept, and only this business�
   const [shop, other] = [await world.addShop(), await world.addShop()];
   const theirFile = await other.inside(() => other.repos.media.save(Buffer.from('x'), 'image/png'));
   const myFile = await shop.inside(() => shop.repos.media.save(Buffer.from('y'), 'image/png'));
-  const created = await shop.post('/products', { ...pot, images: [`/media/${myFile}`, `/media/${theirFile}`, 'https://cdn.example/c.jpg'], imageAlts: ['Mine', 'Theirs', 'Web'] });
-  assert.deepEqual(created.gallery.map((g) => [g.url, g.alt, g.position]), [[`/media/${myFile}`, 'Mine', 0], ['https://cdn.example/c.jpg', 'Web', 1]], 'another business’s file is not linked');
+  const borrowed = await shop.call('/products', { method: 'POST', body: { ...pot, images: [`/media/${myFile}`, `/media/${theirFile}`, 'https://cdn.example/c.jpg'], imageAlts: ['Mine', 'Theirs', 'Web'] } });
+  assert.equal(borrowed.status, 400, 'another business’s file is refused');
+  assert.ok((await borrowed.json()).fields.images, 'the refusal names the images field');
   const [{ n }] = await shop.sql('SELECT count(*)::int AS n FROM product_images WHERE media_id = $1', [theirFile]);
   assert.equal(n, 0);
+  const [{ held }] = await shop.sql('SELECT count(*)::int AS held FROM products WHERE images::text LIKE $1', [`%${theirFile}%`]);
+  assert.equal(held, 0, 'no product row names another business’s file');
+  const created = await shop.post('/products', { ...pot, images: [`/media/${myFile}`, 'https://cdn.example/c.jpg'], imageAlts: ['Mine', 'Web'] });
+  assert.deepEqual(created.gallery.map((g) => [g.url, g.alt, g.position]), [[`/media/${myFile}`, 'Mine', 0], ['https://cdn.example/c.jpg', 'Web', 1]], 'this business’s file and the web link are kept');
 
   const reordered = await shop.patch(`/products/${created.id}`, { images: ['https://cdn.example/c.jpg', `/media/${myFile}`] });
   assert.deepEqual(reordered.gallery.map((g) => [g.url, g.alt, g.position]), [['https://cdn.example/c.jpg', 'Web', 0], [`/media/${myFile}`, 'Mine', 1]], 'alt text follows its image');
