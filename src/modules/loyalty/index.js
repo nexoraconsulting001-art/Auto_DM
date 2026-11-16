@@ -1,16 +1,13 @@
 import express from 'express';
 import { STORE_ROUTES } from '../../contracts/store-routes.js';
-import { reportError } from '../../platform/log.js';
-import { visitorIdFrom } from '../../platform/visitor.js';
-import { currentTenant, tenantId, withTenant } from '../../tenancy.js';
 import { section } from '../../views/buyer/index.js';
-import { cookieOf, hookPages } from '../reviews/page-hook.js';
+import { hookPages } from '../reviews/page-hook.js';
 import { shopperFrom, storeOn } from '../storefront/http.js';
 import { baseOf, sendStoreNotFound, sendStorePage } from '../storefront/shell.js';
 import { addToAccount } from '../wishlist/index.js';
 import { invitePage, pointsPage } from './pages.js';
 import { createReferrals } from './referrals.js';
-import { normalizeCode } from './rules.js';
+import { REF_COOKIE, REF_DEVICE_COOKIE, normalizeCode } from './rules.js';
 import { createLoyalty } from './service.js';
 
 /**
@@ -31,18 +28,14 @@ import { createLoyalty } from './service.js';
  * Job: loyalty.sweep posts points whose return window has closed and lapses expired ones.
  *
  * For checkout: ctx.loyalty.preview({ shopperId, points, orderPaise }, q) for the quote, and ctx.loyalty.redeem(t, { shopperId,
- * orderId, points, valuePaise }) inside the order's transaction. ctx.loyalty.referrals.attach(orderId, { code, visitorId,
- * ownDevice }) records a referral against a placed order.
- *
- * Checkout takes `referralCode` in its body but does nothing with it yet, so this module records the referral itself: it
- * watches POST /api/store/checkout (before checkout's own route), reads the code from the body or from the cookie the
- * invite link set, and records the referral once the order has been placed. The friend's first-order reward
- * (friend_reward_paise) needs checkout to price it and is not given: referrals record 0.
+ * orderId, points, valuePaise }) inside the order's transaction. For referrals (referrals.js): ctx.loyalty.referrals.fromRequest(req,
+ * body) reads the code (the body's referralCode, else the invite link's cookie) and the browser's marks; buildQuote prices the
+ * friend's first-order reward with ctx.loyalty.referrals.judge(q, ...) after the coupon, and placeOrder records the referral
+ * with ctx.loyalty.referrals.record(t, order, judged) inside the order's transaction, so the reward given is the one stored.
  */
 export const LOYALTY_JOB = 'loyalty.sweep';
 /** The friend's browser remembers the code it was invited with; the referrer's browser is marked as theirs. */
-export const REF_COOKIE = '_ref';
-export const REF_DEVICE_COOKIE = '_refdev';
+export { REF_COOKIE, REF_DEVICE_COOKIE };
 const REF_COOKIE_DAYS = 30;
 const DEVICE_COOKIE_DAYS = 365;
 const ORDER_EVENTS = ['order.paid', 'order.delivered', 'order.return_window_closed', 'refund.processed', 'order.cancelled', 'order.rto_delivered', 'order.reinstated'];
@@ -60,35 +53,6 @@ export function loyaltyFor(ctx) {
 }
 
 const cookie = (req, res, name, value, days) => res.cookie(name, value, { httpOnly: true, sameSite: 'lax', secure: req.secure, path: '/', maxAge: days * 86_400_000 });
-
-/** Records the referral of an order checkout has just placed: see the note above. Never changes what checkout answers. */
-function referralWatch(ctx, service) {
-  return (req, res, next) => {
-    try {
-      const code = normalizeCode(req.body?.referralCode) || normalizeCode(cookieOf(req, REF_COOKIE));
-      const tenant = currentTenant();
-      if (!code || !tenant) return next();
-      const visitorId = visitorIdFrom(req);
-      const ownDevice = normalizeCode(cookieOf(req, REF_DEVICE_COOKIE)) === code;
-      let answer = null;
-      const json = res.json;
-      res.json = function watched(body) {
-        answer = body;
-        return json.call(this, body);
-      };
-      res.on('finish', () => {
-        if (res.statusCode !== 201 || typeof answer?.orderNumber !== 'string' || !answer.orderNumber) return;
-        withTenant(tenant, async () => {
-          const [order] = await ctx.db.query('SELECT id FROM orders WHERE tenant_id = $1 AND order_number = $2', [tenantId(), answer.orderNumber]);
-          if (order) await service.referrals.attach(order.id, { code, visitorId, ownDevice });
-        }).catch((err) => reportError(err, { msg: 'loyalty.referral_failed' }));
-      });
-    } catch (err) {
-      reportError(err, { msg: 'loyalty.referral_watch_failed' });
-    }
-    return next();
-  };
-}
 
 export const loyalty = {
   name: 'loyalty',
@@ -114,8 +78,6 @@ export const loyalty = {
     const service = loyaltyFor(ctx);
     const r = express.Router();
     const live = async () => ((await storeOn(ctx.repos)) ? service.active() : null);
-
-    r.post(STORE_ROUTES.checkoutPlace.path, referralWatch(ctx, service));
 
     r.get(STORE_ROUTES.points.path, async (req, res, next) => {
       try {

@@ -20,7 +20,8 @@ import { addressSnapshot, buildQuote, stateName, toE164 } from './quote.js';
  * insert meets orders_idempotency_idx and is answered with the first. Cash on delivery needs the phone proved first (S-94):
  * until it is, the answer is `verify_phone` and no order exists. Once the order has committed, nothing after it may tell
  * the shopper it failed, or they would order again: a failure starting the payment is reported, and the order page offers
- * the payment again.
+ * the payment again. A referral (9.21) is priced and recorded in the same transaction, so a retry with the same key never
+ * records it twice and never misses it.
  */
 const ORDER_NUMBER = (storeName) => (String(storeName).match(/[A-Za-z0-9]+/g) || ['ORD']).map((w) => w[0]).join('').toUpperCase().slice(0, 4) || 'ORD';
 const CHECKOUT_ACTOR = (shopper) => (shopper ? `shopper:${shopper.id}` : 'shopper');
@@ -69,6 +70,8 @@ async function phoneProved(ctx, { phone, checkoutKey, shopper }) {
   return Boolean(await ctx.shoppers.otps.codVerified({ phone, checkoutKey }));
 }
 
+class ReferralTaken extends Error {}
+
 const placed = (order, next, gateway = null) => ({ orderNumber: order.order_number, token: order.public_token, next, gateway });
 const nextFor = (order) => (order.payment_mode === 'cod' ? 'done' : order.payment_status === 'unpaid' && order.fulfilment_status === 'pending' ? 'pay' : 'done');
 
@@ -115,6 +118,7 @@ export async function placeOrder(ctx, req, body) {
   }
 
   const source = await sourceOf(db, body);
+  const referral = ctx.loyalty?.referrals?.fromRequest?.(req, body) ?? null;
   const visitorId = visitorIdFrom(req);
   const settings = await ctx.repos.settings.getAll();
   let low = [];
@@ -122,7 +126,8 @@ export async function placeOrder(ctx, req, body) {
   try {
     order = await db.tx(async (t) => {
       const priced = await buildQuote(t, ctx, {
-        lines: body.lines, address, phone, paymentMode: body.paymentMode, couponCode: body.couponCode, redeemPoints: body.redeemPoints, shopperId: shopper?.id ?? null, lock: true,
+        lines: body.lines, address, phone, paymentMode: body.paymentMode, couponCode: body.couponCode, redeemPoints: body.redeemPoints, shopperId: shopper?.id ?? null,
+        referral, lock: true,
       });
       const { quote, lines } = priced;
       // The order is exactly what the shopper was shown, or it is not placed: a line that changed is refused with the new quote.
@@ -167,6 +172,9 @@ export async function placeOrder(ctx, req, body) {
         const saved = priced.coupon.freeShipping ? priced.deliveryFee : priced.coupon.discountPaise;
         await redeem(t, { coupon: priced.coupon.coupon, orderId: created.id, shopperId: shopper?.id ?? null, phone, discountPaise: saved, config });
       }
+      // The referral is recorded with the reward this price took (9.21). A friend is referred once: if another order of theirs
+      // recorded it first, this one was priced with a reward it no longer has and is refused, with the new price.
+      if (priced.referral && !(await ctx.loyalty.referrals.record(t, created, priced.referral)) && priced.referral.paise > 0) throw new ReferralTaken();
       if (quote.pointsUsed > 0) await ctx.loyalty.redeem(t, { shopperId: shopper.id, orderId: created.id, points: quote.pointsUsed, valuePaise: quote.loyaltyPaise });
 
       let result = created;
@@ -191,6 +199,7 @@ export async function placeOrder(ctx, req, body) {
     });
   } catch (err) {
     if (err instanceof OutOfStockError) throw new CheckoutRefused('Sold out. Someone else just bought the last one.', null);
+    if (err instanceof ReferralTaken) throw new CheckoutRefused('Your friend’s welcome reward was already used on another order. Please check your total and try again.', null);
     if (err instanceof CouponUsedUpError) throw new CheckoutRefused('This code has been used up.', null, { couponCode: 'This code has been used up' });
     // The same key placed at the same moment: the other attempt made the order, so this one answers with it.
     if (err?.code === '23505' && String(err.constraint ?? err.message).includes('orders_idempotency_idx')) {

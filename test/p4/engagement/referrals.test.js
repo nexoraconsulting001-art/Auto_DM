@@ -76,7 +76,7 @@ test('a friend’s first order through the link earns the referrer points once i
     const ravi = await signedIn(app, { phone: '+919000011111', name: 'Ravi K' });
     const order = await friendOrder(app, ravi, lamp.id, { cookie: `_ref=${code}`, body: { address: { ...ADDRESS, line1: '7 Hill View', pincode: '560001', phone: ravi.phone } } });
     const [ref] = await eventually(async () => (await referralsOf(app)).length && referralsOf(app));
-    assert.deepEqual([ref.status, ref.block_reason, ref.referrer_shopper_id, ref.friend_shopper_id, ref.order_id, Number(ref.friend_reward_paise)], ['pending', '', asha.id, ravi.id, order.id, 0]);
+    assert.deepEqual([ref.status, ref.block_reason, ref.referrer_shopper_id, ref.friend_shopper_id, ref.order_id, Number(ref.friend_reward_paise)], ['pending', '', asha.id, ravi.id, order.id, 10000]);
     assert.equal(ref.friend_key.length, 64);
     assert.ok(!ref.friend_key.includes('9000011111'), 'the friend’s number is copied');
 
@@ -87,8 +87,8 @@ test('a friend’s first order through the link earns the referrer points once i
     await app.ctx.loyalty.sweep();
     assert.deepEqual(await accountOf(app, asha.id), { balance: 100, pending: 0 });
     assert.equal((await referralsOf(app))[0].status, 'rewarded');
-    // The friend earned on their own order too, separately.
-    assert.equal((await ledgerOf(app, ravi.id)).find((e) => e.kind === 'earn').points, 10);
+    // The friend earned on their own order too, separately: on what they paid after their ₹100 welcome reward (9.21: after discount).
+    assert.equal((await ledgerOf(app, ravi.id)).find((e) => e.kind === 'earn').points, 9);
 
     // A friend is referred once: a second order through the link records nothing more.
     await friendOrder(app, ravi, lamp.id, { body: { referralCode: code, address: { ...ADDRESS, line1: '7 Hill View', pincode: '560001', phone: ravi.phone } } });

@@ -231,7 +231,10 @@ export const CheckoutPlace = z.strictObject({
 export const Quote = z.object({
   lines: z.array(PricedLine),
   subtotalPaise: z.number().int(),
+  /** The coupon and a referred friend's first-order reward together (9.14, 9.21). */
   discountPaise: z.number().int(),
+  /** The part of discountPaise that is a referred friend's first-order reward (9.21). */
+  referralPaise: z.number().int().default(0),
   loyaltyPaise: z.number().int(),
   shippingPaise: z.number().int(),
   codFeePaise: z.number().int(),

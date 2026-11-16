@@ -5,7 +5,7 @@ import { tenantId } from '../../tenancy.js';
 import { normalizePhone } from '../../util.js';
 import { evaluate, normalizeCode } from '../coupons/rules.js';
 import { entitlementsRepo } from '../entitlements/index.js';
-import { buyable, lineTax, priceLines, publicLine } from './pricing.js';
+import { buyable, lineTax, priceLines, publicLine, splitDiscount } from './pricing.js';
 
 /**
  * Every amount of a checkout, worked out on the server from the database (PRD 9.5, 9.6, 9.14): the lines, the coupon,
@@ -13,8 +13,12 @@ import { buyable, lineTax, priceLines, publicLine } from './pricing.js';
  * The same function answers a quote (changes nothing) and prices the order inside its transaction (`lock: true`: the
  * product, variant and coupon rows are locked until the order commits).
  *
- *   buildQuote(q, ctx, { lines, address?, phone?, paymentMode?, couponCode?, redeemPoints?, shopperId?, lock? })
- *     -> { quote (the Quote of src/contracts/store-routes.js), lines (priced, buyable, with discount shares and tax), coupon, options }
+ *   buildQuote(q, ctx, { lines, address?, phone?, paymentMode?, couponCode?, redeemPoints?, shopperId?, referral?, lock? })
+ *     -> { quote (the Quote of src/contracts/store-routes.js), lines (priced, buyable, with discount shares and tax), coupon, referral, options }
+ *
+ * `referral` is what ctx.loyalty.referrals.fromRequest read off the request ({ code, visitorId, ownDevice }). The friend's
+ * first-order reward is part of discountPaise (and of each line's discount share, so GST is on what is paid) and is also
+ * given alone as referralPaise.
  *
  * Ways to pay come from the business's payment settings (payment_settings, migration 404). No row means online payment is
  * not set up yet and cash on delivery is off. Payments owns that table; checkout only reads it.
@@ -79,7 +83,7 @@ async function serviceability(ctx, pincode) {
   return { serviceable: answer?.serviceable !== false, cod: answer?.cod !== false };
 }
 
-export async function buildQuote(q, ctx, { lines: linesIn, address = null, phone = '', paymentMode, couponCode = '', redeemPoints = 0, shopperId = null, lock = false }) {
+export async function buildQuote(q, ctx, { lines: linesIn, address = null, phone = '', paymentMode, couponCode = '', redeemPoints = 0, shopperId = null, referral: referralIn = null, lock = false }) {
   const priced = await priceLines(q, linesIn, { lock });
   const notices = [...priced.notices];
   const sellable = priced.lines.filter(buyable);
@@ -92,8 +96,19 @@ export async function buildQuote(q, ctx, { lines: linesIn, address = null, phone
     : couponsOn ? await evaluate(q, { code: couponCode, lines: sellable, phone: buyerPhone, shopperId, lock, config: ctx.config })
       : { code: normalizeCode(couponCode), applied: false, message: 'This code isn’t valid.' };
   const applied = coupon?.applied ? coupon : null;
-  const discountPaise = applied?.discountPaise ?? 0;
-  const shares = applied?.shares ?? sellable.map(() => 0);
+  const couponPaise = applied?.discountPaise ?? 0;
+  const couponShares = applied?.shares ?? sellable.map(() => 0);
+
+  // A referred friend's first-order reward (9.21), after the coupon and on what the coupon left. The loyalty add-on judges it
+  // (ctx.loyalty.referrals), on `q`, so inside the order's transaction it is judged again and placeOrder records what was given.
+  const referral = referralIn?.code && sellable.length && typeof ctx.loyalty?.referrals?.judge === 'function'
+    ? await ctx.loyalty.referrals.judge(q, { ...referralIn, phone: buyerPhone, shopperId, address, orderPaise: subtotalPaise - couponPaise })
+    : null;
+  const referralPaise = referral?.paise ?? 0;
+  if (referral?.notice) notices.push(referral.notice);
+  const referralShares = splitDiscount(sellable.map((l, i) => ({ ...l, linePaise: l.linePaise - couponShares[i] })), sellable.map(() => true), referralPaise);
+  const discountPaise = couponPaise + referralPaise;
+  const shares = couponShares.map((share, i) => share + referralShares[i]);
 
   const settings = await storeSettings(q);
   const deliveryFee = sellable.length ? shippingFor(subtotalPaise, settings) : 0;
@@ -157,14 +172,14 @@ export async function buildQuote(q, ctx, { lines: linesIn, address = null, phone
 
   const quote = {
     lines: priced.lines.map(publicLine),
-    subtotalPaise, discountPaise, loyaltyPaise, shippingPaise, codFeePaise, taxPaise, totalPaise, advancePaise, balancePaise,
+    subtotalPaise, discountPaise, referralPaise, loyaltyPaise, shippingPaise, codFeePaise, taxPaise, totalPaise, advancePaise, balancePaise,
     paymentModes,
     serviceable: reach.serviceable,
     coupon: coupon ? { code: coupon.code, applied: coupon.applied, message: coupon.message } : null,
     pointsUsed,
     notices: [...new Set(notices)],
   };
-  return { quote, priced: priced.lines, lines: orderLines, coupon: applied, couponRefused: coupon && !coupon.applied ? coupon : null, options, deliveryFee };
+  return { quote, priced: priced.lines, lines: orderLines, coupon: applied, couponRefused: coupon && !coupon.applied ? coupon : null, referral, options, deliveryFee };
 }
 
 /** The address as the order keeps it (S-14), and as the Phase 0 columns need it. */
