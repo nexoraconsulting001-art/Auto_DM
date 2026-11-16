@@ -259,3 +259,88 @@ test('tenancy attack: the brand kit and categories cannot point at the other bus
   }
   assert.deepEqual(kept, [], `A stored links to B's upload:\n${kept.join('\n')}`);
 });
+
+test('tenancy attack: the other store\'s order link, number and token answer nothing on this store', async (t) => {
+  const { app, b, bProduct } = await twoStores(t);
+  const buyer = await shopper(app, { phone: '+919876543210', tenant: b.tenant });
+  const placed = await hit(app, '/api/store/checkout', { method: 'POST', host: b.host, body: placeBody(bProduct.id, { paymentMode: 'cod' }), cookie: buyer.cookie, headers: shopperCsrf(app, buyer.cookie) });
+  assert.ok(placed.status < 300 && placed.json?.token, `B's order: ${placed.status} ${placed.text.slice(0, 200)}`);
+  const { token, orderNumber } = placed.json;
+  const onB = await hit(app, `/order/${token}`, { host: b.host });
+  assert.equal(onB.status, 200, 'control: the link works on its own store');
+  const aBuyer = await shopper(app, { phone: '+919876543210' });
+  const tries = [
+    ['GET', `/order/${token}`, undefined],
+    ['POST', `/order/${token}/paid`, {}],
+    ['POST', `/api/store/orders/${token}/retry`, {}],
+    ['GET', `/api/store/orders/${orderNumber}`, undefined],
+    ['POST', `/api/store/orders/${orderNumber}/cancel`, {}],
+    ['POST', `/api/store/orders/${orderNumber}/returns`, {}],
+  ];
+  const leaks = [];
+  for (const [method, path, body] of tries) {
+    const res = await hit(app, path, { method, host: A_HOST, body, cookie: aBuyer.cookie, headers: shopperCsrf(app, aBuyer.cookie) });
+    if (res.status < 300 || /Victim|Asha Rao|Lake Road/.test(res.text)) leaks.push(`${method} ${path} -> ${res.status} ${res.text.slice(0, 160)}`);
+    assert.ok(res.status < 500, `${method} ${path}: ${res.status}`);
+  }
+  assert.deepEqual(leaks, [], leaks.join('\n'));
+  const [after] = await app.db.platform.query('SELECT status, fulfilment_status, payment_status FROM orders WHERE tenant_id = $1 AND order_number = $2', [b.tenant.id, orderNumber]).catch(async () => app.db.platform.query('SELECT fulfilment_status FROM orders WHERE tenant_id = $1 AND order_number = $2', [b.tenant.id, orderNumber]));
+  assert.ok(!/cancel/.test(JSON.stringify(after)), `B's order changed: ${JSON.stringify(after)}`);
+});
+
+/** Every row business `tenantId` holds, table by table, as sorted JSON. */
+async function rowsOf(app, tenantId) {
+  const tables = await app.db.platform.query(
+    `SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+       JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname NOT IN ('audit_log', 'jobs', 'rate_limit_hits') ORDER BY 1`,
+  );
+  const out = {};
+  for (const { name } of tables) out[name] = (await app.db.platform.query(`SELECT to_jsonb(x)::text AS j FROM ${name} x WHERE tenant_id = $1`, [tenantId])).map((r) => r.j).sort();
+  return out;
+}
+
+test('tenancy attack: well-formed writes naming the other business\'s real ids change none of its rows', async (t) => {
+  const { app, b, bProduct, aToken, bToken } = await twoStores(t);
+  const bApi = ownerApi(app, b.host, bToken);
+  const cat = (await bApi('POST', '/categories', { name: 'Victim cat' })).json;
+  const coupon = await bApi('POST', '/coupons', { code: 'VICTIM10', kind: 'percent', percentBp: 1000, minOrderPaise: 0, active: true });
+  assert.equal(coupon.status, 201, coupon.text.slice(0, 200));
+  const staff = await withTenant(b.tenant, () => app.platform.users.create({ name: 'Victim staff', phone: '9000000088', password: 'staff-pass-1', role: 'staff' }));
+  const buyer = await shopper(app, { phone: '+919876543210', tenant: b.tenant });
+  const placed = await hit(app, '/api/store/checkout', { method: 'POST', host: b.host, body: placeBody(bProduct.id, { paymentMode: 'cod' }), cookie: buyer.cookie, headers: shopperCsrf(app, buyer.cookie) });
+  assert.ok(placed.status < 300, placed.text.slice(0, 200));
+  const [order] = await app.db.platform.query('SELECT id FROM orders WHERE tenant_id = $1', [b.tenant.id]);
+  await app.ctx.orderEvents.settle(); // B's own order finishes its follow-up work first
+  const before = await rowsOf(app, b.tenant.id);
+  const aApi = ownerApi(app, A_HOST, aToken);
+  const writes = [
+    ['PATCH', `/products/${bProduct.id}`, { name: 'Pwned', pricePaise: 1 }],
+    ['DELETE', `/products/${bProduct.id}`],
+    ['PATCH', `/categories/${cat.id}`, { name: 'Pwned' }],
+    ['DELETE', `/categories/${cat.id}`],
+    ['PATCH', `/coupons/${coupon.json.id}`, { active: false, percentBp: 10000 }],
+    ['DELETE', `/coupons/${coupon.json.id}`],
+    ['PATCH', `/team/${staff.id}`, { role: 'manager' }],
+    ['DELETE', `/team/${staff.id}`],
+    ['POST', `/orders/${order.id}/cancel`, { reason: 'fraud', note: 'x' }],
+    ['POST', `/orders/${order.id}/notes`, { note: 'planted' }],
+    ['POST', `/orders/${order.id}/status`, { status: 'cancelled' }],
+    ['POST', `/orders/${order.id}/advance`, {}],
+    ['POST', `/orders/${order.id}/refunds`, { amountPaise: 100, reason: 'other' }],
+    ['POST', `/orders/${order.id}/shipments`, {}],
+    ['POST', `/customers/${buyer.id}/reset-password`],
+    ['POST', `/loyalty/members/${buyer.id}/adjust`, { points: 1000, note: 'free points' }],
+  ];
+  const answered = [];
+  for (const [method, path, body] of writes) {
+    const res = await aApi(method, path, body);
+    answered.push(`${method} ${path} ${res.status}`);
+    assert.ok(res.status < 500, `${method} ${path}: ${res.status} ${res.text.slice(0, 200)}`);
+    assert.ok(res.status >= 400, `${method} ${path} answered ${res.status}: ${res.text.slice(0, 200)}`);
+  }
+  await app.ctx.orderEvents.settle();
+  const after = await rowsOf(app, b.tenant.id);
+  const changed = Object.keys(before).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+  assert.deepEqual(changed, [], `B's tables changed: ${changed.join(', ')} (${answered.join('; ')})`);
+});
