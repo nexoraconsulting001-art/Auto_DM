@@ -20,6 +20,7 @@ import { createRepos } from './repos/index.js';
 import { backupStorage, lastBackupSuccess, runBackup } from './backup.js';
 import { sweepRawExports } from './modules/platform-console/raw-export.js';
 import { createPlatform, describePlatform } from './platform/index.js';
+import { secretRefreshFailed } from './platform/metrics.js';
 import { createErrorSink } from './platform/error-sink.js';
 import { drainOnSignals } from './platform/health.js';
 import { log, onError, reportError } from './platform/log.js';
@@ -133,13 +134,14 @@ export function registerJobs({ db, platform, config, modules = MODULES, metaCall
 
 async function main(config = defaultConfig) {
   // Secrets first, then the production rules, exactly as the web server does.
-  const secretSource = await loadSecrets(config, { onAlert: (alert) => reportError(new Error('secrets.refresh_failed'), { msg: 'secrets.refresh_failed', code: alert.code }) });
+  let platform = null;
+  const secretSource = await loadSecrets(config, { onAlert: secretRefreshFailed(() => platform?.metrics) });
   const guardProblems = guardProduction(config);
   if (guardProblems.length) log.warn('production.guard', { rules: guardProblems.map((p) => p.id) });
   const errorSink = createErrorSink(config, { service: 'worker' });
   onError(errorSink.report);
   const db = await openRuntimeDb(config);
-  const platform = createPlatform(config, { db, service: 'worker' });
+  platform = createPlatform(config, { db, service: 'worker' });
   const schedule = registerJobs({ db, platform, config });
   const tick = () => schedule().catch((err) => reportError(err, { msg: 'worker.schedule_failed' }));
   await tick();

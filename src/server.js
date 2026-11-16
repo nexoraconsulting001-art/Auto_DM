@@ -31,6 +31,7 @@ import { createPlatform, describePlatform } from './platform/index.js';
 import { createErrorSink } from './platform/error-sink.js';
 import { HEALTH_PATHS, createHealth, drainOnSignals } from './platform/health.js';
 import { log, onError, reportError, requestIds } from './platform/log.js';
+import { secretRefreshFailed } from './platform/metrics.js';
 import { guardProduction } from './platform/production-guard.js';
 
 export const verifySignature = verifyHubSignature;
@@ -244,14 +245,15 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
 
 async function main(config = defaultConfig) {
   // Secrets first, from wherever they are kept; then the rules a production configuration must meet.
-  const secretSource = await loadSecrets(config, { onAlert: (alert) => reportError(new Error('secrets.refresh_failed'), { msg: 'secrets.refresh_failed', code: alert.code }) });
+  let platform = null;
+  const secretSource = await loadSecrets(config, { onAlert: secretRefreshFailed(() => platform?.metrics) });
   assertStartable(config);
   const guardProblems = guardProduction(config);
   if (guardProblems.length) log.warn('production.guard', { rules: guardProblems.map((p) => p.id) });
   const errorSink = createErrorSink(config, { service: 'web' });
   onError(errorSink.report);
   const db = await openRuntimeDb(config);
-  const platform = createPlatform(config, { db });
+  platform = createPlatform(config, { db });
   const repos = createRepos(db, { storage: platform.storage, secrets: platform.secrets });
   const tenant = config.defaultTenant ? await repos.tenants.ensure({ slug: config.defaultTenant, name: config.defaultTenantName }) : null;
   const owner = tenant ? await withTenant(tenant, () => repos.users.ensureOwner({ phone: config.adminPhone, password: config.adminPassword })) : null;

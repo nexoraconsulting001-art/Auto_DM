@@ -2,6 +2,7 @@ import { WHATSAPP_CHANNEL } from '../../contracts/addons.js';
 import { SIGNATURE_HEADERS } from '../../contracts/store-routes.js';
 import { log, reportError } from '../../platform/log.js';
 import { tenantId, withTenant } from '../../tenancy.js';
+import { countWebhookStored } from '../../platform/metrics.js';
 
 /**
  * Shoppers' WhatsApp messages, as Meta delivers them to POST /webhooks/whatsapp (PRD 6.12). This handler is registered in
@@ -147,6 +148,7 @@ export function createIntake(ctx, processor) {
       const ids = await withTenant(tenant, () => storeForTenant(phoneNumberId, list));
       for (const id of ids) stored.push({ tenant, id });
     }
+    countWebhookStored(ctx.platform?.metrics, 'whatsapp');
     return stored;
   }
 

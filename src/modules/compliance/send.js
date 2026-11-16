@@ -11,6 +11,7 @@ import { budgetMultiplier, callAllowed, createGate, evaluate, evaluateCreation, 
 import { createInbound } from './inbound.js';
 import { complianceRepo } from './repo.js';
 import { createSlowMode } from './slow-mode.js';
+import { sendOutcomeLabels } from '../../platform/metrics.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -178,7 +179,18 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
 
   const swallow = (msg, fields = {}) => (err) => reportError(err, { msg, ...fields });
 
+  /** Every send decision the log gets is counted for monitoring (compliance_outcomes_total, sends_accepted_total); token and usage rows are not sends. */
+  function countDecision(action, result) {
+    const metrics = platform?.metrics;
+    if (!metrics || action.kind === 'token' || action.kind === 'usage') return;
+    const labels = sendOutcomeLabels(action.channel, result);
+    if (!labels) return;
+    metrics.inc('compliance_outcomes_total', { channel: labels.channel, outcome: labels.outcome, family: labels.family });
+    if (labels.accepted) metrics.inc('sends_accepted_total', { channel: labels.channel });
+  }
+
   async function writeLog(action, result, { subject = '', jobId = null, errorClass } = {}) {
+    countDecision(action, result);
     try {
       await log.record({
         channel: action.channel,

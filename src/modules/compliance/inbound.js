@@ -181,6 +181,8 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
       if (!owner) await storeUnrouted(channel, accountId);
       else if (rows.length) await storeForTenant({ id: owner.id, slug: owner.slug, name: owner.name, status: owner.status }, channel, rows);
     }
+    // Written down before the 200 (WebhookNotStored compares this with the accepted deliveries).
+    platform?.metrics?.inc('webhook_stored_total', { provider: 'meta' });
   }
 
   // ---- what a stored event means --------------------------------------------------------------------------------
@@ -551,9 +553,12 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
       const verdict = ev ? await handle(ev, row) : 'done';
       if (verdict === 'defer') await finishEvent(row, 'stored', new Date(+now() + ECHO_RETRY_MS));
       else await finishEvent(row, 'done');
+      platform?.metrics?.inc('webhook_processed_total', { provider: 'meta', result: verdict === 'defer' ? 'deferred' : 'done' });
     } catch (err) {
       reportError(err, { msg: 'compliance.event_failed', event: Number(row.id), field: row.field });
-      await finishEvent(row, row.attempts >= MAX_ATTEMPTS ? 'failed' : 'stored', new Date(+now() + 2 ** row.attempts * 1000)).catch(swallow('compliance.event_status_failed'));
+      const gaveUp = row.attempts >= MAX_ATTEMPTS;
+      platform?.metrics?.inc('webhook_processed_total', { provider: 'meta', result: gaveUp ? 'failed' : 'retry' });
+      await finishEvent(row, gaveUp ? 'failed' : 'stored', new Date(+now() + 2 ** row.attempts * 1000)).catch(swallow('compliance.event_status_failed'));
     }
   }
 

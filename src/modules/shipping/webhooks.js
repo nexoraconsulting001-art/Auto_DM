@@ -4,6 +4,7 @@ import { withTenant } from '../../tenancy.js';
 import { writeAudit } from '../audit/index.js';
 import { opsAlert } from './alerts.js';
 import { cleanText, isAwb, providerId } from './util.js';
+import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
 
 /**
  * The courier's tracking webhook (PRD 9.7, 9.10): POST /webhooks/courier, one address for Bhava's master account. The token
@@ -67,6 +68,7 @@ export function createWebhooks(ctx, { tracking }) {
       [`${ev.awb}|${ev.status}|${ev.at}`.slice(0, 200), ev.status.slice(0, 100), JSON.stringify(ev)],
     );
     res.status(200).json({ ok: true });
+    countWebhookStored(metrics, 'shiprocket');
     metrics?.inc?.('courier_webhooks_total', { result: row ? 'stored' : 'duplicate' });
     if (row) kick();
   }
@@ -77,6 +79,7 @@ export function createWebhooks(ctx, { tracking }) {
        WHERE id = $1 AND status = 'received'`,
       [row.id, status, String(outcome).slice(0, 60), security, tenantId],
     );
+    countWebhookProcessed(metrics, 'shiprocket', status);
     return { id: Number(row.id), status, outcome, security };
   }
 
@@ -88,6 +91,7 @@ export function createWebhooks(ctx, { tracking }) {
       [row.id, why, MAX_ATTEMPTS],
     );
     reportError(err, { msg: 'shipping.webhook_failed', event: Number(row.id) });
+    countWebhookProcessed(metrics, 'shiprocket', after?.status === 'failed' ? 'failed' : 'retry');
     if (after?.status === 'failed') {
       await opsAlert(platformDb, { tenantId: after.tenant_id, kind: 'shipping.webhook_failed', message: `A tracking event could not be worked through after ${MAX_ATTEMPTS} tries (event ${row.id}).`, target: `webhook:${row.id}`, dedupeKey: `courier-webhook-failed:${row.id}` });
     }

@@ -3,6 +3,7 @@ import { SIGNATURE_HEADERS } from '../../contracts/store-routes.js';
 import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { cleanLevel, cleanProduct } from './products.js';
+import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
 
 /**
  * POST /webhooks/shopify (PRD 9.11, S-38). Each business's shop signs with its own app's secret, so the shop named in
@@ -64,6 +65,7 @@ export function createShopifyWebhook(ctx, { products, connection }) {
        ON CONFLICT (provider, scope, event_id) DO NOTHING RETURNING id`,
       [`tenant:${conn.tenant_id}`, eventId, TOPIC.test(topic) ? topic : '', JSON.stringify(clean(topic, body)), conn.tenant_id],
     );
+    countWebhookStored(platform?.metrics, 'shopify');
     res.status(200).json({ ok: true });
     if (row) kick();
   }
@@ -98,12 +100,14 @@ export function createShopifyWebhook(ctx, { products, connection }) {
         `UPDATE provider_webhook_events SET status = $2, outcome = $3, attempts = attempts + 1, last_error = '', processed_at = now() WHERE id = $1 AND status = 'received'`,
         [row.id, ['processed', 'created'].includes(outcome) ? 'processed' : 'ignored', String(outcome).slice(0, 60)],
       );
+      countWebhookProcessed(platform?.metrics, 'shopify', ['processed', 'created'].includes(outcome) ? 'processed' : 'ignored');
     } catch (err) {
       reportError(err, { msg: 'shopify.webhook_failed', event: Number(row.id) });
-      await platformDb.query(
-        `UPDATE provider_webhook_events SET attempts = attempts + 1, last_error = $2, status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE status END WHERE id = $1 AND status = 'received'`,
+      const [after] = await platformDb.query(
+        `UPDATE provider_webhook_events SET attempts = attempts + 1, last_error = $2, status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE status END WHERE id = $1 AND status = 'received' RETURNING status`,
         [row.id, String(err?.code ?? err?.kind ?? err?.name ?? 'error').slice(0, 300), MAX_ATTEMPTS],
       );
+      countWebhookProcessed(platform?.metrics, 'shopify', after?.status === 'failed' ? 'failed' : 'retry');
     }
   }
 

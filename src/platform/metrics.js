@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { FORBIDDEN_LABELS, METRICS, metricProblem } from '../contracts/metrics.js';
+import { FORBIDDEN_LABELS, METRICS, METRIC_LABELS, metricProblem } from '../contracts/metrics.js';
+import { reportError } from './log.js';
 
 /**
  * Counters, gauges and timings in Prometheus text format at /metrics, so any monitoring tool can scrape them (Phase 9).
@@ -54,6 +55,42 @@ export function metaCallResult({ status = 0, kind } = {}) {
   if (kind === 'timeout' || kind === 'network') return 'timeout';
   if (kind || status >= 400 || status === 0) return 'error';
   return 'ok';
+}
+
+/** The compliance gate's outcomes (src/contracts/compliance.js OUTCOMES) as compliance_outcomes_total's five. */
+const SEND_OUTCOMES = Object.freeze({
+  sent: 'sent', sent_fallback: 'sent', queued: 'queued', held: 'blocked', failed: 'failed', unknown: 'failed',
+  cancelled: 'skipped', expired: 'skipped', skipped: 'skipped', would_send: 'skipped',
+});
+
+/**
+ * The labels one send decision is counted under: compliance_outcomes_total { channel, outcome, family } (family is the
+ * reason code's first part, 'none' without one) and, when a provider took the message, sends_accepted_total. null for a
+ * channel outside the label set.
+ */
+export function sendOutcomeLabels(channel, { outcome, reason = '' } = {}) {
+  if (!METRIC_LABELS.channel.values.includes(channel)) return null;
+  const family = String(reason || '').split('.')[0] || 'none';
+  const mapped = SEND_OUTCOMES[outcome] ?? 'failed';
+  return { channel, outcome: mapped, family: /^[a-z][a-z_]{0,20}$/.test(family) ? family : 'other', accepted: mapped === 'sent' };
+}
+
+/** One webhook delivery written down before the 200 (webhook_stored_total; WebhookNotStored compares it with the accepted ones). */
+export function countWebhookStored(metrics, provider) {
+  metrics?.inc('webhook_stored_total', { provider });
+}
+
+/** One stored webhook event worked through (webhook_processed_total): its final status, 'retry' when it will be tried again, or 'failed' when given up. */
+export function countWebhookProcessed(metrics, provider, result) {
+  metrics?.inc('webhook_processed_total', { provider, result });
+}
+
+/** The onAlert of loadSecrets() for both processes: reported, and counted once the platform's metrics exist. */
+export function secretRefreshFailed(metricsOf) {
+  return (alert = {}) => {
+    reportError(new Error('secrets.refresh_failed'), { msg: 'secrets.refresh_failed', code: alert.code });
+    metricsOf()?.inc('secret_refresh_failures_total');
+  };
 }
 
 /** A log entry's name as a bounded label: its first dotted part, lower snake case, 30 characters at most. */

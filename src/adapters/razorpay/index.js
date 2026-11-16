@@ -309,5 +309,7 @@ export function createRazorpay(config = {}, { env = process.env } = {}) {
   const partner = createPartner(config, request, authRequest);
   const defaultMode = config.paymentMode === 'own' ? 'own' : 'managed';
   const forMode = (mode) => ((mode ?? defaultMode) === 'own' ? partner : route);
-  return { route, partner, billing: createBilling(config, request), forMode, defaultMode, default: forMode(defaultMode), verifyCheckout, verifyWebhook };
+  // The platform's own subscriptions are counted apart from the businesses' payments (provider_calls_total, PlanBillingFailing).
+  const billingRequest = createHttp({ provider: 'razorpay_billing', baseUrl, timeoutMs, codeOf });
+  return { route, partner, billing: createBilling(config, billingRequest), forMode, defaultMode, default: forMode(defaultMode), verifyCheckout, verifyWebhook };
 }

@@ -4,6 +4,7 @@ import { SIGNATURE_HEADERS } from '../../contracts/store-routes.js';
 import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { opsAlert } from '../payments/util.js';
+import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
 
 /**
  * The billing provider's webhooks (PRD 5.12, F-51, F-52), at BILLING_WEBHOOK.path, before any business is known.
@@ -79,6 +80,7 @@ export function createBillingWebhooks(ctx, service) {
         [BILLING_WEBHOOK.scope, eventId, payload.event.slice(0, 100), JSON.stringify(payload)],
       );
       res.status(200).json({ ok: true });
+      countWebhookStored(metrics, 'razorpay_billing');
       metrics?.inc?.('billing_webhooks_total', { result: row ? 'stored' : 'duplicate' });
       if (row) kick();
       return undefined;
@@ -97,6 +99,7 @@ export function createBillingWebhooks(ctx, service) {
       [row.id, status, String(outcome).slice(0, 60), security, tenantId],
     );
     metrics?.inc?.('billing_webhook_events_total', { status });
+    countWebhookProcessed(metrics, 'razorpay_billing', status);
     return { id: Number(row.id), status, outcome, security };
   }
 
@@ -108,6 +111,7 @@ export function createBillingWebhooks(ctx, service) {
       [row.id, why, MAX_ATTEMPTS],
     );
     reportError(err, { msg: 'billing.webhook_failed', event: Number(row.id) });
+    countWebhookProcessed(metrics, 'razorpay_billing', after?.status === 'failed' ? 'failed' : 'retry');
     if (err?.code === 'billing_not_ready') {
       await opsAlert(platformDb, { tenantId: null, kind: 'billing.not_ready', message: 'A Bhava charge arrived but Bhava’s legal name, state or SAC is not set, so no invoice could be issued. Set them in Billing settings.', target: 'billing-settings', dedupeKey: 'billing-not-ready' });
     }

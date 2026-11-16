@@ -4,6 +4,7 @@ import { SIGNATURE_HEADERS } from '../../contracts/store-routes.js';
 import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { isGatewayId, methodOf, opsAlert, paiseOf } from './util.js';
+import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
 
 /**
  * Payment webhooks (PRD 9.7). Every delivery is verified on its exact bytes before anything is read (a bad signature is 401
@@ -81,6 +82,7 @@ export function createWebhooks(ctx, service) {
        ON CONFLICT (provider, scope, event_id) DO NOTHING RETURNING id`,
       [provider, scope, eventId, eventType.slice(0, 100), JSON.stringify(payload), tenantId],
     );
+    countWebhookStored(metrics, provider);
     return row ? Number(row.id) : null;
   }
 
@@ -150,6 +152,7 @@ export function createWebhooks(ctx, service) {
       [row.id, status, String(outcome).slice(0, 60), security, tenantId],
     );
     metrics?.inc?.('payment_webhook_events_total', { status });
+    countWebhookProcessed(metrics, row.provider ?? 'razorpay', status);
     return { id: Number(row.id), status, outcome, security };
   }
 
@@ -161,6 +164,7 @@ export function createWebhooks(ctx, service) {
       [row.id, why, MAX_ATTEMPTS],
     );
     reportError(err, { msg: 'payments.webhook_failed', event: Number(row.id) });
+    countWebhookProcessed(metrics, row.provider ?? 'razorpay', after?.status === 'failed' ? 'failed' : 'retry');
     if (after?.status === 'failed') {
       await opsAlert(platformDb, { tenantId: after.tenant_id, kind: 'payment.webhook_failed', message: `A payment event could not be worked through after ${MAX_ATTEMPTS} tries (event ${row.id}).`, target: `webhook:${row.id}`, dedupeKey: `webhook-failed:${row.id}` });
     }
