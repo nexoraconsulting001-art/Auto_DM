@@ -63,7 +63,8 @@ export const ConnectUrl = z.object({ url: z.string() });
 export const Payment = z.object({
   id: Id,
   orderId: Id,
-  purpose: z.enum(['full', 'advance', 'cod']),
+  // duplicate: a second capture of a part already paid (the shopper paid twice); given back first by a refund on the order.
+  purpose: z.enum(['full', 'advance', 'cod', 'duplicate']),
   provider: z.enum(['razorpay', 'cashfree', 'cod']),
   mode: z.enum(['managed', 'own', 'cod']),
   status: z.enum(PAYMENT_ATTEMPT_STATUSES),

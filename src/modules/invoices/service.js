@@ -236,6 +236,9 @@ export function createInvoices(ctx) {
       const order = await lockOrder(t, found.order_id);
       const [refund] = await t.query('SELECT * FROM refunds WHERE tenant_id = $1 AND id = $2', [tenantId(), id]);
       if (!order || refund.status !== 'processed') return null;
+      // A shopper's second payment given back (atk-money-2) was never part of the sale: no credit note against its invoice.
+      const [paid] = await t.query('SELECT purpose FROM payments WHERE tenant_id = $1 AND id = $2', [tenantId(), refund.payment_id]);
+      if (paid?.purpose === 'duplicate') return null;
       const [existing] = await t.query('SELECT * FROM invoices WHERE tenant_id = $1 AND refund_id = $2', [tenantId(), id]);
       if (existing) return { invoice: existing, created: false };
       // Money was taken and given back: the sale's own document comes first, if it is somehow missing.
