@@ -4,10 +4,12 @@ import crypto from 'node:crypto';
  * Limits that hold across every process and server (PRD 9.3, 9.5: S-09, S-18), counted in Postgres (rate_limit_hits,
  * migration 400). A limit kept in one process's memory lets each instance allow its own share.
  *
- *   hit(scope, subject, { limit, windowMs }) -> { allowed, hits, retryAfterMs }
+ *   hit(scope, subject, { limit, windowMs }, { via }?) -> { allowed, hits, retryAfterMs }
  *       scope    what is being limited: 'order_attempts', 'otp_sends_ip'
  *       subject  who: an IP address, a business id and a phone number together. Only a hash of scope and subject is stored.
  *       Counts this hit. The window starts at the first hit and the count starts again once it has passed.
+ *       via      an open transaction on the platform database to count in, so the hit commits or rolls back with what
+ *                it limits (and needs no second connection while that transaction holds a lock).
  *   peek(scope, subject, { limit, windowMs }) -> the same, without counting
  *   reset(scope, subject)
  *   purge(olderThanMs) removes rows nobody has hit lately (housekeeping).
@@ -29,8 +31,8 @@ export function createRateLimit({ db } = {}) {
   };
 
   return {
-    async hit(scope, subject, { limit, windowMs }) {
-      const [row] = await need().query(
+    async hit(scope, subject, { limit, windowMs }, { via = null } = {}) {
+      const [row] = await (via ?? need()).query(
         `INSERT INTO rate_limit_hits AS r (key, window_start, hits) VALUES ($1, now(), 1)
          ON CONFLICT (key) DO UPDATE SET
            hits = CASE WHEN r.window_start <= now() - make_interval(secs => $2::float / 1000) THEN 1 ELSE r.hits + 1 END,

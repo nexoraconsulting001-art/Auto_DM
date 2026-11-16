@@ -30,9 +30,11 @@ export function codesService(ctx) {
 
   /**
    * A new code for `subject`, or null when one is still waiting (two requests at the same moment send one code). Any
-   * older code for the same number and purpose stops working. The caller sends it and forgets it.
+   * older code for the same number and purpose stops working. The caller sends it and forgets it. `beforeIssue(t)` runs in
+   * this transaction, under the lock, only when this call is the one that makes the code (the send limits: they count codes that go out,
+   * so a burst of requests counts once); when it throws, no code is made.
    */
-  async function issue({ subject, purpose, personId = null }) {
+  async function issue({ subject, purpose, personId = null, beforeIssue = null }) {
     const hash = subjectOf(subject);
     return db().tx(async (t) => {
       // One number at a time, across every process: the check and the new row are one step.
@@ -44,6 +46,7 @@ export function codesService(ctx) {
         [hash, purpose, personId, CODE_RULES.maxAttempts, CODE_RULES.resendAfterMs / 1000],
       );
       if (recent) return null;
+      if (beforeIssue) await beforeIssue(t);
       await t.query(
         'UPDATE seller_login_codes SET expires_at = now() WHERE subject_hash = $1 AND purpose = $2 AND person_id IS NOT DISTINCT FROM $3::bigint AND used_at IS NULL AND expires_at > now()',
         [hash, purpose, personId],

@@ -34,14 +34,18 @@ export function signInHandlers(ctx, services) {
    */
   async function sendCode({ subject, purpose, personId = null }) {
     if (await codes.waiting({ subject, purpose, personId })) return;
-    if (personId) {
-      await limit(ctx.platform, AUTH_LIMITS.codeSendsPerPerson, `${purpose}:${personId}`);
-      // A number someone is linking may be anyone's: it keeps a cap of its own, apart from sign-in's, against spam.
-      if (purpose === 'link') await limit(ctx.platform, AUTH_LIMITS.codeSendsPerNumber, `link:${subject}`);
-    } else {
-      await limit(ctx.platform, AUTH_LIMITS.codeSendsPerNumber, subject);
-    }
-    const code = await codes.issue({ subject, purpose, personId });
+    // Counted under the number's lock, by the one request that makes the code: requests arriving together count once.
+    // Counted in the transaction that makes the code, so a refused send leaves no code and a made one keeps its count.
+    const countSend = async (t) => {
+      if (personId) {
+        await limit(ctx.platform, AUTH_LIMITS.codeSendsPerPerson, `${purpose}:${personId}`, t);
+        // A number someone is linking may be anyone's: it keeps a cap of its own, apart from sign-in's, against spam.
+        if (purpose === 'link') await limit(ctx.platform, AUTH_LIMITS.codeSendsPerNumber, `link:${subject}`, t);
+      } else {
+        await limit(ctx.platform, AUTH_LIMITS.codeSendsPerNumber, subject, t);
+      }
+    };
+    const code = await codes.issue({ subject, purpose, personId, beforeIssue: countSend });
     if (code) await codes.send({ subject, code, purpose });
   }
 
