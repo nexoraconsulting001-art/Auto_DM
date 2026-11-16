@@ -199,9 +199,11 @@ test('opening a business for support points at its own address, and needs a real
   const { app, operator } = await world(t);
   const shop = await addBusiness(app, { slug: 'kesar-home', name: 'Kesar Home' });
   const open = (id) => onConsole(app, operator, `/tenants/${id}/impersonate`, { method: 'POST', body: { reason: 'ticket 9' } });
-  assert.equal(need(await open(shop.tenant.id), 200, 'Open').json().url, `https://kesar-home.${NEUTRAL}/admin`);
+  // The one-time entry address of the operator session (PRD 5.10, built in Phase 7: src/modules/impersonation ENTRY_PATH), on the business's own host.
+  const entry = (url) => { const u = new URL(url); return [u.origin, u.pathname, /^[A-Za-z0-9_-]{20,}$/.test(u.searchParams.get('t') ?? '')]; };
+  assert.deepEqual(entry(need(await open(shop.tenant.id), 200, 'Open').json().url), [`https://kesar-home.${NEUTRAL}`, '/operator/enter', true]);
   await app.db.query(`INSERT INTO tenant_domains (domain, tenant_id, is_primary) VALUES ('shop.kesarhome.example', $1, true)`, [shop.tenant.id]);
-  assert.equal(need(await open(shop.tenant.id), 200, 'Open').json().url, 'https://shop.kesarhome.example/admin');
+  assert.deepEqual(entry(need(await open(shop.tenant.id), 200, 'Open').json().url), ['https://shop.kesarhome.example', '/operator/enter', true]);
   assert.equal((await open(999999)).status, 404);
 });
 
