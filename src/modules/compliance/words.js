@@ -1,4 +1,4 @@
-import { matchesKeywords } from '../automations/match.js';
+import { fold, matchesKeywords } from '../automations/match.js';
 
 /**
  * Bhava's word lists (PRD 4.6, 4.8, 6.4). Owners add to them through tenant_words and can never remove a base word, because
@@ -25,9 +25,10 @@ export const BASE_WORDS = Object.freeze({
 /** The one word that lifts an opt-out (PRD 4.6). It can't be changed by a business. */
 export const START_WORDS = Object.freeze(['start']);
 
-const fold = (s) => String(s).normalize('NFC').toUpperCase().toLowerCase().normalize('NFC');
-
-/** How a word is stored and compared: NFC, folded, single-spaced. */
+/**
+ * How a word is stored and compared: as the reader sees it (match.js fold: NFKC, invisible marks removed, case folded), single-spaced.
+ * "ＳＴＯＰ", "STOP" with a zero-width space and "बंद करो" with the joiner an Indic keyboard adds all read as the word. Punctuation stays.
+ */
 export const normalizeWord = (s) => fold(s).trim().replace(/\s+/g, ' ');
 
 /** PRD 4.6: true when the whole DM or comment is one of the opt-out words, in any case. "Please stop" is not, and neither is "stop.". */

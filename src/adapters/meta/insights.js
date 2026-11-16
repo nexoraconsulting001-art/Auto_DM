@@ -1,4 +1,5 @@
 import { META_METRICS } from '../../contracts/analytics.js';
+import { externalId } from '../../contracts/api/common.js';
 import { MetaApiError } from './errors.js';
 
 const DAY_SECONDS = 86_400;
@@ -26,7 +27,7 @@ function kindOfMedia(raw) {
 }
 
 const toMedia = (raw) => ({
-  id: String(raw.id),
+  id: externalId(raw.id),
   kind: kindOfMedia(raw),
   caption: raw.caption ?? '',
   permalink: raw.permalink ?? '',
@@ -34,7 +35,8 @@ const toMedia = (raw) => ({
   postedAt: raw.timestamp ? new Date(raw.timestamp.replace(/\+0000$/, 'Z')) : null,
 });
 
-const pageOf = (data) => ({ items: (data.data ?? []).map(toMedia), next: data.paging?.next ? data.paging.cursors?.after ?? null : null });
+// A media id that is not exact (a JSON number past 2^53) is left out: rounded, it would name another post.
+const pageOf = (data) => ({ items: (data.data ?? []).map(toMedia).filter((m) => m.id), next: data.paging?.next ? data.paging.cursors?.after ?? null : null });
 
 const assertNoImpressions = (metrics) => {
   if (metrics.includes('impressions')) throw new Error('Never request impressions (PRD 7.1)');

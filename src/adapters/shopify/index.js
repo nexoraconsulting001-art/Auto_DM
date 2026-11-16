@@ -1,5 +1,6 @@
 import { DEFAULT_TIMEOUT_MS, ProviderHostBlockedError, createHttp, hmac, sameBytes } from '../http.js';
 import { isSimulatorUrl, refuseSimulatorUrl } from '../../../tools/sim/guard.mjs';
+import { externalId } from '../../contracts/api/common.js';
 
 /**
  * Shopify Admin API, for sync (PRD 9.11). Each business connects its own Shopify app, so every call names the shop:
@@ -62,7 +63,7 @@ export function createShopify(config = {}, { env = process.env } = {}) {
     return {
       async shop() {
         const { body } = await request('GET', '/shop.json', { headers, retries: 2 });
-        return { id: String(body.shop.id), name: body.shop.name, domain: body.shop.myshopify_domain ?? domain, currency: body.shop.currency };
+        return { id: externalId(body.shop.id) ?? '', name: body.shop.name, domain: body.shop.myshopify_domain ?? domain, currency: body.shop.currency };
       },
       products: ({ since, pageInfo, limit = 250 } = {}) => list('/products.json', 'products', pageInfo ? { page_info: pageInfo, limit } : { updated_at_min: since ? new Date(since).toISOString() : undefined, limit }),
       async product(id) {
@@ -98,14 +99,14 @@ export function createShopify(config = {}, { env = process.env } = {}) {
           transactions: paid ? [{ kind: 'sale', status: 'success', amount: money(totalPaise) }] : undefined,
         };
         const { body } = await request('POST', '/orders.json', { headers: { ...headers, 'idempotency-key': idempotencyKey }, json: { order } });
-        return { id: String(body.order.id), name: body.order.name ?? '' };
+        return { id: externalId(body.order.id) ?? '', name: body.order.name ?? '' };
       },
       orders: ({ since, pageInfo, limit = 250 } = {}) => list('/orders.json', 'orders', pageInfo ? { page_info: pageInfo, limit } : { updated_at_min: since ? new Date(since).toISOString() : undefined, status: 'any', limit }),
       async registerWebhooks({ address, topics }) {
         const made = [];
         for (const topic of topics) {
           const { body } = await request('POST', '/webhooks.json', { headers, json: { webhook: { topic, address, format: 'json' } } });
-          made.push({ id: String(body.webhook.id), topic });
+          made.push({ id: externalId(body.webhook.id) ?? '', topic });
         }
         return made;
       },

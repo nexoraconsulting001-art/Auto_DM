@@ -1,4 +1,5 @@
 import { CATALOG_LIMITS as L, canonicalProductUrl } from '../../contracts/catalog.js';
+import { externalId } from '../../contracts/api/common.js';
 import { pricePaise } from './extract.js';
 import { cleanLine, cleanUrls, htmlToText } from './text.js';
 
@@ -65,7 +66,7 @@ export function fromShopify(product, origin, { availability = null } = {}) {
     optionValues.forEach((value, i) => {
       if (!options[i].values.includes(value) && options[i].values.length < L.optionValues) options[i].values.push(value);
     });
-    const known = availability && Object.hasOwn(availability, String(v.id)) ? availability[String(v.id)] : undefined;
+    const known = availability && externalId(v.id) && Object.hasOwn(availability, externalId(v.id)) ? availability[externalId(v.id)] : undefined;
     const available = typeof v.available === 'boolean' ? v.available : typeof known === 'boolean' ? known : true;
     variants.push({ optionValues, sku: cleanLine(v.sku ?? '', 100), pricePaise: price, mrpPaise: mrpAbove(price, pricePaise(v.compare_at_price)), inStock: available, sourceRef: String(v.id ?? '').slice(0, 200) });
   }
@@ -96,6 +97,6 @@ export function fromShopify(product, origin, { availability = null } = {}) {
 export function availabilityFromJs(data) {
   if (!data || typeof data !== 'object' || !Array.isArray(data.variants)) return null;
   const out = {};
-  for (const v of data.variants.slice(0, L.variants)) if (v && typeof v.available === 'boolean' && v.id !== undefined) out[String(v.id)] = v.available;
+  for (const v of data.variants.slice(0, L.variants)) if (v && typeof v.available === 'boolean' && externalId(v.id)) out[externalId(v.id)] = v.available;
   return out;
 }

@@ -1,11 +1,18 @@
 const WORD = /[\p{L}\p{N}\p{M}]/u;
 const LETTER_OR_NUMBER = /[\p{L}\p{N}]/u;
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-// Joiners and emoji style selectors: invisible, and typed inconsistently, so they never decide a match.
-const INVISIBLE = /[‌‍︎️]/g;
+/**
+ * What a reader can't see: format marks (zero-width spaces and joiners, direction marks, soft hyphens), the combining grapheme joiner,
+ * Hangul fillers and emoji style selectors. Typed inconsistently or hidden on purpose, so they never decide a match. One list for every
+ * text rule: keywords, the opt-out and START words, and the content check's readable().
+ */
+export const INVISIBLE = /[\p{Cf}͏ᅟᅠㅤﾠ︎️]/gu;
 
-/** NFC, then case-insensitive the way Unicode folding is: ß matches SS, and final sigma matches sigma. */
-export const fold = (s) => String(s).normalize('NFC').replace(INVISIBLE, '').toUpperCase().toLowerCase().normalize('NFC');
+/**
+ * Text as the reader sees it, for comparing words: NFKC (full-width and styled letters read as plain ones), invisible marks removed,
+ * then case-insensitive the way Unicode folding is: ß matches SS, and final sigma matches sigma. Punctuation stays.
+ */
+export const fold = (s) => String(s).normalize('NFKC').replace(INVISIBLE, '').toUpperCase().toLowerCase().normalize('NFC');
 
 function matchesOne(text, keyword) {
   const words = fold(keyword).trim().split(/\s+/).filter(Boolean);
