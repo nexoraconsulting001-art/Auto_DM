@@ -5,7 +5,7 @@ import { ValidationError } from '../../util.js';
 /** The ApiError for what other layers throw (repos, the body and upload parsers), or null for a real fault. */
 function known(err) {
   if (err instanceof ApiError) return err;
-  if (err instanceof ValidationError) return new ApiError('validation_failed', err.message);
+  if (err instanceof ValidationError) return new ApiError('validation_failed', err.message, err.fields ? { fields: err.fields } : {});
   if (err?.code === 'LIMIT_FILE_SIZE' || err?.status === 413) return new ApiError('payload_too_large');
   if (err?.name === 'MulterError') return new ApiError('validation_failed', 'That upload couldn’t be read.');
   if (err?.status >= 400 && err?.status < 500) return new ApiError('validation_failed', 'That request couldn’t be read.');

@@ -1,5 +1,6 @@
 import { ValidationError, slugify } from '../util.js';
 import { tenantId } from '../tenancy.js';
+import { requireOwnMedia } from './media.js';
 
 export function normalizeCategory(input) {
   const name = String(input.name ?? '').trim();
@@ -48,6 +49,7 @@ export function categoriesRepo(db) {
     async save(id, input) {
       const c = normalizeCategory(input);
       const t = tenantId();
+      await requireOwnMedia(db, 'imageUrl', c.image_url);
       const [taken] = await db.query(
         'SELECT 1 FROM categories WHERE tenant_id = $1 AND slug = $2 AND ($3::int IS NULL OR id <> $3)',
         [t, c.slug, id ? Number(id) : null],

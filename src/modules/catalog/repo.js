@@ -1,5 +1,6 @@
 import { CATALOG_LIMITS as L, IMPORT_REASONS, canonicalProductUrl, isProductSource } from '../../contracts/catalog.js';
 import { tenantId } from '../../tenancy.js';
+import { requireOwnMedia } from '../../repos/media.js';
 import { ValidationError, slugify } from '../../util.js';
 import { checkOptionsAndVariants, variantKey } from './rules.js';
 
@@ -331,6 +332,7 @@ export function catalogRepo(db) {
       for (let attempt = 0; ; attempt++) {
         try {
           return await db.tx(async (t) => {
+            await requireOwnMedia(t, 'images', state.images);
             const slug = await uniqueSlug(t, state.name);
             const names = WRITABLE.filter((c) => c in state && c !== 'slug');
             const params = [tenantId(), slug, ...names.map((c) => dbValue(c, state[c]))];
@@ -360,6 +362,7 @@ export function catalogRepo(db) {
         const next = { ...changes };
         if ('tags' in next) next.tags = cleanTags(next.tags);
         validate(next, current);
+        if ('images' in next) await requireOwnMedia(t, 'images', next.images);
         if ('name' in next && next.name !== current.name) next.slug = await uniqueSlug(t, next.name, productId);
         await writeColumns(t, productId, next);
         const links = next.images ?? current.images;
@@ -419,6 +422,7 @@ export function catalogRepo(db) {
       return db.tx(async (t) => {
         const [current] = await t.query('SELECT images FROM products WHERE tenant_id = $1 AND id = $2 FOR UPDATE', [tenantId(), id]);
         if (!current || !current.images.includes(sourceUrl)) return false;
+        await requireOwnMedia(t, 'images', link);
         const images = current.images.map((entry) => (entry === sourceUrl ? link : entry));
         await writeColumns(t, id, { images });
         await writeGallery(t, id, images, { details: new Map([[link, { sourceUrl, width, height }]]) });
