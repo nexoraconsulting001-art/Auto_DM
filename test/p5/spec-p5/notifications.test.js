@@ -110,7 +110,7 @@ test('F-57: five emits of one key at the same moment make one event; after ten m
 test('F-57: an alert raised five times with one dedupe key notifies once', async () => {
   const shop = await addSeller(world);
   const owner = await ownerReady(world, shop);
-  for (let i = 0; i < 5; i++) await shop.repos.alerts.raise({ kind: 'token.invalid', message: 'The Instagram connection stopped working', severity: 'critical', target: 'instagram', dedupeKey: 'spec-token-invalid', audience: 'owner' });
+  for (let i = 0; i < 5; i++) await shop.repos.alerts.raise({ kind: 'token.rejected', message: 'The Instagram connection stopped working', severity: 'critical', target: 'instagram', dedupeKey: 'spec-token-invalid', audience: 'owner' });
   await world.waitFor(async () => (await world.platformEmailsTo(owner.email)).length >= 1, 12_000);
   await world.waitFor(() => false, 1500);
   assert.equal((await world.platformEmailsTo(owner.email)).length, 1, 'One alert raised five times sent more than one email');
@@ -123,7 +123,7 @@ test('F-58: a token alert email is Bhava-branded, from Bhava\'s sender, and the 
   const logoUrl = await shop.upload('#C8794E');
   const kit = await shop.send('PATCH', '/brand-kit', { logoUrl });
   assert.equal(kit.status, 200, `Saving the logo: ${kit.status} ${kit.text.slice(0, 200)}`);
-  await shop.repos.alerts.raise({ kind: 'token.invalid', message: 'The Instagram connection stopped working', severity: 'critical', target: 'instagram', audience: 'owner' });
+  await shop.repos.alerts.raise({ kind: 'token.rejected', message: 'The Instagram connection stopped working', severity: 'critical', target: 'instagram', audience: 'owner' });
   const mail = await world.waitFor(async () => (await world.platformEmailsTo(owner.email))[0], 15_000);
   assert.ok(mail, 'No token alert email');
   assert.equal(addressOf(mail.from), PLATFORM_EMAIL, `The token alert came from ${mail.from}`);
