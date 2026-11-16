@@ -139,14 +139,14 @@ test('seller-ui-6: a plan refusal is told apart from a role refusal, so the owne
   assert.deepEqual(own, []);
 });
 
-test('seller-ui-9: "Sign in instead" on the lock screen goes through the one sign-out path, which can reach the server from a locked session', () => {
+test('seller-ui-9: "Sign in instead" on the lock screen goes through the one sign-out path, and never reads the refresh token', () => {
   const app = read('apps/owner/src/App.js');
   const locked = app.slice(app.indexOf('function Locked('), app.indexOf('function Shell('));
-  assert.match(locked, /signOutEverywhere\(\{ session, store, requireServer: false \}\)/);
-  assert.doesNotMatch(locked, /store\.clearSession\(\)|session\.start\(\)/, 'dropping SecureStore by hand skips the signedOut listeners');
+  assert.ok(locked.includes('signOutEverywhere({ session, store, requireServer: false })'));
+  assert.ok(!locked.includes('store.clearSession()') && !locked.includes('session.start()'), 'emptying SecureStore by hand skips the signedOut listeners');
   const out = read('apps/owner/src/shell/sign-out.js');
-  const release = out.indexOf('session.releaseForSignOut(');
-  assert.ok(release > 0 && release < out.indexOf('unregisterFromPush({') && out.indexOf('unregisterFromPush({') < out.indexOf('session.signOut('), 'released, then the push unregister, then the server sign-out');
+  assert.ok(out.includes('if (session.getState().status !== SESSION_STATUS.locked) await unregisterFromPush('), 'a locked session has no token to unregister with');
+  assert.ok(out.indexOf('unregisterFromPush({') < out.indexOf('session.signOut('), 'the push first, while the session still works');
 });
 
 test('seller-ui-4: a reel’s product picker reads reels.products, which automations staff may call and which shows only what it needs', async () => {

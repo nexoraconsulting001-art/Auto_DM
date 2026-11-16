@@ -1,7 +1,8 @@
 // seller-ui-9: "Sign in instead" on the lock screen signs the locked session out through the one sign-out path
-// (apps/owner/src/shell/sign-out.js: releaseForSignOut, then the push unregister, then signOut). Here, the session's side of
-// it: from a locked session the server hears the sign-out and the push unregister, nothing is loaded on the way, and the
-// 'signedOut' listeners (the owner app's query cache and saved rows) run. sign-out.js itself is read by medium-ui.test.js.
+// (apps/owner/src/shell/sign-out.js), not by emptying SecureStore and starting again. Here, the session's side of it: signOut
+// from a locked session reads no refresh token and sends nothing (F-110, P-68), and still runs the 'signedOut' listeners
+// that drop the owner app's query cache and saved rows. The wiring is read by medium-ui.test.js and rendered by
+// apps/owner/spec/unlock.test.js.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SESSION_STATUS, createSession } from '../../../packages/app-core/src/session.js';
@@ -72,53 +73,26 @@ async function lockedSession() {
   return { server, store, session };
 }
 
-/** What apps/owner/src/shell/sign-out.js does, in its order (unregisterFromPush is api.push.unregister, its errors swallowed). */
-async function signOutEverywhere({ session, store, requireServer }) {
-  await session.releaseForSignOut({ requireServer });
-  await session.api.push.unregister(await store.getDeviceId()).catch(() => false);
-  await session.signOut({ reason: 'signed_out', requireServer });
-}
-
-test('seller-ui-9: signing out of a locked session ends it on the server, stops the push, and runs the signedOut listeners', async () => {
+test('seller-ui-9: signing out of a locked session reads no refresh token, sends nothing, and runs the signedOut listeners', async () => {
   const { server, store, session } = await lockedSession();
   const heard = [];
   session.on('signedOut', (reason) => heard.push(reason));
-
-  assert.equal(typeof session.releaseForSignOut, 'function');
-  await session.releaseForSignOut({ requireServer: false });
-  assert.equal(session.getState().status, SESSION_STATUS.locked, 'released only for the sign-out: still locked');
-  assert.equal(server.calls.some((c) => c.path === '/auth/me'), false, 'nothing of the business is loaded');
-
-  await session.api.push.unregister(DEVICE);
+  // What apps/owner/src/shell/sign-out.js does for a locked session: no push unregister (there is no token), then signOut.
   await session.signOut({ reason: 'signed_out', requireServer: false });
-  const paths = server.calls.map((c) => `${c.method} ${c.path}`);
-  assert.deepEqual(paths, ['POST /auth/refresh', `DELETE /push/devices/${DEVICE}`, 'POST /auth/logout']);
-  assert.ok(server.calls.slice(1).every((c) => c.token), 'the unregister and the logout carry the released token');
-  assert.equal(server.family, 'revoked', 'the server ended the session');
-  assert.deepEqual(heard, ['signed_out'], 'the signedOut listeners ran (query cache and saved rows)');
+  assert.deepEqual(server.calls, [], 'the refresh token is read only after an unlock (F-110, P-68)');
+  assert.deepEqual(heard, ['signed_out'], 'the signedOut listeners ran (the query cache and every business’s saved rows)');
   assert.equal(session.getState().status, SESSION_STATUS.signedOut);
   assert.equal(await store.getRefreshToken(), null);
   assert.equal(await store.isLockEnabled(), false);
+  assert.equal(await store.getSnapshot(), null);
 });
 
-test('seller-ui-9: with no connection, "Sign in instead" still forgets everything here (requireServer false), and never loads anything', async () => {
-  const { server, store, session } = await lockedSession();
+test('seller-ui-9: session.start() on an emptied store, the old lock-screen path, never told the listeners (why the fix goes through signOut)', async () => {
+  const { store, session } = await lockedSession();
   const heard = [];
   session.on('signedOut', (reason) => heard.push(reason));
-  server.down = true;
-  await signOutEverywhere({ session, store, requireServer: false });
-  assert.deepEqual(heard, ['signed_out']);
+  await store.clearSession();
+  await session.start();
   assert.equal(session.getState().status, SESSION_STATUS.signedOut);
-  assert.equal(await store.getRefreshToken(), null);
-  assert.equal(server.calls.some((c) => c.path === '/auth/me'), false);
-});
-
-test('seller-ui-9: releaseForSignOut does nothing to a session that is not locked', async () => {
-  const server = fakeServer();
-  const store = memoryStore();
-  const session = createSession({ baseUrl: BASE, app: APP, store, fetch: server.fetch });
-  await session.adopt({ user: USER, business: SHOP, businesses: [], accessToken: 'a1', accessExpiresInSeconds: 900, refreshToken: 'r1' });
-  server.calls.length = 0;
-  assert.equal(await session.releaseForSignOut({ requireServer: true }), false);
-  assert.deepEqual(server.calls, [], 'a signed-in session already has its token');
+  assert.deepEqual(heard, [], 'no signedOut event: the query cache and saved rows would stay');
 });

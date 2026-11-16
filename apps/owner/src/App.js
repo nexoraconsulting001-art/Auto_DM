@@ -41,9 +41,9 @@ function Locked() {
     unlock();
   }, [unlock]);
 
-  // The other way in is a full sign-in. The locked session is signed out first, through the one sign-out path: the server
-  // ends it, this phone stops hearing its pushes, and its cache and saved rows are dropped (the 'signedOut' listeners).
-  // The lock is never simply skipped: nothing is loaded before the sign-in screen.
+  // The other way in is a full sign-in. The locked session is signed out first, through the one sign-out path, so the
+  // 'signedOut' listeners drop its query cache and every business's saved rows, and SecureStore is emptied. The refresh
+  // token is never read without an unlock (P-68), so the lock is never simply skipped and nothing is loaded.
   const signInInstead = useCallback(() => signOutEverywhere({ session, store, requireServer: false }), [store, session]);
 
   return <LockScreen appName={APP_NAME} onUnlock={unlock} onSignInInstead={signInInstead} failed={failed} busy={busy} />;
