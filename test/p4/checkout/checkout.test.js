@@ -419,3 +419,26 @@ test('S-71 the checkout and order pages carry the seller\'s brand only; a busine
     app.close();
   }
 });
+
+test('cash on delivery this order can\'t have is refused with its reason before any code is asked for (S-22)', async () => {
+  const app = await storeApp();
+  try {
+    // Above the COD cap: the store offers COD, this order can't have it.
+    await payments(app, { cod: true, codMaxPaise: 10000 });
+    const lamp = await product(app, { stock: 2, pricePaise: 50000 });
+    const asked = [];
+    app.ctx.shoppers = { otps: { codVerified: async (args) => (asked.push(args), false) } };
+    const res = await place(app, placeBody(lamp.id, { paymentMode: 'cod' }));
+    assert.equal(res.status, 409, res.text);
+    assert.match(res.json.error, /up to/);
+    assert.notEqual(res.json.next, 'verify_phone', 'the shopper was asked for a code for an order that would be refused');
+    assert.equal((await q(app, 'SELECT count(*)::int AS n FROM orders WHERE tenant_id = $1', [app.tenant.id]))[0].n, 0);
+    const quoted = await quote(app, { lines: [{ productId: lamp.id, variantId: null, qty: 1 }], address: { ...ADDRESS } });
+    assert.ok(quoted.json.notices.some((n) => /up to/.test(n)), 'the bag does not say why cash on delivery is off');
+    // COD the order can have still asks for the code first.
+    await payments(app, { cod: true });
+    assert.equal((await place(app, placeBody(lamp.id, { paymentMode: 'cod' }))).json.next, 'verify_phone');
+  } finally {
+    app.close();
+  }
+});

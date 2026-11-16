@@ -23,7 +23,7 @@ const shown = (p) => priceText(p.price);
 export function productTile(p) {
   const price = shown(p);
   const image = safeHref(p.image);
-  return html`<a class="tile" href="/p/${encodeURIComponent(p.slug)}">${image ? html`<img src="${image}" alt="" width="200" height="250" loading="lazy" decoding="async">` : html`<span class="ph"></span>`}
+  return html`<a class="tile" href="/p/${encodeURIComponent(p.slug)}"${Number.isInteger(p.id) && p.id > 0 ? raw(` data-product="${p.id}"`) : ''}>${image ? html`<img src="${image}" alt="" width="200" height="250" loading="lazy" decoding="async">` : html`<span class="ph"></span>`}
 <b>${p.name}</b><span class="row"><span class="price">${price.now}</span>${price.was ? html`<span class="mrp muted small"><s>${price.was}</s></span>` : ''}${price.off ? html`<span class="off">${price.off}</span>` : ''}</span>
 ${price.soldOut ? html`<span class="muted small">Sold out</span>` : ''}</a>`;
 }
