@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { SIGNATURE_HEADERS } from '../../contracts/store-routes.js';
 import { log, reportError } from '../../platform/log.js';
+import { isOptOut } from '../compliance/words.js';
 import { tenantId, withTenant } from '../../tenancy.js';
 
 /**
@@ -33,7 +34,25 @@ const word = (value, max, pattern) => {
   return pattern.test(s) ? s.slice(0, max) : '';
 };
 
-export const isStop = (text) => STOP_WORDS.has(String(text ?? '').normalize('NFKC').trim().toLowerCase().replace(/[.!]+$/, ''));
+/**
+ * A reply that means stop: these words, or PRD 4.6's opt-out words ("band karo", "mat bhejo", "बंद करो"), so a shopper is never told
+ * automation stopped while marketing goes on. A seller's own added words are known only inside the business: whatsapp-automation's
+ * opt-out handles those and calls stopWhatsappMarketing too.
+ */
+export const isStop = (text) => {
+  const plain = String(text ?? '').normalize('NFKC').trim().toLowerCase().replace(/[.!]+$/, '');
+  return STOP_WORDS.has(plain) || isOptOut(plain);
+};
+
+/** The shopper's yes to WhatsApp marketing at this business is taken back, and their scheduled WhatsApp cart reminders stop. */
+export async function stopWhatsappMarketing({ db, platform }, phone) {
+  await platform.consent.revoke({ subject: { phone }, purpose: 'marketing', channel: 'whatsapp', source: 'reply' });
+  await db.query(
+    `UPDATE cart_reminders r SET status = 'cancelled', stop_reason = 'opted_out'
+     FROM shoppers s WHERE r.tenant_id = $1 AND s.tenant_id = r.tenant_id AND s.id = r.shopper_id AND s.phone = $2 AND r.status = 'scheduled' AND r.channel = 'whatsapp'`,
+    [tenantId(), phone],
+  );
+}
 
 export function createWhatsappWebhook(ctx) {
   const { db, config, providers, platform } = ctx;
@@ -118,12 +137,7 @@ export function createWhatsappWebhook(ctx) {
     } catch {
       return;
     }
-    await platform.consent.revoke({ subject: { phone }, purpose: 'marketing', channel: 'whatsapp', source: 'reply' });
-    await db.query(
-      `UPDATE cart_reminders r SET status = 'cancelled', stop_reason = 'opted_out'
-       FROM shoppers s WHERE r.tenant_id = $1 AND s.tenant_id = r.tenant_id AND s.id = r.shopper_id AND s.phone = $2 AND r.status = 'scheduled' AND r.channel = 'whatsapp'`,
-      [tenantId(), phone],
-    );
+    await stopWhatsappMarketing({ db, platform }, phone);
     log.info('whatsapp.stop', { tenantId: tenantId() });
   }
 

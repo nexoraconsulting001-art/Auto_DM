@@ -6,7 +6,7 @@ import { directLink } from '../links/rules.js';
 import { engineFor } from './engine.js';
 import { windowOpen } from './inbox.js';
 import { faqPayload, render } from './message.js';
-import { checkLaunch, checkSave, contentProblems, normalizeTriggers, warningsFor } from './rules.js';
+import { checkLaunch, checkSave, checkWrittenLinks, contentProblems, normalizeTriggers, warningsFor } from './rules.js';
 
 const SAMPLE_NAME = 'Asha';
 const actorOf = (user) => `user:${user.id}`;
@@ -129,6 +129,8 @@ export function automationsApi(ctx) {
         const [problem] = [...checkContent({ text: item.question }), ...contentProblems({ template: item.templateBody })];
         if (problem) throw new ApiError('validation_failed', problem.message, { fields: { [`items.${index}`]: problem.message }, reason: problem.reason });
       }
+      // The question and the answer reach the buyer, so their links meet the link rules now, as an automation's messages do (PRD 4.11).
+      await checkWrittenLinks(body.items.flatMap((item, index) => [[`items.${index}`, item.question], [`items.${index}`, item.templateBody]]), deps);
       await repos.iceBreakers.save(body.items, { actor: actorOf(user) });
       await pushIceBreakers(body.items);
       return repos.iceBreakers.get();

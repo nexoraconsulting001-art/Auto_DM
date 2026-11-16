@@ -1,3 +1,4 @@
+import { ApiError } from '../../contracts/api/index.js';
 import { PROVIDER_PATHS } from '../../contracts/api/provider.js';
 import { reportError } from '../../platform/log.js';
 import { normalizeHost, withTenant } from '../../tenancy.js';
@@ -16,6 +17,14 @@ const SWEEP = 'ig-connect.sweep';
 const MAINTAIN = 'ig-connect.maintain';
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+
+/** What the seller is told when a release gate stops an automation going live (PRD 4.15). */
+const GATE_REFUSALS = Object.freeze({
+  'gate.access_level': 'Your Instagram account can’t receive automated messages yet. We’ll let you know when Meta approves access.',
+  'gate.scope_missing': 'Reconnect Instagram and allow messages and comments, then turn this on.',
+  'gate.privacy_url': 'Your privacy page hasn’t passed its check yet. Try again in a little while.',
+  'gate.deletion_callback': 'The data deletion check hasn’t passed yet. Try again in a little while.',
+});
 
 const hostOf = (url) => {
   try {
@@ -101,6 +110,15 @@ export function createIgConnect({ fetchImpl, now } = {}) {
       });
       const review = reviewSettings(ctx.config);
       if (review) reviewRoutes(app, { repos: ctx.repos, auth: ctx.auth, config: ctx.config, services: services(ctx), review });
+    },
+
+    /** Called by automations.setState before Test or Live: an automation goes out only when every release gate passes (PRD 4.15). */
+    async beforeAutomationLaunch(_automation, ctx) {
+      const result = await services(ctx).gates.check();
+      if (result.passed) return;
+      const failing = result.gates.find((gate) => !gate.passed && gate.code !== 'gate.passed');
+      const message = GATE_REFUSALS[failing.code];
+      throw new ApiError('validation_failed', message, { fields: { state: message }, reason: failing.code });
     },
 
     api: (ctx) => ({

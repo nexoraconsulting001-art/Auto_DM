@@ -1,4 +1,4 @@
-import { ADDON_FEATURES, WHATSAPP_CHANNEL, WHATSAPP_WINDOW_CLOSED_CODE } from '../../contracts/addons.js';
+import { ADDON_FEATURES, WHATSAPP_CHANNEL, WHATSAPP_LIMITS, WHATSAPP_WINDOW_CLOSED_CODE } from '../../contracts/addons.js';
 import { ProviderError } from '../../adapters/http.js';
 import { tenantId } from '../../tenancy.js';
 
@@ -31,6 +31,8 @@ export function whatsappChannel({ db, platform, providers, repos }) {
   ))[0] ?? null;
 
   return {
+    textBytes: WHATSAPP_LIMITS.textBytes,
+
     async account(action) {
       const row = await accountRow(action.accountId);
       if (!row) return null;

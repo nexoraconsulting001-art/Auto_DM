@@ -349,6 +349,13 @@ export function createAutomationEngine({ db, repos, compliance, meta, inbound = 
       await db.platform.query(`UPDATE needs_human_items SET username = '', text = '' WHERE created_at < now() - ${INBOX_RETENTION} AND (username <> '' OR text <> '')`);
       // The AI reply log keeps its ids, score and outcome; the question and the answer go with the inbox (PRD 6.11).
       await db.platform.query(`UPDATE ai_reply_log SET question = '', answer = '' WHERE created_at < now() - ${INBOX_RETENTION} AND (question <> '' OR answer <> '')`);
+      // A sent message's text and its recipient's id (a WhatsApp number is a phone number) go with the inbox too (PRD 4.14). A job that
+      // can still go keeps its message; a finished one keeps its ids, times, outcome and idempotency key, which dedupe and the log read.
+      await db.platform.query(
+        `UPDATE outbound_jobs SET payload = payload - 'message' - 'fallbackText', recipient_id = ''
+         WHERE created_at < now() - ${INBOX_RETENTION} AND status NOT IN ('queued', 'held', 'sending')
+           AND (payload ? 'message' OR payload ? 'fallbackText' OR recipient_id <> '')`,
+      );
       await db.platform.query(`DELETE FROM tester_codes WHERE used_at IS NULL AND expires_at < now() - interval '1 day'`);
     },
   };

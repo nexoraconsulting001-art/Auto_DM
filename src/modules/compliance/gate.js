@@ -1,8 +1,8 @@
 import { META_CHANNELS } from '../../contracts/compliance.js';
 import { reportError } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
-import { linkProblem } from '../links/rules.js';
-import { checkContent, checkPublicReply, urlsIn, withDisclosure } from './content.js';
+import { hostOf, linkProblem, parseHttps } from '../links/rules.js';
+import { checkContent, checkPublicReply, linksIn, withDisclosure } from './content.js';
 
 /**
  * The rules, as a pure function of a snapshot of the world (PRD 4.3 to 4.12). evaluate() answers "may this go now?" and
@@ -16,7 +16,6 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const RESTORE_MS = 48 * HOUR;
 const SLOW_MODE_MEDIA_GAP_MS = 2 * MINUTE;
-const BLOCKED_HOSTS_TTL_MS = 5 * MINUTE;
 
 /** Usage headers are only as good as the last call that carried one: with every call paused, nothing would ever refresh them. */
 export const USAGE_STALE_MS = 5 * MINUTE;
@@ -61,10 +60,10 @@ export function finalMessage(action, state) {
 function contentProblem(action, state, message) {
   const [problem] = action.kind === 'public_reply'
     ? checkPublicReply(message.text)
-    : checkContent({ text: message.text, buttonTitle: message.button?.title ?? '', url: message.button?.url ?? '', quickReplies: message.quickReplies ?? [], filled: true, ownDomain: state.ownDomain });
+    : checkContent({ text: message.text, buttonTitle: message.button?.title ?? '', url: message.button?.url ?? '', quickReplies: message.quickReplies ?? [], filled: true, ownDomain: state.ownDomain, ...(state.textBytes ? { maxBytes: state.textBytes } : {}) });
   if (problem) return problem.reason;
   const context = { whatsappNumber: state.whatsappNumber ?? '', blockedHosts: state.blockedHosts ?? new Map() };
-  for (const url of [message.button?.url, ...urlsIn(message.text)].filter(Boolean)) {
+  for (const url of [message.button?.url, ...linksIn(message.text)].filter(Boolean)) {
     const reason = linkProblem(url, context);
     if (reason) return reason;
   }
@@ -176,7 +175,6 @@ export function evaluateCreation(action, s, { at, limits }) {
 /** Builds the snapshot evaluate() reads. Switches come from a cache of at most COMPLIANCE_LIMITS.switchCacheMs (PRD 4.12). */
 export function createGate({ db, repos, config, now, limits, channels }) {
   const switchCache = new Map();
-  let blockedHosts = { at: 0, map: new Map() };
 
   async function switches(channel) {
     const business = tenantId();
@@ -299,13 +297,21 @@ export function createGate({ db, repos, config, now, limits, channels }) {
     return row?.at ?? null;
   }
 
-  async function hostBlocklist() {
-    const at = +now();
-    if (at - blockedHosts.at > BLOCKED_HOSTS_TTL_MS || !blockedHosts.at) {
-      const rows = await db.query('SELECT host, category FROM link_blocked_hosts');
-      blockedHosts = { at, map: new Map(rows.map((r) => [r.host, r.category])) };
+  /**
+   * The blocklist rows for these links' hosts and every domain above them, read at each send (PRD 4.11): a host blocked a moment ago is
+   * blocked now, in every process. The host column is the primary key, so this is a few index lookups, not the whole list.
+   */
+  async function hostBlocklist(urls) {
+    const hosts = new Set();
+    for (const url of urls) {
+      const parsed = parseHttps(url);
+      if (!parsed) continue;
+      const labels = hostOf(parsed).split('.');
+      for (let i = 0; i < labels.length; i++) hosts.add(labels.slice(i).join('.'));
     }
-    return blockedHosts.map;
+    if (!hosts.size) return new Map();
+    const rows = await db.query('SELECT host, category FROM link_blocked_hosts WHERE host = ANY($1)', [[...hosts]]);
+    return new Map(rows.map((r) => [r.host, r.category]));
   }
 
   /** Everything evaluate() needs for this action. Reads only. */
@@ -322,6 +328,8 @@ export function createGate({ db, repos, config, now, limits, channels }) {
     const state = { ...sw, breakerBlocks, account, ...person, rate, automation, ownDomain: config.platformDomain ?? '' };
     const registered = channels?.get(action.channel);
     if (registered) {
+      // A registered channel's messages are held to its own byte limit (WhatsApp 4,096), not Instagram's.
+      if (registered.textBytes) state.textBytes = registered.textBytes;
       const known = (await registered.windowState({ action, subject, thread: person.thread })) ?? {};
       state.optedIn = known.optedIn === true;
       if (known.lastUserMessageAt !== undefined) state.thread = { id: null, pausedUntil: null, pauseReason: '', ...person.thread, lastUserMessageAt: known.lastUserMessageAt };
@@ -330,8 +338,9 @@ export function createGate({ db, repos, config, now, limits, channels }) {
     state.isTest = action.isTest;
     if (action.purpose === 'followup') state.lastAutomationDmAt = await lastDmAt(action.channel, subject, action.automationId);
     if (slowModeActive(rate, at) && action.mediaId) state.lastMediaDmAt = await lastOnMedia(action);
-    if (needsLinks && (action.message.button?.url || /https?:\/\//i.test(action.message.text))) {
-      state.blockedHosts = await hostBlocklist();
+    const links = needsLinks ? [action.message.button?.url, ...linksIn(action.message.text)].filter(Boolean) : [];
+    if (links.length) {
+      state.blockedHosts = await hostBlocklist(links);
       const settings = await repos.settings?.getAll?.();
       state.whatsappNumber = settings?.support_whatsapp ?? '';
     }
