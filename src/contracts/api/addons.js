@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { ADDON_FEATURES, AI_LIMITS, AI_OUTCOMES, AI_THRESHOLD, WHATSAPP_ACCOUNT_STATUSES, WHATSAPP_LIMITS, WHATSAPP_OPTIN_SOURCES } from '../addons.js';
 import { Channel, WHATSAPP_OPTIN_PURPOSES } from '../compliance.js';
 import { MANAGERS, OWNER_ONLY, staffWith } from './access.js';
-import { Count, Id, IdParams, ListQuery, Timestamp, page, required, text } from './common.js';
+import { Count, Id, IdParams, ListQuery, Timestamp, noNul, page, required, text } from './common.js';
 import { ReasonCode } from './compliance.js';
 
 /**
@@ -67,7 +67,7 @@ export const WhatsappConnectFinish = z.object({ code: required(2000, 'Finish the
 
 const Keyword = text(WHATSAPP_LIMITS.keywordChars).min(1, 'Write a keyword');
 /** One keyword set answers with one of the business's reels or with a link: exactly one. `message` may carry {link}. */
-const KeywordTarget = { reelId: Id.nullable(), linkUrl: z.union([z.literal(''), z.string().trim().max(2000).regex(/^https:\/\/\S+$/i, 'Use an https link')]) };
+const KeywordTarget = { reelId: Id.nullable(), linkUrl: z.union([z.literal(''), noNul(z.string().trim().max(2000).regex(/^https:\/\/\S+$/i, 'Use an https link'))]) };
 export const WhatsappKeywordSet = z.object({ id: Id, keywords: z.array(z.string()), ...KeywordTarget, message: z.string(), active: z.boolean() });
 export const WhatsappKeywordSetInput = z.object({
   id: Id.optional(),

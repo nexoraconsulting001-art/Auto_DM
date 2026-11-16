@@ -9,7 +9,7 @@ import { GoliveStatus } from '../golive.js';
 import { BusinessOps } from '../metrics.js';
 import { PresetSlots } from '../themes.js';
 import { ImpersonationStarted, opsPlatformRoutes } from './platform-ops.js';
-import { Count, Id, IdParams, IdText, ListQuery, Paise, PaiseInput, Timestamp, page, required, text } from './common.js';
+import { Count, Id, IdParams, IdText, ListQuery, Paise, PaiseInput, Timestamp, noNul, page, required, text } from './common.js';
 
 /**
  * The Platform Console's routes, on its own host and not under /api/v1. Not part of `routes`, so the seller client
@@ -157,7 +157,7 @@ export const AppMinimums = z.object({ android: AppMinimum, ios: AppMinimum });
 export const AppMinimumSet = z.object({
   platform: z.enum(APP_PLATFORMS),
   minVersion: z.union([z.literal(''), AppVersionText]),
-  storeUrl: z.union([z.literal(''), z.string().trim().max(500).regex(/^https:\/\/(play\.google\.com\/store\/apps\/details\?id=|apps\.apple\.com\/)\S+$/, 'Use the app’s Google Play or App Store link')]),
+  storeUrl: z.union([z.literal(''), noNul(z.string().trim().max(500).regex(/^https:\/\/(play\.google\.com\/store\/apps\/details\?id=|apps\.apple\.com\/)\S+$/, 'Use the app’s Google Play or App Store link'))]),
 });
 /** Demo access for store review (2.1(a)): the review number and its code, which is stored only as a hash. */
 export const AppReviewAccessSet = z.object({
@@ -169,8 +169,8 @@ export const PlatformSubmission = AppSubmission.extend({ id: Id, tenantId: Id, t
 export const SubmissionMove = z.object({
   to: z.enum(SUBMISSION_STATES),
   reason: Reason,
-  storeUrl: z.string().trim().max(500).regex(/^https:\/\/\S+$/, 'Use the app’s store link').optional(),
-  rejection: z.object({ guideline: z.string().trim().regex(/^[0-9A-Za-z_.:() -]{1,40}$/, 'Use the guideline number, like 4.2.6'), message: z.string().max(4000).default('') }).optional(),
+  storeUrl: noNul(z.string().trim().max(500).regex(/^https:\/\/\S+$/, 'Use the app’s store link')).optional(),
+  rejection: z.object({ guideline: z.string().trim().regex(/^[0-9A-Za-z_.:() -]{1,40}$/, 'Use the guideline number, like 4.2.6'), message: noNul(z.string().max(4000)).default('') }).optional(),
 }).superRefine((b, issue) => {
   if (b.to === 'rejected' && !b.rejection) issue.addIssue({ code: 'custom', path: ['rejection'], message: 'Give the guideline the store named' });
   if (b.to === 'live' && !b.storeUrl) issue.addIssue({ code: 'custom', path: ['storeUrl'], message: 'Give the app’s store link' });

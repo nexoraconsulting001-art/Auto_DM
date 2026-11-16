@@ -118,7 +118,9 @@ export function peopleService(ctx) {
    * The first business of someone who has no seller account anywhere (F-109): a creator account on the Free plan, with
    * them as its owner. Its address is made up and can be changed in onboarding; nothing about it is special in code.
    * `held` (auth-2): sign-up is not open to this person, so the row is only a place for their session. It answers the
-   * sign-in and sign-up routes and nothing else until signup.start adopts it (migration 926).
+   * sign-in and sign-up routes and nothing else until signup.start adopts it (migration 926). `held` may be a function of
+   * the transaction, asked inside it before the row is made, so the decision and the row commit together (the day's cap,
+   * atk-auth-1). A working business is stamped `signup_opened_at`, which the cap counts and the database checks (928).
    */
   async function makeFirstBusiness(personId, { held = false } = {}) {
     const me = await person(personId);
@@ -128,15 +130,19 @@ export function peopleService(ctx) {
       const slug = `c-${crypto.randomBytes(5).toString('hex')}`;
       try {
         const made = await db().tx(async (t) => {
-          const [tenant] = await t.query(`INSERT INTO tenants (slug, name, plan, account_type, signup_held) VALUES ($1, $2, 'free', 'creator', $3) RETURNING id`, [slug, name.slice(0, 80), Boolean(held)]);
+          const isHeld = Boolean(typeof held === 'function' ? await held(t) : held);
+          const [tenant] = await t.query(
+            `INSERT INTO tenants (slug, name, plan, account_type, signup_held, signup_opened_at) VALUES ($1, $2, 'free', 'creator', $3, CASE WHEN $3 THEN NULL ELSE now() END) RETURNING id`,
+            [slug, name.slice(0, 80), isHeld],
+          );
           const [user] = await t.query(
             `INSERT INTO users (tenant_id, name, phone, email, password_hash, role, person_id) VALUES ($1, $2, $3, '', $4, 'owner', $5) RETURNING id`,
             [tenant.id, (me?.name || 'Owner').slice(0, 80), accountPhone(phones[0], personId), NO_PASSWORD, personId],
           );
-          return { tenantId: tenant.id, userId: user.id };
+          return { tenantId: tenant.id, userId: user.id, held: isHeld };
         });
-        await withTenant(made.tenantId, () => ctx.db.tx((t) => writeAudit(t, { actor: `user:${made.userId}`, action: 'business.created', target: `tenant:${made.tenantId}`, details: { accountType: 'creator', plan: 'free', ...(held ? { held: true } : {}) } })));
-        log.info('accounts.first_business', { personId, tenantId: made.tenantId, userId: made.userId, held: Boolean(held) });
+        await withTenant(made.tenantId, () => ctx.db.tx((t) => writeAudit(t, { actor: `user:${made.userId}`, action: 'business.created', target: `tenant:${made.tenantId}`, details: { accountType: 'creator', plan: 'free', ...(made.held ? { held: true } : {}) } })));
+        log.info('accounts.first_business', { personId, tenantId: made.tenantId, userId: made.userId, held: made.held });
         return { tenant_id: made.tenantId, user_id: made.userId, role: 'owner' };
       } catch (err) {
         if (!UNIQUE_VIOLATION.test(String(err?.message))) throw err;

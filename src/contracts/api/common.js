@@ -8,8 +8,14 @@ import { ERROR_CODES } from './errors.js';
 const INT32_MAX = 2147483647;
 const NO_NUL = /^[^\0]*$/; // Postgres text cannot hold a NUL byte
 
+/**
+ * Refuses a NUL byte, which Postgres text cannot hold (it would answer 500 instead of 400). Every input string schema
+ * not built from `text` and whose own pattern lets \0 through (\S, [^\s...]) ends with this (atk-auth-2).
+ */
+export const noNul = (schema) => schema.regex(NO_NUL, 'Contains a character that isn’t allowed');
+
 /** Trimmed text of at most `max` characters. */
-export const text = (max) => z.string().trim().max(max, `Use ${max} characters or fewer`).regex(NO_NUL, 'Contains a character that isn’t allowed');
+export const text = (max) => noNul(z.string().trim().max(max, `Use ${max} characters or fewer`));
 /** The same, but it can't be empty. */
 export const required = (max, message = 'This is required') => text(max).min(1, message);
 
@@ -27,7 +33,7 @@ export const IdParams = z.object({ id: IdText });
 export const Timestamp = z.union([z.date().transform((d) => d.toISOString()), z.iso.datetime({ offset: true })]);
 
 /** An uploaded file (/media/<id>) or a web link. */
-export const MediaLink = z.string().trim().max(1000).regex(/^(https?:\/\/\S+|\/media\/[\w-]+)$/i, 'Use an uploaded file or a web link');
+export const MediaLink = noNul(z.string().trim().max(1000).regex(/^(https?:\/\/\S+|\/media\/[\w-]+)$/i, 'Use an uploaded file or a web link'));
 export const MediaLinkOrEmpty = z.union([z.literal(''), MediaLink]);
 
 /** Every list takes these. Pass back `nextCursor` as `cursor` for the next page; a cursor means nothing outside the API. */
