@@ -344,3 +344,15 @@ test('tenancy attack: well-formed writes naming the other business\'s real ids c
   const changed = Object.keys(before).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
   assert.deepEqual(changed, [], `B's tables changed: ${changed.join(', ')} (${answered.join('; ')})`);
 });
+
+test('tenancy attack: a seller token on its own address reaches no console route naming the other business', async (t) => {
+  const { app, b, aToken } = await twoStores(t);
+  const reached = [];
+  for (const route of routeList.filter((r) => r.consoleOnly || /\/tenants\/:id|\/businesses\/:id/.test(r.path))) {
+    const path = `/api/v1${route.path.replace(':id', String(b.tenant.id))}`;
+    const res = await hit(app, path, { host: A_HOST, token: aToken, method: route.method, body: route.method === 'GET' ? undefined : {} });
+    assert.ok(res.status < 500, `${route.id} ${path}: ${res.status} ${res.text.slice(0, 160)}`);
+    if (res.status < 300 || /Victim Velvet/.test(res.text)) reached.push(`${route.id} ${route.method} ${path} -> ${res.status} ${res.text.slice(0, 160)}`);
+  }
+  assert.deepEqual(reached, [], reached.join('\n'));
+});
