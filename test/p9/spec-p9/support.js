@@ -166,7 +166,7 @@ export function freePort() {
 /** One request with a real Host header. */
 export function request(port, { method = 'GET', path: p = '/', headers = {}, body, host = '127.0.0.1' } = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host, port, method, path: p, headers }, (res) => {
+    const req = http.request({ agent: false, host, port, method, path: p, headers }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {

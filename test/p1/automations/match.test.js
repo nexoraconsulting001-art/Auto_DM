@@ -91,6 +91,15 @@ test('a two-tap first message has no address anywhere, and a direct one has the 
   assert.deepEqual(direct.button, { url: 'https://s.test/p', title: 'Open' });
 });
 
+test('a two-tap first message carries the automation tap button text even when the variant names a link button (A-67, A-72)', () => {
+  const automation = { tapButtonTitle: 'Get the link', linkButtonTitle: 'Open the link' };
+  const variant = { body: 'Tap below', buttonTitle: 'Open the link', quickReplies: [] };
+  const twoTap = firstMessage({ automation, variant, mode: 'two_tap', firstName: '', finalUrl: 'https://s.test/p', payload: 'two_tap:1:1:M:C' });
+  assert.deepEqual(twoTap.button, { payload: 'two_tap:1:1:M:C', title: 'Get the link' });
+  const direct = firstMessage({ automation, variant, mode: 'direct', firstName: '', finalUrl: 'https://s.test/p' });
+  assert.equal(direct.button.title, 'Open the link', 'A variant still names its own link button');
+});
+
 // Noon on a Monday in India is 06:30 UTC.
 const at = (time) => new Date(`2026-11-09T${time}:00+05:30`);
 const hours = { startsAt: null, endsAt: null, dailyStart: '09:00', dailyEnd: '21:00', outsideHours: 'hold' };

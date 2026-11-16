@@ -112,7 +112,7 @@ async function startGraphProxy(targetPort) {
       hooks.splice(hooks.indexOf(hook), 1);
       await hook.run();
     }
-    const upstream = http.request({ host: '127.0.0.1', port: targetPort, method: rq.method, path: rq.url, headers: { ...rq.headers, host: `127.0.0.1:${targetPort}` } }, (res) => {
+    const upstream = http.request({ agent: false, host: '127.0.0.1', port: targetPort, method: rq.method, path: rq.url, headers: { ...rq.headers, host: `127.0.0.1:${targetPort}` } }, (res) => {
       rs.writeHead(res.statusCode, res.headers);
       res.pipe(rs);
     });

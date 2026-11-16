@@ -21,7 +21,12 @@ async function world(ig = fakeIg()) {
   await base.repos.igAccounts.setToken('IG-A', 'token-a');
   const compliance = createCompliance({ db: base.db, repos: base.platform, ig });
   const inBusiness = (fn) => withTenant(base.tenant, fn);
-  return { ...base, ig, compliance, inBusiness };
+  /** The person last messaged the business just now, so a DM to them is inside the 24-hour window (PRD 4.5: no cold DMs). */
+  const messaged = (personId) => inBusiness(async () => base.db.query(
+    `INSERT INTO inbox_threads (tenant_id, channel, ig_user_id, subject_hash, recipient_id, last_user_message_at) VALUES ($1, 'instagram', 'IG-A', $2, $3, now())`,
+    [base.tenant.id, await base.platform.compliance.subjectHash('instagram', personId), personId],
+  ));
+  return { ...base, ig, compliance, inBusiness, messaged };
 }
 
 const events = (db) => db.platform.query('SELECT * FROM compliance_events ORDER BY id');
@@ -48,6 +53,7 @@ test('a send reaches Meta from the business\'s own account, and the log holds a 
     await meta.post('/messages', { igUserId: 'IG-A', from: '42', text: 'hi', deliver: false });
     const w = await world(createInstagram({ graphBaseUrl: meta.url }));
     await w.repos.igAccounts.setToken('IG-A', token);
+    await w.messaged('42');
 
     const result = await w.inBusiness(() => w.compliance.send(dm({ automationId: undefined, mediaId: 'M1' })));
     assert.equal(result.outcome, 'sent');
@@ -85,13 +91,20 @@ test('a timeout or 5xx is an unknown outcome, and a refusal is a failure, report
     await meta.post('/messages', { igUserId: 'IG-A', from: '42', text: 'hi', deliver: false });
     const w = await world(createInstagram({ graphBaseUrl: meta.url, metaTimeoutMs: 100 }));
     await w.repos.igAccounts.setToken('IG-A', token);
-    const send = (extra) => w.inBusiness(() => w.compliance.send(dm(extra)));
+    // Each send is its own job, to its own person: one idempotency key is one job, and a DM per person is capped.
+    const send = async (person) => {
+      await meta.post('/messages', { igUserId: 'IG-A', from: person, text: 'hi', deliver: false });
+      await w.messaged(person);
+      return w.inBusiness(() => w.compliance.send(dm({ recipientId: person, personId: person, idempotencyKey: `dm:${person}` })));
+    };
 
     await meta.fault({ kind: 'timeout' });
-    assert.deepEqual([(await send()).outcome, (await events(w.db)).at(-1).reason], ['unknown', 'send.unknown_outcome']);
+    assert.deepEqual([(await send('42')).outcome, (await events(w.db)).at(-1).reason], ['unknown', 'send.unknown_outcome']);
     await meta.fault({ kind: 'server_error' });
-    assert.equal((await send()).reason, 'send.unknown_outcome');
-    const refused = await send({ message: { text: 'x'.repeat(1001) } });
+    assert.equal((await send('43')).reason, 'send.unknown_outcome');
+    // Meta refusing the message. (A text over the limit no longer reaches Meta: the gate stops it as content.too_long.)
+    await meta.fault({ kind: 'rate_limit', status: 400, body: { error: { message: '(#100) Invalid parameter', type: 'OAuthException', code: 100, fbtrace_id: 'contract' } } });
+    const refused = await send('44');
     assert.deepEqual([refused.outcome, refused.reason, refused.metaCode], ['failed', 'send.error', 100]);
   } finally {
     await meta.close();
@@ -145,6 +158,7 @@ test('a failed log write never changes what the caller is told', async () => {
   const w = await world();
   const broken = { ...w.db, query: (sql, params) => (/compliance_events/.test(sql) ? Promise.reject(new Error('disk full')) : w.db.query(sql, params)) };
   const compliance = createCompliance({ db: broken, repos: w.platform, ig: w.ig });
+  await w.messaged('42');
   const result = await w.inBusiness(() => compliance.send(dm()));
   assert.equal(result.outcome, 'sent');
 });

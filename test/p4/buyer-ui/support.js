@@ -128,7 +128,7 @@ export function pdfText(buffer) {
 /** A GET on the store's own host whose answer is kept as bytes (a PDF, an image), with the shopper's cookies when given. */
 export function getBytes(world, host, path, headers = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port: Number(new URL(world.base).port), path, method: 'GET', headers: { host, ...headers } }, (res) => {
+    const req = http.request({ agent: false, host: '127.0.0.1', port: Number(new URL(world.base).port), path, method: 'GET', headers: { host, ...headers } }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));

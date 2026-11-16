@@ -1,5 +1,6 @@
 import { externalId } from '../../contracts/api/common.js';
 import { DEFAULT_TIMEOUT_MS, ProviderError, createHttp, hmac, providerUrl, sameBytes } from '../http.js';
+import { META_HOSTS } from '../meta/hosts.js';
 
 /**
  * WhatsApp Business (Cloud API), on each business's own account and number (PRD 9.3, 9.16). There is no SMS.
@@ -47,7 +48,8 @@ import { DEFAULT_TIMEOUT_MS, ProviderError, createHttp, hmac, providerUrl, sameB
  * parseStatuses(body) -> [{ messageId, status: 'sent' | 'delivered' | 'read' | 'failed', at, errorCode, phoneNumberId, costCategory }]
  * parseInbound(body)  -> [{ phoneNumberId, from, text }]  for STOP replies; `from` is a phone number: never log it.
  */
-export const WHATSAPP_HOST = 'https://graph.facebook.com';
+/** WhatsApp Cloud API is served by Meta's Facebook Graph host, named once in the Meta adapter (PRD 4.1). */
+export const WHATSAPP_HOST = META_HOSTS.facebookGraph;
 
 export function verifyWebhook(rawBody, signatureHeader, appSecret) {
   if (!appSecret || !Buffer.isBuffer(rawBody) || typeof signatureHeader !== 'string' || !signatureHeader.startsWith('sha256=')) return false;
