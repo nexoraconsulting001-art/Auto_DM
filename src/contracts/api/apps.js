@@ -3,7 +3,7 @@ import { APP_PLATFORMS } from '../accounts.js';
 import { BUILD_REASONS, BUILD_STATUSES, BUILD_STEPS, SUBMISSION_STATES } from '../apps.js';
 import { COLOR_KEYS, FONTS } from '../../modules/brand/theme.js';
 import { MANAGERS, OWNER_ONLY } from './access.js';
-import { Count, Id, ListQuery, Timestamp, page, text } from './common.js';
+import { Count, Id, ListQuery, Timestamp, noNul, page, text } from './common.js';
 
 /**
  * The seller's side of the branded shopper app (PRD 10.7 to 10.14), in the console and the owner app: the app's details, its
@@ -20,7 +20,7 @@ const Platform = z.enum(APP_PLATFORMS);
 const RequestKey = z.string().regex(/^[\w-]{8,80}$/, 'Use 8 to 80 letters, digits, - or _');
 const Hex = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Use a colour like #234D33');
 const Font = z.string().refine((name) => Object.hasOwn(FONTS, name), 'Choose a font from the list');
-const HttpsUrl = z.string().trim().max(500).regex(/^https:\/\/\S+$/, 'Use a link that starts with https://');
+const HttpsUrl = noNul(z.string().trim().max(500).regex(/^https:\/\/\S+$/, 'Use a link that starts with https://'));
 const Fingerprint = z.string().trim().toUpperCase().regex(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/, 'A fingerprint is 32 pairs of hex digits joined by colons');
 const Problem = z.object({ field: z.string(), code: z.string(), message: z.string(), platform: Platform.nullable() });
 

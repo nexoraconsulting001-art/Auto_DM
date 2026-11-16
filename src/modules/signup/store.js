@@ -26,8 +26,8 @@ export function signupStore(db) {
   return {
     toInvite,
 
-    async settings() {
-      const [row] = await p.query('SELECT mode, free_per_instagram, daily_cap, updated_at FROM signup_settings');
+    async settings(q = p) {
+      const [row] = await q.query('SELECT mode, free_per_instagram, daily_cap, updated_at FROM signup_settings');
       return { mode: row?.mode ?? 'closed', freePerInstagram: row?.free_per_instagram ?? 1, dailyCap: row?.daily_cap ?? null, updatedAt: row?.updated_at ?? new Date(0) };
     },
 
@@ -44,13 +44,34 @@ export function signupStore(db) {
       });
     },
 
-    /** Businesses sign-up has made since midnight, India time: what the daily cap is compared with. */
-    async madeToday() {
-      const [row] = await p.query(
-        `SELECT count(*)::int AS n FROM signup_runs r JOIN tenants t ON t.id = r.tenant_id
-          WHERE t.created_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')`,
-      );
+    /**
+     * Working businesses self-serve made since midnight, India time, whichever way (signup.start or a first sign-in): what
+     * the daily cap is compared with. One definition, in the database (migration 928), shared with its triggers. `q` is a
+     * transaction to count in, after `holdCap` took the lock.
+     */
+    async madeToday(q = p) {
+      const [row] = await q.query('SELECT signup_made_today() AS n');
       return row?.n ?? 0;
+    },
+
+    /**
+     * Takes the platform-wide lock on the day's cap inside `t`, until it ends: the lock the database's own check takes
+     * (migration 928), so a decision made after it and the business it opens can't be overtaken by another sign-up.
+     */
+    async holdCap(t) {
+      await t.query(`SELECT pg_advisory_xact_lock(hashtext('bhava.signup_daily_cap'))`);
+    },
+
+    /**
+     * Whether self-serve may open a new working business now (PRD 5.20): mode 'public' and the day's cap not reached. With
+     * `t`, decided inside that transaction under the cap's lock, so the answer holds until it commits.
+     */
+    async openToNewBusiness(t = null) {
+      if (t) await this.holdCap(t);
+      const settings = await this.settings(t ?? p);
+      if (settings.mode !== 'public') return false;
+      if (settings.dailyCap === null || settings.dailyCap === undefined) return true;
+      return (await this.madeToday(t ?? p)) < settings.dailyCap;
     },
 
     /** Whether an invite code would be accepted now. Reads only: the use is counted when the business is made. */

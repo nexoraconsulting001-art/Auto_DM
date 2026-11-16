@@ -27,13 +27,12 @@ export function sessionOpener(ctx, { people, tokens, devices }) {
   let store;
   const signup = () => (store ??= signupStore(ctx.db));
 
-  /** Whether sign-up would make a business for anyone right now (PRD 5.20): the same mode and cap signup.start checks. */
-  async function signupOpen() {
-    const settings = await signup().settings();
-    if (settings.mode !== 'public') return false;
-    if (settings.dailyCap === null || settings.dailyCap === undefined) return true;
-    return (await signup().madeToday()) < settings.dailyCap;
-  }
+  /**
+   * Whether sign-up would make a business for anyone right now (PRD 5.20): the same mode and cap signup.start checks, and
+   * the same count (every working business self-serve made today, this way or by signup.start). Asked inside the
+   * transaction that makes the first business, under the cap's lock, so first sign-ins arriving together can't pass it.
+   */
+  const signupOpen = (t) => signup().openToNewBusiness(t);
 
   async function chooseAccount({ req, personId, tenantId, review }) {
     if (review) return { account: review, created: false };
@@ -50,7 +49,7 @@ export function sessionOpener(ctx, { people, tokens, devices }) {
     }
     const [last] = await people.accounts(personId);
     if (last) return { account: last, created: false };
-    return { account: await people.makeFirstBusiness(personId, { held: !(await signupOpen()) }), created: true };
+    return { account: await people.makeFirstBusiness(personId, { held: async (t) => !(await signupOpen(t)) }), created: true };
   }
 
   /**
