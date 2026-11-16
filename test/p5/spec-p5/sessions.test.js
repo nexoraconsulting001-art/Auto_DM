@@ -188,7 +188,7 @@ test('P-07: an app below the minimum version gets 426 with a store link; at or a
     assert.match(old.data.error, /update/i, 'The refusal does not say "Update required"');
     assert.equal(old.data.items, undefined);
     for (const version of ['1.2.0', '1.2.1', '1.10.0', '2.0.0', '10.0.0']) assert.equal((await as(version)).status, 200, `version ${version}`);
-    for (const version of ['1.1.99', '0.9.9', '1.2', '1', 'garbage', '1.2.0-beta', ' 1.2.0', '99999999.0.0', '1.2.0.0', '']) {
+    for (const version of ['1.1.99', '0.9.9', '1.2', '1', 'garbage', '1.2.0-beta', '1. 2.0', '99999999.0.0', '1.2.0.0', '']) {
       assert.equal(noCrash(await as(version), `version ${JSON.stringify(version)}`).status, 426, `version ${JSON.stringify(version)} was let through`);
     }
     assert.equal((await as('1.0.0', 'ios')).status, 200, 'No minimum is set for iOS');

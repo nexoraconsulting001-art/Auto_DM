@@ -114,7 +114,8 @@ export async function verifyApple(ctx, { identityToken, nonce }) {
   } catch (err) {
     if (!(err instanceof IdTokenError)) throw err;
     log.warn('accounts.apple_refused', { kind: err.kind });
-    if (err.retryable) throw new ApiError('internal', 'Sign in with Apple isn’t reachable right now. Try again in a minute.');
+    // Apple's keys not answering is not our fault and not a refusal: a 4xx the app shows as "try again in a minute".
+    if (err.retryable) throw new ApiError('rate_limited', 'Sign in with Apple isn’t reachable right now. Try again in a minute.');
     throw refused();
   }
   const once = await ctx.platform.rateLimit.hit('seller_apple_nonce', tokenHash(nonce), { limit: 1, windowMs: APPLE_NONCE_WINDOW_MS });
