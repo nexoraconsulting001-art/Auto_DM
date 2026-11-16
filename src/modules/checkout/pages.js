@@ -7,7 +7,7 @@ import { html, raw } from '../../views/html.js';
 import { safeHref, section } from '../../views/buyer/index.js';
 import { shopperFrom, storeOn } from '../storefront/http.js';
 import { CHECKOUT_SCRIPT, policyLinks, sendStoreNotFound, sendStorePage } from '../storefront/shell.js';
-import { PAY_JS, PAY_SCRIPT } from '../storefront/views/pay.js';
+import { GATEWAY_ORIGINS, PAY_JS, PAY_SCRIPT } from '../storefront/views/pay.js';
 import { CHECKOUT_JS } from './assets.js';
 
 /**
@@ -148,7 +148,7 @@ ${canCancel ? html`<button class="chip" type="button" data-cancel>Cancel this or
 }
 
 /** The order page's two buttons. Paying again is the payments module's call; cancelling is the orders module's. */
-const ORDER_JS = `(() => {
+export const ORDER_JS = `(() => {
   const root = document.querySelector('[data-order-page]');
   const B = window.StoreBag;
   if (!root || !B) return;
@@ -175,6 +175,12 @@ const ORDER_JS = `(() => {
 })();`;
 export const ORDER_SCRIPT = '/store/order.js';
 
+/**
+ * A page that takes a payment: it loads the payment script (window.StorePay, which opens the gateway's checkout) before its own,
+ * and its policy lets the gateway's script, frame and calls through. Checkout and the order page both use it.
+ */
+const paying = (script) => ({ scripts: [PAY_SCRIPT, script], sources: GATEWAY_ORIGINS });
+
 export function checkoutPages(ctx) {
   const { db, repos, platform } = ctx;
   const r = express.Router();
@@ -187,7 +193,6 @@ export function checkoutPages(ctx) {
     if (!(await storeOn(repos))) return next();
     res.set('Cache-Control', 'public, max-age=3600').type('text/javascript').send(ORDER_JS);
   });
-  // The payment screen (PRD 9.6): the checkout opens it after placing a prepaid or part-advance order; the order page's Pay button after that.
   r.get(PAY_SCRIPT, async (req, res, next) => {
     if (!(await storeOn(repos))) return next();
     res.set('Cache-Control', 'public, max-age=3600').type('text/javascript').send(PAY_JS);
@@ -200,7 +205,7 @@ export function checkoutPages(ctx) {
       const [addresses, version] = await Promise.all([savedAddresses(db, shopper), noticeVersion(platform)]);
       res.set('Cache-Control', 'no-store');
       return await sendStorePage(ctx, req, res, {
-        kind: 'checkout', ref: 'checkout', title: 'Checkout', scripts: [CHECKOUT_SCRIPT, PAY_SCRIPT],
+        kind: 'checkout', ref: 'checkout', title: 'Checkout', ...paying(CHECKOUT_SCRIPT),
         data: { noticeVersion: version }, main: checkoutMain({ shopper, addresses }),
       });
     } catch (err) {
@@ -224,7 +229,7 @@ export function checkoutPages(ctx) {
       const canCancel = Boolean(shopper && order.shopper_id === shopper.id && canCancelBeforeShipment(order));
       res.set('Cache-Control', 'no-store');
       return await sendStorePage(ctx, req, res, {
-        kind: 'checkout', ref: 'order', title: `Order ${order.order_number}`, scripts: [ORDER_SCRIPT, PAY_SCRIPT],
+        kind: 'checkout', ref: 'order', title: `Order ${order.order_number}`, ...paying(ORDER_SCRIPT),
         main: orderMain({ order, items, state: orderState(order, latest), canCancel }),
       });
     } catch (err) {

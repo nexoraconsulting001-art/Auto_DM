@@ -2,7 +2,6 @@ import { POLICY_KINDS } from '../../contracts/api/store.js';
 import { buyerPage, loadBuyerLayout, notFoundPage, sendBuyerPage } from '../../views/buyer/index.js';
 import { esc, html, raw } from '../../views/html.js';
 import { currentTenant } from '../../tenancy.js';
-import { GATEWAY_ORIGINS, PAY_SCRIPT } from './views/pay.js';
 
 /**
  * The frame every Phase 4 buyer page sits in (PRD 9.1): the shared buyer layout (src/views/buyer) in the seller's brand only,
@@ -15,15 +14,6 @@ import { GATEWAY_ORIGINS, PAY_SCRIPT } from './views/pay.js';
 export const BAG_SCRIPT = '/store/bag.js';
 export const CHECKOUT_SCRIPT = '/store/checkout.js';
 export const ASSET_VERSION = '4.0.2';
-
-/** Other sites a store script needs in the page's policy. A page that loads the script gets them; no other page does. */
-const SCRIPT_ORIGINS = Object.freeze({ [PAY_SCRIPT]: GATEWAY_ORIGINS });
-
-function originsFor(scripts = []) {
-  const found = scripts.map((src) => SCRIPT_ORIGINS[src]).filter(Boolean);
-  if (!found.length) return null;
-  return { script: [...new Set(found.flatMap((o) => o.script))], frame: [...new Set(found.flatMap((o) => o.frame))] };
-}
 
 /** The address a page is seen at: the business's verified domain when it has one, else the address the shopper used. */
 export function baseOf(req) {
@@ -118,8 +108,9 @@ export async function renderStorePage(ctx, req, { title, description = '', main,
   return withHead(view, tags);
 }
 
-export async function sendStorePage(ctx, req, res, { kind = 'store', ref = '', status = 200, ...page }) {
-  return sendBuyerPage(res, await renderStorePage(ctx, req, page), { status, page: { kind, ref }, origins: originsFor(page.scripts) });
+/** `sources`: other sites' origins this page's scripts need, for its policy only (sendBuyerPage). */
+export async function sendStorePage(ctx, req, res, { kind = 'store', ref = '', status = 200, sources = null, ...page }) {
+  return sendBuyerPage(res, await renderStorePage(ctx, req, page), { status, page: { kind, ref }, sources });
 }
 
 export async function sendStoreNotFound(ctx, req, res, message = 'This page doesn’t exist.') {
