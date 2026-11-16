@@ -57,7 +57,9 @@ export function createStatement({ db }) {
       const of = (kind) => Number(rows.find((r) => r.kind === kind)?.total ?? 0);
       const sales = of('sale');
       const fees = -(of('gateway_fee') + of('gateway_fee_tax'));
-      const shipping = -of('shipping_charge');
+      // A seller billed monthly for courier charges pays them on Bhava's invoice, so the payout does not take them (9.10).
+      const [ship] = await db.query('SELECT charge_billing FROM shipping_settings WHERE tenant_id = $1', [tenantId()]);
+      const shipping = ship?.charge_billing === 'monthly' ? 0 : -of('shipping_charge');
       const refunds = -of('refund');
       const net = sales - fees - shipping - refunds + of('adjustment');
       return {

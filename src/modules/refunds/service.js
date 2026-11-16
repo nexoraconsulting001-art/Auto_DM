@@ -1,7 +1,6 @@
 import { ProviderError } from '../../adapters/http.js';
 import { ApiError } from '../../contracts/api/index.js';
 import { log, reportError } from '../../platform/log.js';
-import { checkPassword } from '../../repos/users.js';
 import { tenantId, withTenant } from '../../tenancy.js';
 import { writeAudit } from '../audit/index.js';
 import { changeOrder, changeRow } from '../orders/state.js';
@@ -16,7 +15,8 @@ import { PaymentError, isGatewayId, lockOrder, paiseOf, raiseAlert, rupees, writ
  *       again (S-28), so two refunds at the same moment can't both pass the limit. Then the gateway is asked, outside any
  *       transaction, with a key that makes a repeat the same refund. A cash-on-delivery payment is refunded by hand: 'manual',
  *       with the reference of how the money went back, and processed at once.
- *   createByOwner(orderId, body, user)   the API's: the owner's password is checked again on the call (5.11), then create.
+ *   createByOwner(orderId, body, user)   the API's: the route is fresh (a re-auth in the last few minutes, 5.11), and here
+ *                                        the caller must still be the owner and within REFUND_LIMIT; then create.
  *   retry(refundId, actor)               a failed gateway refund, asked again with the same key.
  *   applyGatewayRefund({ paymentId, refund, type })   a refund webhook (9.7).
  *   onCancelled(orderId)                 order.cancelled: a shopper's own cancellation is refunded at once (S-56, S-69);
@@ -28,7 +28,10 @@ import { PaymentError, isGatewayId, lockOrder, paiseOf, raiseAlert, rupees, writ
  * In own mode nothing is reversed (S-76). Every refund is in the audit log.
  */
 const RETRYING = 'retrying';
-const REAUTH = Object.freeze({ limit: 5, windowMs: 15 * 60_000 });
+/** The payment ran on an own gateway account the store has since replaced: refunded there by the owner, never retried here. */
+const ACCOUNT_CHANGED = 'account_changed';
+/** Refunds one owner may ask for in a window: enough for a day of returns, not for a runaway script. */
+const REFUND_LIMIT = Object.freeze({ limit: 30, windowMs: 15 * 60_000 });
 
 export const toRefund = (row) => ({
   id: Number(row.id), orderId: row.order_id, paymentId: Number(row.payment_id), amountPaise: Number(row.amount_paise), status: row.status, method: row.method,
@@ -67,9 +70,10 @@ export function createRefunds(ctx, payments) {
     const set = { processed_at: new Date(), error_code: '' };
     if (gatewayRefundId && !refund.gateway_refund_id) set.gateway_refund_id = gatewayRefundId;
 
-    // Managed: the same part of the seller's Route transfer comes back (S-75). Own mode never has one (S-76).
+    // Managed: the same part of the seller's Route transfer comes back (S-75). Own mode never has one (S-76). A reversal that
+    // Route's transfer.reversed already matched to this refund (payments.applyTransfer) is not counted again (money-7).
     let reversedPaise = 0;
-    if (payment.mode === 'managed') {
+    if (payment.mode === 'managed' && refund.reversal_status !== 'reversed') {
       const room = Number(payment.transfer_paise) - Number(payment.reversed_paise);
       const got = paiseOf(reversal?.amountPaise);
       if (got && got > 0) {
@@ -112,7 +116,10 @@ export function createRefunds(ctx, payments) {
     const order = await lockOrder(t, refund.order_id);
     const moved = await changeRow(t, 'refunds', refundId, 'failed', { ifAllowed: true, set: { error_code: String(code || 'refused').replace(/[^A-Za-z0-9_]/g, '').slice(0, 80) || 'refused' } });
     if (moved.row.status === 'failed') {
-      await raiseAlert(t, { kind: 'refund.failed', severity: 'critical', message: `A refund of ${rupees(moved.row.amount_paise)} on order ${order.order_number} didn’t go through. Try it again from the order.`, target: `order:${order.id}`, dedupeKey: `refund-failed:${refundId}:${Math.floor(Date.now() / 3_600_000)}` });
+      const message = moved.row.error_code === ACCOUNT_CHANGED
+        ? `A refund of ${rupees(moved.row.amount_paise)} on order ${order.order_number} can’t be sent: the payment was taken on a payment account this store no longer uses. Refund it from that account’s own dashboard.`
+        : `A refund of ${rupees(moved.row.amount_paise)} on order ${order.order_number} didn’t go through. Try it again from the order.`;
+      await raiseAlert(t, { kind: 'refund.failed', severity: 'critical', message, target: `order:${order.id}`, dedupeKey: `refund-failed:${refundId}:${Math.floor(Date.now() / 3_600_000)}` });
       await writeAudit(t, { actor: 'system', action: 'refund.failed', target: `order:${order.id}`, details: { refundId: Number(refundId), code: moved.row.error_code } });
     }
     return moved.row;
@@ -128,14 +135,24 @@ export function createRefunds(ctx, payments) {
       [tenantId(), refundId],
     );
     if (!row || row.method !== 'gateway' || !(row.status === 'requested' || (row.status === 'failed' && row.error_code === RETRYING))) return row;
+    // A refund the gateway already gave an id is looked up by it, never asked for again (money-13): a second ask would rest on
+    // the gateway still holding the idempotency key. Only a refund whose answer was lost is asked for again with its key.
+    const lookUp = row.status === 'requested' && isGatewayId(row.gateway_refund_id);
     let answer;
     try {
       const creds = await payments.settings.credentials(row.mode, { accountRef: row.account_ref });
-      answer = await creds.adapter.refund(creds.account, row.gateway_payment_id, { amountPaise: Number(row.amount_paise), idempotencyKey: gatewayKey(row), notes: { refund: String(row.id) } });
+      answer = lookUp
+        ? await creds.adapter.fetchRefund(creds.account, row.gateway_payment_id, row.gateway_refund_id)
+        : await creds.adapter.refund(creds.account, row.gateway_payment_id, { amountPaise: Number(row.amount_paise), idempotencyKey: gatewayKey(row), notes: { refund: String(row.id) } });
     } catch (err) {
-      if (err instanceof PaymentError) return db.tx((t) => markFailed(t, row.id, 'account_unavailable'));
+      if (err instanceof PaymentError) return db.tx((t) => markFailed(t, row.id, err.reason === ACCOUNT_CHANGED ? ACCOUNT_CHANGED : 'account_unavailable'));
       if (!(err instanceof ProviderError)) throw err;
-      if (err.delivery === 'none') return db.tx((t) => markFailed(t, row.id, err.code || err.kind));
+      // A refund looked up and not found, or refused, is left as it is: its webhook, or a person, settles it.
+      if (err.delivery === 'none' && !lookUp) return db.tx((t) => markFailed(t, row.id, err.code || err.kind));
+      if (lookUp) {
+        log.warn('refunds.lookup_failed', { refundId: Number(row.id), kind: err.kind });
+        return reread(row.id);
+      }
       // The gateway may have made it: the sweep asks again with the same key, which can only ever make this one refund.
       log.warn('refunds.gateway_unanswered', { refundId: Number(row.id), kind: err.kind });
       return reread(row.id);
@@ -209,16 +226,16 @@ export function createRefunds(ctx, payments) {
   }
 
   async function createByOwner(orderId, body, user) {
-    const limit = await ctx.platform.rateLimit.hit('refund_reauth', `${tenantId()}:${user.id}`, REAUTH);
-    if (!limit.allowed) throw new ApiError('rate_limited', 'Too many tries. Wait a few minutes and try again.');
-    // The signed-in owner's own password, checked against their own row: nothing else a sign-in does happens here.
-    const [me] = await db.query('SELECT id, role, password_hash FROM users WHERE tenant_id = $1 AND id = $2', [tenantId(), Number(user.id)]);
-    if (!me || me.role !== 'owner' || !(await checkPassword(body.password, me.password_hash))) {
-      log.warn('refunds.reauth_failed', { userId: user.id });
-      throw new ApiError('validation_failed', 'That password isn’t right.', { fields: { password: 'That password isn’t right' } });
+    const limit = await ctx.platform.rateLimit.hit('refund_create', `${tenantId()}:${user.id}`, REFUND_LIMIT);
+    if (!limit.allowed) throw new ApiError('rate_limited', 'Too many refunds at once. Wait a few minutes and try again.');
+    // The fresh re-auth is the router's (the route is marked fresh); the role is checked again on the person's own row.
+    const [me] = await db.query('SELECT id, role FROM users WHERE tenant_id = $1 AND id = $2 AND removed_at IS NULL', [tenantId(), Number(user.id)]);
+    if (!me || me.role !== 'owner') {
+      log.warn('refunds.not_owner', { userId: user.id });
+      throw new ApiError('forbidden');
     }
-    await ctx.platform.rateLimit.reset('refund_reauth', `${tenantId()}:${user.id}`);
-    return create(orderId, { ...body, actor: `user:${user.id}` });
+    const { password: _ignored, ...rest } = body ?? {};
+    return create(orderId, { ...rest, actor: `user:${user.id}` });
   }
 
   async function retry(refundId, actor) {
@@ -230,6 +247,7 @@ export function createRefunds(ctx, payments) {
       const [refund] = await t.query('SELECT * FROM refunds WHERE tenant_id = $1 AND id = $2 FOR UPDATE', [tenantId(), id]);
       if (refund.status === 'processed') return { row: refund, done: true };
       if (refund.method !== 'gateway') throw new ApiError('conflict', 'A refund paid back by hand isn’t sent to the gateway.');
+      if (refund.error_code === ACCOUNT_CHANGED) throw new ApiError('conflict', 'This payment was taken on a payment account this store no longer uses. Refund it from that account’s own dashboard.');
       if (refund.status === 'requested' || refund.error_code === RETRYING) return { row: refund };
       const [payment] = await t.query('SELECT * FROM payments WHERE tenant_id = $1 AND id = $2 FOR UPDATE', [tenantId(), refund.payment_id]);
       if (payment.status !== 'captured' || (await held(t, payment.id, refund.id)) + Number(refund.amount_paise) > Number(payment.amount_paise)) {
@@ -331,11 +349,16 @@ export function createRefunds(ctx, payments) {
     }
   }
 
-  /** Refunds whose gateway answer was lost, asked about again with their own key, a few minutes apart. */
+  /**
+   * Refunds whose gateway answer was lost, asked about again with their own key, or looked up by the gateway's id when it is
+   * known: every 2 minutes in the first hour, every 30 minutes in the first day, then every 6 hours up to 30 days.
+   */
   async function sweep({ limit = 100 } = {}) {
     const due = await platformDb.query(
       `SELECT tenant_id, id FROM refunds WHERE method = 'gateway' AND (status = 'requested' OR (status = 'failed' AND error_code = $1))
-         AND updated_at < now() - interval '2 minutes' AND created_at > now() - interval '30 days' ORDER BY updated_at LIMIT $2`,
+         AND updated_at < now() - CASE WHEN created_at > now() - interval '1 hour' THEN interval '2 minutes'
+                                        WHEN created_at > now() - interval '1 day' THEN interval '30 minutes' ELSE interval '6 hours' END
+         AND created_at > now() - interval '30 days' ORDER BY updated_at LIMIT $2`,
       [RETRYING, limit],
     );
     const results = [];

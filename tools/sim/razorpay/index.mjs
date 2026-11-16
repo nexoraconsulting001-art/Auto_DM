@@ -10,11 +10,16 @@
  *   GET  /v1/payments/:id/refunds/:refundId
  *   POST /v2/accounts              GET /v2/accounts/:id                  linked accounts (Route)
  *   GET  /v1/transfers/:id
+ *   GET  /v1/payments/:id/transfers     POST /v1/payments/:id/transfers { transfers: [{ account, amount, currency, on_hold?, notes? }] }
+ *       Route after capture: what of a captured payment goes to linked accounts (at most what is left of the payment)
+ *   POST /v1/transfers/:id/reversals { amount, notes? }                  part of a transfer taken back to Bhava's account
  *   POST /token                                                          Partner OAuth: authorization_code or refresh_token
  *   POST /v1/customers   POST /v1/plans { period, interval, item: { name, amount } }                 Bhava's own billing (PRD 5.12)
  *   POST /v1/subscriptions { plan_id, customer_id, total_count, notes }      GET /v1/subscriptions/:id
  *   PATCH /v1/subscriptions/:id { plan_id, schedule_change_at: 'now' | 'cycle_end' }                 POST /v1/subscriptions/:id/cancel
- *   POST /v1/subscriptions/:id/addons { item: { name, amount }, quantity, notes }    GET /v1/addons?subscription_id=
+ *   POST /v1/subscriptions/:id/addons { item: { name, amount }, quantity, notes }    DELETE /v1/addons/:id (only one not yet charged)
+ *   GET  /v1/addons?count=&skip=&from=&to=   as Razorpay documents it: every add-on of the account, newest first, `count`
+ *        (default 10, at most 100) from `skip`. It takes no subscription filter: a caller filters by subscription_id itself
  *   GET  /v1/settlements/recon/combined?year=&month=    with X-Razorpay-Account: what was settled to one linked account in a month
  *
  * Controls (under /__sim), beside the shared ones in base.mjs (faults, calls, the clock):
@@ -67,6 +72,7 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
   let refundKeys;
   let accounts;
   let transfers;
+  let reversals;
   let tokens;
   let codes;
   let ownWebhooks;
@@ -78,6 +84,7 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
     refundKeys = new Map();
     accounts = new Map();
     transfers = new Map();
+    reversals = new Map();
     tokens = new Map();
     codes = new Map();
     ownWebhooks = new Map();
@@ -211,6 +218,47 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
         if (!account) throw razorpayError(400, 'The id provided does not exist');
         return account;
       });
+      on('GET', '/v1/payments/:id/transfers', (req) => {
+        if (caller(req) !== 'platform') throw razorpayError(400, 'Route is not enabled for this account.');
+        const payment = owned(payments, req.params.id, 'platform');
+        const items = [...transfers.values()].filter((t) => t.source === payment.id);
+        return { entity: 'collection', count: items.length, items };
+      });
+      on('POST', '/v1/payments/:id/transfers', (req) => {
+        if (caller(req) !== 'platform') throw razorpayError(400, 'Route is not enabled for this account.');
+        const payment = owned(payments, req.params.id, 'platform');
+        if (payment.status !== 'captured') throw razorpayError(400, 'Only a captured payment can be transferred.');
+        const wanted = req.body?.transfers;
+        if (!Array.isArray(wanted) || !wanted.length) throw razorpayError(400, 'transfers must be a list.');
+        const already = [...transfers.values()].filter((t) => t.source === payment.id).reduce((sum, t) => sum + t.amount, 0);
+        let total = 0;
+        for (const t of wanted) {
+          const account = accounts.get(t?.account);
+          if (!account) throw razorpayError(400, 'The linked account does not exist.');
+          if (account.status !== 'activated') throw razorpayError(400, 'The linked account is not activated.');
+          if (!Number.isInteger(t.amount) || t.amount < 100) throw razorpayError(400, 'A transfer amount must be an integer of at least 100 paise.');
+          total += t.amount;
+        }
+        if (already + total > payment.amount) throw razorpayError(400, 'The sum of transfers exceeds the payment amount.');
+        const items = wanted.map((t) => {
+          const transfer = { id: nextId('trf'), entity: 'transfer', source: payment.id, recipient: t.account, amount: t.amount, amount_reversed: 0, currency: 'INR', on_hold: Boolean(t.on_hold), notes: t.notes ?? {}, status: 'created', created_at: seconds(sim.clock.now()) };
+          transfers.set(transfer.id, transfer);
+          return transfer;
+        });
+        return { entity: 'collection', count: items.length, items };
+      });
+      on('POST', '/v1/transfers/:id/reversals', (req) => {
+        if (caller(req) !== 'platform') throw razorpayError(400, 'Route is not enabled for this account.');
+        const transfer = transfers.get(req.params.id);
+        if (!transfer) throw razorpayError(400, 'The id provided does not exist');
+        const amount = req.body?.amount ?? transfer.amount - transfer.amount_reversed;
+        if (!Number.isInteger(amount) || amount < 1) throw razorpayError(400, 'The reversal amount must be a positive integer.');
+        if (amount > transfer.amount - transfer.amount_reversed) throw razorpayError(400, 'The reversal amount is greater than the amount left on the transfer.');
+        transfer.amount_reversed += amount;
+        const reversal = { id: nextId('rvrsl'), entity: 'reversal', transfer_id: transfer.id, amount, currency: 'INR', notes: req.body?.notes ?? {}, created_at: seconds(sim.clock.now()) };
+        reversals.set(reversal.id, reversal);
+        return reversal;
+      });
       on('GET', '/v1/transfers/:id', (req) => {
         if (caller(req) !== 'platform') throw razorpayError(400, 'Route is not enabled for this account.');
         const transfer = transfers.get(req.params.id);
@@ -286,8 +334,21 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
       });
       on('GET', '/v1/addons', (req) => {
         billingOnly(req);
-        const items = [...addons.values()].filter((a) => !req.query?.subscription_id || a.subscription_id === req.query.subscription_id);
+        const count = Math.min(100, Math.max(1, Number(req.query?.count ?? 10) || 10));
+        const skip = Math.max(0, Number(req.query?.skip ?? 0) || 0);
+        const from = Number(req.query?.from ?? 0) || 0;
+        const to = Number(req.query?.to ?? 0) || Infinity;
+        const all = [...addons.values()].filter((a) => a.created_at >= from && a.created_at <= to).sort((x, y) => y.created_at - x.created_at || (x.id < y.id ? 1 : -1));
+        const items = all.slice(skip, skip + count);
         return { entity: 'collection', count: items.length, items };
+      });
+      on('DELETE', '/v1/addons/:id', (req) => {
+        billingOnly(req);
+        const addon = addons.get(req.params.id);
+        if (!addon) throw razorpayError(400, 'The id provided does not exist');
+        if (addon.invoice_id) throw razorpayError(400, 'The addon has already been charged and cannot be deleted.');
+        addons.delete(addon.id);
+        return [];
       });
       on('GET', '/v1/settlements/recon/combined', (req) => {
         if (caller(req) !== 'platform') throw razorpayError(400, 'Route is not enabled for this account.');
@@ -307,6 +368,9 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
           if (inMonth(transfer.created_at)) items.push({ entity_id: transfer.id, type: 'transfer', amount: transfer.amount, fee: payment?.fee ?? 0, tax: payment?.tax ?? 0, payment_id: transfer.source, transfer_id: transfer.id, settled, settlement_id: settled ? `setl_${transfer.id.slice(4)}` : null, created_at: transfer.created_at });
           for (const refund of refunds.values()) {
             if (refund.reversal?.transfer_id === transfer.id && inMonth(refund.created_at)) items.push({ entity_id: refund.reversal.id, type: 'reversal', amount: refund.reversal.amount, fee: 0, tax: 0, payment_id: refund.payment_id, transfer_id: transfer.id, settled: true, settlement_id: null, created_at: refund.created_at });
+          }
+          for (const reversal of reversals.values()) {
+            if (reversal.transfer_id === transfer.id && inMonth(reversal.created_at)) items.push({ entity_id: reversal.id, type: 'reversal', amount: reversal.amount, fee: 0, tax: 0, payment_id: transfer.source, transfer_id: transfer.id, settled: true, settlement_id: null, created_at: reversal.created_at });
           }
         }
         return { entity: 'collection', count: items.length, items };
@@ -447,7 +511,7 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
         codes.set(code, accountId);
         return { code, accountId, keySecret: `sim-own-key-secret-${accountId}` };
       });
-      on('GET', '/state', () => ({ subscriptions: [...subscriptions.values()].map(subscriptionView), addons: [...addons.values()], plans: [...plans.values()], customers: [...customers.values()], orders: [...orders.values()].map(publicView), payments: [...payments.values()].map(publicView), refunds: [...refunds.values()].map(publicView), transfers: [...transfers.values()], accounts: [...accounts.values()] }));
+      on('GET', '/state', () => ({ subscriptions: [...subscriptions.values()].map(subscriptionView), addons: [...addons.values()], plans: [...plans.values()], customers: [...customers.values()], orders: [...orders.values()].map(publicView), payments: [...payments.values()].map(publicView), refunds: [...refunds.values()].map(publicView), transfers: [...transfers.values()], reversals: [...reversals.values()], accounts: [...accounts.values()] }));
     },
   });
 

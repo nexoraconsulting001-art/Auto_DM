@@ -87,6 +87,7 @@ const toPayment = (p) => ({
 });
 const toOrder = (o, keyId) => ({ id: o.id, amountPaise: o.amount, amountPaidPaise: o.amount_paid ?? 0, status: o.status, receipt: o.receipt ?? '', keyId });
 const toRefund = (r) => ({ id: r.id, status: r.status, amountPaise: r.amount, paymentId: r.payment_id });
+const toTransfer = (t) => ({ id: t.id, recipient: t.recipient, amountPaise: t.amount ?? 0, amountReversedPaise: t.amount_reversed ?? 0, status: String(t.status ?? '') });
 const toDate = (seconds) => (Number(seconds) > 0 ? new Date(Number(seconds) * 1000) : null);
 const toSubscription = (s) => ({
   id: s.id,
@@ -161,12 +162,42 @@ function createRoute(config, request) {
   return {
     kind: 'route',
     ...common(request, { authFor: auth, keyIdFor: () => config.razorpayKeyId }),
+    /**
+     * The gateway order carries no transfer: the gateway's fee is known only once the payment is captured, and the seller
+     * gets the sale less that fee (S-70), so the transfer is made after capture with transferPayment.
+     */
     async createOrder(account, { amountPaise, receipt, notes = {} }) {
-      const { body } = await request('POST', '/v1/orders', {
-        headers: auth(),
-        json: { amount: amountPaise, currency: 'INR', receipt, notes, transfers: [{ account: linked(account), amount: amountPaise, currency: 'INR', on_hold: false }] },
-      });
+      linked(account);
+      const { body } = await request('POST', '/v1/orders', { headers: auth(), json: { amount: amountPaise, currency: 'INR', receipt, notes } });
       return toOrder(body, config.razorpayKeyId);
+    },
+    /** The Route transfers already made from one captured payment: [{ id, recipient, amountPaise, amountReversedPaise, status }]. */
+    async paymentTransfers(account, gatewayPaymentId) {
+      linked(account);
+      const { body } = await request('GET', `/v1/payments/${encodeURIComponent(gatewayPaymentId)}/transfers`, { headers: auth(), retries: 2 });
+      return (body?.items ?? []).map(toTransfer);
+    },
+    /**
+     * Sends `amountPaise` of a captured payment to the seller's linked account. Razorpay takes no idempotency key here, so a
+     * transfer already made from this payment to this account is answered instead of a second one: a repeat after a lost
+     * answer never pays the seller twice.
+     */
+    async transferPayment(account, gatewayPaymentId, { amountPaise, notes = {} }) {
+      const to = linked(account);
+      const made = (await this.paymentTransfers(account, gatewayPaymentId)).find((t) => t.recipient === to);
+      if (made) return made;
+      const { body } = await request('POST', `/v1/payments/${encodeURIComponent(gatewayPaymentId)}/transfers`, {
+        headers: auth(),
+        json: { transfers: [{ account: to, amount: amountPaise, currency: 'INR', on_hold: false, notes }] },
+      });
+      const item = body?.items?.[0] ?? null;
+      return item ? toTransfer(item) : null;
+    },
+    /** Takes `amountPaise` of a transfer back to Bhava's account, e.g. a courier charge taken from the payout. -> { id, amountPaise } */
+    async reverseTransfer(account, transferId, { amountPaise, notes = {} }) {
+      linked(account);
+      const { body } = await request('POST', `/v1/transfers/${encodeURIComponent(transferId)}/reversals`, { headers: auth(), json: { amount: amountPaise, notes } });
+      return { id: body?.id ?? null, amountPaise: body?.amount ?? 0 };
     },
     async refund(account, gatewayPaymentId, { amountPaise, idempotencyKey, notes = {} }) {
       linked(account);
@@ -246,6 +277,9 @@ function createPartner(config, request, authRequest) {
   };
 }
 
+const ADDON_PAGE = 100;
+const ADDON_PAGES = 50;
+
 /** Subscriptions on Bhava's own account: what a business pays Bhava (PRD 5.12). */
 function createBilling(config, request) {
   const auth = () => ({ authorization: basic(need(config.razorpayBillingKeyId || config.razorpayKeyId, 'RAZORPAY_KEY_ID'), need(config.razorpayBillingKeySecret || config.razorpayKeySecret, 'RAZORPAY_KEY_SECRET')) });
@@ -254,6 +288,21 @@ function createBilling(config, request) {
     if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('Razorpay needs an amount in whole paise');
     return amount;
   };
+  /**
+   * The add-on of one subscription carrying `key` in its notes, or null. Razorpay's list of add-ons is the whole account's,
+   * newest first, in pages (count at most 100), and documents no subscription filter: every page is read until one comes
+   * back short, and the subscription is matched here. ADDON_PAGES bounds it.
+   */
+  async function findAddon(subscriptionId, key) {
+    for (let page = 0; page < ADDON_PAGES; page++) {
+      const { body } = await request('GET', '/v1/addons', { headers: auth(), query: { count: ADDON_PAGE, skip: page * ADDON_PAGE }, retries: 2 });
+      const items = body?.items ?? [];
+      const found = items.find((addon) => addon.subscription_id === subscriptionId && addon.notes?.key === key);
+      if (found) return found;
+      if (items.length < ADDON_PAGE) return null;
+    }
+    throw new Error('Too many Razorpay add-ons to look through for a repeat; not adding another');
+  }
   return {
     kind: 'billing',
     async createCustomer({ name, email = '', phone = '', reference = '' }) {
@@ -280,10 +329,19 @@ function createBilling(config, request) {
     async addCharge(id, { name, amountPaise, quantity = 1, idempotencyKey }) {
       const key = need(idempotencyKey, 'an idempotency key');
       // Razorpay has no idempotency header for add-ons, so the key rides in the notes and is looked for before a new line is made.
-      const { body: existing } = await request('GET', '/v1/addons', { headers: auth(), query: { subscription_id: need(id, 'a subscription id') }, retries: 2 });
-      const found = (existing?.items ?? []).find((addon) => addon.subscription_id === id && addon.notes?.key === key);
+      const found = await findAddon(need(id, 'a subscription id'), key);
       const made = found ?? (await request('POST', `${sub(id)}/addons`, { headers: auth(), json: { item: { name, amount: wholePaise(amountPaise), currency: 'INR' }, quantity, notes: { key } } })).body;
       return { id: made.id, amountPaise: made.item?.amount ?? amountPaise, quantity: made.quantity ?? quantity };
+    },
+    /**
+     * Takes back a line not yet charged: by its id, or, when the answer that named it was lost, by its key. Answers whether a
+     * line was deleted. A line the provider already charged is refused (a ProviderError, delivery 'none').
+     */
+    async removeCharge(id, { addonId = null, idempotencyKey = null } = {}) {
+      const target = addonId ?? (idempotencyKey ? (await findAddon(need(id, 'a subscription id'), idempotencyKey))?.id : null);
+      if (!target) return false;
+      await request('DELETE', `/v1/addons/${encodeURIComponent(target)}`, { headers: auth() });
+      return true;
     },
     async cancel(id, { atCycleEnd = false } = {}) {
       const { body } = await request('POST', `${sub(id)}/cancel`, { headers: auth(), json: { cancel_at_cycle_end: atCycleEnd ? 1 : 0 } });

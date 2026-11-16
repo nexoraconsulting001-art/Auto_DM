@@ -3,9 +3,10 @@ import { monthBounds } from './meter.js';
 
 /**
  * Charges Bhava passes through at cost, with no markup (PRD 5.12, F-84, F-113, F-114): one pass_through_charges row per
- * source, which the billing track puts on the invoice (collected_by 'invoice') or which the payout already took
- * (collected_by 'payout', shown on the settlement statement). (kind, source_ref) is unique per business, so running this
- * again never charges twice; a row may still change until an invoice carries it, and never after.
+ * source, which the billing track charges at the provider and puts on the invoice (collected_by 'invoice': billing's
+ * queuePassThrough is the only writer to the provider, for closed months) or which the payout already took (collected_by
+ * 'payout', shown on the settlement statement). (kind, source_ref) is unique per business, so running this again never
+ * charges twice; a row may still change until billing queues it at the provider (queued_at), and never after.
  *
  *   gateway_fee  one per payment on Bhava's default path (payments.mode 'managed'): the fee and its GST, from Phase 4's
  *                statement lines. Taken at payout.
@@ -41,7 +42,7 @@ export function createPassThrough({ db }) {
        LEFT JOIN shipping_settings s ON s.tenant_id = l.tenant_id
        WHERE l.tenant_id = $1 AND l.kind = 'shipping_charge' AND l.occurred_at >= $2::timestamptz AND l.occurred_at < $3::timestamptz
        ON CONFLICT (tenant_id, kind, source_ref) DO UPDATE SET amount_paise = EXCLUDED.amount_paise, collected_by = EXCLUDED.collected_by
-         WHERE pass_through_charges.invoice_id IS NULL AND (pass_through_charges.amount_paise, pass_through_charges.collected_by) IS DISTINCT FROM (EXCLUDED.amount_paise, EXCLUDED.collected_by)
+         WHERE pass_through_charges.invoice_id IS NULL AND pass_through_charges.queued_at IS NULL AND (pass_through_charges.amount_paise, pass_through_charges.collected_by) IS DISTINCT FROM (EXCLUDED.amount_paise, EXCLUDED.collected_by)
        RETURNING id`,
       [tid, start, end, month],
     );
@@ -50,7 +51,7 @@ export function createPassThrough({ db }) {
        SELECT tenant_id, CASE meter WHEN 'whatsapp_messages' THEN 'whatsapp' ELSE 'ai' END, cost_paise, used, month, 'invoice', 'usage:' || meter || ':' || to_char(month, 'YYYY-MM')
        FROM usage_months WHERE tenant_id = $1 AND month = $2::date AND meter IN ('whatsapp_messages', 'ai_units') AND used > 0
        ON CONFLICT (tenant_id, kind, source_ref) DO UPDATE SET amount_paise = EXCLUDED.amount_paise, quantity = EXCLUDED.quantity
-         WHERE pass_through_charges.invoice_id IS NULL AND (pass_through_charges.amount_paise, pass_through_charges.quantity) IS DISTINCT FROM (EXCLUDED.amount_paise, EXCLUDED.quantity)
+         WHERE pass_through_charges.invoice_id IS NULL AND pass_through_charges.queued_at IS NULL AND (pass_through_charges.amount_paise, pass_through_charges.quantity) IS DISTINCT FROM (EXCLUDED.amount_paise, EXCLUDED.quantity)
        RETURNING id`,
       [tid, month],
     );

@@ -234,7 +234,9 @@ export function createSettings({ db, repos, config, providers, secrets }) {
         const sets = { mode };
         if (mode === 'own' && current.own_connection === 'none') {
           if (!keys) throw new ApiError('conflict', 'Connect your own payment account first.');
-          Object.assign(sets, { own_connection: 'keys', own_account_id: current.own_account_id ?? String(keys.keyId).slice(0, 60) }, webhookColumns(current));
+          Object.assign(sets, { own_connection: 'keys', own_account_id: String(keys.keyId).slice(0, 60) }, webhookColumns(current));
+        } else if (mode === 'own' && current.own_connection === 'keys' && keys) {
+          sets.own_account_id = String(keys.keyId).slice(0, 60); // keys replaced since: the account in use is theirs
         }
         const columns = Object.keys(sets);
         await t.query(`UPDATE payment_settings SET ${columns.map((c, i) => `${c} = $${i + 2}`).join(', ')}, updated_at = now() WHERE tenant_id = $1`, [tenantId(), ...columns.map((c) => sets[c])]);
@@ -271,6 +273,12 @@ export function createSettings({ db, repos, config, providers, secrets }) {
      */
     async credentials(mode, { accountRef } = {}) {
       const current = await row();
+      // Own mode (money-12): the account in use is the OAuth account, or the account behind the saved keys. A payment that ran on
+      // another account the store no longer has can only be refunded or looked up there, never through this one.
+      const sameAccount = (ref) => {
+        if (accountRef && ref && accountRef !== ref) throw new PaymentError('conflict', 'This payment was taken on a payment account this store no longer uses. Refund it from that account’s own dashboard.', 'account_changed');
+        return ref || accountRef || '';
+      };
       if (mode === 'managed') {
         const linkedAccountId = accountRef || current.linked_account_id;
         if (!linkedAccountId || !config.razorpayKeyId || !config.razorpayKeySecret) throw new PaymentError('conflict', 'Online payment isn’t set up for this store yet.', 'online_unavailable');
@@ -299,14 +307,14 @@ export function createSettings({ db, repos, config, providers, secrets }) {
             await saveTokens(db, tokens);
           }
         }
-        return { mode, adapter: razorpay.partner, account: { accessToken: tokens.accessToken, publicToken: tokens.publicToken }, accountRef: accountRef || current.own_account_id || '', checkoutSecret: null };
+        return { mode, adapter: razorpay.partner, account: { accessToken: tokens.accessToken, publicToken: tokens.publicToken }, accountRef: sameAccount(current.own_account_id || ''), checkoutSecret: null };
       }
       if (current.own_connection === 'keys') {
         const keys = await repos.gatewayKeys.get('razorpay').catch((err) => {
           log.warn('payments.keys_unreadable', { error: err.name });
           return null;
         });
-        if (keys) return { mode, adapter: razorpay.partner, account: keys, accountRef: accountRef || current.own_account_id || String(keys.keyId).slice(0, 60), checkoutSecret: keys.keySecret };
+        if (keys) return { mode, adapter: razorpay.partner, account: keys, accountRef: sameAccount(String(keys.keyId).slice(0, 60)), checkoutSecret: keys.keySecret };
       }
       throw new PaymentError('conflict', 'This store’s own payment account isn’t connected.', 'online_unavailable');
     },

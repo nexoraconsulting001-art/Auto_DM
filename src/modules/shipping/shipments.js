@@ -351,6 +351,10 @@ export function createShipments(ctx, { settings, kick = () => {} }) {
       await chargeLine(t, moved.row, charge);
       return moved;
     });
+    // A charge taken at payout comes off the order's Route transfer (9.10); a failure here is retried by the payments check.
+    if (!out.skipped.length && out.row.mode === 'managed' && charge > 0) {
+      await ctx.payments?.takeShipping?.(s.order_id).catch((err) => log.warn('shipping.charge_not_taken', { tenantId: tenantId(), shipment: Number(s.id), ...failureFields(err) }));
+    }
     kick();
     if (out.skipped.length && out.row.status === 'cancelled') {
       // Cancelled while the AWB was being booked: call it off at the courier too.

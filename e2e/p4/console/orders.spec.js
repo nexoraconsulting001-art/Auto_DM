@@ -57,19 +57,16 @@ test('S-30, S-31, S-27: an order is packed, cancelled with a refund prompt, and 
   const prompt = page.getByRole('status').filter({ hasText: 'This order was cancelled after it was paid.' });
   await expect(prompt).toContainText('Refund ₹999.');
 
-  // A wrong password refunds nothing; the right one refunds Rs 200 of Rs 999 (S-27).
+  // Too much refunds nothing; Rs 200 of Rs 999 is refunded (S-27). The session just signed in, so it is fresh (5.11) and
+  // no password is asked for; the stale-session refusal is covered by test/final/money/refund-reauth.test.js.
   await prompt.getByRole('button', { name: 'Refund ₹999' }).click();
   await expect(dialog(page).getByLabel('Amount (₹)')).toHaveValue('999');
+  await expect(dialog(page).getByLabel('Your password')).toHaveCount(0);
   await dialog(page).getByLabel('Amount (₹)').fill('1000');
-  await dialog(page).getByLabel('Your password').fill(shop.owner.password);
   await dialog(page).getByRole('button', { name: 'Refund now' }).click();
   await expect(dialog(page).getByText('You can refund at most ₹999')).toBeVisible();
-  await dialog(page).getByLabel('Amount (₹)').fill('200');
-  await dialog(page).getByLabel('Your password').fill('not-the-password');
-  await dialog(page).getByRole('button', { name: 'Refund now' }).click();
-  await expect(dialog(page).getByText('That password isn’t right').first()).toBeVisible();
   expect(await shop.refunds(row.id)).toEqual([]);
-  await dialog(page).getByLabel('Your password').fill(shop.owner.password);
+  await dialog(page).getByLabel('Amount (₹)').fill('200');
   await dialog(page).getByRole('button', { name: 'Refund now' }).click();
   await expect(toast(page, 'Refund of ₹200 started.')).toBeVisible();
   await orderBecomes(shop, row.order_number, (o) => o.payment_status === 'partially_refunded');

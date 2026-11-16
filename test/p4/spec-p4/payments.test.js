@@ -214,9 +214,10 @@ test('S-70: a Rs 1,000 managed capture sends Rs 1,000 minus the gateway fee to t
   const amount = Number(row.total_paise);
   assert.equal(Number(row.subtotal_paise), 100000);
   const payment = row.paid.payment;
-  const [gwCall] = (await world.rzp.calls({ method: 'POST', path: '/v1/orders' })).filter((c) => c.body?.receipt === row.order_number);
-  assert.ok(Array.isArray(gwCall.body.transfers) && gwCall.body.transfers.length === 1, 'The gateway order carries no Route transfer');
-  assert.equal(gwCall.body.transfers[0].account, shop.linkedAccount, 'The transfer is not to the seller’s linked account');
+  // The fee is known only once the payment is captured, so the split is a transfer from the captured payment.
+  const transferCalls = await world.rzp.calls({ method: 'POST', path: `/v1/payments/${payment.id}/transfers` });
+  assert.equal(transferCalls.length, 1, 'The captured payment is not split by one Route transfer');
+  assert.equal(transferCalls[0].body.transfers[0].account, shop.linkedAccount, 'The transfer is not to the seller’s linked account');
   const state = await world.rzp.get('/state');
   const gwPayment = state.payments.find((x) => x.id === payment.id);
   const transfer = state.transfers.find((t) => t.source === payment.id);

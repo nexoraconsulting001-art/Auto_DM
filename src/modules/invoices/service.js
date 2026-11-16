@@ -16,7 +16,9 @@ import { invoicePdf } from './pdf.js';
  *   settings.get() / settings.update(patch)   legal name, GSTIN, state and prefix (invoice_settings)
  *   issueFor(orderId, { force })              the order's invoice, issued if it is due and not yet issued -> { invoice, created } | null
  *   creditNoteFor(refundId)                   the refund's credit note, issued once it is processed -> { invoice, created } | null
- *   onEvent(event)                            the order event listener: order.paid / advance_paid / delivered, refund.processed
+ *   creditBalanceFor(orderId)                 a part-advance order cancelled or back to origin: the balance never collected, credited
+ *   onEvent(event)                            the order event listener: order.paid / advance_paid / delivered, refund.processed,
+ *                                             order.cancelled / rto_delivered
  *   list({ cursor, limit, orderId }) / get(id)   the console's
  *   file(invoice)                             the PDF: from storage, or drawn again from the row -> Buffer
  *   storeFile(invoiceId)                      the queue job: draws the PDF and keeps it in storage
@@ -32,7 +34,7 @@ import { invoicePdf } from './pdf.js';
  */
 export const PDF_QUEUE = 'invoices.pdf';
 export const SWEEP_QUEUE = 'invoices.pdf-sweep';
-export const INVOICE_EVENTS = Object.freeze(['order.paid', 'order.advance_paid', 'order.delivered', 'refund.processed']);
+export const INVOICE_EVENTS = Object.freeze(['order.paid', 'order.advance_paid', 'order.delivered', 'refund.processed', 'order.cancelled', 'order.rto_delivered']);
 
 const GSTIN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/;
 const STATE = /^[0-9]{2}$/;
@@ -204,7 +206,7 @@ export function createInvoices(ctx) {
     try {
       return await db.tx(work);
     } catch (err) {
-      if (err?.code === '23505' && /^invoices_(order|refund)_idx$/.test(err.constraint ?? '')) {
+      if (err?.code === '23505' && /^invoices_(order|refund|balance_credit)_idx$/.test(err.constraint ?? '')) {
         const row = await reread();
         if (row) return { invoice: row, created: false };
       }
@@ -292,8 +294,62 @@ export function createInvoices(ctx) {
     return result;
   }
 
+  /**
+   * A part-advance order is invoiced in full when the advance is paid (9.13). When it is cancelled, or the parcel comes back
+   * to origin, the balance is never collected at the door: a credit note against the invoice takes that balance off, once per
+   * order (migration 913). What was paid online is credited by its own refund's credit note, as for any refund.
+   */
+  async function creditBalanceFor(orderId) {
+    const result = await once(async (t) => {
+      const order = await lockOrder(t, orderId);
+      if (!order || order.flow !== 'checkout' || order.payment_mode !== 'part_advance') return null;
+      if (!['cancelled', 'rto_delivered'].includes(order.fulfilment_status)) return null;
+      const [{ collected }] = await t.query(`SELECT COALESCE(sum(amount_paise), 0) AS collected FROM payments WHERE tenant_id = $1 AND order_id = $2 AND purpose = 'cod' AND status = 'captured'`, [tenantId(), order.id]);
+      const uncollected = Number(order.balance_paise) - Number(collected);
+      if (uncollected <= 0) return null;
+      const [invoice] = await t.query(`SELECT * FROM invoices WHERE tenant_id = $1 AND order_id = $2 AND doc_type <> 'credit_note'`, [tenantId(), order.id]);
+      if (!invoice) return null; // never invoiced: nothing to take back
+      const [existing] = await t.query(`SELECT * FROM invoices WHERE tenant_id = $1 AND order_id = $2 AND doc_type = 'credit_note' AND refund_id IS NULL`, [tenantId(), order.id]);
+      if (existing) return { invoice: existing, created: false };
+      const earlier = await t.query(`SELECT lines FROM invoices WHERE tenant_id = $1 AND original_invoice_id = $2 AND doc_type = 'credit_note' ORDER BY id`, [tenantId(), invoice.id]);
+      let lines;
+      try {
+        lines = creditNoteLines({
+          invoice: { lines: invoice.lines, placeOfSupply: invoice.place_of_supply, sellerState: invoice.seller?.stateCode ?? '', registered: invoice.doc_type === 'invoice' },
+          earlier: earlier.flatMap((row) => row.lines),
+          amountPaise: uncollected,
+          prefer: {},
+          qty: {},
+        });
+      } catch (err) {
+        if (!(err instanceof RangeError)) throw err;
+        await alertsRepo(t).raise({ kind: 'invoice.credit_mismatch', severity: 'critical', audience: 'ops', target: `order:${order.id}`, dedupeKey: `credit-balance-mismatch:${order.id}`, message: `The uncollected balance of order ${order.order_number} is more than is left on its invoice ${invoice.number}, so no credit note was issued. Check the order.` });
+        log.warn('invoices.credit_mismatch', { orderId: order.id, invoiceId: Number(invoice.id), reason: 'balance' });
+        return { invoice: null, created: false, mismatch: true };
+      }
+      const totals = totalsOf(lines);
+      const [note] = await t.query(
+        `INSERT INTO invoices (tenant_id, order_id, doc_type, fy, seq, number, refund_id, original_invoice_id, seller, buyer, place_of_supply, lines,
+           taxable_paise, cgst_paise, sgst_paise, igst_paise, total_paise)
+         VALUES ($1, $2, 'credit_note', 0, 0, '', NULL, $3, $4::jsonb, $5::jsonb, $6, $7::jsonb, $8, $9, $10, $11, $12) RETURNING *`,
+        [tenantId(), order.id, invoice.id, JSON.stringify(invoice.seller), JSON.stringify(invoice.buyer), invoice.place_of_supply, JSON.stringify(lines),
+          totals.taxablePaise, totals.cgstPaise, totals.sgstPaise, totals.igstPaise, totals.totalPaise],
+      );
+      await writeAudit(t, { actor: 'system', action: 'invoice.balance_credited', target: `order:${order.id}`, details: { creditNoteId: Number(note.id), amountPaise: uncollected } });
+      await ctx.orderEvents?.emit(t, { type: 'credit_note.issued', orderId: order.id, entity: 'credit_note', entityId: Number(note.id), dedupeKey: `credit_note.issued:${note.id}` });
+      return { invoice: note, created: true };
+    }, async () => (await db.query(`SELECT * FROM invoices WHERE tenant_id = $1 AND order_id = $2 AND doc_type = 'credit_note' AND refund_id IS NULL`, [tenantId(), Number(orderId)]))[0]);
+    if (result?.created) {
+      log.info('invoices.balance_credited', { invoiceId: Number(result.invoice.id), orderId: result.invoice.order_id });
+      await queuePdf(result.invoice);
+      ctx.orderEvents?.kick?.();
+    }
+    return result;
+  }
+
   async function onEvent(event) {
     if (event.type === 'refund.processed') return creditNoteFor(event.entityId);
+    if (event.type === 'order.cancelled' || event.type === 'order.rto_delivered') return creditBalanceFor(event.orderId);
     return issueFor(event.orderId);
   }
 
@@ -386,5 +442,5 @@ export function createInvoices(ctx) {
     return found ?? null;
   }
 
-  return { settings, issueFor, creditNoteFor, onEvent, list, get, row, file, storeFile, sweep, forBuyer, draw };
+  return { settings, issueFor, creditNoteFor, creditBalanceFor, onEvent, list, get, row, file, storeFile, sweep, forBuyer, draw };
 }

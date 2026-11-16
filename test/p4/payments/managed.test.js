@@ -190,20 +190,20 @@ test('an amount that does not match the order holds it for review and leaves it 
   assert.equal((await shop.sql(`SELECT * FROM reconciliation_gaps WHERE tenant_id = $1 AND kind = 'amount_mismatch'`, [shop.tenant.id])).length, 1);
 });
 
-test('S-70: a managed capture transfers the whole amount to the linked account; the statement shows the sale and the fee at cost', async (t) => {
+test('S-70: a managed capture transfers the amount less the gateway fee to the linked account; the statement shows the sale and the fee at cost', async (t) => {
   const world = await openWorld(t);
   const { shop } = world;
   await shop.payReady();
   const { order } = await shop.paidOrder({ totalPaise: 100000 });
   let [payment] = await shop.payments(order.id);
-  assert.equal(Number(payment.transfer_paise), 100000);
+  assert.equal(Number(payment.transfer_paise), 100000 - 2360, 'Rs 1,000 minus the gateway fee and its GST');
   assert.equal(payment.transfer_status, 'created');
   assert.equal(Number(payment.fee_paise), 2000, 'the gateway fee, at cost');
   assert.equal(Number(payment.fee_tax_paise), 360, 'GST on the fee');
   const { transfers } = await world.rzp.get('/state');
   const transfer = transfers.find((x) => x.source === payment.gateway_payment_id);
   assert.equal(transfer.recipient, shop.linkedAccount);
-  assert.equal(transfer.amount, 100000, 'Bhava keeps nothing');
+  assert.equal(transfer.amount, 100000 - 2360, 'Bhava keeps only the fee it paid the gateway');
 
   await world.rzp.post('/transfers/settle', { id: transfer.id });
   await world.settle();
@@ -211,7 +211,7 @@ test('S-70: a managed capture transfers the whole amount to the linked account; 
   assert.equal(payment.transfer_status, 'processed');
   assert.equal(payment.transfer_id, transfer.id);
   const lines = await shop.lines(order.id);
-  assert.deepEqual(lines.map((l) => [l.kind, Number(l.amount_paise)]), [['sale', 100000], ['gateway_fee', -2000], ['gateway_fee_tax', -360], ['transfer', 100000]]);
+  assert.deepEqual(lines.map((l) => [l.kind, Number(l.amount_paise)]), [['sale', 100000], ['gateway_fee', -2000], ['gateway_fee_tax', -360], ['transfer', 100000 - 2360]]);
   const summary = (await shop.api('GET', '/settlements/summary')).json;
   assert.equal(summary.salesPaise, 100000);
   assert.equal(summary.gatewayFeesPaise, 2360);
@@ -221,7 +221,7 @@ test('S-70: a managed capture transfers the whole amount to the linked account; 
   assert.equal(list.items.find((l) => l.kind === 'gateway_fee').debitPaise, 2000);
   const forOrder = (await shop.api('GET', `/orders/${order.id}/payments`)).json;
   assert.equal(forOrder.items[0].status, 'captured');
-  assert.equal(forOrder.items[0].transferPaise, 100000);
+  assert.equal(forOrder.items[0].transferPaise, 100000 - 2360);
 });
 
 test('a failed transfer holds the statement lines for review and tells the owner and ops', async (t) => {
