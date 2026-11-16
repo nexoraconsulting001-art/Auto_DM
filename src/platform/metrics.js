@@ -256,26 +256,19 @@ export function createMetrics({ strict = false, maxSeries = DEFAULT_MAX_SERIES, 
   return self;
 }
 
+const instrumented = new WeakSet();
+
 /**
- * Counts every run of a queue's jobs (job_runs_total by queue and result, job_failures_total) by wrapping the queue's drain(),
- * which both work() and tests go through. Once per queue object. Returns false when the queue has no drain().
+ * Counts every run of a queue's jobs (job_runs_total by queue and result, job_failures_total) through the queue's onRun(),
+ * which both drivers call from the one path every job runs through (src/platform/queue.js). Once per queue object.
+ * Returns false when the queue has no onRun() or is already counted.
  */
 export function instrumentQueue(metrics, queue) {
-  if (typeof queue?.drain !== 'function' || queue.drain.instrumented) return false;
-  const drain = queue.drain.bind(queue);
-  const wrapped = (name, handler, options) =>
-    drain(name, async (job) => {
-      try {
-        const out = await handler(job);
-        metrics.inc('job_runs_total', { queue: name, result: 'ok' });
-        return out;
-      } catch (err) {
-        metrics.inc('job_runs_total', { queue: name, result: 'failed' });
-        metrics.inc('job_failures_total', { queue: name });
-        throw err;
-      }
-    }, options);
-  wrapped.instrumented = true;
-  queue.drain = wrapped;
+  if (typeof queue?.onRun !== 'function' || instrumented.has(queue)) return false;
+  instrumented.add(queue);
+  queue.onRun(({ queue: name, result }) => {
+    metrics.inc('job_runs_total', { queue: name, result });
+    if (result === 'failed') metrics.inc('job_failures_total', { queue: name });
+  });
   return true;
 }

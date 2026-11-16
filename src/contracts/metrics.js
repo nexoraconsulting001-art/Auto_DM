@@ -23,8 +23,8 @@ export const METRIC_LABELS = Object.freeze({
   group: { pattern: /^[a-z-]{1,20}$/, max: 80 },
   status: { pattern: /^[1-5]\d\d$/, max: 60 },
   queue: { pattern: /^[a-z][a-z0-9_.-]{0,40}$/, max: 80 },
-  // Job states of the queue: `queued`, `running`, `failed`, `unknown`.
-  state: { values: ['queued', 'running', 'failed', 'unknown', 'idle', 'used', 'waiting'] },
+  // Job states of the queue (stats() in src/platform/queue.js): `queued` (ready now), `delayed` (waiting for its time), `running`, `failed`, `unknown`.
+  state: { values: ['queued', 'delayed', 'running', 'failed', 'unknown', 'idle', 'used', 'waiting'] },
   result: { pattern: /^[a-z][a-z0-9_]{0,30}$/, max: 40 },
   provider: { values: ['meta', 'whatsapp', 'razorpay', 'razorpay_billing', 'shiprocket', 'shopify', 'google', 'apple', 'email', 'ai', 'fcm', 'apns', 'eas', 'appstore', 'play', 'ga4'] },
   channel: { values: ['instagram', 'facebook', 'whatsapp'] },

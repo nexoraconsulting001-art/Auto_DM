@@ -166,7 +166,7 @@ test('queue (pg): a job running when its worker died becomes unknown unless safe
   let sent = 0;
   assert.equal(await queue.drain('dm', async () => sent++), 0);
   assert.equal(sent, 0, 'the unknown DM is never sent again');
-  assert.deepEqual(await queue.stats(), { dm: { queued: 0, running: 0, failed: 0, unknown: 1 }, refresh: { queued: 1, running: 0, failed: 0, unknown: 0 } });
+  assert.deepEqual(await queue.stats(), { dm: { queued: 0, delayed: 0, running: 0, failed: 0, unknown: 1 }, refresh: { queued: 1, delayed: 0, running: 0, failed: 0, unknown: 0 } });
 });
 
 test('queue (pg): 500 queued jobs survive a restart and none runs twice (R-02)', async () => {

@@ -31,7 +31,7 @@ spec:
           value: 1
           periodSeconds: 60
 ---
-# The worker scales on queue depth: queue_jobs{status="waiting"} from src/contracts/metrics.js, served to the
+# The worker scales on queue depth: queue_jobs{status="queued"} (jobs ready to run, src/platform/queue.js stats()), served to the
 # autoscaler as an external metric by the cluster's metrics adapter (any Prometheus adapter; see runbooks/scaling.md).
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -51,7 +51,7 @@ spec:
           name: queue_jobs
           selector:
             matchLabels:
-              status: waiting
+              status: queued
         target:
           type: AverageValue
           averageValue: "200"
