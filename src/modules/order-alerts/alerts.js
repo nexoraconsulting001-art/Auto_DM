@@ -162,7 +162,8 @@ export function createOrderAlerts(ctx, settings) {
         reportError(err, { msg: 'order_alert.unsubscribe_link_failed' });
       }
     }
-    const message = orderMessage({ channel: row.channel, event: row.event, order, items, business, unsubscribeUrl });
+    const trackingUrl = row.event === 'shipped' || row.event === 'delivered' ? (await ctx.shipping?.trackingUrl?.(order.id)) || '' : '';
+    const message = orderMessage({ channel: row.channel, event: row.event, order, items, business, unsubscribeUrl, trackingUrl });
     message.dedupeKey = `order-alert-${tenantId()}-${row.id}`;
     return shopperMessages.send(message);
   }

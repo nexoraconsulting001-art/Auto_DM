@@ -20,12 +20,15 @@ const WORDS = Object.freeze({
   refunded: { subject: (n) => `A refund for order ${n}`, lead: 'We have processed a refund for your order.' },
 });
 
+const TRACKED = new Set(['shipped', 'delivered']);
+
 export const orderLink = (business, order) => (business.base && order.public_token ? `${business.base}/order/${encodeURIComponent(order.public_token)}` : '');
 
 /** The message for one alert. `unsubscribeUrl` is the shopper's one-tap way to stop order emails. */
-export function orderMessage({ channel, event, order, items = [], business, unsubscribeUrl = '' }) {
+export function orderMessage({ channel, event, order, items = [], business, unsubscribeUrl = '', trackingUrl = '' }) {
   const to = { shopperId: order.shopper_id ?? undefined, phone: order.phone || undefined, email: order.email || undefined };
-  const link = orderLink(business, order);
+  // Shipping updates go to the seller's tracking page when there is one (F-89, S-78); every other update to the order page.
+  const link = (TRACKED.has(event) && trackingUrl) || orderLink(business, order);
   const base = { channel, purpose: 'order_update', to, orderId: order.id };
   if (channel === 'whatsapp') {
     return { ...base, template: { purpose: TEMPLATE_OF[event], params: [firstName(order.customer_name), order.order_number, business.name, link || business.name] } };

@@ -178,14 +178,24 @@ export function createShipments(ctx, { settings, kick = () => {} }) {
     return { weightGrams: weight, lengthCm, breadthCm, heightCm };
   }
 
-  /** Everything checked before a row is made or the courier is called. -> { order, parcel, existing? } | null */
-  async function prepare(q, orderId, body, { lock = false, kind = 'forward', items = null } = {}) {
+  /**
+   * Everything checked before a row is made or the courier is called. -> { order, parcel, existing? } | null
+   * A forward shipment is one per order. A reverse pickup belongs to one return: with a returnId only that return's own live
+   * pickup counts as existing, so a second return on the order gets its own (without one, the order's live reverse pickup).
+   */
+  async function prepare(q, orderId, body, { lock = false, kind = 'forward', items = null, returnId = null } = {}) {
     const [order] = await q.query(`SELECT * FROM orders WHERE tenant_id = $1 AND id = $2${lock ? ' FOR UPDATE' : ''}`, [tenantId(), orderId]);
     if (!order) return null;
-    const [existing] = await q.query(
-      `SELECT * FROM shipments WHERE tenant_id = $1 AND order_id = $2 AND kind = $3 AND status NOT IN ${NOT_LIVE} ORDER BY id DESC LIMIT 1`,
-      [tenantId(), orderId, kind],
-    );
+    const [existing] = kind === 'reverse' && returnId
+      ? await q.query(
+        `SELECT s.* FROM returns r JOIN shipments s ON s.tenant_id = r.tenant_id AND s.id = r.shipment_id
+          WHERE r.tenant_id = $1 AND r.id = $2 AND s.order_id = $3 AND s.status NOT IN ${NOT_LIVE}`,
+        [tenantId(), returnId, orderId],
+      )
+      : await q.query(
+        `SELECT * FROM shipments WHERE tenant_id = $1 AND order_id = $2 AND kind = $3 AND status NOT IN ${NOT_LIVE} ORDER BY id DESC LIMIT 1`,
+        [tenantId(), orderId, kind],
+      );
     if (existing && (kind === 'forward' || existing.status !== 'delivered')) return { order, existing };
     if (kind === 'forward') {
       const why = notShippable(order);
@@ -211,7 +221,7 @@ export function createShipments(ctx, { settings, kick = () => {} }) {
     const s = await readyPickup();
     try {
       return await db.tx(async (t) => {
-        const again = await prepare(t, orderId, body, { lock: true, kind, items });
+        const again = await prepare(t, orderId, body, { lock: true, kind, items, returnId });
         if (!again) return null;
         if (again.existing) return again.existing;
         const { order, parcel } = again;
@@ -470,7 +480,7 @@ export function createShipments(ctx, { settings, kick = () => {} }) {
     }
     // On the mode the business ships with now (9.17): a reverse pickup is a new shipment, and its pickup location (where the
     // parcel goes back to) is registered on that account.
-    const checked = await prepare(db, orderId, {}, { kind: 'reverse', items });
+    const checked = await prepare(db, orderId, {}, { kind: 'reverse', items, returnId });
     if (!checked) return null;
     const row = checked.existing ?? await makeRow({ orderId, body: {}, kind: 'reverse', items, returnId });
     if (!row) return null;
