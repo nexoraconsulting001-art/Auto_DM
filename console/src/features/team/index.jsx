@@ -1,4 +1,5 @@
 import { lazy } from 'react';
+import { Navigate } from 'react-router-dom';
 import { Users } from 'lucide-react';
 import { OWNER_ONLY } from '@contracts/access.js';
 
@@ -9,5 +10,9 @@ export default {
   name: 'team',
   access: OWNER_ONLY,
   nav: { to: '/settings/team', label: 'Team', icon: Users, order: 75 },
-  routes: [{ path: 'settings/team', element: <TeamPage /> }],
+  routes: [
+    { path: 'settings/team', element: <TeamPage /> },
+    // The owner app's path for the team, which a notification's link names (src/contracts/notifications.js).
+    { path: 'team', element: <Navigate to="/settings/team" replace /> },
+  ],
 };
