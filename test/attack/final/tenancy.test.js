@@ -8,6 +8,7 @@ import { withTenant } from '../../../src/tenancy.js';
 import { routeList } from '../../../src/contracts/api/index.js';
 import { OWNER } from '../../helpers.js';
 import { csrfFor } from '../../../src/modules/shoppers/keys.js';
+import { uploadFile } from '../../p0/spec-p0/support.js';
 import { hit, otherStore, payments, placeBody, product, q, shopper, stockOf, storeApp } from '../../p4/checkout/support.js';
 
 const A_HOST = 'default.bhava.test';
@@ -202,4 +203,59 @@ test('tenancy attack: both stores ordering at once keep their own order numbers 
     const lines = await app.db.platform.query('SELECT DISTINCT i.product_id, o.tenant_id FROM order_items i JOIN orders o ON o.tenant_id = i.tenant_id AND o.id = i.order_id WHERE o.tenant_id = $1', [tenant.id]);
     assert.ok(lines.every((l) => Number(l.product_id) === Number(prod.id)), `orders of ${tenant.id} hold another product: ${JSON.stringify(lines)}`);
   }
+});
+
+test('tenancy attack: a product cannot be put in the other business\'s category (K-01)', async (t) => {
+  const { app, b, aToken, bToken } = await twoStores(t);
+  const cat = await ownerApi(app, b.host, bToken)('POST', '/categories', { name: 'Victim shelf' });
+  assert.equal(cat.status, 201, cat.text.slice(0, 200));
+  const aApi = ownerApi(app, A_HOST, aToken);
+  const made = await aApi('POST', '/products', { name: 'Smuggled', pricePaise: 1000, categoryIds: [cat.json.id] });
+  assert.ok(made.status < 500, `create: ${made.status} ${made.text.slice(0, 200)}`);
+  if (made.status === 201) assert.ok(!(made.json.categoryIds ?? []).includes(cat.json.id), `A's product sits in B's category: ${made.text.slice(0, 300)}`);
+  const [mine] = await app.db.platform.query('SELECT id FROM products WHERE tenant_id = $1 ORDER BY id LIMIT 1', [app.tenant.id]);
+  const patched = await aApi('PATCH', `/products/${mine.id}`, { categoryIds: [cat.json.id] });
+  assert.ok(patched.status < 500, `patch: ${patched.status} ${patched.text.slice(0, 200)}`);
+  const links = await app.db.platform.query('SELECT tenant_id, product_id FROM product_categories WHERE category_id = $1', [cat.json.id]);
+  assert.deepEqual(links.filter((l) => l.tenant_id !== b.tenant.id), [], 'no other business links a product to B\'s category');
+  const bCat = await ownerApi(app, b.host, bToken)('GET', `/categories/${cat.json.id}`);
+  assert.ok(!/Smuggled/.test(bCat.text), 'B\'s category does not show A\'s product');
+});
+
+test('tenancy attack: the other business\'s uploaded image is not served on this address, and cannot be put on a product', async (t) => {
+  const { app, b, aToken, bToken } = await twoStores(t);
+  const up = await uploadFile(app, { host: b.host }, bToken);
+  assert.equal(up.status, 201, up.text.slice(0, 200));
+  const { id } = up.json();
+  for (const path of [`/media/${id}`, `/media/${id}/card`, `/media/${id}/hero`]) {
+    const own = await hit(app, path, { host: b.host });
+    const other = await hit(app, path, { host: A_HOST });
+    assert.equal(other.status, 404, `B's image ${path} on A's address: ${other.status} (on B: ${own.status})`);
+  }
+  const made = await ownerApi(app, A_HOST, aToken)('POST', '/products', { name: 'Borrowed photo', pricePaise: 1000, images: [`/media/${id}`] });
+  assert.ok(made.status < 500, `create: ${made.status} ${made.text.slice(0, 200)}`);
+  const stored = await app.db.platform.query('SELECT images::text AS images FROM products WHERE tenant_id = $1 AND images::text LIKE $2', [app.tenant.id, `%${id}%`]);
+  const page = await hit(app, '/p/borrowed-photo', { host: A_HOST });
+  assert.ok(made.status !== 201 || !JSON.stringify(made.json.images ?? []).includes(id),
+    `A's product holds B's upload ${id}: API answer ${made.text.slice(0, 200)} | products.images rows: ${JSON.stringify(stored)} | A's product page (${page.status}) names it: ${page.text.includes(id)}`);
+});
+
+test('tenancy attack: the brand kit and categories cannot point at the other business\'s uploaded files', async (t) => {
+  const { app, b, aToken, bToken } = await twoStores(t);
+  const up = await uploadFile(app, { host: b.host }, bToken);
+  assert.equal(up.status, 201, up.text.slice(0, 200));
+  const link = `/media/${up.json().id}`;
+  const aApi = ownerApi(app, A_HOST, aToken);
+  const kept = [];
+  for (const [method, path, body] of [
+    ['PATCH', '/brand-kit', { logoUrl: link }],
+    ['PATCH', '/brand-kit', { faviconUrl: link }],
+    ['PATCH', '/brand-kit', { logoDarkUrl: link }],
+    ['POST', '/categories', { name: 'Borrowed cover', imageUrl: link }],
+  ]) {
+    const res = await aApi(method, path, body);
+    assert.ok(res.status < 500, `${method} ${path}: ${res.status} ${res.text.slice(0, 200)}`);
+    if (res.status < 300 && res.text.includes(up.json().id)) kept.push(`${method} ${path} ${JSON.stringify(body)} -> ${res.status} ${res.text.slice(0, 160)}`);
+  }
+  assert.deepEqual(kept, [], `A stored links to B's upload:\n${kept.join('\n')}`);
 });
