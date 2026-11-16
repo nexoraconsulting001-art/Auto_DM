@@ -65,9 +65,8 @@ async function addressFor(q, body, shopper) {
 /** Has this phone been proved for this checkout? A shopper signed in with this verified number has; otherwise the cash-on-delivery code (9.3). */
 async function phoneProved(ctx, { phone, checkoutKey, shopper }) {
   if (shopper?.phoneVerified && shopper.phone && toE164(shopper.phone) === phone) return true;
-  const check = ctx.shoppers?.otps?.codVerified ?? ctx.shoppers?.codVerified;
-  if (typeof check !== 'function') return false;
-  return Boolean(await check({ phone, checkoutKey }));
+  // ctx.shoppers is set by the shoppers module's setup. Missing, this throws: a guest must never be quietly refused forever.
+  return Boolean(await ctx.shoppers.otps.codVerified({ phone, checkoutKey }));
 }
 
 const placed = (order, next, gateway = null) => ({ orderNumber: order.order_number, token: order.public_token, next, gateway });
@@ -205,8 +204,11 @@ export async function placeOrder(ctx, req, body) {
   ctx.orderEvents?.kick();
   log.info('checkout.placed', { orderId: order.id, mode: order.payment_mode });
   await raiseLowStock(ctx.repos.alerts, low);
-  if (body.saveDetails && shopper && body.address && typeof ctx.shoppers?.addresses?.create === 'function') {
-    await ctx.shoppers.addresses.create(shopper.id, body.address).catch((err) => reportError(err, { msg: 'checkout.save_address_failed', orderId: order.id }));
+  if (body.saveDetails && shopper && body.address) {
+    // The order is made; a failure to save the address (or a missing ctx.shoppers) is reported, never answered.
+    await Promise.resolve()
+      .then(() => ctx.shoppers.addresses.create(shopper.id, body.address))
+      .catch((err) => reportError(err, { msg: 'checkout.save_address_failed', orderId: order.id }));
   }
   const gateway = await startPayment(ctx, order, req);
   return { status: 201, body: placed(order, nextFor(order), gateway) };
