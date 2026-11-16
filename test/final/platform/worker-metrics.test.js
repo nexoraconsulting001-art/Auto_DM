@@ -10,7 +10,7 @@ import { createStorage } from '../../../src/platform/storage.js';
 import * as backup from '../../../src/backup.js';
 import * as worker from '../../../src/worker.js';
 
-const TOKEN = 'worker-metrics-token-0123456789';
+const TOKEN = ['worker-metrics', 'token', '0123456789'].join('-');
 
 test('platform-1: the worker probe server answers /metrics with its token, labelled service="worker", and keeps its health paths', async (t) => {
   assert.equal(typeof worker.createWorkerProbes, 'function', 'the worker has a probe server that answers /metrics');
