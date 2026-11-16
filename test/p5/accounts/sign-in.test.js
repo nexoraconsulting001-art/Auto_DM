@@ -308,9 +308,8 @@ async function review() {
     await withTenant(demo, () => world.platform.products.create({ name: 'Sample kurta', price: '499', active: 'on' }));
     const uses = () => world.db.platform.query('SELECT accepted, reason FROM review_login_uses ORDER BY id');
     const tryIt = (phone, code) => call(world, '/api/v1/auth/verify', { method: 'POST', body: { phone, code, device: testDevice('Review iPad') }, ip: freshIp() });
-    // Before the demo business is named the login opens nothing.
-    assert.equal((await tryIt('9000000099', REVIEW_CODE)).status, 401);
-    await world.db.platform.query('UPDATE review_logins SET tenant_id = $1', [demo.id]);
+    // It is the demo business by its flag, as scripts/demo-tenant.js makes one: the login names it at the first try.
+    await world.db.platform.query('UPDATE tenants SET is_demo = true WHERE id = $1', [demo.id]);
     return { world, demo, uses, tryIt };
   })();
   return reviewWorld;

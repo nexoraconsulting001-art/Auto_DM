@@ -105,6 +105,9 @@ export async function openP4World({ overrides = {}, worker = true, defaultTenant
         whatsappBaseUrl: wa.url,
         whatsappAppSecret: wa.appSecret,
         whatsappVerifyToken: 'spec-wa-verify',
+        // Bhava's own verified number (PRD 5.13): every seller's sign-in code comes from it, never from a business's.
+        platformWhatsappPhoneId: '100200300400',
+        platformWhatsappToken: 'sim-whatsapp-token',
         emailDriver: 'http',
         emailBaseUrl: mail.url,
         emailHosts: mail.url,

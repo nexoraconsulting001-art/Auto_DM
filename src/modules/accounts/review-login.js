@@ -1,12 +1,14 @@
 import { codeHash, isCode, reviewCodeProblem, sameSecret, subjectHash, toE164 } from '../../contracts/accounts.js';
 import { log } from '../../platform/log.js';
+import { demoTenantService } from '../demo-tenant/service.js';
 import { NO_PASSWORD, accountPhone, platformOf } from './shared.js';
 
 /**
  * App Review's fixed login (PRD 5.11, 10.6; F-50, P-24). One number and the hash of its code come from
  * REVIEW_LOGIN_PHONE and REVIEW_LOGIN_CODE_HASH (codeHash with purpose "signin" and the review number as subject, keyed
  * with SESSION_SECRET); the code itself is never in the environment. Both set turns the flag on; both empty turns it off.
- * review_logins.tenant_id names the demo business (src/modules/demo-tenant), which is all the login opens.
+ * review_logins.tenant_id names the demo business (src/modules/demo-tenant), which is all the login opens; the first
+ * accepted review sign-in makes it when ops have not.
  *
  * reviewCodeProblem decides. Every try of it is a row in review_login_uses, accepted or not: the review number with any
  * code, and the review code on any number. A refusal is then an ordinary wrong code.
@@ -15,6 +17,8 @@ export function reviewLoginService(ctx, { people }) {
   const db = () => platformOf(ctx.db);
   const secret = () => ctx.config.sessionSecret;
   let synced = null;
+  let demoService = null;
+  const demo = () => (demoService ??= demoTenantService({ db: ctx.db, repos: ctx.repos, config: ctx.config }));
 
   /** Writes the configured login once per process, and turns off any other. */
   function sync() {
@@ -47,7 +51,8 @@ export function reviewLoginService(ctx, { people }) {
       const codeMatches = isCode(code) && sameSecret(codeHash(secret(), { purpose: 'signin', subject: login.phone, code }), login.code_hash);
       if (!isReviewNumber && !codeMatches) continue;
       let reason = reviewCodeProblem(login, { phone: phone ?? '', codeMatches });
-      if (reason === '' && !login.tenant_id) reason = 'flag_off';
+      // The login opens the demo business, made now if there is none yet (P-24): never nothing, never another business.
+      if (reason === '' && !login.tenant_id) login.tenant_id = await demo().provide();
       await db().query(
         'INSERT INTO review_login_uses (subject_hash, accepted, reason, ip_hash) VALUES ($1, $2, $3, $4)',
         [subjectHash(secret(), 'phone', phone ?? ''), reason === '', reason, subjectHash(secret(), 'ip', ip ?? '')],

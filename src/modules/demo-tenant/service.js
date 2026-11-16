@@ -102,6 +102,43 @@ export function demoTenantService({ db, repos, config = {}, now = () => Date.now
     return reset({ anchorDay });
   }
 
+  /**
+   * The demo business the review login opens: the one there is, or one made now when there is none (P-24: the review
+   * login always opens a demo business, whether or not ops ran scripts/demo-tenant.js). It never removes or rewrites
+   * a demo business, so a sign-in can't sign anyone out of one. Two first sign-ins at once make one: the one-demo index
+   * and the address name refuse the second, which then opens the first. Returns its id.
+   */
+  let providing = null;
+  function provide() {
+    providing ??= (async () => {
+      const found = await find();
+      if (found) {
+        await linkReviewLogin(found.id);
+        return found.id;
+      }
+      let tenant;
+      try {
+        tenant = await create();
+      } catch (err) {
+        const other = await find();
+        if (!other) throw err;
+        await linkReviewLogin(other.id);
+        return other.id;
+      }
+      const anchorDay = today();
+      try {
+        const filled = await fill(tenant, anchorDay);
+        log.info('demo_tenant.filled', { tenantId: tenant.id, version: SAMPLE_VERSION, anchorDay, ...filled.counts });
+      } catch (err) {
+        await platform.query('DELETE FROM tenants WHERE id = $1', [tenant.id]);
+        throw err;
+      }
+      await linkReviewLogin(tenant.id);
+      return tenant.id;
+    })().finally(() => { providing = null; });
+    return providing;
+  }
+
   /** The worker's refresh: an out-of-date sample is rebuilt for today, but never while someone is using the business. */
   async function refreshIfIdle() {
     const found = await find();
@@ -118,5 +155,5 @@ export function demoTenantService({ db, repos, config = {}, now = () => Date.now
     return reset();
   }
 
-  return { find, status: async () => describe(await find()), ensure, reset, remove, refreshIfIdle };
+  return { find, status: async () => describe(await find()), ensure, provide, reset, remove, refreshIfIdle };
 }
