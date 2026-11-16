@@ -157,5 +157,5 @@ export const refundRoutes = {
   'refunds.create': { method: 'POST', path: '/orders/:id/refunds', access: OWNER_ONLY, fresh: true, params: IdParams, body: RefundCreate, status: 201, response: Refund },
   'refunds.get': { method: 'GET', path: '/refunds/:id', access: reader, params: IdParams, response: Refund },
   /** Tries a failed refund again at the gateway. */
-  'refunds.retry': { method: 'POST', path: '/refunds/:id/retry', access: OWNER_ONLY, params: IdParams, response: Refund },
+  'refunds.retry': { method: 'POST', path: '/refunds/:id/retry', access: OWNER_ONLY, fresh: true, params: IdParams, response: Refund },
 };

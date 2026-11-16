@@ -76,14 +76,15 @@ test('the moves offered are exactly the ones the server says are next', () => {
 test('a refund sends the amount the person typed, held inside what can still go back, with one key per visit', () => {
   const most = refundable({ paidPaise: 99900, refundedPaise: 50000 });
   assert.equal(most, 49900);
-  const typed = { password: 'pw' };
+  const typed = {};
   assert.deepEqual(refundBody({ ...typed, amountText: '1000' }, { most: 99900 }).problems, { amount: 'refunds.problem.tooMuch' }, 'S-28: ₹1,000 on ₹999');
   assert.deepEqual(refundBody({ ...typed, amountText: 'abc' }, { most }).problems, { amount: 'refunds.problem.amount' });
   assert.deepEqual(refundBody({ ...typed, amountText: '10' }, { most, byHand: true }).problems, { reference: 'refunds.problem.reference' });
   const key = newRefundKey(1_700_000_000_000, () => 0.123456789);
-  assert.deepEqual(refundBody({ amountText: '499', idempotencyKey: key }, { most }).problems, { password: 'refunds.problem.password' }, 'the contract checks the owner’s password on the call');
+  // 5.11: the re-auth is fresh (fingerprint, face or a WhatsApp code), so no password is asked for or sent.
+  assert.equal(refundBody({ amountText: '499', idempotencyKey: key }, { most }).problems, undefined, 'no password is asked for');
   const body = built(refundBody({ amountText: '499', reason: ' damaged ', idempotencyKey: key, password: ' typed ' }, { most }));
-  assert.deepEqual(body, { amountPaise: 49900, reason: 'damaged', idempotencyKey: key, password: ' typed ' });
+  assert.deepEqual(body, { amountPaise: 49900, reason: 'damaged', idempotencyKey: key }, 'a password is never sent');
   accepted('refunds.create', body);
   assert.notEqual(newRefundKey(), newRefundKey());
 });

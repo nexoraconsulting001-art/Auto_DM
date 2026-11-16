@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { INVITE_EXPIRED_MESSAGE, stepsFor } from '../../../src/contracts/onboarding.js';
 import { connectInstagramFlow } from '../../p1/spec-p1/support.js';
-import { APP, buyer, consoleUser, hit, json, need, one, opCall, shopOn, sql, unique, useBillingWorld } from '../spec-p7/support.js';
+import { APP, buyer, consoleUser, finishConnect, hit, json, need, one, opCall, shopOn, sql, unique, useBillingWorld } from '../spec-p7/support.js';
 
 const world = useBillingWorld();
 const DAY = 86_400_000;
@@ -36,7 +36,8 @@ async function connectWith(shop, scopes) {
   const start = need(await shop.send('POST', '/instagram/connect', {}), 200, 'Starting Instagram');
   const consent = await fetch(json(start).authorizeUrl, { redirect: 'manual' });
   const back = new URL(consent.headers.get('location'));
-  await hit(world, `${back.pathname}${back.search}`, { host: shop.host });
+  const done = await hit(world, `${back.pathname}${back.search}`, { host: shop.host });
+  await finishConnect(world, done, { send: shop.send });
 }
 
 test('F-26, F-27: the invite is stored as a hash, opens once on the sign-in host, names its business, and the token is in no log or audit row', async () => {

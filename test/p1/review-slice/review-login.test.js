@@ -111,7 +111,11 @@ test('the whole flow on one page: connect, granted permissions, webhooks, privac
   assert.equal(dialog.status, 302);
   const back = new URL(dialog.headers.get('location'));
   const done = await fetch(`${slice.app.base}${back.pathname}${back.search}`, { redirect: 'manual', headers: { 'x-forwarded-host': back.host } });
-  const landing = new URL(done.headers.get('location'));
+  // D-4: the connect is finished on this host, in the session that started it.
+  const finish = new URL(done.headers.get('location'));
+  assert.equal(`${finish.host}${finish.pathname}`, `${HOST}/oauth/instagram/finish`);
+  const finished = await fetch(`${slice.app.base}${finish.pathname}${finish.search}`, { redirect: 'manual', headers: { 'x-forwarded-host': finish.host, cookie } });
+  const landing = new URL(finished.headers.get('location'));
   assert.equal(landing.host, HOST);
   assert.equal(`${landing.pathname}${landing.search}`, '/review?instagram=connected');
 

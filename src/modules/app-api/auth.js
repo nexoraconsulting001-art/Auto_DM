@@ -6,6 +6,7 @@ import { APP_ROUTES, AppDeleteBody, AppSessionStart, AppRefresh, AppleSignInBody
 import { log } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { loadBuyerLayout } from '../../views/buyer/index.js';
+import { APPLE_NONCE_WINDOW_MS } from '../accounts/sign-in.js';
 import { createDataRequests } from '../consent/erasure.js';
 import { loyaltyFor } from '../loyalty/index.js';
 import { shopperServices } from '../shoppers/index.js';
@@ -150,6 +151,12 @@ export function mountAuthRoutes(app, ctx) {
       who = await ctx.apple.signIn.verify(body.identityToken, { nonce: body.nonce, audiences: [bundleId] });
     } catch (err) {
       log.warn('app.apple_refused', { kind: err?.kind ?? 'error' });
+      throw new ApiError('unauthorized', 'Sign in with Apple didn’t work. Please try again.');
+    }
+    // The nonce opens one sign-in only, as the seller's does: a captured token and nonce cannot open a second session.
+    const once = await ctx.platform.rateLimit.hit('shopper_apple_nonce', `${tenantId()}:${tokenHash(body.nonce)}`, { limit: 1, windowMs: APPLE_NONCE_WINDOW_MS });
+    if (!once.allowed) {
+      log.warn('app.apple_refused', { kind: 'nonce_reused' });
       throw new ApiError('unauthorized', 'Sign in with Apple didn’t work. Please try again.');
     }
     const [row] = await ctx.db.query(

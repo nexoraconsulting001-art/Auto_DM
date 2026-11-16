@@ -10,6 +10,12 @@ import { RecordState, Refusal, useWritable } from '../compliance/kit.js';
 import { SCOPES } from '../compliance/notices.js';
 import { RETURN_TO, connectionView, isMetaLogin, pageView } from './connection.js';
 
+/** The one-time finish token in bhavabusiness://auth/callback?instagram=finish&f=..., or null. */
+export function finishTokenIn(url) {
+  const match = /[?&]instagram=finish(?:&|$)/.test(String(url ?? '')) ? /[?&]f=([\w%-]{20,300})/.exec(String(url)) : null;
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 export const IG_KEY = ['connect', 'instagram'];
 export const FB_KEY = ['connect', 'facebook'];
 
@@ -20,7 +26,7 @@ export const FB_KEY = ['connect', 'facebook'];
  * business's own connect page, not to the app, so the read happens when the session closes or the app is active again.
  * `browser` is expo-web-browser; `appState` is react-native's AppState. Both are passed in by tests.
  */
-export function useBrowserConnect(start, { browser, appState = AppState, keys }) {
+export function useBrowserConnect(start, { browser, appState = AppState, keys, finish = null }) {
   const queryClient = useQueryClient();
   const [away, setAway] = useState(false);
   const reread = () => Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
@@ -42,6 +48,9 @@ export function useBrowserConnect(start, { browser, appState = AppState, keys })
       if (!isMetaLogin(authorizeUrl)) throw Object.assign(new Error('not a Meta login'), { status: 502 });
       setAway(true);
       const result = browser.openAuthSessionAsync ? await browser.openAuthSessionAsync(authorizeUrl, OWNER_APP_CALLBACK) : await browser.openBrowserAsync(authorizeUrl);
+      // D-4: Meta's answer comes back to the app, and only this signed-in session can finish the connect.
+      const finishToken = finish && result?.type === 'success' ? finishTokenIn(result.url) : null;
+      if (finishToken) await finish({ finishToken });
       return result?.type ?? 'opened';
     },
     // iOS hands back when the sheet closes; Android as soon as the tab opens, and AppState catches the return.
@@ -85,7 +94,7 @@ function Instagram({ connection, canManage, writable, browser, appState }) {
   const theme = useTheme();
   const [asking, setAsking] = useState(false);
   const view = connectionView(connection);
-  const connect = useBrowserConnect((body) => api.instagram.connect(body), { browser, appState, keys: [IG_KEY, ['compliance']] });
+  const connect = useBrowserConnect((body) => api.instagram.connect(body), { browser, appState, keys: [IG_KEY, ['compliance']], finish: (body) => api.instagram.connectFinish(body) });
   const disconnect = useDisconnect(() => api.instagram.disconnect(), [IG_KEY, ['compliance']]);
   return (
     <>

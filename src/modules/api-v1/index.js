@@ -107,6 +107,11 @@ function serve(route, handler, ctx, counters, handlers) {
   async function run(req, res) {
     // On the host that belongs to no business, only the routes that need none are answered before sign-in.
     if (!route.noBusiness && !currentTenant()) throw new ApiError('unauthorized');
+    // A first sign-in while sign-up was not open made a held place, not a business (auth-2, PRD 5.20): the person may sign
+    // in, manage their own sign-in and sign up, and nothing else, until signup.start adopts it.
+    if (currentTenant()?.signup_held && !route.noBusiness && !route.id.startsWith('auth.')) {
+      throw new ApiError('forbidden', 'Finish signing up to use your business.', { reason: 'signup.pending' });
+    }
     // A session Bhava's team opened is held to its own rules first (PRD 5.10, 5.17): read-only, what is blocked, the route's service.
     await checkOperator(route, req, ctx);
     if (!isAllowed(req.user ?? null, route.access)) throw new ApiError(req.user ? 'forbidden' : 'unauthorized', req.user ? route.access.denied : undefined);

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { subjectHash, tokenHash } from '../../../src/contracts/accounts.js';
 import { bindTenant } from '../../../src/repos/index.js';
 import { withTenant } from '../../../src/tenancy.js';
+import { accountsFor } from '../../../src/modules/accounts/index.js';
 import { OWNER, accountsApp, call, captureLogs, codeSignIn, freshIp, otherBusiness, random10, testDevice, typedAccount } from './support.js';
 
 const SHOPPER = { name: 'Asha K', phone: '9876543210', address: '12 MG Road', city: 'Pune', state: 'MH', pincode: '411001' };
@@ -105,11 +106,15 @@ test('a shopper\'s session never becomes a team member\'s when their number is i
   assert.equal((await call(app, '/api/v1/auth/me', { headers: { authorization: `Bearer ${shopperSession}` }, host: null })).status, 401, 'the old session ended when the account changed hands');
 });
 
-test('an invitation to an email is taken up by a verified Google email, and an invitation for someone who already proved it is taken up at once', async () => {
+test('an invitation to an email is taken up by a verified Google email when that person next signs in, never at once', async () => {
   const [person] = await app.db.platform.query(`INSERT INTO people (name) VALUES ('Meera') RETURNING id`);
   await app.db.platform.query(`INSERT INTO person_identities (person_id, kind, subject, email, verified_at) VALUES ($1, 'google', 'g-meera', 'meera@example.com', now())`, [person.id]);
   const res = await call(app, '/api/v1/team/invites', { method: 'POST', headers: as(owner), body: { contact: 'Meera@Example.com', role: 'manager' } });
   assert.equal(res.status, 201);
+  // The team contract: the account appears when the person signs in with that identity verified, not when it is typed.
+  assert.deepEqual(await app.db.platform.query('SELECT 1 FROM users WHERE tenant_id = $1 AND person_id = $2', [app.tenant.id, person.id]), [], 'not at once');
+  // What every sign-in runs for the person (src/modules/accounts/session.js open -> people.reconcile).
+  await accountsFor(app.ctx).people.reconcile(Number(person.id));
   const [account] = await app.db.platform.query('SELECT role, phone FROM users WHERE tenant_id = $1 AND person_id = $2', [app.tenant.id, person.id]);
   assert.deepEqual(account, { role: 'manager', phone: `person:${person.id}` });
 });

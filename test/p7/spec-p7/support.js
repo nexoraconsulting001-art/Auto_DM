@@ -26,6 +26,27 @@ export const json = (res) => {
 export const sql = (world, text, params = []) => world.rawDb.platform.query(text, params);
 export const one = async (world, text, params = []) => (await sql(world, text, params))[0];
 export const key = () => `req_${crypto.randomBytes(8).toString('hex')}`;
+
+/**
+ * D-4: the Instagram callback saves nothing; the person who started the connect finishes it in their own session. A
+ * token start (the owner app) comes back with instagram=finish and finishes with POST /instagram/connect/finish; a
+ * console start goes on to /oauth/instagram/finish on its own host, with its cookie. `done` is the callback's answer;
+ * `send(method, path, body)` calls the API as the starter. Returns the outcome (connected, taken, ...), or null.
+ */
+export async function finishConnect(world, done, { send, cookie, host } = {}) {
+  const at = (location) => (location ? new URL(location, 'http://relative.invalid') : null);
+  const next = at(done?.headers?.location);
+  if (!next) return null;
+  if (next.searchParams.get('instagram') === 'finish') {
+    const finished = await send('POST', '/instagram/connect/finish', { finishToken: next.searchParams.get('f') });
+    return json(finished)?.outcome ?? null;
+  }
+  if (next.pathname === '/oauth/instagram/finish') {
+    const landed = await hit(world, `${next.pathname}${next.search}`, { host, cookie });
+    return at(landed.headers.location)?.searchParams.get('instagram') ?? null;
+  }
+  return next.searchParams.get('instagram');
+}
 /** Never a server error, and never a success. */
 export const refusal = (res, what, statuses) => {
   assert.ok(res.status >= 400 && res.status < 500, `${what}: expected a refusal, got HTTP ${res.status}: ${res.text.slice(0, 300)}`);

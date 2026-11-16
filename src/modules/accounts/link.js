@@ -48,7 +48,7 @@ export function linkHandlers(ctx, { people, codes, handoffs, sendCode }) {
           return { identities: await identitiesView(people, personId), pending: true };
         }
         await limit(ctx.platform, AUTH_LIMITS.codeTriesPerAddress, req.ip);
-        await limit(ctx.platform, AUTH_LIMITS.codeTriesPerNumber, phone);
+        await limit(ctx.platform, AUTH_LIMITS.codeTriesPerPerson, `link:${personId}`);
         if (!(await codes.check({ subject: phone, purpose: 'link', personId, code: body.code }))) throw wrong('code');
         await people.attach(personId, { kind: 'phone', subject: phone });
         return done(personId, user, 'phone');

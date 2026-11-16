@@ -107,8 +107,23 @@ export function registerOversight(router, ctx) {
         [params.id, body.role ?? null, body.disabled ?? null, Boolean(body.resetTotp)],
       );
       if (body.resetTotp) await t.query('DELETE FROM platform_recovery_codes WHERE platform_user_id = $1', [params.id]);
-      // Losing access, a role or the authenticator ends every session now; the next request is a sign-in.
-      if (body.disabled || body.resetTotp || (body.role && body.role !== before.role)) await t.query('UPDATE platform_sessions SET revoked_at = now() WHERE platform_user_id = $1 AND revoked_at IS NULL', [params.id]);
+      // Losing access, a role or the authenticator ends every session now; the next request is a sign-in. That is the
+      // console's, and every impersonation and service session the operator opened inside a business, with its cookie.
+      if (body.disabled || body.resetTotp || (body.role && body.role !== before.role)) {
+        await t.query('UPDATE platform_sessions SET revoked_at = now() WHERE platform_user_id = $1 AND revoked_at IS NULL', [params.id]);
+        await t.query(
+          `UPDATE sessions s SET revoked_at = now() FROM impersonation_sessions i
+            WHERE s.tenant_id = i.tenant_id AND s.impersonation_id = i.id AND i.operator_id = $1 AND s.revoked_at IS NULL`,
+          [params.id],
+        );
+        await t.query(
+          `UPDATE sessions s SET revoked_at = now() FROM service_sessions v
+            WHERE s.tenant_id = v.tenant_id AND s.service_session_id = v.id AND v.operator_id = $1 AND s.revoked_at IS NULL`,
+          [params.id],
+        );
+        await t.query('UPDATE impersonation_sessions SET ended_at = now() WHERE operator_id = $1 AND ended_at IS NULL', [params.id]);
+        await t.query('UPDATE service_sessions SET ended_at = now() WHERE operator_id = $1 AND ended_at IS NULL', [params.id]);
+      }
       return updated;
     });
     await platformAudit(db, {

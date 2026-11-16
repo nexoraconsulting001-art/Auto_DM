@@ -12,13 +12,16 @@ let nextIp = 1;
 export const freshIp = () => `10.${(nextIp >> 16) & 255}.${(nextIp >> 8) & 255}.${nextIp++ & 255}`;
 
 /** A test app whose platform WhatsApp number is the simulator. `close()` stops both. */
-export async function accountsApp({ overrides = {}, ...rest } = {}) {
+export async function accountsApp({ overrides = {}, signupMode = 'public', ...rest } = {}) {
   const whatsapp = createWhatsApp({ token: 'platform-token' });
   await whatsapp.start();
   const app = await startApp({
     overrides: { whatsappBaseUrl: whatsapp.url, platformWhatsappPhoneId: '1000', platformWhatsappToken: 'platform-token', ...overrides },
     ...rest,
   });
+  // F-109 (a first sign-in gets a working Free business) holds while sign-up is open (PRD 5.20, auth-2). These suites
+  // test a launched platform, so sign-up is public unless a suite asks for the database's own default (null).
+  if (signupMode) await app.db.platform.query('UPDATE signup_settings SET mode = $1', [signupMode]);
   const ownerId = (await app.repos.users.findByPhone(OWNER.phone)).id;
   return {
     ...app,

@@ -35,6 +35,8 @@ const FRESH = [
   'setup.ownKeys',
   // Phase 7 (the WhatsApp add-on): connecting and disconnecting the business's own number.
   'whatsapp.connectStart', 'whatsapp.connectFinish', 'whatsapp.disconnect',
+  // Money sent back to a shopper needs a fresh re-auth (PRD 5.11, 9.8; final review auth-1), not a password.
+  'refunds.create', 'refunds.retry',
 ];
 const PLATFORM_TABLES = ['people', 'person_identities', 'seller_login_codes', 'token_families', 'refresh_tokens', 'auth_devices', 'auth_handoffs', 'review_logins', 'review_login_uses', 'account_deletion_requests', 'app_min_versions'];
 

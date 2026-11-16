@@ -67,7 +67,7 @@ export const ALWAYS_ON = Object.freeze([
   'stats.dashboard',
   'media.upload',
   'audit.list',
-  'instagram.connection', 'instagram.connect', 'instagram.disconnect', 'instagram.media',
+  'instagram.connection', 'instagram.connect', 'instagram.connectFinish', 'instagram.disconnect', 'instagram.media',
   'compliance.status', 'compliance.pause', 'compliance.resume', 'compliance.settings', 'compliance.updateSettings', 'compliance.activity', 'compliance.whyNoDm', 'compliance.heldJobs', 'compliance.discardHeld', 'compliance.slowModeOverride', 'compliance.words', 'compliance.addWord', 'compliance.removeWord',
   'automations.list', 'automations.preview', 'automations.get', 'automations.remove', 'automations.pickWinner', 'automations.stats', 'automations.sendTest',
   'testers.list', 'testers.createCode', 'testers.remove',

@@ -13,8 +13,8 @@ import { Offline, RecordView, RupeeField, problemText, useAllowed, whenAsked, us
  * Refunding an order (PRD 9.8, S-28, S-29): owner only. The amount is the one a person types (the app never sends an
  * order's own amounts) and the server holds it inside what was captured. One key per visit to this screen, so a second
  * tap, or a retry after a lost answer, is the same refund and never a second one. A cash on
- * delivery refund is paid back by hand, with its reference. The route is not one the server marks fresh, so a fresh check is
- * asked for only if the server says so.
+ * delivery refund is paid back by hand, with its reference. The route is marked fresh (5.11): when the server answers
+ * reauth_required, fingerprint, face or a WhatsApp code is asked for and the same refund is tried again. No password.
  */
 export default function RefundCreateScreen({ route }) {
   const id = Number(route?.params?.id);

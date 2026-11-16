@@ -61,9 +61,9 @@ export function OrderPayments({ order }) {
 }
 
 /**
- * The owner's refund, in a sheet: the amount, why, and how it was paid back for cash on delivery. A refund needs a fresh
- * check (5.11): when the session's last one has run out, the WhatsApp code sheet opens first. One key per opening, so a
- * second tap is the same refund.
+ * The owner's refund, in a sheet: the amount, why, and how it was paid back for cash on delivery. refunds.create needs a
+ * fresh re-auth (5.11: a WhatsApp code or the device unlock), asked for first when the session is not fresh. One key per
+ * opening, so a second tap is the same refund.
  */
 export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund', variant = 'outline', onDone }) {
   const sheet = useRef(null);
@@ -100,15 +100,16 @@ export function RefundButton({ order, returnId, suggestedPaise, label = 'Refund'
       ...(returnId ? { returnId } : {}),
     };
     let refund = null;
+    let cancelled = false;
     const done = await form.run(async () => {
       try {
         refund = await fresh.run(() => api.refunds.create(order.id, body));
       } catch (error) {
-        if (isCancelled(error)) throw Object.assign(new Error('Confirm it’s you to refund.'), { code: 'reauth_required' });
-        throw error;
+        if (!isCancelled(error)) throw error;
+        cancelled = true;
       }
     });
-    if (done) {
+    if (done && !cancelled) {
       sheet.current?.close();
       toast(refund?.status === 'failed' ? 'The gateway refused the refund. Try it again from Refunds.' : `Refund of ${formatPaise(amountPaise)} started.`);
       await refresh();
@@ -152,7 +153,22 @@ export function OrderRefunds({ order }) {
   const isOwner = allowed(OWNER_ONLY);
   const refunds = useQuery({ queryKey: refundsKey(order.id), queryFn: () => api.refunds.forOrder(order.id) });
   const action = useAction();
+  const fresh = useFresh();
   const canRefund = order.flow === 'checkout' && refundable(order) > 0;
+
+  /** Sends a failed refund to the gateway again, after a fresh re-auth (5.11). Closing the check is not a problem. */
+  async function retry(refund) {
+    let cancelled = false;
+    await action.run(`retry-${refund.id}`, async () => {
+      try {
+        return await fresh.run(() => api.refunds.retry(refund.id));
+      } catch (error) {
+        if (isCancelled(error)) cancelled = true;
+        throw error;
+      }
+    }, 'Refund sent again.');
+    if (cancelled) action.setProblem('');
+  }
 
   return (
     <Panel title="Refunds" action={isOwner && canRefund ? <RefundButton order={order} /> : null}>
@@ -175,7 +191,7 @@ export function OrderRefunds({ order }) {
                   </span>
                   {isOwner && refund.status === 'failed' && refund.method === 'gateway' && (
                     <div className="row-actions">
-                      <Button variant="soft" loading={action.busy === `retry-${refund.id}`} onClick={() => action.run(`retry-${refund.id}`, () => api.refunds.retry(refund.id), 'Refund sent again.')}>Try again</Button>
+                      <Button variant="soft" loading={action.busy === `retry-${refund.id}`} onClick={() => retry(refund)}>Try again</Button>
                     </div>
                   )}
                 </div>
@@ -186,6 +202,7 @@ export function OrderRefunds({ order }) {
           <EmptyState title="No refunds">{canRefund ? 'A refund goes back the way the customer paid.' : 'Nothing has been paid that could be refunded.'}</EmptyState>
         ))}
       </StoreScreen>
+      {fresh.sheet}
     </Panel>
   );
 }

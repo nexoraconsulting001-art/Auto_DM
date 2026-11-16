@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { INVITE_EXPIRED_MESSAGE, OPERATOR_TARGET_MS, stepsFor } from '../../../src/contracts/onboarding.js';
 import { connectInstagramFlow } from '../../p1/spec-p1/support.js';
 import {
-  APP, appSignIn, buyer, consoleUser, hit, json, key, need, one, opCall, pause, shopOn, sql, unique, useBillingWorld,
+  APP, appSignIn, buyer, consoleUser, finishConnect, hit, json, key, need, one, opCall, pause, shopOn, sql, unique, useBillingWorld,
 } from './support.js';
 
 const world = useBillingWorld();
@@ -147,7 +147,7 @@ test('F-29: an owner who denies the messages permission fails the step with gate
   const start = need(await shop.send('POST', '/instagram/connect', {}), 200, 'Starting Instagram');
   const consent = await fetch(json(start).authorizeUrl, { redirect: 'manual' });
   const back = new URL(consent.headers.get('location'));
-  await hit(world, `${back.pathname}${back.search}`, { host: shop.host });
+  await finishConnect(world, await hit(world, `${back.pathname}${back.search}`, { host: shop.host }), { send: shop.send });
   need(await shop.send('POST', '/setup/check', { step: 'instagram' }), 200, 'Checking');
   const s = step(await checklist(shop), 'instagram');
   assert.equal(s.status, 'failed');
@@ -166,7 +166,7 @@ test('F-30: denying only the insights permission still goes live, in slow mode, 
   const start = need(await shop.send('POST', '/instagram/connect', {}), 200, 'Starting Instagram');
   const consent = await fetch(json(start).authorizeUrl, { redirect: 'manual' });
   const back = new URL(consent.headers.get('location'));
-  await hit(world, `${back.pathname}${back.search}`, { host: shop.host });
+  await finishConnect(world, await hit(world, `${back.pathname}${back.search}`, { host: shop.host }), { send: shop.send });
   need(await shop.send('POST', '/setup/check', { step: 'instagram' }), 200, 'Checking');
   const s = step(await checklist(shop), 'instagram');
   assert.equal(s.status, 'done', 'insights is not needed to go live');

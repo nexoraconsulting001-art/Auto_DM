@@ -7,7 +7,7 @@ import { asApiError } from '../payments/util.js';
  *
  * Tables (migration 404): refunds. The database holds refunds inside the captured amount (S-28), whatever two requests at
  * the same moment do.
- * Console routes: refunds.forOrder, refunds.create (owner only, with the owner's password checked again on the call, S-29),
+ * Console routes: refunds.forOrder, refunds.create and refunds.retry (owner only, after a fresh re-auth, S-29, 5.11),
  * refunds.get, refunds.retry. Every refund is in the audit log.
  * Order events it listens to: order.cancelled (a shopper's own cancellation is refunded, S-56, S-69; any other cancellation
  * of a paid order tells the owner a refund is due, S-31).

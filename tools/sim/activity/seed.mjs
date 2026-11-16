@@ -121,7 +121,14 @@ async function connectInstagram(world, { api, repos, seed, tenant }) {
   const back = dialog.headers.get('location') ? new URL(dialog.headers.get('location')) : null;
   if (!back) throw new SeedError('The Instagram simulator did not answer the consent screen');
   const done = await fetch(`${world.base}${back.pathname}${back.search}`, { redirect: 'manual' });
-  const landing = done.headers.get('location') ?? '';
+  let landing = done.headers.get('location') ?? '';
+  // D-4: the callback saves nothing. A connect started with the API token (as the owner app does) comes back to the
+  // app's scheme with a finish token, and the seller's own session finishes it.
+  const next = landing ? new URL(landing, 'http://relative.invalid') : null;
+  if (next?.searchParams.get('instagram') === 'finish') {
+    const finished = await api.post('/instagram/connect/finish', { finishToken: next.searchParams.get('f') ?? '' });
+    landing = `?instagram=${finished.data?.outcome ?? 'failed'}`;
+  }
   if (!/instagram=connected/.test(landing)) throw new SeedError(`Connecting the Instagram account did not finish (${landing.replace(/^https?:\/\/[^/]+/, '').slice(0, 80)})`);
   const connection = (await api.get('/instagram/connection')).data;
   if (connection.status !== 'active') throw new SeedError(`The Instagram account is ${connection.status} after connecting`);

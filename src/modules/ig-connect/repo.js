@@ -10,10 +10,10 @@ const HEALTH_CHECK_VALID_MS = DAY + 2 * 3_600_000;
 export function igConnectRepo(db) {
   return {
     /** A connect in progress. Only the hash is stored, and the callback reads it through db.platform. */
-    async saveState({ stateHash, provider, userId, returnTo, expiresAt }) {
+    async saveState({ stateHash, provider, userId, returnTo, expiresAt, via = 'cookie', startHost = '' }) {
       await db.query(
-        `INSERT INTO oauth_states (state_hash, tenant_id, provider, user_id, return_to, expires_at) VALUES ($1, $2, $3, $4, $5, $6::timestamptz)`,
-        [stateHash, tenantId(), provider, userId, returnTo, expiresAt],
+        `INSERT INTO oauth_states (state_hash, tenant_id, provider, user_id, return_to, expires_at, via, start_host) VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7, $8)`,
+        [stateHash, tenantId(), provider, userId, returnTo, expiresAt, via, startHost],
       );
     },
 

@@ -369,6 +369,8 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, getTenantId, ap
       connection: () => get('/instagram/connection'),
       /** @returns { authorizeUrl }: send the owner there */
       connect: (body) => post('/instagram/connect', body),
+      /** @param body { finishToken }: the f= Meta's answer brought back to the app (D-4). @returns { outcome } */
+      connectFinish: (body) => post('/instagram/connect/finish', body),
       disconnect: () => del('/instagram/connection'),
       /** @param query { type?: 'all' | 'reel' | 'post' | 'story', cursor?, limit? } */
       media: (query) => get('/instagram/media', query),

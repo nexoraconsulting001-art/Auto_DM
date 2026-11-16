@@ -194,7 +194,8 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
     }
     // req.hostname honours X-Forwarded-Host only from the trusted proxy in front (Caddy).
     const tenant = await tenants.resolve(req.hostname);
-    if (!tenant) {
+    // A held sign-up place (auth-2) has no address of its own: it is not a store.
+    if (!tenant || tenant.signup_held) {
       if (isApiV1Url(req.originalUrl)) return sendApiError(new ApiError('not_found', 'There is no store at this address.'), req, res);
       return res.status(404).type('text').send('There is no store at this address.');
     }
@@ -217,7 +218,10 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
     return r;
   };
   app.use((req, res, next) => {
-    if (!req.appHost || currentTenant()) return next();
+    // A session in a held sign-up place (auth-2) is served as before sign-in: the API (whose router lets it sign in and
+    // sign up only) and the console's shell. No module route, page or store of a business answers it.
+    const held = Boolean(currentTenant()?.signup_held);
+    if (!held && (!req.appHost || currentTenant())) return next();
     signInHost ??= buildSignInHost();
     return signInHost(req, res, next);
   });

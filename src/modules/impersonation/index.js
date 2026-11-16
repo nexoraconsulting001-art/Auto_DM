@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { IMPERSONATION_MINUTES } from '../../contracts/api/access.js';
+import { IMPERSONATION_MINUTES, IMPERSONATION_ROLES } from '../../contracts/api/access.js';
 import { OPS_PLATFORM_OWNERS } from '../../contracts/api/platform-ops.js';
 import { log, reportError } from '../../platform/log.js';
 import { currentTenant, tenantId } from '../../tenancy.js';
@@ -18,13 +18,26 @@ const entryKey = (token) => `impersonation-entry:${crypto.createHash('sha256').u
 const sameName = (a, b) => String(a).trim().replace(/\s+/g, ' ').toLowerCase() === String(b).trim().replace(/\s+/g, ' ').toLowerCase();
 
 /**
+ * Whether the platform user who opened an operator session may still hold it: not turned off, and still in one of `roles`.
+ * platform_users is not readable inside a business, so this one read is on the platform path. Taking access or a role
+ * away ends the sessions in the same transaction (platform.updateTeamMember); this is the check behind that.
+ */
+export async function operatorStillAllowed(db, operatorId, roles) {
+  const [row] = await (db.platform ?? db).query('SELECT 1 FROM platform_users WHERE id = $1 AND disabled_at IS NULL AND role = ANY($2::text[])', [Number(operatorId), [...roles]]);
+  return Boolean(row);
+}
+
+/**
  * What the API router asks on every request of an impersonated session (PRD 5.10). Read inside the business: the row is
  * fenced, and business code can only read it. Starting, confirming write mode and ending are the platform's, through
  * db.platform, in the Platform Console routes this module mounts.
  */
 export function impersonationRepo(db) {
   return {
-    /** The live session with this id in the current business, as req.session.operator, or null once it ended or its 30 minutes are up. */
+    /**
+     * The live session with this id in the current business, as req.session.operator, or null once it ended, its 30
+     * minutes are up, or the operator who opened it was turned off or no longer has a role that may impersonate.
+     */
     async live(id) {
       const [row] = await db.query(
         `SELECT i.id, i.operator_id, i.operator_name, i.owner_user_id, i.mode, i.expires_at
@@ -32,7 +45,7 @@ export function impersonationRepo(db) {
          WHERE i.tenant_id = $1 AND i.id = $2 AND i.ended_at IS NULL AND i.expires_at > now()`,
         [tenantId(), Number(id)],
       );
-      if (!row) return null;
+      if (!row || !(await operatorStillAllowed(db, row.operator_id, IMPERSONATION_ROLES))) return null;
       return { kind: 'impersonation', id: Number(row.id), operatorId: row.operator_id, operatorName: row.operator_name || 'Bhava support', ownerId: row.owner_user_id, mode: row.mode, service: null, taskRef: null, expiresAt: row.expires_at };
     },
   };
@@ -68,7 +81,7 @@ export function registerImpersonationRoutes(router, ctx) {
     const [tenant] = await pdb.query('SELECT id, slug, name, status FROM tenants WHERE id = $1', [params.id]);
     if (!tenant) throw new Refusal(404, 'Not found.');
     if (tenant.status === 'closed') throw new Refusal(409, 'This business is closed.', 'conflict');
-    const [owner] = await pdb.query(`SELECT id FROM users WHERE tenant_id = $1 AND role = 'owner' ORDER BY id LIMIT 1`, [tenant.id]);
+    const [owner] = await pdb.query(`SELECT id FROM users WHERE tenant_id = $1 AND role = 'owner' AND removed_at IS NULL ORDER BY id LIMIT 1`, [tenant.id]);
     if (!owner) throw new Refusal(409, 'This business has no owner account to open.', 'conflict');
     const row = await pdb.tx(async (t) => {
       // One live session per operator and business: starting again ends the last one and its cookie.

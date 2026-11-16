@@ -53,6 +53,16 @@ test('connecting opens Meta’s own login in the system browser, never a web vie
   expect(callsTo(server, 'GET', '/instagram/connection').length).toBeGreaterThanOrEqual(2);
 });
 
+test('D-4 Meta’s answer comes back to the app, and the app finishes the connect with its own session', async () => {
+  const finishToken = 'f'.repeat(43);
+  WebBrowser.openAuthSessionAsync.mockImplementationOnce(async () => ({ type: 'success', url: `bhavabusiness://auth/callback?instagram=finish&f=${finishToken}` }));
+  const { server, state } = await open('/connect', { ig: NONE, extra: { 'POST /instagram/connect/finish': () => { state.ig = ACTIVE; return { outcome: 'connected' }; } } });
+  expect(await screen.findByTestId('connect-ig-start')).toBeTruthy();
+  await fireEvent.press(screen.getByTestId('connect-ig-start'));
+  await waitFor(() => expect(callsTo(server, 'POST', '/instagram/connect/finish').map((c) => c.body)).toEqual([{ finishToken }]));
+  expect(await screen.findByText('@kesarhome')).toBeTruthy();
+});
+
 test('an address that is not Meta’s login opens nothing, and the person is told it didn’t work', async () => {
   await open('/connect', { ig: NONE, extra: { 'POST /instagram/connect': () => ({ authorizeUrl: 'https://evil.example.com/login' }) } });
   await fireEvent.press(await screen.findByTestId('connect-ig-start'));

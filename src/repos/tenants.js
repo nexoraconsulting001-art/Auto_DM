@@ -5,7 +5,7 @@ import { hashSessionToken, operatorRef } from './sessions.js';
 
 const COLS = 'id, slug, name, status, plan, created_at';
 /** The verified primary domain goes with the business, because the links a DM carries are built on it. */
-export const WITH_PRIMARY = `t.id, t.slug, t.name, t.status, t.plan, t.created_at, t.account_type,
+export const WITH_PRIMARY = `t.id, t.slug, t.name, t.status, t.plan, t.created_at, t.account_type, t.signup_held,
   (SELECT p.domain FROM tenant_domains p WHERE p.tenant_id = t.id AND p.is_primary AND p.status = 'verified') AS primary_domain`;
 
 /** Addresses Bhava keeps for itself; no business can take one. */
