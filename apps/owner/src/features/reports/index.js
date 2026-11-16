@@ -14,7 +14,9 @@ export default {
     'reports.list', 'reports.preferences', 'reports.updatePreferences', 'reports.unsubscribe', 'reports.get',
     'downloads.list', 'downloads.create', 'downloads.get',
     'scheduledReports.list', 'scheduledReports.create', 'scheduledReports.update', 'scheduledReports.remove', 'scheduledReports.addRecipient', 'scheduledReports.removeRecipient',
-    'console:/reports', 'console:/reports/scheduled', 'console:/reports/:id',
+    // The keys' screen is Settings' (settings/api-keys, one screen per path); Reports offers the way in, as the console keeps them under Reports.
+    'apiKeys.list', 'apiKeys.create', 'apiKeys.revoke',
+    'console:/reports', 'console:/reports/scheduled', 'console:/reports/:id', 'console:/settings/api-keys',
   ],
   screens: [
     { name: 'index', path: 'reports', title: 'reports.title', component: ReportsScreen },

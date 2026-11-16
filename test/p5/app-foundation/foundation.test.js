@@ -267,7 +267,8 @@ test('P-12 and P-69 a screen opens by role, permission, plan and account type, f
 test('Devices, notifications and Your account cover their routes, and the allowance file no longer lists them', () => {
   const found = readAppFeatures(ROOT);
   assert.deepEqual(found.problems, []);
-  const byName = Object.fromEntries(found.features.map((f) => [f.name, f.routeIds]));
+  // A feature also lists the console pages it stands for ('console:/settings/devices', since f406592); the API routes are these.
+  const byName = Object.fromEntries(found.features.map((f) => [f.name, f.routeIds.filter((id) => !id.startsWith('console:'))]));
   assert.deepEqual(byName.devices, ['auth.devices', 'auth.revokeDevice']);
   assert.deepEqual(byName.notifications, ['notifications.list', 'notifications.markRead', 'notifications.prefs', 'notifications.savePrefs']);
   assert.deepEqual(byName.account, ['auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.reauthStart', 'auth.reauthVerify', 'auth.deleteAccount']);
