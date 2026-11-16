@@ -84,6 +84,8 @@ export function mountPages(app, ctx, service) {
         : [];
       const items = await db.query('SELECT name, qty FROM order_items WHERE tenant_id = $1 AND order_id = $2 ORDER BY id', [tenantId(), order.id]);
       const live = shipment && shipment.status !== 'cancelled' ? shipment : null;
+      // One order's parcel and items, for whoever holds its link: no cache keeps it, the browser's included.
+      res.set('Cache-Control', 'no-store');
       return sendStorePage(ctx, req, res, {
         title: `Track order ${order.order_number}`,
         description: trackingState(order, live).title,

@@ -6,7 +6,7 @@ import { writeAudit } from '../audit/index.js';
 import { changeRow } from '../orders/state.js';
 import { opsAlert, ownerAlert } from './alerts.js';
 import { addressComplete, pickupReady } from './settings.js';
-import { BEFORE_PICKUP, cleanText, failureFields, failureOf, isAwb, listOf, providerId, stateName, tenDigits, trackingToken } from './util.js';
+import { BEFORE_PICKUP, cleanText, failureFields, failureOf, isAwb, listOf, providerId, stateName, tenDigits, trackingPath } from './util.js';
 
 /**
  * Shipments (PRD 9.10): "Ready to ship" makes the shipment at the courier, its AWB, the pickup and the label, on the account
@@ -100,10 +100,7 @@ export function createShipments(ctx, { settings, kick = () => {} }) {
     return tenant ? buyerBaseUrl(tenant, config) || '' : '';
   }
 
-  const pathFor = (orderId, publicToken) => {
-    const token = trackingToken(tenantId(), orderId, publicToken);
-    return token ? `/track/${token}` : '';
-  };
+  const pathFor = (orderId, publicToken) => trackingPath(tenantId(), orderId, publicToken);
 
   async function trackingUrl(orderId) {
     const [order] = await db.query('SELECT id, public_token FROM orders WHERE tenant_id = $1 AND id = $2', [tenantId(), orderId]);

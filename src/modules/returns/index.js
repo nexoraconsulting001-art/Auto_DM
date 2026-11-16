@@ -129,6 +129,8 @@ export const returns = {
         if (!shopper) return res.redirect(303, `/login?next=${encodeURIComponent(req.originalUrl.slice(0, 300))}`);
         const order = await shopperOrder(ctx, shopper, req.params.orderNumber);
         if (!order) return sendStoreNotFound(ctx, req, res, 'We couldn’t find that order.');
+        // The return page shows the shopper's order: no cache keeps it, the browser's included.
+        res.set('Cache-Control', 'no-store');
         const options = await returnsFor(ctx).options(order);
         if (!options.ok) {
           return sendStorePage(ctx, req, res, { title: 'Returns', main: noReturnPage({ order, message: options.message }), kind: 'other', status: 404 });
