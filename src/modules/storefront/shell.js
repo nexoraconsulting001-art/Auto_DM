@@ -108,8 +108,9 @@ export async function renderStorePage(ctx, req, { title, description = '', main,
   return withHead(view, tags);
 }
 
-export async function sendStorePage(ctx, req, res, { kind = 'store', ref = '', status = 200, ...page }) {
-  return sendBuyerPage(res, await renderStorePage(ctx, req, page), { status, page: { kind, ref } });
+/** `sources`: other sites' origins this page's scripts need, for its policy only (sendBuyerPage). */
+export async function sendStorePage(ctx, req, res, { kind = 'store', ref = '', status = 200, sources = null, ...page }) {
+  return sendBuyerPage(res, await renderStorePage(ctx, req, page), { status, page: { kind, ref }, sources });
 }
 
 export async function sendStoreNotFound(ctx, req, res, message = 'This page doesn’t exist.') {

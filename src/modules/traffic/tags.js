@@ -17,10 +17,12 @@ const OFF = Object.freeze({ meta: { on: false, pixelId: '' }, ga4: { on: false, 
 /** The browser event each tag event comes from. Purchase comes from the order itself, never from a page. */
 const TAG_FOR_BEACON = { page_view: 'page_view', product_view: 'view_content', add_to_cart: 'add_to_cart', checkout_started: 'initiate_checkout' };
 
-const CONTENT_POLICY = (hosts) => [
+const list = (hosts) => (hosts.length ? ` ${hosts.join(' ')}` : '');
+const CONTENT_POLICY = (hosts, page) => [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${hosts.length ? ` ${hosts.join(' ')}` : ''}`,
-  `connect-src 'self'${hosts.length ? ` ${hosts.join(' ')}` : ''}`,
+  `script-src 'self' 'unsafe-inline'${list([...hosts, ...page.script])}`,
+  `connect-src 'self'${list([...hosts, ...page.connect])}`,
+  ...(page.frame.length ? [`frame-src 'self'${list(page.frame)}`] : []),
   "style-src 'self' 'unsafe-inline' https:",
   "font-src 'self' data: https:",
   "img-src 'self' data: blob: https:",
@@ -31,9 +33,18 @@ const CONTENT_POLICY = (hosts) => [
   "frame-ancestors 'self'",
 ].join('; ');
 
-/** A buyer page's policy. It names Meta's or Google's hosts only for a tag that is on for this business (7.14). */
-export function contentSecurityPolicy(state = OFF) {
-  return CONTENT_POLICY([...(state.meta.on ? TAG_HOSTS.meta : []), ...(state.ga4.on ? TAG_HOSTS.ga4 : [])]);
+/** Only plain https origins ("https://host" or "https://host:port") reach the header: no paths, wildcards, keywords or separators. */
+const ORIGIN = /^https:\/\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\d{1,5})?$/i;
+const origins = (value) => [...new Set((Array.isArray(value) ? value : []).filter((o) => typeof o === 'string' && ORIGIN.test(o)))];
+
+/**
+ * A buyer page's policy. It names Meta's or Google's hosts only for a tag that is on for this business (7.14), and another
+ * site's origins only for the page that declared it needs them (`sources` { script, frame, connect }, such as the payment
+ * gateway on checkout and the order page). Without frame sources there is no frame-src, so default-src 'self' blocks frames.
+ */
+export function contentSecurityPolicy(state = OFF, sources = null) {
+  const page = { script: origins(sources?.script), frame: origins(sources?.frame), connect: origins(sources?.connect) };
+  return CONTENT_POLICY([...(state.meta.on ? TAG_HOSTS.meta : []), ...(state.ga4.on ? TAG_HOSTS.ga4 : [])], page);
 }
 
 const toView = (row, { available, consentReady }) => ({

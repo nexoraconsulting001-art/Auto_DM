@@ -133,6 +133,12 @@ export const CHECKOUT_JS = `(() => {
       if (res.ok && res.data.token) {
         B.clear();
         try { sessionStorage.removeItem(KEY); } catch {}
+        // An online order opens the gateway at once (pay.js). Once paid, pay.js brings the shopper back itself; a closed or
+        // failed screen lands on the order page, whose Pay button asks for the payment again.
+        if (res.data.next === 'pay' && res.data.gateway && typeof window.StorePay?.open === 'function') {
+          const outcome = await window.StorePay.open(res.data.gateway, res.data.token);
+          if (outcome === 'paid') return;
+        }
         location.assign('/order/' + encodeURIComponent(res.data.token));
         return;
       }

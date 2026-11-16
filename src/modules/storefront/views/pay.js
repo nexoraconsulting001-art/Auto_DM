@@ -15,13 +15,20 @@
  * server answered when it is one of this store's own paths. A failed or closed payment screen lets Pay be tapped again,
  * with the reason in words in the page's [data-pay-error] box.
  *
- * Not mounted yet: serving it needs a route beside the order page's own script, and the order page's scripts list
- * (both in src/modules/checkout/pages.js, outside this folder).
+ * Served by src/modules/checkout/pages.js beside the order page's own script, and loaded by the two pages that take a payment
+ * (checkout and the order page), which also hand GATEWAY_ORIGINS to their policy (sendStorePage's `sources`).
  */
 export const PAY_SCRIPT = '/store/pay.js';
 export const GATEWAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
-/** Where the gateway's checkout runs, for the order page's Content-Security-Policy (script-src and frame-src). */
-export const GATEWAY_ORIGINS = Object.freeze({ script: Object.freeze(['https://checkout.razorpay.com']), frame: Object.freeze(['https://api.razorpay.com', 'https://checkout.razorpay.com']) });
+/**
+ * Where the gateway's checkout runs, for the Content-Security-Policy of a page that loads PAY_JS: its script (script-src), its
+ * payment frame (frame-src) and the calls its script makes to its own servers (connect-src).
+ */
+export const GATEWAY_ORIGINS = Object.freeze({
+  script: Object.freeze(['https://checkout.razorpay.com']),
+  frame: Object.freeze(['https://api.razorpay.com', 'https://checkout.razorpay.com']),
+  connect: Object.freeze(['https://api.razorpay.com', 'https://lumberjack.razorpay.com']),
+});
 
 // Written with String.raw so its regular expressions keep their backslashes; it has no backtick and no "${".
 export const PAY_JS = String.raw`(function () {
