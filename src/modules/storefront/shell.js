@@ -60,8 +60,9 @@ const STORE_CSS = [
 
 export const storeStyles = () => html`<style>${raw(STORE_CSS)}</style>`;
 
-const header = () => html`<nav class="row" aria-label="Store">
+const header = (signedIn = false) => html`<nav class="row" aria-label="Store">
 <a class="chip" href="/search" aria-label="Search">Search</a>
+<a class="chip" href="/account" aria-label="${signedIn ? 'Your account' : 'Sign in'}">${signedIn ? 'Account' : 'Sign in'}</a>
 <a class="chip bag-link" href="/cart" aria-label="Your bag">Bag<span data-bag-count></span></a>
 </nav>`;
 
@@ -76,6 +77,11 @@ function whatsappHref(settings) {
   if (digits.length === 10) return `https://wa.me/91${digits}`;
   if (digits.length >= 11 && digits.length <= 15) return `https://wa.me/${digits}`;
   return '';
+}
+
+/** The store's header chips and footer, for pages that are not drawn by renderStorePage (the shopper's own pages). */
+export function storeChrome({ business, settings }, { signedIn = true } = {}) {
+  return { headerEnd: header(signedIn), footer: { note: `© ${business.name}`, whatsappHref: whatsappHref(settings), links: FOOTER_LINKS } };
 }
 
 /** Adds the store's tags to the head of a finished document. */
@@ -93,7 +99,7 @@ export async function renderStorePage(ctx, req, { title, description = '', main,
     business,
     meta: { title: title ? `${title} · ${business.name}` : business.name, description: description || settings.tagline || '', url: url || `${baseOf(req)}${req.path}`, indexable, image: image ?? undefined },
     main: html`${storeStyles()}${main}`,
-    headerEnd: header(),
+    headerEnd: header(Boolean(req.shopper?.id)),
     footer: { note: `© ${business.name}`, whatsappHref: whatsappHref(settings), links: FOOTER_LINKS },
   });
   const tags = [

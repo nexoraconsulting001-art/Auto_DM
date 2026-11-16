@@ -6,6 +6,7 @@ import { log, reportError } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { ValidationError } from '../../util.js';
 import { loadBuyerLayout } from '../../views/buyer/index.js';
+import { returnOption } from '../returns/index.js';
 import { platformHostOf } from '../platform-console/host.js';
 import { csrfFor, field, newToken, originOf, readCookie, readToken, safeEqual, signToken } from './keys.js';
 import { OtpError } from './service.js';
@@ -279,7 +280,9 @@ export function shopperRoutes(ctx, { service, shared, google }) {
     if (!req.shopper) return signInFirst(req, res);
     const order = await service.orders.get(req.shopper.id, req.params.orderNumber);
     if (!order) return page(res, (layout) => messagePage(layout, { title: 'Not found', message: 'We couldn’t find that order in your account.', action: { href: '/account/orders', label: 'Your orders' } }), 404);
-    return page(res, (layout) => orderDetailPage(layout, { order, shopperCsrf: req.shopperCsrf, sellerCsrf: req.csrf ?? '' }));
+    // The return link shows only while a return can be asked for now: returns on, inside the window, something eligible (S-57).
+    const returnHref = await returnOption(ctx, order);
+    return page(res, (layout) => orderDetailPage(layout, { order, returnHref, shopperCsrf: req.shopperCsrf, sellerCsrf: req.csrf ?? '' }));
   }));
 
   // ---- saved addresses (9.4) ----

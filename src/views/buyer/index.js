@@ -37,7 +37,10 @@ const PAGE_KINDS = new Set(['landing', 'category', 'product', 'store', 'link_in_
 export function sendBuyerPage(res, view, { status = 200, page = null, sources = null } = {}) {
   if (page && PAGE_KINDS.has(page.kind)) res.locals.page = { kind: page.kind, ref: String(page.ref ?? '').slice(0, 200) };
   if (sources) res.locals.contentSources = sources;
-  res.set('Cache-Control', 'private, no-cache');
+  // A page that already said how it may be kept (no-store for anything with a person's details) keeps its own rule.
+  if (!res.get('Cache-Control')) res.set('Cache-Control', 'private, no-cache');
+  // Every buyer page leaves compressed (8.12), from this one place.
+  if (res.req) gzipOnEnd(res.req, res);
   return res.status(status).type('html').send(String(view));
 }
 
@@ -46,7 +49,9 @@ export function sendBuyerPage(res, view, { status = 200, page = null, sources = 
  * is compressed, which is how res.send writes a page. Call it just before sendBuyerPage.
  */
 export function gzipOnEnd(req, res) {
+  if (res.locals.gzipOnEnd) return;
   if (!/\bgzip\b/i.test(req.get('accept-encoding') ?? '')) return;
+  res.locals.gzipOnEnd = true;
   const end = res.end.bind(res);
   res.end = (chunk, encoding, done) => {
     res.end = end;
