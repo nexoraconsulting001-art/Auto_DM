@@ -32,7 +32,7 @@ import { createTenantResolver, currentTenant, normalizeHost, withTenant } from '
 import { createPlatform, describePlatform } from './platform/index.js';
 import { createErrorSink } from './platform/error-sink.js';
 import { HEALTH_PATHS, createHealth, drainOnSignals } from './platform/health.js';
-import { log, onError, reportError, requestIds } from './platform/log.js';
+import { log, onError, reportError, requestIds, routeOf } from './platform/log.js';
 import { secretRefreshFailed } from './platform/metrics.js';
 import { guardProduction } from './platform/production-guard.js';
 
@@ -245,7 +245,7 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
     // A body that isn't JSON or is too big is the sender's fault. The parser's error quotes the body, so it isn't logged.
     const refused = { 'entity.parse.failed': 400, 'entity.too.large': 413 }[err.type];
     if (refused && !res.headersSent) return res.status(refused).json({ error: 'That request could not be read.' });
-    reportError(err, { msg: 'http.error', method: req.method, path: req.path });
+    reportError(err, { msg: 'http.error', method: req.method, path: routeOf(req) });
     if (res.headersSent) return;
     if (req.path.startsWith('/api/') || req.get('accept')?.includes('application/json')) {
       return res.status(500).json({ error: 'Something went wrong on our side. Please try again.' });

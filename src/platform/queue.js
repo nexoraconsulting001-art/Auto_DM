@@ -27,6 +27,11 @@ export const backoffMs = (attempt) => Math.min(60 * 60_000, 1000 * 2 ** Math.max
 
 const workerId = () => `${os.hostname()}:${process.pid}`;
 
+/** One report for a job that threw, in both drivers (the log scrubs the message): final is true when no retry follows. */
+export function reportJobFailure(err, { queue, attempt, maxAttempts, final }) {
+  reportError(err, { msg: 'job.failed', queue, attempt, final: final ?? attempt >= maxAttempts });
+}
+
 async function runHandler(handler, job) {
   return job.tenantId ? withTenant(job.tenantId, () => handler(job)) : handler(job);
 }
@@ -98,6 +103,7 @@ function pgQueue(db, config) {
           await runHandler(handler, job);
           await finish(row);
         } catch (err) {
+          reportJobFailure(err, { queue, attempt: row.attempts, maxAttempts: row.max_attempts });
           await finish(row, err);
         }
       }
@@ -198,6 +204,12 @@ function redisQueue(config) {
           return runHandler(handler, job);
         }, { connection: connection(), concurrency, maxStalledCount: 1 });
         worker.on('error', (err) => reportError(err, { msg: 'queue.worker_error', queue }));
+        worker.on('failed', (bjob, err) => {
+          if (!bjob) return;
+          const attempt = bjob.attemptsMade ?? 0;
+          const maxAttempts = bjob.opts?.attempts ?? 1;
+          reportJobFailure(err, { queue, attempt, maxAttempts, final: err?.name === 'UnrecoverableError' || attempt >= maxAttempts });
+        });
         workers.push(worker);
       })();
       start.catch((err) => reportError(err, { msg: 'queue.failed_to_start', queue }));
