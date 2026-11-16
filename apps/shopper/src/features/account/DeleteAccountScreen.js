@@ -6,6 +6,7 @@ import { Banner, Button, ConfirmSheet, Screen, Text } from '@bhava/ui';
 import { useServices } from '../../services.js';
 import { useBrandName } from '../../shell/parts.js';
 import { NeedSignIn, Problem, useSessionState } from '../cart/ui.js';
+import { openTab } from '../../shell/menu.js';
 
 export default function DeleteAccountScreen() {
   const { t } = useStrings();
@@ -35,7 +36,7 @@ export default function DeleteAccountScreen() {
     return (
       <Screen testID="screen-account-deleted" title={t('account.deletedTitle')}>
         <Banner testID="deleted-message" tone="good">{done.message || t('account.deletedBody')}</Banner>
-        <Button testID="deleted-home" label={t('account.backToStore')} onPress={() => navigation.navigate('home.index')} />
+        <Button testID="deleted-home" label={t('account.backToStore')} onPress={() => openTab(navigation, 'home.index')} />
       </Screen>
     );
   }

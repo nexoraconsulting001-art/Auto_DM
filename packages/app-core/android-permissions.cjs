@@ -4,6 +4,12 @@
  *
  * LAUNCHER_BADGE_PERMISSIONS: expo-notifications brings ShortcutBadger, which asks for the badge permissions of a dozen
  * launchers. Neither app sets an icon badge count, and an unexplained permission fails the store check (P-15).
+ *
+ * INSTALL_REFERRER_PERMISSIONS: expo-application brings Google's Install Referrer library, which asks to bind Play's
+ * install referrer service. It is used only by Application.getInstallReferrerAsync, which no app calls: an app never
+ * learns which campaign or link installed it (the store answers collect no such data).
+ *
+ * BLOCKED_LIBRARY_PERMISSIONS is every list above: what each app.config.js spreads into blockedPermissions.
  */
 const LAUNCHER_BADGE_PERMISSIONS = Object.freeze([
   'com.sec.android.provider.badge.permission.READ', 'com.sec.android.provider.badge.permission.WRITE',
@@ -16,4 +22,8 @@ const LAUNCHER_BADGE_PERMISSIONS = Object.freeze([
   'me.everything.badger.permission.BADGE_COUNT_READ', 'me.everything.badger.permission.BADGE_COUNT_WRITE',
 ]);
 
-module.exports = { LAUNCHER_BADGE_PERMISSIONS };
+const INSTALL_REFERRER_PERMISSIONS = Object.freeze(['com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE']);
+
+const BLOCKED_LIBRARY_PERMISSIONS = Object.freeze([...LAUNCHER_BADGE_PERMISSIONS, ...INSTALL_REFERRER_PERMISSIONS]);
+
+module.exports = { BLOCKED_LIBRARY_PERMISSIONS, INSTALL_REFERRER_PERMISSIONS, LAUNCHER_BADGE_PERMISSIONS };

@@ -5,6 +5,7 @@ import { useStrings } from '@bhava/app-core/strings';
 import { Banner, Button, EmptyState, Loading, Screen } from '@bhava/ui';
 import { useBuy } from '../cart/ui.js';
 import { payAndSettle } from './flow.js';
+import { openTab } from '../../shell/menu.js';
 
 export default function PaymentScreen() {
   const { t } = useStrings();
@@ -59,7 +60,7 @@ export default function PaymentScreen() {
       {error ? <Banner testID="payment-error" tone="warn">{error.message}</Banner> : null}
       <Button testID="pay-again" label={t('payment.again')} onPress={again} />
       <Button testID="pay-view-order" kind="secondary" label={t('payment.viewOrder')} onPress={() => navigation.replace('orders.byToken', { token: order.current.token, justPlaced: true })} />
-      <Button testID="pay-back-cart" kind="quiet" label={t('payment.backToCart')} onPress={() => navigation.navigate('cart.index')} />
+      <Button testID="pay-back-cart" kind="quiet" label={t('payment.backToCart')} onPress={() => openTab(navigation, 'cart.index')} />
     </>
   );
   return (

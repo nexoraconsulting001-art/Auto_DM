@@ -3,10 +3,11 @@ import React, { useMemo, useState } from 'react';
 import { FlatList, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useStrings } from '@bhava/app-core/strings';
-import { Badge, Button, Screen, Section, Text, useTheme } from '@bhava/ui';
+import { Badge, Banner, Button, Screen, Section, Text, useTheme } from '@bhava/ui';
 import { useServices } from '../../services.js';
 import { useBrowseQuery } from '../../shell/data.js';
 import { Photo, Price, ReelTile, Shown } from '../../shell/parts.js';
+import { openTab } from '../../shell/menu.js';
 
 const JOIN = ' / ';
 
@@ -54,6 +55,9 @@ function Detail({ product }) {
   const services = useServices();
   const [chosen, setChosen] = useState({});
   const [qty, setQty] = useState(1);
+  // The product is a screen on the stack above the tabs, so the cart tab is not on screen here: once a line is in the bag
+  // the page says so and offers the cart itself, one tap away.
+  const [added, setAdded] = useState(false);
   const variant = useMemo(() => variantFor(product, chosen), [product, chosen]);
   const hasOptions = product.options.length > 0;
   const price = variant?.pricePaise ?? product.pricePaise;
@@ -105,8 +109,9 @@ function Detail({ product }) {
             testID="add-to-cart"
             label={inStock ? t('product.add') : t('home.common.soldOut')}
             disabled={!inStock || needsChoice}
-            onPress={() => add({ productId: product.id, variantId: variant?.id ?? null, qty })}
+            onPress={() => Promise.resolve(add({ productId: product.id, variantId: variant?.id ?? null, qty })).then(() => setAdded(true))}
           />
+          {added ? <Banner testID="added-to-cart" tone="good" action={<Button testID="added-go-cart" kind="secondary" label={t('product.goToCart')} onPress={() => openTab(navigation, 'cart.index')} />}>{t('product.added')}</Banner> : null}
         </View>
       ) : null}
       {product.reels.length ? (
@@ -126,7 +131,7 @@ export default function ProductScreen() {
   const query = useBrowseQuery(['product', slug], (browse) => browse.product(slug), { enabled: slug !== '' });
   return (
     <Screen testID="screen-product">
-      <Shown query={query} onGone={() => navigation.navigate('catalog.index')}>
+      <Shown query={query} onGone={() => openTab(navigation, 'catalog.index')}>
         {(product) => (product ? <Detail key={product.slug} product={product} /> : null)}
       </Shown>
     </Screen>

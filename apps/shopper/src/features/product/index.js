@@ -8,7 +8,7 @@ export default {
   ],
   nav: null,
   strings: {
-    en: { 'product.title': 'Product', 'product.choose': 'Choose an option to see its price and stock.', 'product.add': 'Add to cart', 'product.less': 'One less', 'product.more': 'One more', 'product.reels': 'Seen in reels' },
-    hi: { 'product.title': 'प्रोडक्ट', 'product.choose': 'कीमत और स्टॉक देखने के लिए विकल्प चुनें।', 'product.add': 'कार्ट में जोड़ें', 'product.less': 'एक कम', 'product.more': 'एक ज़्यादा', 'product.reels': 'रील्स में देखा गया' },
+    en: { 'product.title': 'Product', 'product.choose': 'Choose an option to see its price and stock.', 'product.add': 'Add to cart', 'product.less': 'One less', 'product.more': 'One more', 'product.reels': 'Seen in reels', 'product.added': 'Added to your cart.', 'product.goToCart': 'Go to cart' },
+    hi: { 'product.title': 'प्रोडक्ट', 'product.choose': 'कीमत और स्टॉक देखने के लिए विकल्प चुनें।', 'product.add': 'कार्ट में जोड़ें', 'product.less': 'एक कम', 'product.more': 'एक ज़्यादा', 'product.reels': 'रील्स में देखा गया', 'product.added': 'कार्ट में जोड़ दिया गया।', 'product.goToCart': 'कार्ट देखें' },
   },
 };

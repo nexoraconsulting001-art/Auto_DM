@@ -8,6 +8,7 @@ import { Banner, Button, Card, EmptyState, ListRow, LoadingRows, Screen, Section
 import { useServices } from '../../services.js';
 import { useBrandName } from '../../shell/parts.js';
 import { NeedSignIn, Problem, useBuy, useSessionState, useStoreQuery } from '../cart/ui.js';
+import { openTab } from '../../shell/menu.js';
 
 export default function RewardsScreen() {
   const { t } = useStrings();
@@ -32,7 +33,7 @@ export default function RewardsScreen() {
   };
   return (
     <Screen testID="screen-rewards" title={t('rewards.title')}>
-      {code ? <Banner testID="referral-kept" tone="good" action={<Button testID="referral-shop" label={t('rewards.shop')} onPress={() => navigation.navigate('catalog.index')} />}>{t('rewards.kept', { brand })}</Banner> : null}
+      {code ? <Banner testID="referral-kept" tone="good" action={<Button testID="referral-shop" label={t('rewards.shop')} onPress={() => openTab(navigation, 'catalog.index')} />}>{t('rewards.kept', { brand })}</Banner> : null}
       {!signedIn ? <NeedSignIn go={(name) => navigation.navigate(name)} reason={t('rewards.signInBody', { brand })} /> : null}
       {signedIn && rewards.isError && !data ? <Problem error={rewards.error} onRetry={() => rewards.refetch()} /> : null}
       {signedIn && rewards.isPending ? <LoadingRows rows={3} label={t('home.common.loading')} testID="rewards-loading" /> : null}

@@ -256,6 +256,21 @@ describe.each(brands)('%s', (name) => {
     expect(flatText()).not.toMatch(PLATFORM_WORD);
   });
 
+  test('after the deletion, Back to the store closes the deleted page and the tabs are on top again', async () => {
+    // The deleted page is on the stack above the tabs; home is a tab's screen, opened through the tabs (shell/menu.js openTab).
+    const { services } = setup(name);
+    await render(<App services={services} linking={false} />);
+    await services.session.sendCode('9876543210');
+    await services.session.signInWithCode('9876543210', '123456');
+    await fireEvent.press(screen.getByTestId('tab-account'));
+    await fireEvent.press(await screen.findByTestId('account-delete'));
+    await fireEvent.press(await screen.findByTestId('delete-start'));
+    await fireEvent.press(await screen.findByText('Yes, delete it'));
+    await fireEvent.press(await screen.findByTestId('deleted-home'));
+    await waitFor(() => expect(screen.queryByTestId('screen-account-deleted')).toBeNull());
+    expect(screen.getByTestId('screen-home')).toBeTruthy();
+  });
+
   test('the account page offers sign-in to a guest, links the shopper’s screens, and shows no platform name', async () => {
     const { services } = setup(name);
     await render(<App services={services} linking={false} />);

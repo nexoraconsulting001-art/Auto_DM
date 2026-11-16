@@ -9,10 +9,12 @@ name: 'P-18 - Confirm a cash on delivery order in the app, and the web console s
       PHONE: ${PHONE_ORDERS}
 - tapOn:
     id: tab-orders
+# A row reads "<number> · <customer>" (features/orders/OrdersScreen.js), and Maestro matches the whole text, so the
+# number is looked for at the start of the row.
 - extendedWaitUntil:
-    visible: ${ORDER_A_NUMBER}
+    visible: '${ORDER_A_NUMBER} · .*'
     timeout: 60000
-- tapOn: ${ORDER_A_NUMBER}
+- tapOn: '${ORDER_A_NUMBER} · .*'
 - extendedWaitUntil:
     visible:
       id: order-action-confirm

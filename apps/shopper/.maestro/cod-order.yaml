@@ -65,6 +65,12 @@ name: 'P-28 - Check out with cash on delivery using a WhatsApp code, then find t
       id: screen-tracking
     timeout: 30000
 - back
+# The order's page is on the stack above the tabs: Keep shopping brings the tabs back, then Account is one tap away.
+- scrollUntilVisible:
+    element:
+      id: status-shop
+- tapOn:
+    id: status-shop
 - tapOn:
     id: tab-account
 - tapOn:

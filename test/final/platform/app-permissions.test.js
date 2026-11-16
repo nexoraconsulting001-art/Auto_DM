@@ -2,6 +2,7 @@
 // notification library's badge helper (ShortcutBadger, pulled in with expo-notifications) adds the launcher badge
 // permissions of a dozen phone makers at build time; neither app sets a badge count, so both apps block them, from one list.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -21,6 +22,8 @@ const ADDED_BY_LIBRARIES = [
   'com.huawei.android.launcher.permission.WRITE_SETTINGS', 'android.permission.READ_APP_BADGE',
   'com.oppo.launcher.permission.READ_SETTINGS', 'com.oppo.launcher.permission.WRITE_SETTINGS',
   'me.everything.badger.permission.BADGE_COUNT_READ', 'me.everything.badger.permission.BADGE_COUNT_WRITE',
+  // expo-application's Install Referrer library (the owner release APK on CI, final loop 1).
+  'com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE',
 ];
 
 /** The APK as the build makes it: a blocked permission is removed from the merged manifest (tools:node="remove"). */
@@ -52,4 +55,22 @@ test('D-10: every shopper brand blocks the same launcher badge permissions', () 
   } finally {
     for (const name of SETTINGS) if (saved[name] === undefined) delete process.env[name]; else process.env[name] = saved[name];
   }
+});
+
+test('the install referrer permission is blocked because no app reads the install referrer', () => {
+  // Blocking the permission breaks Application.getInstallReferrerAsync: if an app ever calls it, this test says so first.
+  const calls = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (['node_modules', 'android', 'ios', 'dist', '.expo'].includes(entry.name)) continue;
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(file);
+      else if (/\.(c|m)?jsx?$/.test(entry.name) && /getInstallReferrer(Async)?\s*\(/.test(fs.readFileSync(file, 'utf8'))) calls.push(path.relative(ROOT, file));
+    }
+  };
+  for (const dir of ['apps/owner/src', 'apps/shopper/src', 'packages']) walk(path.join(ROOT, dir));
+  assert.deepEqual(calls, []);
+  const { BLOCKED_LIBRARY_PERMISSIONS, INSTALL_REFERRER_PERMISSIONS } = require('../../../packages/app-core/android-permissions.cjs');
+  for (const name of INSTALL_REFERRER_PERMISSIONS) assert.ok(BLOCKED_LIBRARY_PERMISSIONS.includes(name), name);
+  assert.ok(readAppConfig(ROOT).android.blockedPermissions.includes('com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE'));
 });

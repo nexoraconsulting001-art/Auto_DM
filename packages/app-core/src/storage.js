@@ -11,6 +11,13 @@ const DEVICE_ID = /^[A-Za-z0-9_-]{16,64}$/;
 /** Everything about a sign-in. Signing out deletes each of these. */
 export const SESSION_KEYS = Object.freeze(['refresh', 'device_secret', 'lock', 'lock_offered', 'tenant', 'snapshot']);
 const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+/** A device flag's name: never one of the names above, nor the locale or the device id this store keeps itself. */
+const FLAG_NAME = /^[a-z][a-z0-9_]{1,30}$/;
+const OWN_KEYS = new Set([...SESSION_KEYS, 'locale', 'device_id']);
+const flagName = (name) => {
+  if (!FLAG_NAME.test(name ?? '') || OWN_KEYS.has(name)) throw new Error(`"${name}" cannot be a device flag`);
+  return name;
+};
 
 /** `prefix` keeps two apps, or two builds of one, apart: 'bhava.owner' for the owner app. */
 export function createSecureStore({ prefix, secureStore = SecureStore, crypto = Crypto } = {}) {
@@ -58,6 +65,13 @@ export function createSecureStore({ prefix, secureStore = SecureStore, crypto = 
       }
     },
     setSnapshot: (snapshot) => write('snapshot', snapshot ? JSON.stringify(snapshot) : null),
+
+    /**
+     * A choice about this phone that is about no one, such as the shopper app's "notifications were explained": kept
+     * across sign-outs, like the locale. Every app keeps such a flag here, so SecureStore is touched by this file only.
+     */
+    getDeviceFlag: (name) => read(flagName(name)),
+    setDeviceFlag: (name, value) => write(flagName(name), value),
 
     /** Chosen once at install and never changed: what Settings > Devices lists, and what a revoke ends. */
     async getDeviceId() {

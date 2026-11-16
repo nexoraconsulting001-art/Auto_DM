@@ -6,6 +6,7 @@ import { useStrings } from '@bhava/app-core/strings';
 import { Screen, Section, Text, useTheme } from '@bhava/ui';
 import { useBrowseQuery } from '../../shell/data.js';
 import { Photo, ProductTile, ReelTile, ReelVideo, Shown } from '../../shell/parts.js';
+import { openTab } from '../../shell/menu.js';
 
 export default function ReelPageScreen() {
   const { t } = useStrings();
@@ -15,7 +16,7 @@ export default function ReelPageScreen() {
   const page = useBrowseQuery(['landing', slug], (browse) => browse.landing(slug), { enabled: slug !== '' });
   return (
     <Screen testID="screen-reel">
-      <Shown query={page} onGone={() => navigation.navigate('reels.index')}>
+      <Shown query={page} onGone={() => openTab(navigation, 'reels.index')}>
         {(data) => (
           <View style={{ gap: theme.space[5] }}>
             {data.media.kind === 'video' ? <ReelVideo uri={data.media.url} poster={data.media.poster} name={data.title} autoPlay /> : <Photo uri={data.media.url || data.media.poster} name={data.title} ratio={9 / 16} />}

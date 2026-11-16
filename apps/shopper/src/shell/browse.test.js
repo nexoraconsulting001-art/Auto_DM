@@ -13,6 +13,7 @@ import { createServices } from '../services.js';
 import { clearUpdateRequired } from './gate.js';
 import { linkingOf } from './menu.js';
 import { variantFor, valueAvailable } from '../features/product/ProductScreen.js';
+import { PLATFORM_NAME, platformOr } from '../../spec/platform-name.js';
 
 jest.mock('expo-notifications', () => ({ requestPermissionsAsync: jest.fn(), getPermissionsAsync: jest.fn(async () => ({ status: 'undetermined' })) }));
 
@@ -109,7 +110,7 @@ describe.each(brands)('%s', (name) => {
     expect(screen.queryByTestId('screen-sign-in')).toBeNull();
     expect(require('expo-notifications').requestPermissionsAsync).not.toHaveBeenCalled();
     expect(calls.every((c) => c.url.startsWith(`${ORIGIN}/api/store/app/`) && !c.headers.authorization)).toBe(true);
-    expect(flatText()).not.toMatch(/bhava/i);
+    expect(flatText()).not.toMatch(PLATFORM_NAME);
   });
 
   test('seller text is drawn as text, and an unsafe image address is never loaded', async () => {
@@ -185,12 +186,30 @@ describe.each(brands)('%s', (name) => {
     expect(services.cart.add).not.toHaveBeenCalled();
   });
 
+  test('a line added on a product page offers the cart, and the cart opens on the tabs with the product page closed', async () => {
+    // The product is on the stack above the tabs, so its page is where the cart is offered; the cart is a tab's screen.
+    const { services } = setup(name);
+    await render(<App services={services} linking={false} />);
+    await fireEvent.press(await screen.findByTestId('product-blue-pot'));
+    expect(await screen.findByTestId('product-name')).toHaveTextContent('Item blue-pot');
+    expect(screen.queryByTestId('added-to-cart')).toBeNull();
+    await fireEvent.press(screen.getByTestId('value-Colour-Red'));
+    await fireEvent.press(screen.getByTestId('value-Size-L'));
+    await fireEvent.press(screen.getByTestId('add-to-cart'));
+    expect(await screen.findByTestId('added-to-cart')).toHaveTextContent(/Added to your cart\./);
+    expect(services.cart.count).toBe(1);
+    await fireEvent.press(screen.getByTestId('added-go-cart'));
+    await waitFor(() => expect(screen.queryByTestId('screen-product')).toBeNull());
+    expect(screen.getByTestId('screen-cart')).toBeTruthy();
+    expect(flatText()).not.toMatch(PLATFORM_NAME);
+  });
+
   test('a product the server no longer has shows the store’s own words', async () => {
     const { services } = setup(name);
     await openAt(services, `https://${brand.linkHosts[0]}/p/never-existed`);
     const gone = await screen.findByTestId('gone');
     expect(within(gone).getByText(new RegExp(brand.name))).toBeTruthy();
-    expect(flatText()).not.toMatch(/bhava/i);
+    expect(flatText()).not.toMatch(PLATFORM_NAME);
   });
 
   test('search asks the server as the shopper types, and says plainly when nothing matches', async () => {
@@ -233,7 +252,7 @@ describe.each(brands)('%s', (name) => {
     const gate = await screen.findByTestId('update-required');
     expect(within(gate).getByText(`Please update the ${brand.name} app`)).toBeTruthy();
     expect(screen.getByTestId('update-button')).toBeTruthy();
-    expect(flatText()).not.toMatch(/bhava/i);
+    expect(flatText()).not.toMatch(PLATFORM_NAME);
   });
 
   test('with no connection and nothing saved, the app says it is offline, in plain words', async () => {
@@ -241,7 +260,7 @@ describe.each(brands)('%s', (name) => {
     await render(<App services={services} linking={false} />);
     expect(await screen.findByTestId('offline')).toBeTruthy();
     expect(screen.getByText('You are offline')).toBeTruthy();
-    expect(flatText()).not.toMatch(/bhava|localhost|4010/i);
+    expect(flatText()).not.toMatch(platformOr('localhost', '4010'));
   });
 
   test('what was downloaded before shows with no connection', async () => {

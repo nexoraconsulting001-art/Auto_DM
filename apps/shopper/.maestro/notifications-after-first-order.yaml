@@ -66,6 +66,12 @@ name: 'P-46 - Notifications are asked for only after the first order, in the sto
     notVisible:
       id: notification-explainer
     timeout: 30000
+# The order's page is on the stack above the tabs: Keep shopping brings the tabs back, then Account is one tap away.
+- scrollUntilVisible:
+    element:
+      id: status-shop
+- tapOn:
+    id: status-shop
 - tapOn:
     id: tab-account
 - tapOn:

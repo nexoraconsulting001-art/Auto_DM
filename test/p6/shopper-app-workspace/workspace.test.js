@@ -336,6 +336,9 @@ test('no brand, no colour and no platform name in the shopper app’s source, an
   const findings = checkShopperSource("const title = 'Welcome to Bhava';\n// made by bhava\nconst c = '#3B2FC9';\nconst short = '#fff';\nconst id = '#12';\n", 'apps/shopper/src/a.js');
   assert.deepEqual(findings.map((f) => [f.line, f.rule]), [[1, 'platform-name-in-shopper-app'], [2, 'platform-name-in-shopper-app'], [3, 'colour-in-shopper-app'], [4, 'colour-in-shopper-app']]);
   assert.deepEqual(checkShopperSource('# A heading\nSee #3B2FC9\n', 'apps/shopper/README.md').map((f) => f.rule), [], 'colours are looked for in code and JSON');
+  // A shopper test is shopper source too: it takes the platform's name from spec/platform-name.js, never as a literal.
+  assert.deepEqual(checkShopperSource('expect(text).not.toMatch(/bhava/i);\n', 'apps/shopper/src/shell/x.test.js').map((f) => f.rule), ['platform-name-in-shopper-app']);
+  assert.deepEqual(checkShopperSource(read('apps/shopper/spec/platform-name.js'), 'apps/shopper/spec/platform-name.js'), []);
 
   const values = brandValues();
   const brand = brandOf(brands[0]);
@@ -427,4 +430,13 @@ test('the flows’ seed gives the store the brand file’s own business id, name
   }
   await assert.rejects(() => seedDataDir(dataDir, brand, { env: { NODE_ENV: 'production' }, dataKey: 'k' }), /never runs in production/);
   await assert.rejects(() => seedDataDir(dataDir, brand, { env: { DATABASE_URL: 'postgres://x' }, dataKey: 'k' }), /built-in database/);
+});
+
+test('the shopper tests spell the platform name from one place, and it still matches the name in any case', async () => {
+  const { PLATFORM_NAME, platformOr } = await import(pathToFileURL(path.join(repoRoot, 'apps/shopper/spec/platform-name.js')).href);
+  const word = ['b', 'h', 'a', 'v', 'a'].join('');
+  for (const text of [word, word.toUpperCase(), `Powered by ${word[0].toUpperCase()}${word.slice(1)}`]) assert.match(text, PLATFORM_NAME);
+  assert.doesNotMatch('A plant store', PLATFORM_NAME);
+  for (const text of [word, 'http://localhost', 'port 4010']) assert.match(text, platformOr('localhost', '4010'));
+  assert.doesNotMatch('You are offline', platformOr('localhost', '4010'));
 });

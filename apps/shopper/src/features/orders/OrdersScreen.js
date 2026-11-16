@@ -10,6 +10,7 @@ import { useServices } from '../../services.js';
 import { Photo } from '../../shell/parts.js';
 import { BUY, NeedSignIn, Problem, useBuy, useSessionState } from '../cart/ui.js';
 import { paymentWords } from '../checkout/placing.js';
+import { openTab } from '../../shell/menu.js';
 
 export default function OrdersScreen() {
   const { t } = useStrings();
@@ -40,7 +41,7 @@ export default function OrdersScreen() {
     <Screen testID="screen-orders" title={t('orders.title')}>
       {query.isError && !items.length ? <Problem error={query.error} onRetry={() => query.refetch()} /> : null}
       {query.isPending ? <LoadingRows rows={3} label={t('home.common.loading')} testID="orders-loading" /> : null}
-      {query.data && !items.length ? <EmptyState testID="orders-empty" title={t('orders.emptyTitle')} action={<Button label={t('orders.keepShopping')} onPress={() => navigation.navigate('catalog.index')} />}>{t('orders.emptyBody')}</EmptyState> : null}
+      {query.data && !items.length ? <EmptyState testID="orders-empty" title={t('orders.emptyTitle')} action={<Button label={t('orders.keepShopping')} onPress={() => openTab(navigation, 'catalog.index')} />}>{t('orders.emptyBody')}</EmptyState> : null}
       {items.map((order) => (
         <ListRow
           key={order.orderNumber}

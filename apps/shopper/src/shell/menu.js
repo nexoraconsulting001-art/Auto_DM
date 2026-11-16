@@ -6,11 +6,20 @@
  *   checkFeature(feature)         what is wrong with a feature's registration, as sentences; [] when sound
  *   linkPathsOf(features)         every path of the store's website that opens a screen, as '/p/*' patterns
  *   linkingOf(features, brand)    React Navigation's linking config: the brand's link scheme and its own hosts
+ *   openTab(navigation, name)     open a tab's screen from any screen, the tabs' own or one on the stack above them
  */
 export const MAX_TABS = 5;
 export const TABS = 'tabs';
 
 export const screenName = (feature, screen) => `${feature.name}.${screen.name}`;
+
+/**
+ * The tabs are one navigator nested in the stack (Navigation.js), and React Navigation 7 sends navigate() only to the
+ * navigator a screen is in and the ones above it, never down into a nested one. So `navigate('cart.index')` from a screen
+ * on the stack (product, checkout, an order, a finished deletion) reaches no navigator and nothing happens. A tab's
+ * screen is always opened through the tabs: this works from a tab and from the stack, and brings the tabs back on top.
+ */
+export const openTab = (navigation, name, params) => navigation.navigate(TABS, { screen: name, params });
 
 export const tabsOf = (features) => features.filter((feature) => feature.nav).sort((a, b) => a.nav.order - b.nav.order);
 

@@ -11,7 +11,7 @@ import { createServices } from '../src/services.js';
 export const FIXTURES = path.resolve(__dirname, '../../../tools/build-brand/fixtures');
 export const BRANDS = fs.readdirSync(FIXTURES).filter((name) => fs.existsSync(path.join(FIXTURES, name, 'brand.json'))).sort();
 export const brandOf = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURES, name, 'brand.json'), 'utf8'));
-export const PLATFORM_NAME = /bhava/i;
+export { PLATFORM_NAME } from './platform-name.js';
 
 /** What app.config.js writes into a build for this brand, as expo-constants hands it to the app. */
 export function constantsFor(name, extra = {}) {
