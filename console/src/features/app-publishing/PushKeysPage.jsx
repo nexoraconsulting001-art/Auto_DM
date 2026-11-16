@@ -143,7 +143,6 @@ export default function PushKeysPage() {
           )}
         </StoreScreen>
       )}
-      {fresh.sheet}
     </>
   );
 }

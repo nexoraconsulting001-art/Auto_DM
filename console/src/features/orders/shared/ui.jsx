@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Badge, EmptyState, ErrorState, NotFoundState, Spinner, TextField } from '../../../design/index.jsx';
 import { useFeedback } from '../../../components/feedback.jsx';
 import { formatDateTime, formatPaise } from '../../../lib/format.js';
+import { isCancelled } from '../../../lib/fresh-gate.js';
 import { useRefresh } from '../../../lib/query.js';
 import { PLAN_REASONS } from './contract.js';
 import { statusOf } from './labels.js';
@@ -127,7 +128,7 @@ export function useAction() {
       await refresh();
       return result ?? true;
     } catch (error) {
-      setProblem(error.message);
+      if (!isCancelled(error)) setProblem(error.message); // closing "Confirm it’s you" is not a failure
       return null;
     } finally {
       setBusy('');

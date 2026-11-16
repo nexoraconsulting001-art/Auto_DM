@@ -308,7 +308,6 @@ export default function BillingPage() {
       </Screen>
       <Invoices />
       <Statements />
-      {money.fresh.sheet}
     </div>
   );
 }

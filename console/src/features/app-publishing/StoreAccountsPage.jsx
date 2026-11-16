@@ -235,7 +235,6 @@ export default function StoreAccountsPage() {
           </div>
         )}
       </StoreScreen>
-      {fresh.sheet}
     </>
   );
 }

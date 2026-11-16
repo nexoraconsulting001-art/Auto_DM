@@ -5,6 +5,7 @@ import { useFeedback } from '../../components/feedback.jsx';
 import { Badge, Banner, Button, EmptyState, FieldGroup, LoadMore, PageHeader, Panel, TextField } from '../../design/index.jsx';
 import { api } from '../../lib/api/index.js';
 import { formatDate, formatDateTime } from '../../lib/format.js';
+import { isCancelled } from '../../lib/fresh-gate.js';
 import { usePagedList } from '../../lib/query.js';
 import { useSession } from '../../lib/session.jsx';
 import { ANALYTICS_LIMITS, FIGURE_TEXT, REPORTING_BASE_PATH, REPORTING_SCOPE } from '../insights/shared/catalog.js';
@@ -35,7 +36,7 @@ function CreateKey({ onCreated }) {
       onCreated(created);
       await queries.invalidateQueries({ queryKey: ['api-keys'] });
     },
-    onError: (error) => setProblem(error.fields?.name ?? error.message),
+    onError: (error) => { if (!isCancelled(error)) setProblem(error.fields?.name ?? error.message); },
   });
   return (
     <Panel title="Make a key">
@@ -59,7 +60,7 @@ function Keys() {
       toast('Key revoked. It stops working at once.');
       await queries.invalidateQueries({ queryKey: ['api-keys'] });
     },
-    onError: (error) => toast(error.message),
+    onError: (error) => { if (!isCancelled(error)) toast(error.message); },
   });
   async function askToRevoke(key) {
     if (await confirm({ title: `Revoke “${key.name}”?`, text: 'Anything using it stops working at once. This can’t be undone.', confirm: 'Revoke key' })) revoke.mutate(key.id);

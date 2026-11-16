@@ -180,7 +180,6 @@ function Checklist({ checklist }) {
       </Panel>
       {sheet === 'pickup' && <PickupSheet onClose={() => setSheet('')} onSaved={async () => { toast('Pickup address saved.'); await refresh(); }} />}
       {sheet === 'keys' && <KeysSheet fresh={fresh} onClose={() => setSheet('')} onSaved={async () => { toast('Your keys passed the test and are saved.'); await refresh(); }} />}
-      {fresh.sheet}
     </>
   );
 }
