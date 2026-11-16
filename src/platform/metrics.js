@@ -13,7 +13,8 @@ import { FORBIDDEN_LABELS, METRICS, metricProblem } from '../contracts/metrics.j
  *   `createMetrics({ strict: true })` throws instead (the tests), and also refuses a name the catalogue does not have. rejected() lists what was refused.
  * - Each metric holds at most `maxSeries` label combinations; a new one beyond that is dropped, so no label can grow without bound.
  * - Label values never carry a business, person, address or text (FORBIDDEN_LABELS), so /metrics holds no personal data.
- * - /metrics answers only with its token (handler); without one configured it does not exist.
+ * - /metrics answers only with its token; without one configured it does not exist. handler(token) is the web server's
+ *   (Express) and serve(req, res, token) the worker's probe server's (node:http): both give the same answer.
  * - The middleware also counts webhook requests by provider and outcome, and requests in flight.
  * - Setting `backup_last_success_seconds` also gives `backup_age_seconds`.
  */
@@ -187,16 +188,32 @@ export function createMetrics({ strict = false, maxSeries = DEFAULT_MAX_SERIES, 
         next();
       };
     },
+    /** The answer to a scrape: 200 and the text with the right token (Bearer), 404 otherwise or when no token is set. */
+    async answer(authorization, token) {
+      const header = String(authorization || '');
+      const sent = header.startsWith('Bearer ') ? header.slice(7) : '';
+      const ok = Boolean(token) && sent.length === token.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(token));
+      return ok ? { status: 200, type: 'text/plain; version=0.0.4', body: await self.render() } : { status: 404, type: 'text/plain', body: 'Not Found' };
+    },
     /** Express handler for /metrics, protected by METRICS_TOKEN (Bearer). Hidden when no token is set. */
     handler(token) {
       return async (req, res) => {
-        const header = req.get('authorization') || '';
-        const sent = header.startsWith('Bearer ') ? header.slice(7) : '';
-        const ok = token && sent.length === token.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(token));
+        const { status, type, body } = await self.answer(req.get('authorization'), token);
         res.set('Cache-Control', 'no-store');
-        if (!ok) return res.sendStatus(404);
-        res.type('text/plain; version=0.0.4').send(await self.render());
+        res.status(status).type(type).send(body);
       };
+    },
+    /** The same on a node:http server (the worker's probe server): answers /metrics and returns true; false for any other path. */
+    serve(req, res, token) {
+      if (new URL(req.url, 'http://x').pathname !== '/metrics') return false;
+      self.answer(req.headers.authorization, token).then(({ status, type, body }) => {
+        res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
+        res.end(req.method === 'HEAD' ? undefined : body);
+      }, () => {
+        res.writeHead(500, { 'cache-control': 'no-store' });
+        res.end();
+      });
+      return true;
     },
   };
   return self;

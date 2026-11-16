@@ -26,7 +26,7 @@ import { createStorage } from './storage.js';
  * fetcher is safeFetch (PRD 8.2) with the host limit kept in Postgres; images is sharp. config.safeFetchTransport
  * ({ lookup, dial }, from tools/sim/sites) points the fetcher at the site simulator in tests and is refused in production.
  */
-export function createPlatform(config, { db }) {
+export function createPlatform(config, { db, service = 'web' }) {
   const transport = config.safeFetchTransport ?? {};
   const gapMs = config.fetchHostGapMs ?? 1000;
   const platform = {
@@ -34,7 +34,7 @@ export function createPlatform(config, { db }) {
     queue: createQueue(config, { db }),
     analytics: createAnalytics(config, { db }),
     cache: createCache(config),
-    metrics: createMetrics(),
+    metrics: createMetrics({ service }),
     secrets: createSecrets(config),
     consent: createConsent(),
     rateLimit: createRateLimit({ db }),

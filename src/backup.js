@@ -53,6 +53,21 @@ const tempFile = async () => {
 };
 
 const LATEST = 'backups/latest';
+/** When the last backup finished: { key, at } as JSON. Written by every run (the worker's job and the CronJob's script). */
+const LAST_SUCCESS = 'backups/last-success.json';
+
+/** Records that a backup finished at `at`. */
+export async function recordBackupSuccess(storage, { key, at = new Date() }) {
+  await storage.put(LAST_SUCCESS, Buffer.from(JSON.stringify({ key, at: new Date(at).toISOString() })), 'application/json');
+}
+
+/** When the last backup finished, in Unix seconds, or null when none is recorded. */
+export async function lastBackupSuccess(storage) {
+  const raw = await storage.get(LAST_SUCCESS);
+  if (!raw) return null;
+  const ms = Date.parse(JSON.parse(raw.toString()).at);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
 const dayKey = (date) => `backups/daily-${String(date.getUTCDate()).padStart(2, '0')}.dump`;
 
 /** Dumps the database and uploads it. Returns { key, bytes }. */
@@ -67,6 +82,7 @@ export async function runBackup({ databaseUrl, storage, now = new Date() }) {
     const key = dayKey(now);
     await storage.put(key, data, 'application/octet-stream');
     await storage.put(LATEST, Buffer.from(key), 'text/plain');
+    await recordBackupSuccess(storage, { key, at: new Date() });
     return { key, bytes: data.length };
   } finally {
     await done();
