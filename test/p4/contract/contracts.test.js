@@ -91,7 +91,8 @@ test('who may do what: refunds and the customer list are the owner’s, and no r
   assert.deepEqual([...byId['refunds.create'].access.roles], ['owner']);
   assert.equal(RefundCreate.safeParse({ amountPaise: 20000, idempotencyKey: 'refund-key-1', password: 'x' }).success, true);
   assert.equal(RefundCreate.safeParse({ amountPaise: 0, idempotencyKey: 'refund-key-1', password: 'x' }).success, false);
-  assert.equal(RefundCreate.safeParse({ amountPaise: 20000, idempotencyKey: 'refund-key-1' }).success, false, 'a fresh re-auth is part of the request');
+  assert.equal(RefundCreate.safeParse({ amountPaise: 20000, idempotencyKey: 'refund-key-1' }).success, true, 'no password: sellers have none');
+  assert.equal(byId['refunds.create'].fresh, true, 'a fresh re-auth is the route’s, checked by the router (PRD 9.8)');
   assert.equal(RefundCreate.safeParse({ amountPaise: 199.5, idempotencyKey: 'refund-key-1', password: 'x' }).success, false, 'whole paise');
   assert.equal(StockAdjust.safeParse({ productId: 1, stock: 5 }).success, true);
   assert.equal(StockAdjust.safeParse({ productId: 1, stock: 5, delta: 1 }).success, false);

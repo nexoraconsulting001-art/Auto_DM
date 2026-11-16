@@ -1,8 +1,9 @@
-// Refunds (PRD 9.8): owner only after the password again, never more than was captured even at the same moment, through the
+// Refunds (PRD 9.8): owner only after a fresh re-auth, never more than was captured even at the same moment, through the
 // gateway with the transfer taken back in managed mode, by hand for cash, retried with one key, and on a shopper's cancel.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { changeOrder } from '../../../src/modules/orders/state.js';
+import { hashSessionToken } from '../../../src/repos/sessions.js';
 import { refundBody, openWorld } from './support.js';
 
 const cancel = (world, shop, orderId, cancelReason) => shop.inTenant(() => world.db.tx((t) => changeOrder(t, orderId, { fulfilment: 'cancelled', cancelReason, actor: 'user:1' })));
@@ -43,7 +44,7 @@ test('S-27, S-75: refunding ₹200 of ₹999 shows partially refunded, takes ₹
   assert.equal((await shop.order(order.id)).payment_status, 'refunded');
 });
 
-test('S-28, S-29: more than was captured is refused, a manager gets 403, and a wrong password refunds nothing', async (t) => {
+test('S-28, S-29: more than was captured is refused, a manager gets 403, and a session past its re-auth refunds nothing', async (t) => {
   const world = await openWorld(t);
   const { shop } = world;
   await shop.payReady();
@@ -58,14 +59,13 @@ test('S-28, S-29: more than was captured is refused, a manager gets 403, and a w
   // The manager may still read them.
   assert.equal((await shop.api('GET', `/orders/${order.id}/refunds`, undefined, { as: manager.token })).status, 200);
 
-  const wrong = await shop.api('POST', `/orders/${order.id}/refunds`, refundBody(100, { password: 'not-the-password' }));
-  assert.equal(wrong.status, 400);
-  assert.ok(wrong.json.fields.password);
+  // Sellers have no password (PRD: "No passwords"): the route is fresh, so a session past its re-auth is asked to confirm.
+  await shop.sql(`UPDATE sessions SET fresh_until = now() - interval '1 minute' WHERE id = $1`, [hashSessionToken(shop.token)]);
+  const stale = await shop.api('POST', `/orders/${order.id}/refunds`, refundBody(100));
+  assert.equal(stale.status, 403);
+  assert.equal(stale.json.code, 'reauth_required');
   assert.equal((await shop.refunds(order.id)).length, 0);
   assert.equal((await world.rzp.get('/state')).refunds.length, 0);
-  // Guessing is limited.
-  for (let i = 0; i < 5; i++) await shop.api('POST', `/orders/${order.id}/refunds`, refundBody(100, { password: `guess-${i}` }));
-  assert.equal((await shop.api('POST', `/orders/${order.id}/refunds`, refundBody(100))).status, 429);
 });
 
 test('S-28: two refunds at the same moment cannot both pass what was captured, and the same key twice is one refund', async (t) => {

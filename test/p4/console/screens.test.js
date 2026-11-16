@@ -161,7 +161,8 @@ test('S-29: the refund button is offered to the owner only, wherever it appears'
   assert.match(money, /const isOwner = allowed\(OWNER_ONLY\)/);
   assert.match(money, /action=\{isOwner && canRefund \? <RefundButton order=\{order\} \/> : null\}/);
   assert.match(money, /\{isOwner && refund\.status === 'failed'/);
-  assert.match(money, /password: form\.values\.password/, 'the owner\'s password goes with every refund (5.11)');
+  assert.doesNotMatch(money, /password/, 'no password: sellers have none; the route is fresh and the client asks to re-auth (9.8, 5.11)');
+  assert.equal(routes['refunds.create'].fresh, true);
   assert.match(money, /idempotencyKey: key/);
   const order = source('orders/OrderPage.jsx');
   assert.match(order, /\{isOwner && <RefundButton order=\{order\} suggestedPaise=\{order\.refundDuePaise\}/, 'S-31: the refund prompt');

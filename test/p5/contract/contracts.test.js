@@ -33,6 +33,8 @@ const FRESH = [
   // Phase 7 (billing): whatever changes what a business pays.
   'billing.change', 'billing.addItem', 'billing.removeItem', 'billing.paymentMethod',
   'setup.ownKeys',
+  // A refund, only after a fresh re-auth (PRD 9.8): sellers have no password to type instead.
+  'refunds.create',
   // Phase 7 (the WhatsApp add-on): connecting and disconnecting the business's own number.
   'whatsapp.connectStart', 'whatsapp.connectFinish', 'whatsapp.disconnect',
 ];

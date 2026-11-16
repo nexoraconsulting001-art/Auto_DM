@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { addP4Shop, addStaff, buyer, hit, idemKey, need, noCrash, ok, ownGateway, platformAuth, refused, sum, textOf, together, useP4World } from './kit.js';
 import { signInCookie } from '../../p0/spec-p0/support.js';
+import { hashSessionToken } from '../../../src/repos/sessions.js';
 
 const world = useP4World();
 const line = (product, qty = 1) => ({ productId: product.id, variantId: null, qty });
@@ -63,7 +64,7 @@ test('S-28: a refund above what was captured is blocked, at the API and when two
   need(await shop.refund(row.id, { amountPaise: 39900 }), 201, 'Exactly what is left');
 });
 
-test('S-28: the same tap twice is one refund, and a wrong password or an unpaid order gets none', async () => {
+test('S-28: the same tap twice is one refund, and a session past its re-auth or an unpaid order gets none', async () => {
   const shop = await addP4Shop(world);
   const { row, paymentId } = await paidOrder(shop);
   const key = idemKey();
@@ -74,12 +75,13 @@ test('S-28: the same tap twice is one refund, and a wrong password or an unpaid 
   assert.equal((await shop.refunds(row.id)).length, 1);
   await world.quiet(800);
   assert.equal(sum(await gatewayRefunds(paymentId), (r) => r.amount), 10000, 'The gateway refunded twice');
-  refused(await shop.refund(row.id, { amountPaise: 1000, password: 'not-my-password' }), 'A refund with the wrong password', [401, 403]);
-  refused(await shop.refund(row.id, { amountPaise: 1000, password: undefined }), 'A refund with no password', [400, 401, 403]);
   const product = await shop.item({ pricePaise: 50000 });
   const unpaid = await buyer(world, shop).order({ lines: [line(product)] });
   const unpaidRow = await shop.order(unpaid.orderNumber);
   refused(await shop.refund(unpaidRow.id, { amountPaise: 1000 }), 'Refunding an unpaid order');
+  // PRD 9.8: only after a fresh re-auth. Sellers have no password, so the route is fresh: a stale session is asked to re-auth.
+  await world.sql(`UPDATE sessions SET fresh_until = now() - interval '1 minute' WHERE id = $1`, [hashSessionToken(shop.token)]);
+  assert.equal(refused(await shop.refund(row.id, { amountPaise: 1000 }), 'A refund on a session past its re-auth', [403]).json().code, 'reauth_required');
   const other = await addP4Shop(world);
   refused(await shop.as(other.token)('POST', `/orders/${row.id}/refunds`, { amountPaise: 1000, idempotencyKey: idemKey(), password: other.owner.password }), 'Another business’s owner refunding this order', [403, 404]);
   assert.equal((await shop.refunds(row.id)).length, 1);

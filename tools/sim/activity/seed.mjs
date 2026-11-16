@@ -36,12 +36,13 @@ const MEDIA_TYPE = { reel: 'REELS', post: 'FEED', story: 'STORY' };
 
 /**
  * A seller's session on one business's own address: `session` is { token, login() }, and a refused token (a session ages like
- * everything else when time passes) signs in again once. Answers { status, data, text }; throws SeedError on anything outside `ok`.
+ * everything else when time passes) signs in again once. So does a route marked fresh that answers `reauth_required`: a new
+ * sign-in starts fresh, which is what a seller in the console does when asked "Confirm it's you". Answers { status, data, text }; throws SeedError on anything outside `ok`.
  */
 export function sellerApi(world, host, session) {
   const call = async (method, path, body, { ok = [200, 201, 202, 204], allow = [] } = {}) => {
     let res = await world.hit(`/api/v1${path}`, { host, method, token: session.token, body });
-    if (res.status === 401 && session.login) {
+    if ((res.status === 401 || (res.status === 403 && res.data?.code === 'reauth_required')) && session.login) {
       session.token = await session.login();
       res = await world.hit(`/api/v1${path}`, { host, method, token: session.token, body });
     }

@@ -76,14 +76,14 @@ test('the moves offered are exactly the ones the server says are next', () => {
 test('a refund sends the amount the person typed, held inside what can still go back, with one key per visit', () => {
   const most = refundable({ paidPaise: 99900, refundedPaise: 50000 });
   assert.equal(most, 49900);
-  const typed = { password: 'pw' };
+  const typed = {};
   assert.deepEqual(refundBody({ ...typed, amountText: '1000' }, { most: 99900 }).problems, { amount: 'refunds.problem.tooMuch' }, 'S-28: ₹1,000 on ₹999');
   assert.deepEqual(refundBody({ ...typed, amountText: 'abc' }, { most }).problems, { amount: 'refunds.problem.amount' });
   assert.deepEqual(refundBody({ ...typed, amountText: '10' }, { most, byHand: true }).problems, { reference: 'refunds.problem.reference' });
   const key = newRefundKey(1_700_000_000_000, () => 0.123456789);
-  assert.deepEqual(refundBody({ amountText: '499', idempotencyKey: key }, { most }).problems, { password: 'refunds.problem.password' }, 'the contract checks the owner’s password on the call');
-  const body = built(refundBody({ amountText: '499', reason: ' damaged ', idempotencyKey: key, password: ' typed ' }, { most }));
-  assert.deepEqual(body, { amountPaise: 49900, reason: 'damaged', idempotencyKey: key, password: ' typed ' });
+  // No password: sellers have none (PRD: "No passwords"); the route is fresh, so the app asks for the fresh check instead (9.8).
+  const body = built(refundBody({ amountText: '499', reason: ' damaged ', idempotencyKey: key }, { most }));
+  assert.deepEqual(body, { amountPaise: 49900, reason: 'damaged', idempotencyKey: key });
   accepted('refunds.create', body);
   assert.notEqual(newRefundKey(), newRefundKey());
 });

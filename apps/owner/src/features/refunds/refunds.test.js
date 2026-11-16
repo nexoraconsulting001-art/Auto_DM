@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import * as SecureStore from 'expo-secure-store';
 import { onlineManager } from '@tanstack/react-query';
-import { AT, everythingHeld, openApp, writes, forgetApps } from '../orders/kit/testing.js';
+import { AT, fresh, openApp, writes, forgetApps } from '../orders/kit/testing.js';
 import orders from '../orders/index.js';
 import refunds from './index.js';
 
@@ -40,13 +40,11 @@ test('S-28 a refund sends only the amount the person typed, refuses more than ca
       return [201, { id: 40, orderId: 3, paymentId: 21, amountPaise: call.body.amountPaise, status: 'requested', method: 'gateway', reference: '', reason: call.body.reason, reversalStatus: 'none', reversalPaise: 0, createdAt: AT, processedAt: null }];
     },
   };
-  const { server, made } = await openApp({ list: [orders, refunds], path: '/orders/3/refund', routes });
+  const { server } = await openApp({ list: [orders, refunds], path: '/orders/3/refund', routes, freshUntil: fresh() });
   expect(await screen.findByText('Up to ₹999 can go back to the customer, the way they paid.')).toBeTruthy();
-  const password = screen.getByTestId('refund-password');
-  expect(password.props.secureTextEntry).toBe(true);
+  expect(screen.queryByTestId('refund-password')).toBeNull(); // sellers have no password: the route is fresh instead
 
   await fireEvent.changeText(screen.getByTestId('refund-amount'), '1000');
-  await fireEvent.changeText(password, 'owner-pass');
   await fireEvent.press(screen.getByTestId('refund-submit'));
   expect(await screen.findByText('You can refund at most ₹999')).toBeTruthy();
   expect(writes(server)).toEqual([]);
@@ -54,16 +52,32 @@ test('S-28 a refund sends only the amount the person typed, refuses more than ca
   await fireEvent.changeText(screen.getByTestId('refund-amount'), '499.50');
   await fireEvent.press(screen.getByTestId('refund-submit'));
   expect(await screen.findByText('We couldn’t reach the server. Check your connection and try again.')).toBeTruthy();
-  expect(screen.getByTestId('refund-password').props.value).toBe(''); // typed again, never kept
-  await fireEvent.changeText(screen.getByTestId('refund-password'), 'owner-pass');
   await fireEvent.press(screen.getByTestId('refund-submit'));
   expect(await screen.findByTestId('refund-done')).toBeTruthy();
 
   const sent = writes(server).filter((c) => c.path === '/orders/3/refunds');
   expect(sent).toHaveLength(2);
   expect(sent[0].body.idempotencyKey).toBe(sent[1].body.idempotencyKey);
-  expect(sent[1].body).toEqual({ amountPaise: 49950, reason: '', idempotencyKey: sent[0].body.idempotencyKey, password: 'owner-pass' });
-  expect(everythingHeld(made)).not.toContain('owner-pass');
+  expect(sent[1].body).toEqual({ amountPaise: 49950, reason: '', idempotencyKey: sent[0].body.idempotencyKey });
+});
+
+test('seller-ui-2 a refund on a session past its re-auth asks "Confirm it is you" first, then sends it once, with no password', async () => {
+  const routes = {
+    'GET /orders/:id': () => ORDER,
+    'GET /orders/:id/payments': () => ({ items: [PAYMENT] }),
+    'POST /orders/:id/refunds': (call) => [201, { id: 41, orderId: 3, paymentId: 21, amountPaise: call.body.amountPaise, status: 'requested', method: 'gateway', reference: '', reason: call.body.reason, reversalStatus: 'none', reversalPaise: 0, createdAt: AT, processedAt: null }],
+  };
+  const { server } = await openApp({ list: [orders, refunds], path: '/orders/3/refund', routes });
+  await fireEvent.changeText(await screen.findByTestId('refund-amount'), '200');
+  await fireEvent.press(screen.getByTestId('refund-submit'));
+  await fireEvent.press(await screen.findByTestId('reauth-send'));
+  expect(writes(server).filter((c) => c.path === '/orders/3/refunds')).toEqual([]); // nothing before the check
+  await fireEvent.changeText(await screen.findByTestId('reauth-code'), '654321');
+  await fireEvent.press(screen.getByTestId('reauth-verify'));
+  expect(await screen.findByTestId('refund-done')).toBeTruthy();
+  const sent = writes(server).filter((c) => c.path === '/orders/3/refunds');
+  expect(sent).toHaveLength(1);
+  expect(sent[0].body).toEqual({ amountPaise: 20000, reason: '', idempotencyKey: sent[0].body.idempotencyKey });
 });
 
 test('S-29 a manager opening the refund screen by a link cannot refund', async () => {
