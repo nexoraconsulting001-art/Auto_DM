@@ -44,28 +44,6 @@ export function createPushes(ctx, { connection, products }) {
       [tenantId(), order.id],
     );
     if (made && conn.status === 'active') await pushOne(order.id);
-    if (!made) await keepInShopify(order.id);
-  }
-
-  /**
-   * order.reinstated of an order whose Shopify cancel was asked for: one not yet made is called off (the Shopify order stays,
-   * as it should); one already made can't be undone, so the owner is told to add the order in Shopify again.
-   */
-  async function keepInShopify(orderId) {
-    const [row] = await db.query(
-      `UPDATE shopify_order_pushes p SET cancel_status = CASE WHEN p.cancel_status = 'pending' THEN 'none' ELSE p.cancel_status END, cancel_next_at = NULL
-       FROM shopify_order_pushes old WHERE old.tenant_id = p.tenant_id AND old.order_id = p.order_id
-         AND p.tenant_id = $1 AND p.order_id = $2 AND p.status = 'pushed' AND p.cancel_status IN ('pending', 'done', 'failed')
-       RETURNING old.cancel_status AS was`,
-      [tenantId(), orderId],
-    );
-    if (!row || row.was === 'pending') return;
-    const [order] = await db.query('SELECT order_number FROM orders WHERE tenant_id = $1 AND id = $2', [tenantId(), orderId]);
-    await repos.alerts.raise({
-      kind: 'shopify.order_back', severity: 'warning',
-      message: `Order ${order?.order_number ?? ''} is going ahead again, but it was cancelled in your Shopify store. Add it there again by hand so your Shopify stock stays right.`,
-      target: `order:${orderId}`, dedupeKey: `shopify-order-back:${orderId}`,
-    }).catch((alertErr) => reportError(alertErr, { msg: 'shopify.alert_failed' }));
   }
 
   /**
