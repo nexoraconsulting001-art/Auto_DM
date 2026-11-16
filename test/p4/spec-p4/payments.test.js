@@ -96,10 +96,10 @@ test('S-23: the same captured event three times, or five at once, changes the st
   const captured = (await deliveries('payment.captured')).filter((d) => d.body.payload.payment.entity.id === paid.payment.id);
   assert.equal(captured.length, 1);
   assert.ok(captured[0].attempts >= 3);
-  const [stored] = await world.sql(`SELECT count(*)::int AS n FROM provider_webhook_events WHERE provider = 'razorpay' AND payload->'payload'->'payment'->'entity'->>'id' = $1 AND event_type = 'payment.captured'`, [paid.payment.id]);
+  const [stored] = await world.sql(`SELECT count(*)::int AS n FROM provider_webhook_events WHERE provider = 'razorpay' AND payload->'payment'->>'id' = $1 AND event_type = 'payment.captured'`, [paid.payment.id]);
   assert.equal(stored.n, 1, 'The repeated event was stored more than once');
   const raw = captured[0].body;
-  const eventId = (await world.sql(`SELECT event_id FROM provider_webhook_events WHERE payload->'payload'->'payment'->'entity'->>'id' = $1 AND event_type = 'payment.captured'`, [paid.payment.id]))[0].event_id;
+  const eventId = (await world.sql(`SELECT event_id FROM provider_webhook_events WHERE payload->'payment'->>'id' = $1 AND event_type = 'payment.captured'`, [paid.payment.id]))[0].event_id;
   const again = await together(5, () => world.razorpayHook(raw, { eventId }));
   again.forEach((r) => assert.ok(r.status >= 200 && r.status < 300, `A repeated delivery answered ${r.status}`));
   ok(await b.paymentReturn(p, paid), 'The browser coming back too');
@@ -128,7 +128,7 @@ test('S-24: a "failed" arriving after "captured" leaves the order paid', async (
   assert.equal(row.fulfilment_status, 'new');
   const pays = await shop.payments(order.id);
   assert.equal(pays.find((x) => x.gateway_payment_id === good.payment.id).status, 'captured', 'The captured payment went backwards');
-  const stale = await world.sql(`SELECT status, outcome FROM provider_webhook_events WHERE provider = 'razorpay' AND event_type IN ('payment.failed', 'payment.authorized') AND payload->'payload'->'payment'->'entity'->>'id' = $1`, [good.payment.id]);
+  const stale = await world.sql(`SELECT status, outcome FROM provider_webhook_events WHERE provider = 'razorpay' AND event_type IN ('payment.failed', 'payment.authorized') AND payload->'payment'->>'id' = $1`, [good.payment.id]);
   assert.ok(stale.length >= 1 && stale.every((e) => e.status !== 'failed'), `Late events were not set aside cleanly: ${JSON.stringify(stale)}`);
 });
 
@@ -307,12 +307,13 @@ test('S-72: switching to the seller’s own account applies to new orders; earli
   assert.equal(account.mode, 'own');
   assert.ok(!account.linkedAccount.includes(shop.linkedAccount.slice(4)), 'The linked account id is shown unmasked');
   const late = buyer(world, shop);
+  const callsBefore = (await world.rzp.calls({ method: 'POST', path: '/v1/orders' })).length;
   const after = await late.order({ lines: [line(product)] });
   assert.equal((await shop.order(before.orderNumber)).gateway_mode, 'managed', 'The earlier order changed mode');
   assert.equal((await shop.order(after.orderNumber)).gateway_mode, 'own');
   const calls = await world.rzp.calls({ method: 'POST', path: '/v1/orders' });
   const platformAuth = `Basic ${Buffer.from(`${world.rzp.keyId}:${world.rzp.keySecret}`).toString('base64')}`;
-  const newCall = calls.find((c) => c.body?.receipt === after.orderNumber);
+  const newCall = calls.slice(callsBefore).find((c) => c.body?.receipt === after.orderNumber);
   assert.notEqual(newCall.headers.authorization, platformAuth, 'The new order was made on the platform’s account');
   assert.equal(newCall.body.transfers, undefined, 'An own-account order carries a Route transfer');
   // The earlier order, paid now, still settles to the linked account.

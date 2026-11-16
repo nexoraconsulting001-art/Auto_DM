@@ -72,6 +72,20 @@ async function phoneProved(ctx, { phone, checkoutKey, shopper }) {
 
 class ReferralTaken extends Error {}
 
+/**
+ * What stops an order before anything is made or sent (9.5, 9.6, S-22, S-33): a line that changed, a PIN no courier serves,
+ * or a way of paying this order can't use. The order is exactly what the shopper was shown, or it is not placed. Asked once
+ * before the cash-on-delivery code is sent, so a shopper is never asked to prove a phone for an order that would be refused,
+ * and again inside the order's transaction on the locked quote, which is the one that counts.
+ */
+function refuseUnplaceable(priced, body) {
+  const { quote } = priced;
+  if (priced.priced.some((l) => l.state !== 'ok')) throw new CheckoutRefused(priced.priced.some((l) => l.state === 'sold_out') ? 'Sold out. Your bag has been updated.' : 'Your bag has changed. Please check it and try again.', quote);
+  if (!quote.serviceable) throw new CheckoutRefused('We don’t deliver to this PIN code yet.', quote, { 'address.pincode': 'Not deliverable' });
+  const mode = quote.paymentModes.find((m) => m.mode === body.paymentMode);
+  if (!mode?.available) throw new CheckoutRefused(mode?.reason || 'Choose another way to pay.', quote, { paymentMode: mode?.reason || 'Not available' });
+}
+
 const placed = (order, next, gateway = null) => ({ orderNumber: order.order_number, token: order.public_token, next, gateway });
 const nextFor = (order) => (order.payment_mode === 'cod' ? 'done' : order.payment_status === 'unpaid' && order.fulfilment_status === 'pending' ? 'pay' : 'done');
 
@@ -113,28 +127,26 @@ export async function placeOrder(ctx, req, body) {
   const before = sameAttempt(await existing(db, body.idempotencyKey), phone);
   if (before) return { status: 200, body: placed(before, nextFor(before), await startPayment(ctx, before, req)) };
 
+  const referral = ctx.loyalty?.referrals?.fromRequest?.(req, body) ?? null;
+  const quoteIn = {
+    lines: body.lines, address, phone, paymentMode: body.paymentMode, couponCode: body.couponCode, redeemPoints: body.redeemPoints, shopperId: shopper?.id ?? null, referral,
+  };
   if (body.paymentMode === 'cod' && !(await phoneProved(ctx, { phone, checkoutKey: body.idempotencyKey, shopper }))) {
+    // Refused now, with the reason, rather than after the code: cash on delivery this order can't have is never offered a code.
+    refuseUnplaceable(await buildQuote(db, ctx, quoteIn), body);
     return { status: 200, body: { orderNumber: '', token: '', next: 'verify_phone', gateway: null } };
   }
 
   const source = await sourceOf(db, body);
-  const referral = ctx.loyalty?.referrals?.fromRequest?.(req, body) ?? null;
   const visitorId = visitorIdFrom(req);
   const settings = await ctx.repos.settings.getAll();
   let low = [];
   let order;
   try {
     order = await db.tx(async (t) => {
-      const priced = await buildQuote(t, ctx, {
-        lines: body.lines, address, phone, paymentMode: body.paymentMode, couponCode: body.couponCode, redeemPoints: body.redeemPoints, shopperId: shopper?.id ?? null,
-        referral, lock: true,
-      });
+      const priced = await buildQuote(t, ctx, { ...quoteIn, lock: true });
       const { quote, lines } = priced;
-      // The order is exactly what the shopper was shown, or it is not placed: a line that changed is refused with the new quote.
-      if (priced.priced.some((l) => l.state !== 'ok')) throw new CheckoutRefused(priced.priced.some((l) => l.state === 'sold_out') ? 'Sold out. Your bag has been updated.' : 'Your bag has changed. Please check it and try again.', quote);
-      if (!quote.serviceable) throw new CheckoutRefused('We don’t deliver to this PIN code yet.', quote, { 'address.pincode': 'Not deliverable' });
-      const mode = quote.paymentModes.find((m) => m.mode === body.paymentMode);
-      if (!mode?.available) throw new CheckoutRefused(mode?.reason || 'Choose another way to pay.', quote, { paymentMode: mode?.reason || 'Not available' });
+      refuseUnplaceable(priced, body);
       if (priced.couponRefused) throw new CheckoutRefused(priced.couponRefused.message, quote, { couponCode: priced.couponRefused.message });
       if (body.redeemPoints > 0 && quote.pointsUsed === 0) throw new CheckoutRefused('Points can’t be used on this order. Remove them to continue.', quote, { redeemPoints: 'Not available' });
 

@@ -2,6 +2,7 @@
 // shopper sessions, and requests with any Host header.
 import crypto from 'node:crypto';
 import http from 'node:http';
+import { csrfFor } from '../../../src/modules/shoppers/keys.js';
 import { withTenant } from '../../../src/tenancy.js';
 import { OWNER, startApp } from '../../helpers.js';
 
@@ -90,6 +91,9 @@ export function hit(app, path, { host, method = 'GET', headers = {}, body, cooki
     const sent = { ...headers };
     if (host) sent.host = host;
     if (cookie) sent.cookie = cookie;
+    // A POST from a cookie session carries its CSRF token, as the store's own pages send it (src/contracts/store-routes.js).
+    const sid = cookie ? /(?:^|;\s*)_sid=([^;]+)/.exec(cookie) : null;
+    if (sid && !Object.keys(sent).some((h) => h.toLowerCase() === 'x-shopper-csrf')) sent['x-shopper-csrf'] = csrfFor(app.config, sid[1]);
     if (token) sent.authorization = `Bearer ${token}`;
     let payload = body;
     if (body !== undefined && typeof body !== 'string') {
