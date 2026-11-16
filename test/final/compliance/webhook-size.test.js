@@ -56,3 +56,23 @@ test('compliance-2: the WhatsApp webhook takes a large delivery to its handlers 
     await app.db.close();
   }
 });
+
+// Same cause, every provider: the provider decides how big its delivery is (a Shopify products/update for a product with many
+// variants and images runs past 200 kB), and a 413 makes it retry and then drop the delivery or the subscription. Every POST
+// webhook in the contract therefore reaches its signature check whatever its size, up to the webhook limit.
+test('compliance-2: every provider webhook in the contract takes a delivery over 200 kB to its signature check', async () => {
+  const app = await startApp({ ig: scriptedIg(), overrides: { complianceInline: false } });
+  try {
+    const raw = JSON.stringify({ id: 1, variants: Array.from({ length: 2000 }, (_, i) => ({ id: i, title: `Size ${i} / Colour ${i}`, sku: `SKU-${'x'.repeat(60)}-${i}` })) });
+    assert.ok(Buffer.byteLength(raw) > 200 * 1024);
+    const posts = Object.values(STORE_PROVIDER_PATHS).filter((p) => p.method === 'POST');
+    assert.ok(posts.length >= 5, 'the contract lists the provider webhooks');
+    for (const { path } of posts) {
+      const res = await post(app, path.replace(/:[a-z]+/gi, 'unknown-key'), raw);
+      assert.notEqual(res.status, 413, `${path} refused a large delivery for its size`);
+    }
+  } finally {
+    app.close();
+    await app.db.close();
+  }
+});

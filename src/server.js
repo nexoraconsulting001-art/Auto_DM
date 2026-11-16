@@ -40,6 +40,8 @@ export const verifySignature = verifyHubSignature;
 
 /** A full batch of 1,000 webhook entries at a few hundred bytes each, with room to spare. */
 export const WEBHOOK_BODY_LIMIT = '5mb';
+/** Every address a provider POSTs a webhook to, read from the contracts, so a provider added later gets the webhook limit too. */
+const PROVIDER_WEBHOOK_PATHS = [PROVIDER_PATHS.webhook, ...Object.values(STORE_PROVIDER_PATHS).filter((p) => p.method === 'POST').map((p) => p.path)];
 
 /** Uploaded files, by their unguessable id. Anyone with the link can open one, so nothing private is stored as media. */
 function mediaRoutes({ repos }) {
@@ -105,9 +107,10 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
     next();
   });
   const keepRawBody = (req, _res, buf) => (req.rawBody = buf);
-  // Meta and WhatsApp send up to 1,000 entries in one delivery (PRD 4.3 row 14), and resend an answer of 413 until they give up,
-  // which loses every event in it. Their webhooks get a body limit that fits a full batch; everything else keeps 200 kB.
-  app.use([PROVIDER_PATHS.webhook, STORE_PROVIDER_PATHS.whatsapp.path], express.json({ limit: WEBHOOK_BODY_LIMIT, verify: keepRawBody }));
+  // A provider decides how big its delivery is: Meta and WhatsApp send up to 1,000 entries at once (PRD 4.3 row 14), and a Shopify
+  // product with many variants runs past 200 kB. An answer of 413 makes the provider resend until it gives up, losing the events.
+  // Every provider webhook in the contracts gets a limit that fits a full delivery; everything else keeps 200 kB.
+  app.use(PROVIDER_WEBHOOK_PATHS, express.json({ limit: WEBHOOK_BODY_LIMIT, verify: keepRawBody }));
   app.use(express.json({ limit: '200kb', verify: keepRawBody }));
   app.use(express.urlencoded({ extended: false, limit: '200kb' }));
   app.use('/static', express.static(path.join(config.rootDir, 'public'), { maxAge: '1h' }));
