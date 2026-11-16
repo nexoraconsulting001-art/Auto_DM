@@ -5,7 +5,8 @@ import { useFeedback } from '../../components/feedback.jsx';
 import { api } from '../../lib/api/index.js';
 import { formatDateTime } from '../../lib/format.js';
 import { useForm } from '../../lib/forms.js';
-import { usePagedList, useRefresh } from '../../lib/query.js';
+import { MANAGERS } from '@contracts/access.js';
+import { usePagedList, useAllowed, useRefresh } from '../../lib/query.js';
 import { Screen } from '../catalog/shared/ui.jsx';
 import { UpgradePrompt } from '../billing/UpgradePrompt.jsx';
 import { isPlanProblem } from '../billing/contract.js';
@@ -99,6 +100,7 @@ function Faq({ onPlan }) {
 
 function Settings({ settings, onPlan }) {
   const refresh = useRefresh();
+  const canChange = useAllowed()(MANAGERS); // aiReplies.save is managers only; staff with automations can read, not change
   const { toast } = useFeedback();
   const [threshold, setThreshold] = useState(String(settings.threshold));
   const save = useMutation({
@@ -118,10 +120,11 @@ function Settings({ settings, onPlan }) {
     <Panel title="AI replies">
       <div className="p7-stack">
         {!settings.configured && <Banner tone="warn">No AI service is set up for Bhava yet, so every question goes to you.</Banner>}
-        <Toggle label="Answer questions with AI" checked={settings.enabled} disabled={save.isPending || (!settings.enabled && !settings.canEnable)} onChange={(event) => save.mutate({ enabled: event.target.checked })} />
+        <Toggle label="Answer questions with AI" checked={settings.enabled} disabled={!canChange || save.isPending || (!settings.enabled && !settings.canEnable)} onChange={(event) => save.mutate({ enabled: event.target.checked })} />
         {!settings.canEnable && !settings.enabled && <p className="p7-meta">Add at least one answer below to switch this on.</p>}
-        <TextField label="Confidence needed to send" type="number" inputMode="decimal" min={AI_THRESHOLD.min} max={AI_THRESHOLD.max} step={AI_THRESHOLD.step} value={threshold} onChange={(event) => setThreshold(event.target.value)} error={valid ? undefined : `Use a number from ${AI_THRESHOLD.min} to ${AI_THRESHOLD.max}.`} hint="Below this, a person replies instead." />
-        <Button variant="soft" disabled={!valid || value === settings.threshold} loading={save.isPending} onClick={() => save.mutate({ threshold: value })}>Save confidence</Button>
+        <TextField label="Confidence needed to send" type="number" inputMode="decimal" min={AI_THRESHOLD.min} max={AI_THRESHOLD.max} step={AI_THRESHOLD.step} value={threshold} disabled={!canChange} onChange={(event) => setThreshold(event.target.value)} error={valid ? undefined : `Use a number from ${AI_THRESHOLD.min} to ${AI_THRESHOLD.max}.`} hint="Below this, a person replies instead." />
+        {!canChange && <p className="p7-meta">Only an owner or manager can change these.</p>}
+        <Button variant="soft" disabled={!canChange || !valid || value === settings.threshold} loading={save.isPending} onClick={() => save.mutate({ threshold: value })}>Save confidence</Button>
       </div>
     </Panel>
   );

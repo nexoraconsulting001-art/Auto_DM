@@ -171,7 +171,8 @@ export default function ReelFormPage() {
   const stores = useQuery({ queryKey: ['reels', 'all'], queryFn: () => fetchAll(api.reels.list) });
   const hasStore = stores.data?.some((item) => item.id === id) ?? false;
   const reel = useQuery({ queryKey: ['reels', id], queryFn: () => api.reels.get(id), enabled: hasStore });
-  const catalog = useQuery({ queryKey: ['products', 'all'], queryFn: () => fetchAll(api.products.list) });
+  // reels.products, not products.list: reels are for staff with automations, who may not read the catalog itself.
+  const catalog = useQuery({ queryKey: ['reels', 'products'], queryFn: () => fetchAll(api.reels.products) });
   // The list hands over the post it came from. A reloaded page or a shared link looks it up instead.
   const needsLookup = stores.isSuccess && !hasStore && !state?.post;
   const posts = useQuery({ queryKey: ['instagram-posts', 'first'], queryFn: () => api.reels.instagramPosts({ limit: 50 }), enabled: needsLookup, retry: false });

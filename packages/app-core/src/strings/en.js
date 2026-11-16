@@ -39,6 +39,8 @@ export default {
   'error.body': 'Something went wrong on our side. Try again in a moment.',
   'error.network': 'We couldn’t reach the server. Check your connection and try again.',
   'error.forbidden': 'You don’t have access to this. Ask the owner of this business.',
+  'error.planFeature': 'This isn’t on this business’s plan. The owner can add it in Plan and billing.',
+  'error.planLimit': 'This business has used everything its plan allows for this. The owner can add more in Plan and billing.',
   'error.notFound': 'This isn’t here any more.',
   'error.saveFailed': 'That wasn’t saved. Try again.',
 

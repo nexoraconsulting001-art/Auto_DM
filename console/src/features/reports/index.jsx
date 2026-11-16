@@ -1,4 +1,5 @@
 import { Suspense, lazy } from 'react';
+import { Navigate } from 'react-router-dom';
 import { FileSpreadsheet } from 'lucide-react';
 import { staffWith } from '@contracts/access.js';
 import home from '../home/index.jsx';
@@ -24,6 +25,8 @@ export default {
   routes: [
     { path: 'reports', element: <ReportsPage /> },
     { path: 'reports/scheduled', element: <ScheduledPage /> },
+    // A report notification links to its run (src/contracts/notifications.js), which the owner app opens; the console lists runs on Reports.
+    { path: 'reports/:id', element: <Navigate to="/reports" replace /> },
     { path: 'settings/api-keys', element: <ApiKeysPage /> },
   ],
 };

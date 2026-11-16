@@ -94,8 +94,9 @@ test('staff see only what their permissions allow, and a plan can hide a feature
   const nav = buildNavigation(features, { user: ordersStaff, entitlements: null });
   expect(nav.tabs.map((f) => f.name)).toEqual(['home', 'orders']);
   const all = [...nav.tabs, ...nav.more].map((f) => f.name);
-  for (const name of ['returns', 'refunds', 'invoices', 'alerts', 'notifications', 'devices', 'account']) expect(all).toContain(name);
-  for (const name of ['products', 'automations', 'payments', 'team', 'settings', 'insights', 'customers', 'audit-log']) expect(all).not.toContain(name);
+  for (const name of ['returns', 'refunds', 'invoices', 'notifications', 'devices', 'account']) expect(all).toContain(name);
+  // alerts.list is staff with automations (src/contracts/api/alerts.js), so an orders-only staff member has no Alerts entry
+  for (const name of ['products', 'automations', 'alerts', 'payments', 'team', 'settings', 'insights', 'customers', 'audit-log']) expect(all).not.toContain(name);
   expect(nav.screens.some((s) => s.feature === 'payments')).toBe(false);
 
   const managerNav = buildNavigation(features, { user: manager, entitlements: { automations: false, 'store.payments': false } });

@@ -1,4 +1,5 @@
 import { lazy } from 'react';
+import { Navigate } from 'react-router-dom';
 import { Smartphone } from 'lucide-react';
 import { MANAGERS } from '@contracts/access.js';
 
@@ -20,6 +21,8 @@ export default {
   nav: { to: '/my-app', label: 'My app', icon: Smartphone, order: 81 },
   routes: [
     { path: 'my-app', element: <AppDetailsPage /> },
+    // The owner app calls this area app-publishing, and a notification's link is one path for both (src/contracts/notifications.js).
+    { path: 'app-publishing', element: <Navigate to="/my-app" replace /> },
     { path: 'my-app/stores', element: <StoreAccountsPage /> },
     { path: 'my-app/listing/:platform', element: <ListingPage /> },
     { path: 'my-app/review', element: <ReviewPage /> },

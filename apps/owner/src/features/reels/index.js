@@ -12,7 +12,7 @@ export default {
   name: 'reels',
   access: staffWith('automations'),
   feature: null,
-  routeIds: ['reels.list', 'reels.get', 'reels.save', 'reels.remove', 'reels.instagramPosts', 'products.list', 'console:/reels', 'console:/reels/:id'],
+  routeIds: ['reels.list', 'reels.get', 'reels.save', 'reels.remove', 'reels.instagramPosts', 'reels.products', 'console:/reels', 'console:/reels/:id'],
   screens: [
     { name: 'index', path: 'reels', title: 'reels.title', component: ReelsScreen },
     { name: 'detail', path: 'reels/:id', title: 'reels.editTitle', component: ReelScreen },

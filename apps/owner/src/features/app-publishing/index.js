@@ -16,7 +16,7 @@ export default {
     'storeAccess.get', 'storeAccess.save', 'storeAccess.check',
     'pushCampaigns.list', 'pushCampaigns.summary', 'pushCampaigns.send',
     'pushCredentials.get', 'pushCredentials.save',
-    'console:/my-app', 'console:/my-app/stores', 'console:/my-app/listing/:platform', 'console:/my-app/review', 'console:/my-app/offers', 'console:/my-app/push-keys',
+    'console:/my-app', 'console:/app-publishing', 'console:/my-app/stores', 'console:/my-app/listing/:platform', 'console:/my-app/review', 'console:/my-app/offers', 'console:/my-app/push-keys',
   ],
   screens: [
     { name: 'index', path: 'app-publishing', title: 'app-publishing.title', component: AppPublishingScreen },

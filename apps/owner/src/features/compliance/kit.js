@@ -39,7 +39,7 @@ export function refusalOf(t, error) {
   if (error.code === 'offline') return { text: t('offline.writeDisabled'), code: '' };
   if (error.status === 0 || error.code === 'network') return { text: t('error.network'), code: '' };
   if (error.reason && isReason(error.reason)) return { text: describeReason(t, error.reason), code: error.reason };
-  if (error.status === 403) return { text: t('error.forbidden'), code: '' };
+  if (error.status === 403) return { text: t(errorKey(error)), code: '' }; // a plan refusal is not a role's
   if (error.status === 404) return { text: t('error.notFound'), code: '' };
   if (SERVER_WORDS.has(error.status) && typeof error.message === 'string' && error.message.trim()) return { text: error.message.trim(), code: error.reason ?? '' };
   return { text: t('error.saveFailed'), code: '' };

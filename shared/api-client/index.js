@@ -317,6 +317,8 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, getTenantId, ap
       save: (reelId, body) => put(`/reels/${id(reelId)}`, body),
       remove: (reelId) => del(`/reels/${id(reelId)}`),
       instagramPosts: (query) => get('/instagram/posts', query),
+      /** The products a reel's store can show, for staff with automations too. @param query { search?, cursor?, limit? } */
+      products: (query) => get('/reel-products', query),
     },
     orders: {
       /** @param query { status?, search?, cursor?, limit? } */

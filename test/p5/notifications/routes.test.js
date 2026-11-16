@@ -41,7 +41,7 @@ test('the in-app list: newest first, an unread count for the badge, pages, and m
   assert.deepEqual(list.body.items.map((i) => i.title), ['Reconnect Instagram soon', 'Reconnect Instagram soon', 'Reconnect Instagram soon']);
   assert.deepEqual(list.body.items.map((i) => i.body.match(/\d+ days/)[0]), ['5 days', '6 days', '7 days'], 'newest first');
   assert.deepEqual(Object.keys(list.body.items[0]).sort(), ['body', 'createdAt', 'id', 'kind', 'link', 'readAt', 'title']);
-  assert.equal(list.body.items[0].link, '/settings/instagram');
+  assert.equal(list.body.items[0].link, '/connect');
   const pageOne = await me.get('/notifications?limit=2');
   assert.equal(pageOne.body.items.length, 2);
   const pageTwo = await me.get(`/notifications?limit=2&cursor=${pageOne.body.nextCursor}`);

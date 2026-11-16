@@ -290,7 +290,7 @@ test('F-58: a token alert email is Bhava-branded, from Bhava\'s sender, with the
   const images = mail.html.match(/<img\b[^>]*>/g) ?? [];
   assert.equal(images.length, 1);
   assert.ok(images[0].includes(n.WORKSPACE_BADGE) && images[0].includes(logo), 'the logo, once, as the workspace badge');
-  assert.match(mail.html, new RegExp(`href="https?://[^"]+/admin/settings/instagram"`), 'a direct link to the record in the console');
+  assert.match(mail.html, new RegExp(`href="https?://[^"]+/admin/connect"`), 'a direct link to the record in the console');
   assert.equal(/background(-image)?\s*:[^;"']*url\(/i.test(mail.html), false);
   const [alert] = await w.sql(`SELECT notified_at FROM alerts WHERE tenant_id = $1 AND dedupe_key = 'expiry_7d:ME:1'`, [w.tenant.id]);
   assert.ok(alert.notified_at, 'the alert is marked as taken');

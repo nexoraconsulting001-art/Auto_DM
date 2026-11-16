@@ -10,7 +10,8 @@
  *   links.js      parseLink, matchPath, watchLinks: deep links from a push, an email or a browser sign-in
  *   cache.js      createOfflineCache, createQueryClient, watchConnection, useOnline, scrub: lists that open with no
  *                 connection, changes that need one, and nothing secret in either
- *   screens.js    UpdateRequiredScreen, OfflineScreen, OfflineBanner, LockScreen, errorKey
+ *   screens.js    UpdateRequiredScreen, OfflineScreen, OfflineBanner, LockScreen, errorKey (from refusals.js)
+ *   refusals.js   errorKey and planRefusal: a refusal by plan is told apart from one by role
  *   prompts.js    LockOffer, ReauthProvider, useReauth
  *   strings       createStrings, useStrings: every word by key, English and Hindi
  *   access.js     canOpen and the access rules (import from '@bhava/app-core/access')
@@ -26,9 +27,10 @@ export { createLinkRouter, tapId } from './routing.js';
 export { OWNER_APP_CALLBACK, OWNER_APP_SCHEME, isLinkPath, matchPath, parseLink, watchLinks } from './links.js';
 export { CACHE_MAX_AGE_MS, OfflineError, createOfflineCache, createQueryClient, holdsSecret, maskPhoneNumber, scrub, useOnline, watchConnection } from './cache.js';
 export { LockScreen, OfflineBanner, OfflineScreen, UpdateRequiredScreen, errorKey, isStoreUrl, methodLabel } from './screens.js';
+export { PLAN_REASONS, planRefusal } from './refusals.js';
 export { LockOffer, ReauthProvider, useReauth } from './prompts.js';
 export { LOCALES, StringsProvider, checkCatalogue, createStrings, pickLocale, shared as sharedStrings, useStrings } from './strings/index.js';
 export { formatDate, formatWhen } from './time.js';
 export { readAppConfig } from './config.js';
-export { ACCOUNT_TYPES, canOpen } from './access.js';
+export { ACCOUNT_TYPES, canOpen, entitlementsOf } from './access.js';
 export { ApiError } from '@bhava/api-client';

@@ -24,13 +24,13 @@ function useDebounced(value, delay = 300) {
   return settled;
 }
 
-/** The catalog, searched on the server, to add products from. Archived ones say so. */
+/** The catalog, searched on the server, to add products from (reels.products: staff with automations may pick, not read the catalog). Archived ones say so. */
 function Catalog({ visible, picked, onAdd, onClose }) {
   const { api } = useServices();
   const { t } = useStrings();
   const [search, setSearch] = useState('');
   const term = useDebounced(search.trim());
-  const catalog = useQuery({ queryKey: ['reels', 'catalog', term], queryFn: () => api.products.list({ limit: 50, ...(term ? { search: term } : {}) }), enabled: visible });
+  const catalog = useQuery({ queryKey: ['reels', 'catalog', term], queryFn: () => api.reels.products({ limit: 50, ...(term ? { search: term } : {}) }), enabled: visible });
   const items = catalog.data?.items ?? [];
   const full = picked.length >= MAX_REEL_PRODUCTS;
   return (

@@ -66,13 +66,5 @@ export function LockScreen({ appName, onUnlock, onSignInInstead, failed = false,
   );
 }
 
-/**
- * What a failed call means to the person, as a string key: no connection, no access, gone, or anything else. The
- * error's own message is never shown: it may carry what the server said about someone else's record.
- */
-export function errorKey(error) {
-  if (error?.status === 0 || error?.code === 'network' || error?.code === 'offline') return 'error.network';
-  if (error?.status === 403) return 'error.forbidden';
-  if (error?.status === 404) return 'error.notFound';
-  return 'error.body';
-}
+/** What a failed call means to the person, as a string key (refusals.js, where a plan refusal is told apart from a role's). */
+export { errorKey } from './refusals.js';

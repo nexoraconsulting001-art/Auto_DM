@@ -79,7 +79,7 @@ export const payments = {
       const base = tenant ? tenantBaseUrl(tenant, ctx.config) : '';
       if (!base) return res.type('text').send(done.ok ? 'Your payment account is connected. You can close this page.' : 'Your payment account couldn’t be connected. Please try again.');
       log.info('payments.oauth_done', { tenantId: done.tenantId, ok: done.ok });
-      res.redirect(303, `${base}/admin/settings?payments=${done.ok ? 'connected' : 'failed'}`);
+      res.redirect(303, `${base}/admin/payments?payments=${done.ok ? 'connected' : 'failed'}`);
     });
   },
 

@@ -29,7 +29,7 @@ function routes(extra = {}) {
     'GET /reels/:id': () => ({ ...REEL, products: [PRODUCTS[0]] }),
     'PUT /reels/:id': (call) => ({ ...REEL, id: call.path.split('/').pop(), ...call.body, products: PRODUCTS.filter((p) => call.body.productIds.includes(p.id)) }),
     'DELETE /reels/:id': () => null,
-    'GET /products': (call) => page(PRODUCTS.filter((p) => !call.search.includes('search=') || p.name.toLowerCase().includes(decodeURIComponent(call.search.split('search=')[1].split('&')[0]).toLowerCase()))),
+    'GET /reel-products': (call) => page(PRODUCTS.filter((p) => !call.search.includes('search=') || p.name.toLowerCase().includes(decodeURIComponent(call.search.split('search=')[1].split('&')[0]).toLowerCase()))),
     ...extra,
   };
 }
