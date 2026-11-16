@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigation } from '@react-navigation/native';
-import { formatWhen, useReauth, useStrings } from '@bhava/app-core';
+import { formatWhen, useStrings } from '@bhava/app-core';
 import { MANAGERS, OWNER_ONLY } from '@bhava/app-core/access';
 import { Badge, Banner, Button, Card, Choices, ConfirmSheet, Divider, Field, ListRow, Section, Text, Toggle } from '@bhava/ui';
+import { useOpenLink } from '../../shell/context.js';
 import { useServices } from '../../shell/hooks.js';
 import { FileButton, Loadable, MoreButton, Page, Refusal, itemsOf, useCan, useConnection, usePaged } from '../products/kit.js';
 import { DOWNLOAD_FORMATS, FIXED_DOWNLOADS, REPORT_FREQUENCIES, REPORT_KINDS } from '../products/limits.js';
@@ -60,6 +61,7 @@ export default function ReportsScreen() {
   const { api } = useServices();
   const { t, locale } = useStrings();
   const navigation = useNavigation();
+  const openLink = useOpenLink(); // API keys are Settings' screen (one screen per path); the console keeps them under Reports
   const queryClient = useQueryClient();
   const can = useCan();
   const { online, offline } = useConnection();
@@ -74,7 +76,7 @@ export default function ReportsScreen() {
       <Text variant="page">{t('reports.title')}</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {can(MANAGERS) ? <Button testID="reports-open-scheduled" kind="secondary" label={t('reports.scheduled.title')} onPress={() => navigation.navigate('reports.scheduled')} /> : null}
-        {can(OWNER_ONLY) ? <Button testID="reports-open-keys" kind="quiet" label={t('reports.keys.title')} onPress={() => navigation.navigate('reports.keys')} /> : null}
+        {can(OWNER_ONLY) ? <Button testID="reports-open-keys" kind="quiet" label={t('reports.keys.title')} onPress={() => openLink('/settings/api-keys')} /> : null}
       </View>
       <Loadable query={prefs} testID="reports-preferences">
         {p ? (
@@ -205,75 +207,6 @@ export function ScheduledReportsScreen() {
           <Button testID="schedule-create" label={t('reports.scheduled.create')} busy={create.isPending} disabled={!online || Boolean(read.error)} onPress={() => create.mutate(read.body)} />
         </Card>
       </Section>
-    </Page>
-  );
-}
-
-/**
- * Reporting API keys (7.13): read-only keys for the business's own tools, owner only. Making or revoking one needs a
- * fresh sign-in check. A new key is shown once, here, and never again; it is not kept on the phone.
- */
-export function ApiKeysScreen() {
-  const { api } = useServices();
-  const { t, locale } = useStrings();
-  const { runFresh } = useReauth();
-  const queryClient = useQueryClient();
-  const { online, offline } = useConnection();
-  const keys = usePaged([...REPORTS_KEY, 'keys'], (page) => api.apiKeys.list({ limit: 20, ...page }));
-  const [name, setName] = useState('');
-  const [shown, setShown] = useState(null);
-  const [revoking, setRevoking] = useState(null);
-  const create = useMutation({
-    mutationFn: () => runFresh(() => api.apiKeys.create({ name: name.trim() })),
-    onSuccess: (answer) => {
-      setShown({ name: answer.name, key: answer.key });
-      setName('');
-      queryClient.invalidateQueries({ queryKey: [...REPORTS_KEY, 'keys'] });
-    },
-  });
-  const revoke = useMutation({
-    mutationFn: (id) => runFresh(() => api.apiKeys.revoke(id)),
-    onSuccess: () => {
-      setRevoking(null);
-      queryClient.invalidateQueries({ queryKey: [...REPORTS_KEY, 'keys'] });
-    },
-  });
-  const list = itemsOf(keys);
-  return (
-    <Page testID="screen-api-keys" offline={offline}>
-      <Text variant="page">{t('reports.keys.title')}</Text>
-      <Text variant="small">{t('reports.keys.intro')}</Text>
-      {shown ? (
-        <Banner tone="warn" testID="api-key-shown" title={t('reports.keys.once', { name: shown.name })} action={<Button kind="secondary" label={t('common.done')} onPress={() => setShown(null)} />}>
-          {shown.key}
-        </Banner>
-      ) : null}
-      <Card>
-        <Field testID="api-key-name" label={t('reports.keys.name')} value={name} onChangeText={setName} maxLength={60} />
-        <Refusal error={create.error} testID="api-key-create-error" />
-        <Button testID="api-key-create" label={t('reports.keys.create')} busy={create.isPending} disabled={!online || !name.trim()} onPress={() => create.mutate()} />
-        {!online ? <Text variant="caption">{t('offline.writeDisabled')}</Text> : null}
-      </Card>
-      <Loadable query={keys} empty={!list.length} testID="api-keys" emptyTitle={t('reports.keys.none')}>
-        <Card>
-          {list.map((key, i) => (
-            <View key={key.id}>
-              {i ? <Divider /> : null}
-              <ListRow
-                testID={`api-key-${key.id}`}
-                title={key.name}
-                subtitle={`${key.prefix}… · ${key.lastUsedAt ? t('reports.keys.used', { when: formatWhen(t, key.lastUsedAt, { locale }) }) : t('reports.keys.unused')}`}
-                end={key.revokedAt ? <Badge label={t('reports.keys.revoked')} /> : <Button testID={`api-key-${key.id}-revoke`} kind="quiet" label={t('reports.keys.revoke')} disabled={!online} onPress={() => setRevoking(key)} />}
-              />
-            </View>
-          ))}
-        </Card>
-        <MoreButton query={keys} testID="api-keys-more" />
-      </Loadable>
-      <Refusal error={revoke.error} testID="api-key-revoke-error" />
-      <ConfirmSheet testID="api-key-revoke-confirm" visible={Boolean(revoking)} title={revoking ? t('reports.keys.revokeTitle', { name: revoking.name }) : ''} confirmLabel={t('reports.keys.revoke')} cancelLabel={t('common.cancel')} onCancel={() => setRevoking(null)} onConfirm={() => revoke.mutate(revoking.id)} busy={revoke.isPending} disabled={!online}>
-        {t('reports.keys.revokeBody')}
-      </ConfirmSheet>
     </Page>
   );
 }

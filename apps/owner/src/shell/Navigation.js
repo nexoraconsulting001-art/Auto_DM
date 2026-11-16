@@ -12,6 +12,7 @@ import { features } from '../features/index.js';
 import { useServices, useSession } from '../services.js';
 import { APP_NAME } from '../strings.js';
 import { ShellContext } from './context.js';
+import { usePlanEntitlements } from './entitlements.js';
 import { startHeartbeat } from './heartbeat.js';
 import { useStoredLocale } from './locale.js';
 import { MORE, SWITCHER, TABS, buildNavigation, linkTarget, screenName } from './menu.js';
@@ -107,7 +108,7 @@ function useRestored(cache, queryClient, tenantId) {
 /**
  * The signed-in app: a tab bar of the four primary features and More, over a stack that holds every other screen.
  * All of it comes from the feature registry and what this person may open here: their role and permissions, the
- * plan's entitlements once the session knows them, and whether the account is a seller's or a creator's. Nothing here
+ * plan's entitlements once billing.features has answered (shell/entitlements.js), and whether the account is a seller's or a creator's. Nothing here
  * names a feature.
  *
  * While it is open it also: opens what a tapped push or a link points at (switching business first, P-13); asks the
@@ -124,7 +125,7 @@ export function Navigation({ list = features, notifications, network, linking = 
   const { t } = useStrings();
   const theme = useTheme();
   const { user, business, tenantId } = state;
-  const entitlements = state.entitlements ?? null;
+  const entitlements = usePlanEntitlements(); // billing.features: a plan without a feature has no menu entry or screen for it
   const accountType = business?.accountType ?? null;
   const nav = useMemo(() => buildNavigation(list, { user, entitlements, accountType }), [list, user, entitlements, accountType]);
   const moreEntries = useMemo(() => nav.more.map((feature) => ({ feature: feature.name, name: screenName(feature, feature.screens[0]), label: feature.nav.label })), [nav]);

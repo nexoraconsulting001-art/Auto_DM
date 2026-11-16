@@ -161,13 +161,13 @@ export const NOTIFY_EVENTS = Object.freeze({
     label: 'Weekly report', audience: 'owner', channels: ['push', 'email', 'inapp'],
     one: { title: 'Your weekly report is ready', body: 'See how {business} did this week.' },
     many: { title: 'Your weekly report is ready', body: 'See how {business} did this week.' },
-    email: 'report', whatsapp: '', link: '/reports',
+    email: 'report', whatsapp: '', link: '/reports/{reportRunId}',
   }),
   'report.monthly': event({
     label: 'Monthly report', audience: 'owner', channels: ['push', 'email', 'inapp'],
     one: { title: 'Your monthly report is ready', body: 'See how {business} did this month.' },
     many: { title: 'Your monthly report is ready', body: 'See how {business} did this month.' },
-    email: 'report', whatsapp: '', link: '/reports',
+    email: 'report', whatsapp: '', link: '/reports/{reportRunId}',
   }),
   'staff.changed': event({
     label: 'Changes to your team', audience: 'owner', channels: ['email', 'inapp'], mandatory: true,

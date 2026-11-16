@@ -9,6 +9,9 @@
  *
  * An `asset` is what expo-image-picker or expo-document-picker hands back: { uri, fileName | name, mimeType, fileSize | size }.
  */
+// The plain file (no React), so node's test runner reads this file too; '@bhava/app-core' exports the same errorKey.
+import { errorKey } from '../../../../../packages/app-core/src/refusals.js';
+
 const MB = 1024 * 1024;
 
 export const IMAGE_RULE = Object.freeze({
@@ -133,7 +136,7 @@ export function refusalText(t, error) {
     const field = Object.values(error.fields ?? {}).find((m) => typeof m === 'string' && m);
     return field || error.message || t('error.saveFailed');
   }
-  if (error?.status === 403) return t('error.forbidden');
+  if (error?.status === 403) return t(errorKey(error)); // a plan refusal is not a role's
   if (error?.status === 404) return t('error.notFound');
   return t('error.saveFailed');
 }

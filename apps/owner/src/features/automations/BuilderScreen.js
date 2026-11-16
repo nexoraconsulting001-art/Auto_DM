@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { OfflineBanner, useStrings } from '@bhava/app-core';
 import { MANAGERS, isAllowed } from '@bhava/app-core/access';
 import { Badge, Banner, Button, Card, Choices, ConfirmSheet, EmptyState, Field, Screen, Section, Text, Toggle, useTheme } from '@bhava/ui';
+import { usePlanEntitlements } from '../../shell/entitlements.js';
 import { useServices, useSession } from '../../shell/hooks.js';
 import { RecordState, Refusal, refusalOf, useWritable } from '../compliance/kit.js';
 import { KeywordEditor } from '../reels/KeywordEditor.js';
@@ -98,7 +99,8 @@ async function saveTracking(api, values, rows) {
 
 function Editor({ automation, navigation, landed = '' }) {
   const { api } = useServices();
-  const { user, business, entitlements } = useSession();
+  const { user, business } = useSession();
+  const entitlements = usePlanEntitlements(); // the triggers this plan has (billing.features)
   const { t } = useStrings();
   const theme = useTheme();
   const queryClient = useQueryClient();

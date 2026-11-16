@@ -320,7 +320,7 @@ test('F-88: the weekly report email is the report, Bhava-branded and from Bhava\
   assert.equal(mail.from, `Bhava <${PLATFORM_FROM}>`);
   assert.equal(n.sellerEmailProblem({ from: PLATFORM_FROM, html: mail.html }, { platformFrom: PLATFORM_FROM }), null, 'the logo is the workspace badge');
   const [push] = await accepted(w, owner.devices[0].token);
-  assert.deepEqual([push.title, push.data.link], ['Your weekly report is ready', '/reports']);
+  assert.deepEqual([push.title, push.data.link], ['Your weekly report is ready', `/reports/${run.id}`]);
   const [firm] = await emailsTo(w, 'accounts@firm.example');
   assert.ok(firm, 'an outside address gets the report from Bhava\'s sender too');
   assert.equal(n.sellerEmailProblem({ from: PLATFORM_FROM, html: firm.html }, { platformFrom: PLATFORM_FROM }), null);

@@ -10,6 +10,9 @@
  *   - The access token is held in memory only. The refresh token is in SecureStore and nowhere else.
  *   - While the app is locked the refresh token is not read at all: only `resume()`, which the app calls after a
  *     fingerprint, face or passcode unlock, releases it (F-110). Any other call made meanwhile goes out with no token.
+ *     The one other use is releaseForSignOut() ("Sign in instead" on the lock screen): it is presented once, only so the
+ *     sign-out that follows can end the session on the server and stop this phone's pushes. Nothing is loaded and the
+ *     app stays locked until that sign-out forgets everything here.
  *   - A 401 on any call is answered with one silent refresh and one retry of that call (P-04). Calls that arrive
  *     while a refresh is running wait for it, so a refresh token is never presented twice (that would end the family).
  *     A second 401 on the retried call means the session is gone, and it is forgotten.
@@ -237,6 +240,26 @@ export function createSession({ baseUrl, app, store, fetch: rawFetch = (...args)
     },
     resume,
     check,
+
+    /**
+     * Before signing out of a locked session: the refresh token is presented once, only so the sign-out can reach the
+     * server (auth.logout, the push unregister). Nothing is loaded and the status stays locked. Does nothing unless locked.
+     * With requireServer, a server that cannot be reached is thrown and the lock is kept; without it, the sign-out
+     * still forgets everything here.
+     */
+    async releaseForSignOut({ requireServer = false } = {}) {
+      if (state.status !== SESSION_STATUS.locked) return false;
+      released = true;
+      try {
+        return await refresh();
+      } catch (error) {
+        if (requireServer) {
+          released = false;
+          throw error;
+        }
+        return false;
+      }
+    },
 
     /** Takes the answer of auth.verify, auth.exchange or auth.apple (an AuthSession for transport "bearer"). */
     async adopt(authSession) {

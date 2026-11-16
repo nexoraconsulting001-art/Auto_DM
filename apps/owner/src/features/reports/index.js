@@ -1,10 +1,10 @@
 import FileChartColumn from 'lucide-react-native/icons/file-chart-column';
 import { staffWith } from '@bhava/app-core/access';
-import ReportsScreen, { ApiKeysScreen, ReportScreen, ScheduledReportsScreen, UnsubscribeScreen } from './ReportsScreen.js';
+import ReportsScreen, { ReportScreen, ScheduledReportsScreen, UnsubscribeScreen } from './ReportsScreen.js';
 
 /**
  * Reports and downloads (PRD 7.9, 7.12, 7.13): the weekly and monthly reports, summary files, scheduled reports with
- * their recipients, and reporting API keys (owner only, fresh check). The console keeps API keys under Reports too.
+ * their recipients, and the way to the reporting API keys, which are Settings' screen (settings/api-keys): one screen per path. The console keeps API keys under Reports.
  */
 export default {
   name: 'reports',
@@ -14,15 +14,13 @@ export default {
     'reports.list', 'reports.preferences', 'reports.updatePreferences', 'reports.unsubscribe', 'reports.get',
     'downloads.list', 'downloads.create', 'downloads.get',
     'scheduledReports.list', 'scheduledReports.create', 'scheduledReports.update', 'scheduledReports.remove', 'scheduledReports.addRecipient', 'scheduledReports.removeRecipient',
-    'apiKeys.list', 'apiKeys.create', 'apiKeys.revoke',
-    'console:/reports', 'console:/reports/scheduled', 'console:/settings/api-keys',
+    'console:/reports', 'console:/reports/scheduled', 'console:/reports/:id',
   ],
   screens: [
     { name: 'index', path: 'reports', title: 'reports.title', component: ReportsScreen },
     { name: 'scheduled', path: 'reports/scheduled', title: 'reports.scheduled.title', component: ScheduledReportsScreen },
     { name: 'detail', path: 'reports/:id', title: 'reports.one', component: ReportScreen },
     { name: 'unsubscribe', path: 'reports/unsubscribe/:token', title: 'reports.unsubscribe.title', component: UnsubscribeScreen },
-    { name: 'keys', path: 'settings/api-keys', title: 'reports.keys.title', component: ApiKeysScreen },
   ],
   nav: { label: 'reports.title', order: 36, icon: FileChartColumn },
   strings: {
@@ -104,17 +102,6 @@ export default {
       'reports.weekday.fri': 'Friday',
       'reports.weekday.sat': 'Saturday',
       'reports.keys.title': 'Reporting API keys',
-      'reports.keys.intro': 'Keys let your own tools read your summaries. They can’t change anything. Only you can make one.',
-      'reports.keys.name': 'Name the key, like Accounts sheet',
-      'reports.keys.create': 'Make a key',
-      'reports.keys.once': 'Copy the key for {name} now',
-      'reports.keys.none': 'No keys yet',
-      'reports.keys.used': 'Used {when}',
-      'reports.keys.unused': 'Not used yet',
-      'reports.keys.revoked': 'Revoked',
-      'reports.keys.revoke': 'Revoke',
-      'reports.keys.revokeTitle': 'Revoke {name}?',
-      'reports.keys.revokeBody': 'Anything using it stops working at once. This can’t be undone.',
       'reports.unsubscribe.title': 'Stop report emails',
       'reports.unsubscribe.which': 'Which',
       'reports.unsubscribe.weekly': 'Weekly',
@@ -202,17 +189,6 @@ export default {
       'reports.weekday.fri': 'शुक्रवार',
       'reports.weekday.sat': 'शनिवार',
       'reports.keys.title': 'रिपोर्टिंग API कुंजी',
-      'reports.keys.intro': 'कुंजी से आपके अपने टूल आपके सारांश पढ़ सकते हैं। वे कुछ बदल नहीं सकते। सिर्फ़ आप बना सकते हैं।',
-      'reports.keys.name': 'कुंजी का नाम, जैसे हिसाब की शीट',
-      'reports.keys.create': 'कुंजी बनाएँ',
-      'reports.keys.once': '{name} की कुंजी अभी कॉपी करें',
-      'reports.keys.none': 'अभी कोई कुंजी नहीं',
-      'reports.keys.used': '{when} इस्तेमाल हुई',
-      'reports.keys.unused': 'अभी इस्तेमाल नहीं हुई',
-      'reports.keys.revoked': 'रद्द',
-      'reports.keys.revoke': 'रद्द करें',
-      'reports.keys.revokeTitle': '{name} रद्द करें?',
-      'reports.keys.revokeBody': 'जो भी इसे इस्तेमाल करता है, तुरंत बंद हो जाएगा। यह वापस नहीं होगा।',
       'reports.unsubscribe.title': 'रिपोर्ट ईमेल बंद करें',
       'reports.unsubscribe.which': 'कौन-सी',
       'reports.unsubscribe.weekly': 'हफ़्ते की',
