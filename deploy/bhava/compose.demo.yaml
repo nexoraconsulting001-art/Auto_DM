@@ -32,3 +32,20 @@ services:
       retries: 3
       start_period: 10s
     depends_on: [web]
+  # The email test copy. Read what it was sent with: docker compose ... exec sim-email node -e "fetch('http://127.0.0.1:9107/__sim/sent').then(r=>r.text()).then(console.log)"
+  sim-email:
+    image: bhava-demo-app:local
+    pull_policy: never
+    restart: unless-stopped
+    env_file: [demo.env]
+    network_mode: "service:web"
+    command: ["node", "--input-type=module", "-e", "import { createEmail } from './tools/sim/email/index.mjs'; const s = createEmail(); await s.start({ port: 9107 }); console.log('sim email', s.url);"]
+    volumes: ["../../tools:/app/tools:ro"]
+    mem_limit: 96m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9107/__sim/sent').then(()=>process.exit(0),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on: [web]
