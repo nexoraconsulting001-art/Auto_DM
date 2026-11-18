@@ -79,8 +79,12 @@ export function createConnect({ db, repos, meta, config, platform, gates }) {
    */
   const claimAccount = (tenant, login) => claimConnection(platformDb, 'instagram', { tenantId: tenant.id, accountId: login.igUserId, name: login.username });
 
-  /** Under Unified Login the subscription belongs to the Page behind the account. */
-  const subscriptionTarget = (detail, account) => (detail?.loginKind === 'unified' && detail.pageId ? { pageId: detail.pageId, token: account.token } : account);
+  /**
+   * The subscription belongs to the Instagram account under both logins. Under Unified Login the Page's own subscription accepts
+   * only Page fields (messages needs pages_messaging, and comments, live_comments and mentions are not Page fields, so Meta refused
+   * the whole request with error 100); the account's subscribed_apps takes all five, with the Page token the account already holds.
+   */
+  const subscriptionTarget = (detail, account) => account;
 
   /** Tells Meta to send this account's events here (PRD 4.1), only the fields its granted permissions allow. False leaves it for the hourly retry. */
   async function subscribe(igUserId) {
