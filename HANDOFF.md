@@ -12,7 +12,7 @@ The requirements (PRD) and build plan live outside this repo, because the repo i
   - Attack round on money, sign-in, business separation and Meta compliance: 17 confirmed bugs, all fixed with tests.
   - First full GitHub run after those fixes: about 220 test files still fail, mostly outside the demo path.
   - Not done yet: Stryker mutation testing, the remaining GitHub fix rounds, and the "no test weakened" audit.
-- **Fixes not merged yet** (local branches only, from the first GitHub fix round; partly finished): `fix/t1-apps-owner-shopper-and-mobile-ci`, `fix/t1-checkout-store-orders-money`, `fix/t1-meta-sends-intake-queue-p1-p6`, `fix/t1-signin-codes-sessions-auth`, plus medium follow-ups on `fix/final-money-m` and `fix/final-commerce-m`.
+- **Fixes not merged yet** (pushed to GitHub on 26 Nov; from the first GitHub fix round; partly finished, and the last commit on `fix/t1-signin-codes-sessions-auth`, `fix/final-money-m` and `fix/final-commerce-m` is unreviewed work in progress): `fix/t1-apps-owner-shopper-and-mobile-ci`, `fix/t1-checkout-store-orders-money`, `fix/t1-meta-sends-intake-queue-p1-p6`, `fix/t1-signin-codes-sessions-auth`, plus medium follow-ups on `fix/final-money-m` and `fix/final-commerce-m`.
 - **Open high items** (root cause noted, fix not finished):
   - The compliance gate does not re-check a business's Meta access before each automated send after go-live.
   - The owner app's sign-out wipe leaves one empty query entry behind.
@@ -25,6 +25,16 @@ The requirements (PRD) and build plan live outside this repo, because the repo i
   4. Run the test-weakening audit.
   5. Build the per-business admin brand setting (white-label admin for managed clients).
   6. Fix the low-priority list.
+- **Where to pick up:**
+  - Code: this branch (`bhava/build`) plus the fix branches above.
+  - Website: the separate repo `nexoraconsulting001-art/Auto_DM_Plugin`, folder `site/`.
+  - Private notes stay off git, because this repo is public. They are on the build laptop in `C:\bhava\docs`:
+    - PRD and build plan.
+    - Problem notes `p0-attack-r1.md` and `p1..p9-known-problems.md`.
+    - `rca-log.md` and `rca-escalations.md`.
+    - `decisions-needed.md` and `later-low-priority.md`.
+    - `test-changes.md`.
+    - `demo-deploy-notes.md`, which holds the server and demo logins.
 
 ## Rules that never bend
 
