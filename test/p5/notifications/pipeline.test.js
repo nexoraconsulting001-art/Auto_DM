@@ -27,9 +27,14 @@ const order = async (mode = 'prepaid') => {
   await w.app.ctx.orderEvents.drain();
   return made;
 };
+// The furthest the clock has been: a test may set it to a fixed day in the past (quiet hours), and the next must still
+// start after every row written so far, or its events would meet groups "made" in its future.
+let furthest = 0;
 const reset = async () => {
   // Each test starts well clear of the last one's collapse groups.
-  w.clock.advance(10 * MINUTE);
+  furthest = Math.max(furthest, w.clock.ms);
+  w.clock.set(furthest + 10 * MINUTE);
+  furthest = w.clock.ms;
   await w.sims.push.post('/reset');
   await w.sims.email.post('/reset');
   await w.sims.whatsapp.post('/reset');

@@ -207,7 +207,8 @@ test('WhatsApp: an answer that was lost is never sent again on a guess; throttli
 test('email: a lost answer is tried again under the same idempotency key, so the seller gets one email', async () => {
   await reset();
   const worker = w.worker();
-  await w.sims.email.post('/faults', { kind: 'partial', then: 'timeout', match: { path: '/messages' }, times: 3 });
+  // One try is one call (the outbox passes retries: 0; F-59 counts three calls for three tries): one answer is lost.
+  await w.sims.email.post('/faults', { kind: 'partial', then: 'timeout', match: { path: '/messages' }, times: 1 });
   const eventId = await emit({ event: 'dm.usage_100', key: 'mail:lost' });
   await worker.drain();
   const first = await deliveryOf(w, eventId, 'email');
