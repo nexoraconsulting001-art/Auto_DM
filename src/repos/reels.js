@@ -12,7 +12,6 @@ export function normalizeReel(input) {
     .split(',')
     .map((k) => k.trim())
     .filter(Boolean);
-  if (!keywords.length) throw new ValidationError('Add at least one keyword people can comment');
 
   const slug = slugify(input.slug || input.headline || '');
   if (!slug) throw new ValidationError('Add a headline or a store link name');
@@ -28,7 +27,7 @@ export function normalizeReel(input) {
     slug,
     headline: String(input.headline ?? '').trim(),
     keywords,
-    dm_message: String(input.dm_message ?? '').trim() || 'Hey @{username}! Here’s everything from the reel 👇',
+    dm_message: String(input.dm_message ?? '').trim() || (keywords.length ? 'Hey @{username}! Here’s everything from the reel 👇' : ''),
     button_text: buttonText,
     public_reply: String(input.public_reply ?? '').trim(),
     active: input.active === true || input.active === 'on' || input.active === 'true',
@@ -78,6 +77,14 @@ export function reelsRepo(db) {
     /** Used by the webhook: only active reels send DMs. */
     async getActiveByMediaId(id) {
       const [reel] = await db.query(`SELECT ${COLS} FROM reels r WHERE r.tenant_id = $2 AND r.ig_media_id = $1 AND r.active`, [String(id), tenantId()]);
+      return reel || null;
+    },
+    /**
+     * An active Phase 0 reel that still answers comments itself: it has keywords (D-11). A reel without them is only a
+     * landing page, and a comment on its post belongs to the automations engine.
+     */
+    async getLegacyDmByMediaId(id) {
+      const [reel] = await db.query(`SELECT ${COLS} FROM reels r WHERE r.tenant_id = $2 AND r.ig_media_id = $1 AND r.active AND cardinality(r.keywords) > 0`, [String(id), tenantId()]);
       return reel || null;
     },
     async save(id, input) {

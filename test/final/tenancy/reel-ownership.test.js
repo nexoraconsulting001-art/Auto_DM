@@ -25,7 +25,7 @@ function ownedIg(owners) {
   return ig;
 }
 
-const reelBody = (productIds, headline) => ({ keywords: ['LINK'], productIds, headline });
+const reelBody = (productIds, headline) => ({ productIds, headline });
 const errorOf = (res) => ({ status: res.status, code: res.body?.code, message: res.body?.error });
 
 async function twoShops(t, overrides = {}) {

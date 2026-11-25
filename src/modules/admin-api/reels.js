@@ -39,20 +39,19 @@ function requireWebLink(value, field, pattern = /^https?:\/\//i) {
 }
 
 /**
- * The repo keeps keywords as comma-separated text, so a comma inside one would turn it into two.
- * Saving again keeps the store link: links already sent in DMs must keep working.
+ * Saving again keeps the store link: links already sent in DMs must keep working. The keyword DM fields are not the seller's
+ * to set here (the contract refuses them; DMs are automations, D-11): a Phase 0 reel keeps the ones it had, a new reel has none.
  */
 function reelInput(body, existing) {
-  if (body.keywords.some((keyword) => keyword.includes(','))) throw invalidField('keywords', 'A keyword can’t contain a comma');
   requireWebLink(body.permalink, 'permalink');
   requireWebLink(body.thumbnailUrl, 'thumbnailUrl', /^(https?:\/\/|\/media\/)/i);
   return {
     slug: body.slug ?? existing?.slug,
     headline: body.headline,
-    keywords: body.keywords.join(','),
-    dm_message: body.dmMessage,
-    button_text: body.buttonText,
-    public_reply: body.publicReply,
+    keywords: existing?.keywords ?? '',
+    dm_message: existing?.dm_message ?? '',
+    button_text: existing?.button_text ?? '',
+    public_reply: existing?.public_reply ?? '',
     active: body.active ?? existing?.active ?? true,
     productIds: body.productIds,
     permalink: body.permalink,

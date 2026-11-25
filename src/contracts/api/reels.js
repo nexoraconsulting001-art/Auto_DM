@@ -28,14 +28,21 @@ export const ReelSummary = Reel.extend({ productCount: Count, dmCount: Count, vi
 export const ReelProduct = z.object({ id: Id, name: z.string(), pricePaise: Paise, images: z.array(z.string()), active: z.boolean(), position: Count });
 export const ReelDetail = Reel.extend({ products: z.array(ReelProduct) });
 
-/** Saving creates the reel's store the first time and replaces it after that. */
+/**
+ * Saving creates the reel's store the first time and replaces it after that. A reel is its landing page (PRD 8.10): the DM
+ * a comment gets is an automation's (PRD 6.1), made in Automations, where the plan's limits and the message and link checks
+ * apply. So the Phase 0 keyword DM fields are refused here, with a message saying where they went (final review D-11); a reel
+ * that already had them keeps them, read-only, until it is moved to an automation.
+ */
+const MOVED_TO_AUTOMATIONS = 'Keyword DMs are set up in Automations now';
+const notHere = z.undefined({ error: MOVED_TO_AUTOMATIONS }).optional();
 export const ReelSave = z.object({
   slug: text(60).optional(),
   headline: text(200).optional(),
-  keywords: z.array(required(60)).min(1, 'Add at least one keyword people can comment').max(50),
-  dmMessage: text(1000).optional(),
-  buttonText: text(20).optional(),
-  publicReply: text(1000).optional(),
+  keywords: notHere,
+  dmMessage: notHere,
+  buttonText: notHere,
+  publicReply: notHere,
   active: z.boolean().optional(),
   productIds: z.array(Id).min(1, 'Pick at least 1 product for this reel').max(20, 'A reel can show at most 20 products'),
   permalink: text(1000).optional(),

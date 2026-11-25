@@ -21,7 +21,7 @@ test('U-02: staff with orders only reach orders and are refused Automations, and
     ['GET', `/reels/${REEL_ID}`],
     ['GET', '/activity'],
     ['GET', '/instagram/posts'],
-    ['PUT', `/reels/${REEL_ID}`, { keywords: ['LINK'], productIds: [product.id] }],
+    ['PUT', `/reels/${REEL_ID}`, { productIds: [product.id] }],
     ['DELETE', `/reels/${REEL_ID}`],
   ];
   for (const [method, route, body] of refused) {

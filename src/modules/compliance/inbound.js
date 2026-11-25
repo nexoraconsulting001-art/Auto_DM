@@ -271,7 +271,7 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
       const [link] = await db.query(`SELECT 1 FROM fb_post_links WHERE tenant_id = $1 AND fb_post_id = $2 AND status = 'confirmed'`, [tenantId(), ev.mediaId]);
       return Boolean(link);
     }
-    return Boolean(await repos.reels?.getActiveByMediaId(ev.mediaId));
+    return Boolean(await repos.reels?.getLegacyDmByMediaId(ev.mediaId));
   }
 
   async function addNeedsHuman({ channel, kind, reason, subject = '', threadId = null, commentId = '', mediaId = '', username = '', text = '' }) {
@@ -293,7 +293,7 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
       return matchesKeywords(text, a.keywords);
     }
     if (job.payload?.legacy) {
-      const reel = await repos.reels?.getActiveByMediaId(job.media_id);
+      const reel = await repos.reels?.getLegacyDmByMediaId(job.media_id);
       if (!reel) return true;
       return matchesKeywords(text, Array.isArray(reel.keywords) ? reel.keywords : [reel.keywords]);
     }
@@ -387,7 +387,7 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
       logger.info('webhook.comment', { comment: ev.commentId, media: ev.mediaId, result });
       platform?.metrics?.inc('webhook_comments_total', { result: result.split(':')[0] });
     };
-    const reel = ev.channel === 'instagram' ? await repos.reels?.getActiveByMediaId(ev.mediaId) : null;
+    const reel = ev.channel === 'instagram' ? await repos.reels?.getLegacyDmByMediaId(ev.mediaId) : null;
     if (!reel) {
       if (hasNewEngine) return;
       await repos.activity?.log({ ...entry, result: 'skip:unmapped-reel' });
