@@ -17,7 +17,7 @@ The requirements (PRD) and build plan live outside this repo, because the repo i
   - The compliance gate does not re-check a business's Meta access before each automated send after go-live.
   - The owner app's sign-out wipe leaves one empty query entry behind.
   - Branded app builds cannot find the uploaded icon on real Postgres, possibly a tenant-context gap in background jobs.
-- **Demo server:** the QA server runs the demo profile (`deploy/bhava`). Payments, courier, WhatsApp and email go to test copies, and Instagram is real. The address is `https://mehta-mart.140-238-251-141.sslip.io`. Logins live only on the server and in the private notes, never in this repo.
+- **Demo server:** the QA server runs the demo profile (`deploy/bhava`). Payments, courier, WhatsApp and email go to test copies, and Instagram is real. It is reached through an sslip.io address built from the server's IP (listed in the private demo notes, not here, because the secret scan refuses server addresses in tracked files). Logins live only on the server and in the private notes, never in this repo.
 - **Next:**
   1. Merge the unmerged fix branches.
   2. Run the GitHub test rounds until green, with demo-path failures first.
