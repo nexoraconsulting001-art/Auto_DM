@@ -449,6 +449,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     }
 
     if (target === 'free' && result.effective === 'period_end') await endUnpaid(actor);
+    if (target === 'free' && result.effective === 'now') await endWithSubscription(actor);
     if (result.toFree) {
       // No subscription to end (a plan set by the console): the owner's own move to Free is recorded as theirs.
       await platformDb.query(
@@ -638,6 +639,32 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     const s = await subOf(db);
     for (const item of ended) await dropPending(item, s);
     return ended.length;
+  }
+
+  /**
+   * A cancelled subscription charges nothing more, so the lines it charged end with it (money-10): a recurring line runs to
+   * the end of the period already paid for (when still ahead) and a line never paid for ends now, its charge still waiting
+   * at the provider taken back. A one-time purchase already paid for stays. Features of lines that have ended are switched
+   * off. Called where a subscription is cancelled, and by renewals for cancelled ones, so a paid period that ends later is
+   * switched off then. Does nothing while the subscription is not cancelled. -> how many lines it ended
+   */
+  async function endWithSubscription(actor = 'billing') {
+    const ended = await locked(async (t) => {
+      const s = await subOf(t, { forUpdate: true });
+      if (!s || s.status !== 'cancelled') return null;
+      const paidUntil = s.current_period_end && new Date(s.current_period_end) > at() ? iso(s.current_period_end) : null;
+      const rows = await t.query(
+        `UPDATE subscription_items SET ends_at = GREATEST(starts_at, CASE WHEN billed_through IS NOT NULL AND $2::timestamptz IS NOT NULL THEN $2::timestamptz ELSE now() END)
+         WHERE tenant_id = $1 AND ends_at IS NULL AND NOT (cycle = 'one_time' AND billed_through IS NOT NULL) RETURNING *`,
+        [tenantId(), paidUntil],
+      );
+      await switchOffEnded(t);
+      if (rows.length) await writeAudit(t, { actor, action: 'billing.items_ended', target: 'plan', details: { items: rows.map((r) => Number(r.id)), reason: 'subscription_cancelled' } });
+      return { s, rows };
+    });
+    if (!ended) return 0;
+    for (const item of ended.rows) if (!item.billed_through) await dropPending(item, ended.s);
+    return ended.rows.length;
   }
 
   // ---- invoices ----
@@ -836,7 +863,10 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       await writeAudit(t, { actor: 'billing', action: 'billing.cancelled', target: `subscription:${s.id}` });
       return 'processed';
     });
-    if (outcome === 'processed') await syncPlan(tenantId());
+    if (outcome === 'processed') {
+      await endWithSubscription();
+      await syncPlan(tenantId());
+    }
     return outcome;
   }
 
@@ -871,6 +901,19 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     const settings = await settingsOf(platformDb);
     const done = { queued: 0, passThrough: 0, failed: 0 };
     if (!complete(settings)) return done;
+    // Cancelled subscriptions: lines still open, or a paid period that has since ended with its feature still on (money-10).
+    const ending = await platformDb.query(
+      `SELECT DISTINCT s.tenant_id FROM subscriptions s JOIN subscription_items i ON i.tenant_id = s.tenant_id JOIN addons a ON a.code = i.addon_code
+       WHERE s.status = 'cancelled' AND ((i.ends_at IS NULL AND NOT (i.cycle = 'one_time' AND i.billed_through IS NOT NULL))
+         OR (i.ends_at <= now() AND a.feature IS NOT NULL AND EXISTS (SELECT 1 FROM tenant_features f WHERE f.tenant_id = s.tenant_id AND f.feature = a.feature AND f.enabled)))
+       ORDER BY s.tenant_id`,
+    );
+    for (const { tenant_id: business } of ending) {
+      await withTenant(business, () => endWithSubscription()).catch((err) => {
+        done.failed += 1;
+        reportError(err, { msg: 'billing.end_lines_failed', tenantId: business });
+      });
+    }
     for (const sub of await liveSubscriptions()) {
       await withTenant(sub.tenant_id, async () => {
         try {
@@ -993,6 +1036,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
           if (!moved) return;
           if (moved.how === 'free') {
             done.freed += 1;
+            await endWithSubscription();
             await syncPlan(tenantId());
             await provider().cancel(moved.s.provider_subscription_id, { atCycleEnd: false }).catch((err) => reportError(err, { msg: 'billing.cancel_failed' }));
           } else {
