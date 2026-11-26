@@ -236,7 +236,8 @@ export async function createWorld({ overrides = {}, plan = 't3' } = {}) {
   let app;
   try {
     app = await startApp({
-      overrides: { shiprocketBaseUrl: ship.url, shiprocketEmail: 'sim@bhava.test', shiprocketPassword: 'sim-shiprocket-password', providerTimeoutMs: 1500, queuePollMs: 20, ...overrides },
+      // The tests read the Postgres jobs table and run the queue themselves, so the queue is Postgres's whatever QUEUE_DRIVER says (CI's production-drivers job: Redis), as R3-PROD-7 and R3-CAT-2 (R3-MONEY-14).
+      overrides: { queueDriver: 'pg', shiprocketBaseUrl: ship.url, shiprocketEmail: 'sim@bhava.test', shiprocketPassword: 'sim-shiprocket-password', providerTimeoutMs: 1500, queuePollMs: 20, ...overrides },
     });
   } catch (err) {
     await ship.close();
