@@ -47,6 +47,8 @@ test('S-07: a shopper signs in with the WhatsApp code from checkout and comes ba
   const phone = `98${String(Date.now()).slice(-8)}`;
   await page.getByLabel(/phone|mobile|whatsapp/i).first().fill(phone);
   await page.getByRole('button', { name: /send|get code|continue/i }).first().click();
+  // The page asks for the code once the send has been answered; reading WhatsApp before that raced the request (R4-MONEY-7).
+  await expect(page.getByLabel(/code|otp/i).first()).toBeVisible();
   const code = await world.codeFor(`+91${phone}`);
   await page.getByLabel(/code|otp/i).first().fill(code);
   await page.getByRole('button', { name: /verify|sign in|continue/i }).first().click();
@@ -69,6 +71,8 @@ test('S-15: tapping "Place order" twice in a row makes one order', async ({ page
   if (await state.count()) await state.selectOption({ label: 'Maharashtra' }).catch(() => {});
   const terms = page.getByRole('checkbox', { name: /terms|agree/i }).first();
   if (await terms.count()) await terms.check();
+  // Checkout has no way to pay chosen until the shopper picks one, and places nothing without it (R4-MONEY-7).
+  await page.getByRole('radio', { name: /upi|card|netbanking/i }).first().check();
   const place = page.getByRole('button', { name: /place order|pay/i }).first();
   await Promise.all([place.click(), place.click({ force: true }).catch(() => {})]);
   await expect.poll(async () => (await shop.orders()).length, { timeout: 10_000 }).toBe(1);
@@ -116,6 +120,8 @@ test('S-84: items hearted while logged out are in the account wishlist after sig
   const phone = `97${String(Date.now()).slice(-8)}`;
   await page.getByLabel(/phone|mobile|whatsapp/i).first().fill(phone);
   await page.getByRole('button', { name: /send|get code|continue/i }).first().click();
+  // The page asks for the code once the send has been answered; reading WhatsApp before that raced the request (R4-MONEY-7).
+  await expect(page.getByLabel(/code|otp/i).first()).toBeVisible();
   await page.getByLabel(/code|otp/i).first().fill(await world.codeFor(`+91${phone}`));
   await page.getByRole('button', { name: /verify|sign in|continue/i }).first().click();
   await expect.poll(async () => (await shop.sql('SELECT count(*)::int AS n FROM wishlist_items WHERE tenant_id = $1', [shop.tenantId]))[0].n, { timeout: 10_000 }).toBe(3);
