@@ -67,10 +67,12 @@ export function landingPagesRepo(db) {
     );
     const byProduct = new Map();
     for (const v of variants) byProduct.set(v.product_id, [...(byProduct.get(v.product_id) ?? []), v]);
-    return rows.map((p) => {
+    const shownRows = rows.map((p) => {
       const shown = displayPrice({ ...p, in_stock: !soldOut(p) }, byProduct.get(p.id) ?? []);
       return { ...p, price_paise: paiseFromDb(p.price_paise), mrp_paise: paiseFromDb(p.mrp_paise), shown };
     });
+    // What a buyer sees: sold-out products move last (PRD 8.8), the rest keep the owner's order. The saved order is untouched.
+    return liveOnly ? [...shownRows.filter((p) => !p.shown.soldOut), ...shownRows.filter((p) => p.shown.soldOut)] : shownRows;
   }
 
   async function categoryIdsOf(t, pageId) {
