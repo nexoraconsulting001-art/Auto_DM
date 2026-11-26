@@ -51,7 +51,7 @@ export function productHref(product, page, { utmEnabled = true, campaign = '' } 
   return `/r/${encodeURIComponent(page.slug)}/p/${encodeURIComponent(product.slug)}`;
 }
 
-function productsBlock({ theme, page, products, links, whatsapp }) {
+function productsBlock({ theme, page, products, links, whatsapp, firstEager = false }) {
   if (!products.length) return '';
   const cards = products.map((product, index) => {
     const href = safeHref(productHref(product, page, links));
@@ -63,7 +63,8 @@ ${href ? html`<a class="btn" href="${href}"${outside ? raw(' rel="noopener"') : 
 ${wa ? html`<a class="btn-wa" href="${wa}" rel="noopener" data-product="${product.id}" aria-label="Order on WhatsApp, ${product.name}">${icon('chat', 18)}Order on WhatsApp</a>` : ''}
 </div>`;
     // Every card photo is lazy and small, so the picture at the top of the page has the connection to itself first (8.12).
-    return productCard({ name: product.name, imageUrl: sized(product.image_url, 'card'), imageAlt: product.name, number: index + 1, price: cardPrice(product), productId: product.id, actions });
+    // When the top of the page is a video (its poster is not an <img>), the first card's photo is the page's first image and loads at once.
+    return productCard({ eager: firstEager && index === 0, name: product.name, imageUrl: sized(product.image_url, 'card'), imageAlt: product.name, number: index + 1, price: cardPrice(product), productId: product.id, actions });
   });
   const word = KIND_WORD[page.kind] ?? 'reel';
   return section({ theme, id: 'products-h', kicker: `${products.length} ${products.length === 1 ? 'product' : 'products'}`, title: `Shop the ${word}`, body: cards });
@@ -106,7 +107,7 @@ export function landingPageView({ page, layout, blocks, pageUrl, preview = null,
 
   const draw = {
     hero: () => html`${hero({ theme, eyebrow: `From the ${word}`, title, highlight, media: { ...media, imageUrl: sized(media.imageUrl, 'hero'), alt: headline, width: 290, height: 380 }, tags })}${page.description ? html`<p class="lede">${page.description}</p>` : ''}`,
-    products: () => productsBlock({ theme, page, products, links: { utmEnabled, campaign }, whatsapp }),
+    products: () => productsBlock({ theme, page, products, links: { utmEnabled, campaign }, whatsapp, firstEager: !(media.imageUrl && !media.videoUrl) }),
     more_reels: () => (pageSettings.more_reels ? moreReelsBlock({ theme, more }) : ''),
     lead_form: () => extraBlocks.lead_form ?? '',
     whatsapp: () => '', // the chat button sits in the footer, below

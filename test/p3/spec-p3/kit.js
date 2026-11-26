@@ -236,7 +236,9 @@ export const gzipSize = (text) => zlib.gzipSync(Buffer.from(text, 'utf8')).lengt
 /** Nothing an outside name, caption or page smuggled in is live HTML: the fixtures' own payloads never appear unescaped. */
 export function assertNoLiveMarkup(html, what) {
   assert.doesNotMatch(html, /<script>\s*(alert|steal)\(/i, `${what}: a script from outside is live in the page`);
-  assert.doesNotMatch(html, /<(img|svg|body|video)\b[^>]*\son\w+\s*=\s*["']?\s*alert/i, `${what}: an event handler from outside is live in the page`);
+  // The words inside a quoted attribute (an aria-label that names the page, escaped) are text, not markup: only an attribute that is itself a handler (on...=) is looked at.
+  const tags = html.replace(/(\s(?!on)[\w:-]+)\s*=\s*("[^"]*"|'[^']*')/gi, '$1=""');
+  assert.doesNotMatch(tags, /<(img|svg|body|video)\b[^>]*\son\w+\s*=\s*["']?\s*alert/i, `${what}: an event handler from outside is live in the page`);
   assert.doesNotMatch(html, /<iframe\b/i, `${what}: an iframe is live in the page`);
   assert.doesNotMatch(html, /(href|src|action)\s*=\s*["']?\s*(javascript|data|vbscript):/i, `${what}: a javascript: or data: link is live in the page`);
 }

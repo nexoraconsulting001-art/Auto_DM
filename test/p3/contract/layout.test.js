@@ -50,7 +50,7 @@ test('K-34, K-52: a buyer page carries the seller\'s brand only, never the platf
   }
   assert.doesNotMatch(String(notFoundPage({ theme: buyerTheme(kits.utsav), business: { name: 'Zari and Co' } })), /bhava/i);
   const sent = {};
-  const res = { locals: {}, set(k, v) { sent[k.toLowerCase()] = v; return this; }, status(s) { sent.status = s; return this; }, type(t) { sent.type = t; return this; }, send(b) { sent.body = b; return this; } };
+  const res = { locals: {}, get(k) { return sent[k.toLowerCase()]; }, set(k, v) { sent[k.toLowerCase()] = v; return this; }, status(s) { sent.status = s; return this; }, type(t) { sent.type = t; return this; }, send(b) { sent.body = b; return this; } };
   sendBuyerPage(res, landing(buyerTheme(kits.utsav)), { page: { kind: 'creator', ref: 'priya' } });
   assert.deepEqual(res.locals.page, { kind: 'creator', ref: 'priya' });
   assert.doesNotMatch(JSON.stringify(sent).replace(sent.body, ''), /bhava/i, 'no header names it either');

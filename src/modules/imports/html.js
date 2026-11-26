@@ -108,7 +108,19 @@ export function scanHtml(html) {
       if (close === -1) break;
       pos = close;
     } else if (name === 'script') {
-      const close = findClose(lower, 'script', pos);
+      let close = findClose(lower, 'script', pos);
+      // A product's text may hold a literal "</script>" (a name or description of markup, K-10). Where the first end tag leaves a
+      // block that is not JSON, the block runs on to a later end tag that makes it JSON (a few tries, never past the size limit).
+      if (/ld\+json/i.test(attrs.type ?? '') && close !== -1 && !parsesAsJson(s.slice(pos, close))) {
+        for (let tries = 0, next = close; tries < 8; tries++) {
+          next = findClose(lower, 'script', next + 1);
+          if (next === -1 || next - pos > HTML_LIMITS.jsonLdBytes) break;
+          if (parsesAsJson(s.slice(pos, next))) {
+            close = next;
+            break;
+          }
+        }
+      }
       const body = s.slice(pos, close === -1 ? s.length : close);
       if (/ld\+json/i.test(attrs.type ?? '') && jsonLd.length < HTML_LIMITS.jsonLdBlocks && body.length <= HTML_LIMITS.jsonLdBytes) jsonLd.push(body);
       if (close === -1) break;
@@ -120,6 +132,16 @@ export function scanHtml(html) {
     }
   }
   return { title, meta, links, jsonLd };
+}
+
+/** True when the text (less the comment and CDATA wrappers some sites add) is JSON. */
+function parsesAsJson(text) {
+  try {
+    JSON.parse(text.trim().replace(/^<!--/, '').replace(/-->$/, '').replace(/^\/\/\s*<!\[CDATA\[/, '').replace(/\/\/\s*\]\]>$/, '').trim());
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** The first content of a meta, or ''. */

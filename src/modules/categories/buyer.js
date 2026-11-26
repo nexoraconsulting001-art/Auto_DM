@@ -19,10 +19,14 @@ export const nowOf = (config) => new Date((config?.pagesNow ?? Date.now)());
  * The address a buyer page is seen at, for its canonical link and og:url: the business's verified domain when it has one,
  * else the address the shopper used. Never the platform's own domain unless the shopper is already on it.
  */
-export function pageBase(req) {
+export function pageBase(req, config) {
   const primary = currentTenant()?.primary_domain ?? null;
   if (primary) return `https://${primary}`;
-  return `${req.protocol}://${req.get('host')}`;
+  // A business's own public address (its name on the platform domain) is https only, so its share tags and canonical address say so
+  // whatever hop the request came over (K-53); any other host, such as a local run, keeps the request's own scheme.
+  const host = req.get('host');
+  const own = currentTenant()?.slug && config?.platformDomain && String(host).toLowerCase().split(':')[0] === `${currentTenant().slug}.${config.platformDomain}`.toLowerCase();
+  return `${own ? 'https' : req.protocol}://${host}`;
 }
 
 /** A path on this host made absolute for a share tag; a web link stays as it is. */

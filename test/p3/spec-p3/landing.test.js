@@ -88,12 +88,14 @@ test('K-30: an archived product drops off the page; hostile names and captions s
 // ---- K-31 ------------------------------------------------------------------------------------------------------------------
 
 const expire = (shop, pageId) => shop.sql(`UPDATE reels SET posted_at = now() - interval '30 hours', expires_at = now() - interval '6 hours' WHERE tenant_id = $1 AND id = $2`, [shop.tenantId, pageId]);
+// The share image the app draws for a page (PRD 8.12) is its own file in media; K-31 counts only what came from the owner or the story.
+const ownFiles = (shop) => shop.sql(`SELECT id FROM media WHERE tenant_id = $1 AND id NOT IN (SELECT media_id FROM share_previews WHERE tenant_id = $1 AND media_id IS NOT NULL)`, [shop.tenantId]);
 
 test('K-31: a story link opened 30 h after posting shows the owner\'s cover image, and no story media was ever stored', async () => {
   const shop = await addP3Shop(world);
   const productImage = await shop.upload('#AA5522');
   const product = await shop.product({ name: 'Story product', images: [productImage] });
-  const mediaBefore = (await shop.mediaRows()).length;
+  const mediaBefore = (await ownFiles(shop)).length;
   const storyId = await shop.story({ caption: 'Today only' });
   const landing = await shop.page({ kind: 'story', mediaId: storyId, productIds: [product.id] });
   assert.equal(landing.kind, 'story');
@@ -101,7 +103,7 @@ test('K-31: a story link opened 30 h after posting shows the owner\'s cover imag
   assert.ok(Math.abs(new Date(landing.expiresAt) - new Date(landing.postedAt) - 24 * HOUR) < HOUR, 'A story lasts 24 hours');
   const cover = await shop.upload('#3355AA', { width: 1080, height: 1920, filename: 'cover.png' });
   await shop.must('PATCH', `/pages/${landing.id}`, { coverUrl: cover });
-  assert.equal((await shop.mediaRows()).length, mediaBefore + 1, 'Only the cover the owner uploaded was stored');
+  assert.equal((await ownFiles(shop)).length, mediaBefore + 1, 'Only the cover the owner uploaded was stored');
   await expire(shop, landing.id);
 
   const page = await html(shop, landing, DM_UTM(storyId));
@@ -111,10 +113,10 @@ test('K-31: a story link opened 30 h after posting shows the owner\'s cover imag
   assert.ok(!page.includes(`media.invalid/${storyId}`), 'The expired story\'s own media is not shown');
   assert.doesNotMatch(hero, /<video/i, 'No story video after it expired');
   assert.ok(textOf(page).includes('Story product'), 'The products still show');
-  assert.equal((await shop.mediaRows()).length, mediaBefore + 1, 'No story media was copied when the page was opened');
+  assert.equal((await ownFiles(shop)).length, mediaBefore + 1, 'No story media was copied when the page was opened');
   const [row] = await shop.sql('SELECT media_url, thumbnail_url, cover_media_id FROM reels WHERE tenant_id = $1 AND id = $2', [shop.tenantId, landing.id]);
   assert.ok(row.cover_media_id, 'The cover is kept as the business\'s own file');
-  const stored = await shop.sql(`SELECT count(*)::int AS n FROM media WHERE tenant_id = $1 AND created_at > now() - interval '1 hour' AND size > 0`, [shop.tenantId]);
+  const stored = await shop.sql(`SELECT count(*)::int AS n FROM media WHERE tenant_id = $1 AND created_at > now() - interval '1 hour' AND size > 0 AND id NOT IN (SELECT media_id FROM share_previews WHERE tenant_id = $1 AND media_id IS NOT NULL)`, [shop.tenantId]);
   assert.ok(stored[0].n <= mediaBefore + 1);
 });
 
@@ -220,7 +222,8 @@ test('K-33: a link-out to another business\'s product is the branded 404, and no
   const mine = await a.product({ name: 'Mine', externalUrl: `https://${a.siteHost}/p/mine` });
   const theirs = await b.product({ name: 'Theirs', externalUrl: `https://${b.siteHost}/p/theirs` });
   const landingA = await a.page({ productIds: [mine.id] });
-  const landingB = await b.page({ productIds: [theirs.id] });
+  // Slugs are per business, so the other business's page must have a slug this business doesn't have, or /r/<slug> is rightly this business's own.
+  const landingB = await b.page({ productIds: [theirs.id], caption: 'Their other reel' });
 
   for (const path of [`/r/${landingA.slug}/p/${theirs.slug}`, `/r/${landingB.slug}`, `/r/${landingB.slug}/p/${theirs.slug}`, `/go/${theirs.id}?r=${landingA.slug}`, `/p/${theirs.slug}`]) {
     const res = await a.open(path);

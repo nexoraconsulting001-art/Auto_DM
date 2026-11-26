@@ -208,7 +208,13 @@ export function categorySequencesRepo(db) {
         const wanted = [...pinned, ...order];
         const known = new Set(current.map((r) => r.page_id));
         if (new Set(wanted).size !== wanted.length) throw refuse('validation_failed', 'A reel is in the list twice.', { order: 'A reel is in the list twice' });
-        if (wanted.length !== known.size || wanted.some((id) => !known.has(id))) {
+        // An id that is none of this business's reels is a bad request (400); a real reel that has joined or left the category since the list was read is a stale list (409).
+        const strangers = wanted.filter((id) => !known.has(id));
+        if (strangers.length) {
+          const own = await t.query('SELECT id FROM reels WHERE tenant_id = $1 AND id = ANY($2::int[])', [t0(), strangers]);
+          if (own.length !== new Set(strangers).size) throw refuse('validation_failed', 'One of those reels isn’t in your account.', { order: 'One of those reels isn’t in your account' });
+        }
+        if (wanted.length !== known.size || strangers.length) {
           throw refuse('conflict', 'This category changed while you were arranging it. Reload it and try again.');
         }
         // The pinned reels' last unpinned places, kept among the new order of the rest.

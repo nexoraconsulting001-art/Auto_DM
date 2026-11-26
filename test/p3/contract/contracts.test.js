@@ -72,15 +72,14 @@ test('the client has every Phase 3 route with its method and path', async () => 
   assert.ok(calls[0].body instanceof FormData);
 });
 
-test('a Phase 3 route not built yet answers 501, and the Phase 0 catalog still answers', async () => {
+test('the Phase 3 routes are built and answer, and the Phase 0 catalog still answers', async () => {
   const app = await startApp();
   try {
     const token = await signIn(app.base);
     const headers = { authorization: `Bearer ${token}` };
     for (const path of ['/pages', '/theme', '/leads', '/creator-page', '/catalog/settings', '/imports']) {
       const res = await fetch(`${app.base}/api/v1${path}`, { headers });
-      assert.equal(res.status, 501, path);
-      assert.equal((await res.json()).code, 'not_implemented', path);
+      assert.equal(res.status, 200, path);
     }
     const created = await fetch(`${app.base}/api/v1/products`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Brass pot', pricePaise: 49900, mrpPaise: 59900 }) });
     assert.equal(created.status, 201);

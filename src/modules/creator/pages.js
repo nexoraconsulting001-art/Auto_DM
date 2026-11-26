@@ -2,11 +2,12 @@ import { platformSiteUrlOf } from '../../config.js';
 import { referralLink } from '../../contracts/billing.js';
 import { BUYER_ROUTES, DEFAULT_BLOCKS, isReservedPath } from '../../contracts/buyer-pages.js';
 import { whatsappDigits } from '../../contracts/catalog.js';
-import { buyerPage, gzipOnEnd, loadBuyerLayout, notFoundPage, safeHref, section, sendBuyerPage, ticker } from '../../views/buyer/index.js';
+import { sealBadge, buyerPage, gzipOnEnd, loadBuyerLayout, notFoundPage, safeHref, section, sendBuyerPage, ticker } from '../../views/buyer/index.js';
 import { html, raw } from '../../views/html.js';
 import { absolute, categoryProducts, chipRow, likeText, nowOf, pageBase, productList, reelTile, searchProducts, searchTerms, tileStyles } from '../categories/buyer.js';
 import { tileImage } from '../categories/repo.js';
 import { leadFormFor } from '../leads/form.js';
+import { createSharePreviews } from '../pages/share.js';
 import { sized } from '../pages/variants.js';
 import { CREATOR_BODY, creatorCss, linkBlock, madeWithBadge, profileHead, searchBox } from './look.js';
 import { CREATOR_SLUG } from './repo.js';
@@ -38,6 +39,7 @@ const tilesUrl = (slug, shelf, offset) => `/${slug}/_tiles?shelf=${encodeURIComp
 
 export function registerCreatorPages(app, ctx) {
   const { db, repos, config } = ctx;
+  const shares = createSharePreviews(ctx);
 
   /** This business's live creator page when the first path segment is its name; null for every other address. */
   async function find(req) {
@@ -70,7 +72,7 @@ ${more ? html`<div class="more-tiles" data-more="${more.url}" data-grid="${id}">
     const digits = page.show_whatsapp && whatsappAllowed ? whatsappDigits(settings.support_whatsapp) : null;
     const placed = blocks ?? DEFAULT_BLOCKS.creator.map((block) => ({ block, settings: {} }));
     const shows = (block) => placed.some((b) => b.block === block);
-    const head = profileHead({ name, bio: page.bio, photo: sized(photo, 'card'), website, whatsapp: digits && shows('whatsapp') ? `https://wa.me/${digits}` : '' });
+    const head = profileHead({ seal: sealBadge(theme), name, bio: page.bio, photo: sized(photo, 'card'), website, whatsapp: digits && shows('whatsapp') ? `https://wa.me/${digits}` : '' });
     const leadForm = shows('lead_form') ? await leadFormFor(ctx, req, { theme, surface: 'creator', pageSlug: page.slug, back: `/${page.slug}` }) : '';
 
     /** The page's sections in the business's block order, with `shelves` as the shelves block. */
@@ -84,7 +86,7 @@ ${more ? html`<div class="more-tiles" data-more="${more.url}" data-grid="${id}">
     }
 
     const footer = badge ? { extra: madeWithBadge(await badgeLink()) } : {};
-    return { theme, business, name, photo, body, footer, base: pageBase(req) };
+    return { theme, business, name, photo, body, footer, base: pageBase(req, config) };
   }
 
   /**
@@ -101,10 +103,12 @@ ${more ? html`<div class="more-tiles" data-more="${more.url}" data-grid="${id}">
     }
   }
 
-  async function preview(target, fallbacks, base) {
-    const drawn = await repos.creatorPages.sharePreview(target);
-    if (drawn) return { url: absolute(base, drawn.url), width: drawn.width, height: drawn.height };
+  /** The share image of the creator page or a shelf (PRD 8.12): drawn at 1200 x 630 from the first picture there is, so its size is known. */
+  async function preview(target, fallbacks, base, { ground, title = '', description = '' }) {
     const url = fallbacks.map((u) => safeHref(u)).find(Boolean);
+    const source = url && /^(\/media\/[0-9a-f-]{36}$|https?:\/\/)/i.test(url) ? url : '';
+    const drawn = await shares.forTarget({ target, source, ground, title, description }).catch(() => null);
+    if (drawn) return { url: absolute(base, drawn.url), width: drawn.width, height: drawn.height };
     return url ? { url: absolute(base, url) } : undefined;
   }
 
@@ -210,7 +214,7 @@ ${sections.length ? sections : section({ theme, id: 'shelf-none-h', kicker: 'Ree
           title: name === business.name ? name : `${name} · ${business.name}`,
           description: page.bio || `Reels and products from ${name}`,
           url: `${base}/${page.slug}`,
-          image: await preview('creator', [view.photo, first ? tileImage(first, now) : ''], base),
+          image: await preview('creator', [view.photo, first ? tileImage(first, now) : ''], base, { ground: theme.colors.ground, title: name, description: page.bio }),
           indexable: !showAllMore,
         },
         main: view.body(shelvesBlock),
@@ -262,7 +266,7 @@ ${more ? html`<script>${raw(TILES_SCRIPT)}</script>` : ''}`;
           title: `${category.name} · ${name}`,
           description: category.description || `${category.name} picks from ${name}`,
           url: `${base}${href}`,
-          image: await preview(`shelf:${category.id}`, [category.image_url, shown[0] ? tileImage(shown[0], now) : '', view.photo], base),
+          image: await preview(`shelf:${category.id}`, [category.image_url, shown[0] ? tileImage(shown[0], now) : '', view.photo], base, { ground: theme.colors.ground, title: category.name, description: category.description }),
           indexable: !all,
         },
         main: view.body(shelfBlock),

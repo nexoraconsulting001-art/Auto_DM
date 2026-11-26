@@ -89,7 +89,8 @@ export function createReader({ fetcher, adapters }) {
           if (found) return { ok: true, readFrom: 'shopify', draft: found.draft, source: 'link', sourceRef: found.sourceRef, finalUrl: url, mrpKnown: true, page: null, home: null };
         } catch (err) {
           if (!(err instanceof SafeFetchError)) throw err;
-          if (err.code === 'blocked') return failure(err);
+          // A site that never answers is not asked again for its page: the owner waits one timeout (8 s), not two (K-09).
+          if (err.code === 'blocked' || err.code === 'timeout') return failure(err);
           // Not a Shopify store, or its JSON is switched off: the page itself is next.
         }
       }

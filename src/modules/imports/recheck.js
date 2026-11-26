@@ -49,7 +49,9 @@ export function createRecheck({ db, repos, platform, config = {} }, reader) {
       return 'skipped';
     }
 
-    const read = await reader.reread(product, { enabledAdapters: enabled });
+    let read = await reader.reread(product, { enabledAdapters: enabled });
+    // A page that now gives no product data (nothing but a title, or nothing) is junk, not the product: nothing changes and it is tried again at the usual interval (K-24).
+    if (read.ok && (!read.draft || read.readFrom === 'title')) read = { ok: false, reason: 'wrong_type', status: null, gone: false, retryable: false };
     if (read.skipped) {
       await catalog.markFetched(product.id, { ...keep, nextCheckAt: next });
       await catalog.recordCheck({ productId: product.id, outcome: 'skipped' });

@@ -100,12 +100,16 @@ export function catalogRepo(db) {
     await q.query('DELETE FROM product_categories WHERE tenant_id = $1 AND product_id = $2', [tid, productId]);
     const ids = [...new Set(categoryIds.map(rowId).filter(Boolean))];
     if (!ids.length) return;
-    // Only this business's categories are linked: an id from elsewhere finds nothing here.
-    await q.query(
+    // Only this business's categories are linked: an id from elsewhere finds nothing here, and the save is refused (K-01).
+    const linked = await q.query(
       `INSERT INTO product_categories (tenant_id, product_id, category_id)
-       SELECT $1, $2, c.id FROM categories c WHERE c.tenant_id = $1 AND c.id = ANY($3::int[]) ON CONFLICT DO NOTHING`,
+       SELECT $1, $2, c.id FROM categories c WHERE c.tenant_id = $1 AND c.id = ANY($3::int[]) ON CONFLICT DO NOTHING RETURNING category_id`,
       [tid, productId, ids],
     );
+    if (linked.length !== ids.length) {
+      const message = 'One of the picked categories no longer exists';
+      throw Object.assign(new ValidationError(message), { fields: { categoryIds: message } });
+    }
   }
 
   /**
@@ -329,6 +333,7 @@ export function catalogRepo(db) {
       };
       state.tags = cleanTags(state.tags);
       validate(state);
+      if (state.mrp_paise === state.price_paise) state.mrp_paise = null; // an MRP equal to the price is no MRP (K-02)
       for (let attempt = 0; ; attempt++) {
         try {
           return await db.tx(async (t) => {
@@ -362,6 +367,11 @@ export function catalogRepo(db) {
         const next = { ...changes };
         if ('tags' in next) next.tags = cleanTags(next.tags);
         validate(next, current);
+        // An MRP equal to the price is no MRP (K-02), whichever of the two the change touched.
+        if ('price_paise' in next || 'mrp_paise' in next) {
+          const after = { ...current, ...next };
+          if (after.mrp_paise !== null && after.mrp_paise === after.price_paise) next.mrp_paise = null;
+        }
         if ('images' in next) await requireOwnMedia(t, 'images', next.images);
         if ('name' in next && next.name !== current.name) next.slug = await uniqueSlug(t, next.name, productId);
         await writeColumns(t, productId, next);

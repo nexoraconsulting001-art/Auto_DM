@@ -279,9 +279,9 @@ test('K-53: a facebookexternalhit fetch of the creator page gets every Open Grap
 
 // ---- K-60 ------------------------------------------------------------------------------------------------------------------
 
-async function searchable(shop, { product = 'Steel Bottle', tags = ['insulated'], caption = 'Keeps chai hot all day' } = {}) {
+async function searchable(shop, { product = 'Steel Bottle', tags = ['insulated'], caption = 'Keeps chai hot all day', headline = 'My daily carry' } = {}) {
   const item = await shop.product({ name: product, tags, pricePaise: 34900, externalUrl: `https://${shop.siteHost}/p/${unique()}` });
-  const reel = await shop.page({ productIds: [item.id], headline: 'My daily carry', caption });
+  const reel = await shop.page({ productIds: [item.id], headline, caption });
   return { item, reel };
 }
 
@@ -291,7 +291,8 @@ test('K-60: searching "steel bottle" on the creator page shows the matching prod
   const mine = await searchable(shop);
   const second = await shop.page({ productIds: [mine.item.id], headline: 'Another reel with the bottle' });
   const unrelated = await searchable(shop, { product: 'Cotton Towel', tags: ['bath'], caption: 'Soft and quick to dry' });
-  const theirs = await searchable(other, { product: 'Steel Bottle Deluxe' });
+  // A reel's address comes from its headline and is per business, so the other business's reel needs its own headline or its address is rightly ours too.
+  const theirs = await searchable(other, { product: 'Steel Bottle Deluxe', headline: 'Their steel bottle day' });
   const creator = await creatorPage(shop);
   await creatorPage(other, { slug: creator.slug });
 

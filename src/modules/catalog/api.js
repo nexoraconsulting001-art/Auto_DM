@@ -244,8 +244,10 @@ export function catalogHandlers(ctx) {
       const product = await catalog().get(params.id);
       if (!product) return null;
       if (product.source === 'manual' || !product.external_url) throw new ApiError('conflict', 'This product was added by hand, so there is no page to re-check.');
-      const slot = Math.floor(Date.now() / 60_000);
-      const id = await ctx.platform.queue.enqueue(RECHECK_ONE, { productId: product.id }, { tenantId: tenantId(), dedupeKey: `recheck:${tenantId()}:${product.id}:${slot}`, maxAttempts: 2, retryInFlight: true });
+      // Asking again while a check is still waiting queues nothing new. Once a check has run it has left a record, so the key moves on and the next ask is a new check
+      // (a key that only counted minutes dropped a second ask made soon after a finished check, so the owner's fix was never read).
+      const lastCheck = product.last_check?.checked_at ? new Date(product.last_check.checked_at).getTime() : 'none';
+      const id = await ctx.platform.queue.enqueue(RECHECK_ONE, { productId: product.id }, { tenantId: tenantId(), dedupeKey: `recheck:${tenantId()}:${product.id}:${lastCheck}`, maxAttempts: 2, retryInFlight: true });
       return { queued: id !== null };
     },
 

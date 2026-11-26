@@ -50,7 +50,7 @@ import { NEVER_A_SERVICE, SERVICES } from '../services.js';
  *   params    zod schema for the path. Not matching it is a 404
  *   query     zod schema for the query string
  *   body      zod schema for a JSON body
- *   upload    { field, maxBytes, mimeTypes } for a multipart file, instead of body
+ *   upload    { field, maxBytes, mimeTypes, tooLarge? } for a multipart file, instead of body; tooLarge is the words for a file over maxBytes
  *   status    the success status, 200 unless given
  *   response  zod schema for the result, or null for no body. Results are parsed through it, so unknown
  *             fields never leave the server
