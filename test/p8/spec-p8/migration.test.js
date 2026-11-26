@@ -63,7 +63,7 @@ test('F-68: a dry run lists every conflict as ids and codes, blocks, and still w
   const { app, a, b, importer } = await twoShops(t);
   const source = legacyExport({ products: 4, orders: 3 });
   const mine = bindTenant(app.platform, a.tenant);
-  await mine.products.create({ name: 'Already here', slug: 'old-product-2', price: '100', active: 'on' });
+  await mine.products.create({ name: 'Old product 2', price: '100', active: 'on' }); // the repo makes the slug from the name: old-product-2
   const before = await snap(app, a.id);
   const report = await importer.plan(source, { tenantId: a.id });
   assert.equal(report.blocked, true);
@@ -91,12 +91,13 @@ test('F-68: a table the importer does not know is a blocking conflict, never dro
 
 const WRITES = /INSERT\s+INTO\s+"?(products|orders|order_items|categories|activity|visits|reels)"?\b/i;
 
-async function failAt(t, which, source) {
+// `shape` makes the measuring export: an export of its own (its order tokens and media ids are its own, which are unique across businesses), or the failing run would find them taken and write nothing.
+async function failAt(t, which, source, shape) {
   const app = await sharedWorld();
   const counting = { at: 0, seen: 0 };
   const measureShop = await emptyBusiness(app, u('measure'));
   const measured = await (await import('../../../src/modules/migration/index.js')).createMigration({ db: faultyDb(app.db, WRITES, counting), platform: importerPlatform(app), repos: app.platform, config: app.config });
-  const ok = await measured.run(source, { tenantId: measureShop.id });
+  const ok = await measured.run(legacyExport(shape), { tenantId: measureShop.id });
   assert.equal(ok.blocked, false, 'the measuring run goes through');
   const writes = counting.seen;
   assert.ok(writes >= 3, `the import makes at least three writes of its own to count (saw ${writes})`);
@@ -113,8 +114,9 @@ async function failAt(t, which, source) {
 
 for (const which of ['first', 'middle', 'last']) {
   test(`F-69: a failure at the ${which} write rolls everything back and leaves the business exactly as it was`, async (t) => {
-    const source = legacyExport({ products: 40, categories: 4, orders: 15, itemsPerOrder: 2, activity: 20, reels: 3 });
-    const { app, target, before } = await failAt(t, which, source);
+    const shape = { products: 40, categories: 4, orders: 15, itemsPerOrder: 2, activity: 20, reels: 3 };
+    const source = legacyExport(shape);
+    const { app, target, before } = await failAt(t, which, source, shape);
     unchanged(before, await snap(app, target.id));
     for (const table of IMPORTED_TABLES) assert.equal(await countOf(app, target.id, table), 0, `${table} is empty`);
     assert.equal((await sql(app, 'SELECT count(*)::int AS n FROM migration_id_map WHERE tenant_id = $1', [target.id]))[0].n, 0, 'no id was mapped');
@@ -237,14 +239,14 @@ test('F-69: source ids that equal another business\'s ids overwrite nothing of t
   for (let i = 1; i <= 6; i++) await theirs.products.create({ name: `Neighbour product ${i}`, slug: `neighbour-${i}`, price: '100', active: 'on' });
   await theirs.categories?.create?.({ name: 'Neighbour category', slug: 'neighbour-cat' }).catch?.(() => {});
   const mine = await snap(app, b.tenant.id);
+  // The world is shared with this file's other tests, whose businesses already hold rows: what counts is that this import adds none to them.
+  const strays = async () => Object.fromEntries(await Promise.all(IMPORTED_TABLES.map(async (table) => [table, (await sql(app, `SELECT count(*)::int AS n FROM "${table}" WHERE tenant_id NOT IN ($1, $2)`, [a.id, b.tenant.id]))[0].n])));
+  const strayBefore = await strays();
   const source = legacyExport({ products: 6, orders: 4, categories: 3 });
   const report = await importer.run(source, { tenantId: a.id });
   assert.equal(report.blocked, false);
   unchanged(mine, await snap(app, b.tenant.id));
-  for (const table of IMPORTED_TABLES) {
-    const stray = await sql(app, `SELECT count(*)::int AS n FROM "${table}" WHERE tenant_id NOT IN ($1, $2)`, [a.id, b.tenant.id]);
-    assert.equal(stray[0].n, 0, `${table}: no row for a third business`);
-  }
+  assert.deepEqual(await strays(), strayBefore, 'no row was added for a third business');
   const names = await sql(app, `SELECT name FROM products WHERE tenant_id = $1 AND name LIKE 'Neighbour%'`, [a.id]);
   assert.deepEqual(names, [], 'nothing of the neighbour was copied');
   const crossed = await sql(app, `SELECT count(*)::int AS n FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE oi.tenant_id <> o.tenant_id`);
@@ -405,10 +407,12 @@ async function reelWorld(t) {
   const igId = `9000${String(Math.floor(Math.random() * 1e11)).padStart(11, '0')}`;
   await app.platform.tenants.linkIgAccount(holder.tenant.id, igId, `demo_holder_${igId.slice(-4)}`);
   const holderRepos = bindTenant(app.platform, holder.tenant);
-  await holderRepos.reels.save(`9000${String(Math.floor(Math.random() * 1e11)).padStart(11, '0')}`, { headline: 'Theirs', keywords: 'LINK', productIds: [], active: 'on' });
+  // A reel needs at least one product (reels repo), so the holder has one.
+  const heldProduct = await holderRepos.products.create({ name: 'Holder pot', price: '100', active: 'on' });
+  await holderRepos.reels.save(`9000${String(Math.floor(Math.random() * 1e11)).padStart(11, '0')}`, { headline: 'Theirs', keywords: 'LINK', productIds: [heldProduct.id ?? heldProduct], active: 'on' });
   const incoming = await emptyBusiness(app, u('incoming-reels'));
-  const source = legacyExport({ products: 4, reels: 3, orders: 2, igUserId: igId });
-  return { app, importer, holder, incoming, source };
+  const again = () => legacyExport({ products: 4, reels: 3, orders: 2, igUserId: igId });
+  return { app, importer, holder, incoming, source: again(), again };
 }
 
 test('F-73: reels of the old shop posted on another business\'s Instagram account block the import until the operator chooses', async (t) => {
@@ -428,7 +432,7 @@ test('F-73: reels of the old shop posted on another business\'s Instagram accoun
 });
 
 test('F-73: choosing drop imports everything but those reels; choosing reassign brings them in under the new business', async (t) => {
-  const { app, importer, holder, incoming, source } = await reelWorld(t);
+  const { app, importer, holder, incoming, source, again } = await reelWorld(t);
   const holderBefore = await snap(app, holder.tenant.id);
   const dropped = await importer.run(source, { tenantId: incoming.id, reels: 'drop' });
   assert.equal(dropped.blocked, false, JSON.stringify(dropped.conflicts));
@@ -440,7 +444,7 @@ test('F-73: choosing drop imports everything but those reels; choosing reassign 
   unchanged(holderBefore, await snap(app, holder.tenant.id));
 
   const second = await emptyBusiness(app, u('incoming-reassign'));
-  const reassigned = await importer.run(altered(source, () => {}), { tenantId: second.id, reels: 'reassign' });
+  const reassigned = await importer.run(again(), { tenantId: second.id, reels: 'reassign' }); // an export of its own: the first one's order tokens are taken now
   assert.equal(reassigned.blocked, false, JSON.stringify(reassigned.conflicts));
   assert.equal(await countOf(app, second.id, 'reels'), 3);
   const owned = await sql(app, `SELECT count(*)::int AS n FROM reels WHERE tenant_id = $1`, [second.id]);
