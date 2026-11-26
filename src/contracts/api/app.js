@@ -24,6 +24,16 @@ export const AppRequirements = z.object({
   storeUrl: z.string(),
   /** Which buttons the sign-in screen shows. There is never a password field or an SMS option (P-11). */
   signIn: z.object({ whatsapp: z.boolean(), google: z.boolean(), apple: z.boolean() }),
+  /**
+   * What a sign-in page in a browser on the address this was asked from can offer, so it never asks a route that may not
+   * be there (each such miss is a 404 the browser reports as an error):
+   *   signInHost     this is the sign-in host (PLATFORM_APP_HOST), the only address where Google's browser sign-in
+   *                  (AUTH_PATHS.googleStart) exists, and where no password could name a business.
+   *   passwordLogin  the phone-and-password route exists (PASSWORD_LOGIN: tests and local runs only; production refuses
+   *                  to start with it). It says nothing about any account, and the route answers the same either way.
+   * The apps ignore it: they start Google through their own redirect, and never show a password field.
+   */
+  web: z.object({ signInHost: z.boolean(), passwordLogin: z.boolean() }),
 });
 
 export const appRoutes = {

@@ -168,14 +168,15 @@ describe('Devices', () => {
 
 describe('Sign-in: what the page offers', () => {
   test('P-11: WhatsApp unless the server says no; Google only where it starts; a password only off the sign-in host; never SMS', () => {
-    const requirements = { signIn: { whatsapp: true, google: true, apple: false } };
-    assert.deepEqual(waysIn({ passwordRoute: false, requirements, signInHost: true }), { whatsapp: true, google: true, password: false, signInHost: true });
-    assert.deepEqual(waysIn({ passwordRoute: true, requirements, signInHost: true }), { whatsapp: true, google: true, password: false, signInHost: true }, 'a password could never name a business on the sign-in host');
-    assert.deepEqual(waysIn({ passwordRoute: true, requirements, signInHost: false }), { whatsapp: true, google: false, password: true, signInHost: false });
-    assert.deepEqual(waysIn({ passwordRoute: false, requirements: null, signInHost: false }), { whatsapp: true, google: false, password: false, signInHost: false }, 'nothing learned: the code is still the way in');
-    assert.equal(waysIn({ requirements: { signIn: { whatsapp: false, google: false } } }).whatsapp, false);
+    const said = (passwordLogin, signInHost, signIn = { whatsapp: true, google: true, apple: false }) => ({ signIn, web: { signInHost, passwordLogin } });
+    assert.deepEqual(waysIn(said(false, true)), { whatsapp: true, google: true, password: false, signInHost: true });
+    assert.deepEqual(waysIn(said(true, true)), { whatsapp: true, google: true, password: false, signInHost: true }, 'a password could never name a business on the sign-in host');
+    assert.deepEqual(waysIn(said(true, false)), { whatsapp: true, google: false, password: true, signInHost: false });
+    assert.deepEqual(waysIn(null), { whatsapp: true, google: false, password: false, signInHost: false }, 'nothing learned: the code is still the way in');
+    assert.deepEqual(waysIn({ signIn: { whatsapp: true, google: true, apple: false } }), { whatsapp: true, google: false, password: false, signInHost: false }, 'a server that does not say where it is offers no Google and no password');
+    assert.equal(waysIn({ signIn: { whatsapp: false, google: false } }).whatsapp, false);
     fc.assert(fc.property(fc.boolean(), fc.boolean(), fc.boolean(), fc.boolean(), (password, signInHost, google, whatsapp) => {
-      const ways = waysIn({ passwordRoute: password, requirements: { signIn: { whatsapp, google } }, signInHost });
+      const ways = waysIn(said(password, signInHost, { whatsapp, google }));
       return Object.keys(ways).every((key) => ['whatsapp', 'google', 'password', 'signInHost'].includes(key)) && !(ways.password && ways.signInHost) && !(ways.google && !signInHost);
     }));
   });
