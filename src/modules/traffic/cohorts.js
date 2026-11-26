@@ -15,7 +15,7 @@ export function createCohorts(ctx, rollupService) {
     const unit = groupBy === 'first_month' ? 'month' : 'week';
     const baseOf = `date_trunc('${unit}', first_local)`;
     const key = groupBy === 'first_source' ? 'first_source' : groupBy === 'first_month' ? `to_char(first_local, 'YYYY-MM')` : `to_char(${baseOf}, 'YYYY-MM-DD')`;
-    const when = `date_trunc('${unit}', e.at AT TIME ZONE $4)`;
+    const when = `date_trunc('${unit}', e.started_at AT TIME ZONE $4)`;
     const offset = unit === 'month'
       ? `((extract(year FROM ${when})::int * 12 + extract(month FROM ${when})::int) - (extract(year FROM c.base)::int * 12 + extract(month FROM c.base)::int))`
       : `floor(extract(epoch FROM (${when} - c.base)) / 604800)::int`;
@@ -23,7 +23,7 @@ export function createCohorts(ctx, rollupService) {
       `WITH v AS (SELECT visitor_id, first_seen_at AT TIME ZONE $4 AS first_local, first_source FROM traffic_visitors WHERE tenant_id = $1 AND first_seen_at >= $2::timestamptz AND first_seen_at < $3::timestamptz),
             c AS (SELECT visitor_id, ${key} AS key, ${baseOf} AS base FROM v),
             sizes AS (SELECT key, count(*)::int AS size FROM c GROUP BY key),
-            a AS (SELECT DISTINCT c.key, c.visitor_id, ${offset} AS period FROM c JOIN traffic_events e ON e.tenant_id = $1 AND e.visitor_id = c.visitor_id AND e.at >= $2::timestamptz)
+            a AS (SELECT DISTINCT c.key, c.visitor_id, ${offset} AS period FROM c JOIN traffic_sessions e ON e.tenant_id = $1 AND e.visitor_id = c.visitor_id AND e.started_at >= $2::timestamptz)
        SELECT s.key, s.size, a.period, count(a.visitor_id)::int AS n FROM sizes s LEFT JOIN a ON a.key = s.key AND a.period > 0 GROUP BY s.key, s.size, a.period ORDER BY s.key, a.period`,
       [tenantId(), bounds.from, bounds.to, timeZone],
     );

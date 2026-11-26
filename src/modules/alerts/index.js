@@ -1,4 +1,5 @@
 import { tenantId } from '../../tenancy.js';
+import { ApiError } from '../../contracts/api/index.js';
 
 const toAlert = (row) => ({ id: Number(row.id), kind: row.kind, severity: row.severity, message: row.message, target: row.target, createdAt: row.created_at, readAt: row.read_at });
 
@@ -27,7 +28,8 @@ export function alertsRepo(db) {
     },
 
     async markRead(id) {
-      await db.query(`UPDATE alerts SET read_at = COALESCE(read_at, now()) WHERE tenant_id = $1 AND audience = 'owner' AND id = $2`, [tenantId(), id]);
+      const rows = await db.query(`UPDATE alerts SET read_at = COALESCE(read_at, now()) WHERE tenant_id = $1 AND audience = 'owner' AND id = $2 RETURNING id`, [tenantId(), id]);
+      return rows.length > 0;
     },
   };
 }
@@ -38,7 +40,8 @@ export const alerts = {
   api: ({ repos }) => ({
     'alerts.list': ({ query }) => repos.alerts.list(query),
     'alerts.markRead': async ({ params }) => {
-      await repos.alerts.markRead(params.id);
+      // Another business's alert, or none, is not found (the same answer for both, so ids reveal nothing).
+      if (!(await repos.alerts.markRead(params.id))) throw new ApiError('not_found');
     },
   }),
 };

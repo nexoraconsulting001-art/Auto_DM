@@ -362,6 +362,11 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
         if (back.length) await t.exec(`UPDATE "${table}" SET ${back.join(', ')}`);
         if (INSERT_ONLY.has(table)) await t.exec(`ALTER TABLE "${table}" ENABLE TRIGGER USER`);
       }
+      // A session's dimensions are kept as JSON on its first event (src/modules/traffic/sessions.js), where the column shift above can't reach
+      // them. They hold the times a later hit is compared with (30 minutes idle, same day), so they move with the rest.
+      const shifted = ['started_at', 'last_hit_at'].reduce((expr, key) => `CASE WHEN outbound_host::jsonb ? '${key}' THEN jsonb_set(${expr}, '{${key}}', to_jsonb(to_char(((outbound_host::jsonb ->> '${key}')::timestamptz - interval '${interval}') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')), false) ELSE ${expr} END`, 'outbound_host::jsonb');
+      const withDay = days ? `CASE WHEN outbound_host::jsonb ? 'day' THEN jsonb_set(${shifted}, '{day}', to_jsonb(to_char((outbound_host::jsonb ->> 'day')::date - ${days}, 'YYYY-MM-DD')), false) ELSE ${shifted} END` : shifted;
+      await t.exec(`UPDATE traffic_events SET outbound_host = (${withDay})::text WHERE outbound_host LIKE '{%'`);
     });
     if (sim) await meta.post('/clock', { advanceMs: ms });
   }
