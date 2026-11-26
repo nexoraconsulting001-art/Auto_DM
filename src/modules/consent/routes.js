@@ -9,7 +9,6 @@ import { visitorIdFrom } from '../../platform/visitor.js';
 import { tenantId, withTenant } from '../../tenancy.js';
 import { loadBuyerLayout, sendBuyerPage } from '../../views/buyer/index.js';
 import { readToken, signToken } from '../shoppers/keys.js';
-import { clearSessionCookie } from '../shoppers/session.js';
 import { isBuyerPage } from '../traffic/page-kinds.js';
 import { bannerHtml, policyPage, unsubscribePage } from './views.js';
 
@@ -18,7 +17,8 @@ import { bannerHtml, policyPage, unsubscribePage } from './views.js';
  * page, data requests from the account, and the cookie banner on every buyer page of a business that has a tag on.
  */
 const SOURCES = new Set(['sign_in', 'account', 'banner', 'checkout']);
-const DataRequestBody = z.strictObject({ kind: z.enum(['access', 'erasure']), confirm: z.boolean().optional() });
+// D2 decision: a buyer has no self-serve "delete my data" (the seller's side, dataRequests.create, still erases). Only access is here.
+const DataRequestBody = z.strictObject({ kind: z.enum(['access']) });
 const UNSUBSCRIBE_DAYS = 400;
 
 const fail = (res, status, code, error, extra = {}) => res.status(status).json({ error, code, ...extra });
@@ -176,19 +176,10 @@ export function consentRoutes(ctx, { store, requests, privacy }) {
     if (!req.shopper) return fail(res, 401, 'unauthorized', 'Please sign in again.');
     const parsed = DataRequestBody.safeParse(req.body);
     if (!parsed.success) return fail(res, 400, 'validation_failed', 'Choose what you would like to do.');
-    if (parsed.data.kind === 'erasure' && parsed.data.confirm !== true) return fail(res, 400, 'validation_failed', 'Please confirm that you want your data deleted.');
     res.set('Cache-Control', 'no-store');
-    const made = await requests.create({ shopperId: req.shopper.id, kind: parsed.data.kind, source: 'account', actor: `shopper:${req.shopper.id}` });
+    const made = await requests.create({ shopperId: req.shopper.id, kind: 'access', source: 'account', actor: `shopper:${req.shopper.id}` });
     if (!made) return fail(res, 404, 'not_found', 'We couldn’t find your account.');
-    if (parsed.data.kind === 'access') return res.status(201).json({ request: made.request, data: made.data });
-    const done = made.request.status === 'completed';
-    if (done) clearSessionCookie(res);
-    return res.status(201).json({
-      request: made.request,
-      signedOut: done,
-      message: done ? 'Your account and personal details were deleted. Tax records of your orders are kept with your details removed.'
-        : 'We’ll delete your details as soon as your open orders are complete. Until then, they are only used for those orders.',
-    });
+    return res.status(201).json({ request: made.request, data: made.data });
   }));
 
   return r;

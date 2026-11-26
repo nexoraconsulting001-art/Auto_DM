@@ -25,13 +25,20 @@ async function invoiceFor(db, order) {
   return inv;
 }
 
+/** The seller's own console API for the default business. D2 decision: erasure is the seller's path; a buyer has no self-serve delete. */
+async function sellerApi(w) {
+  const login = await fetch(`${w.app.base}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(OWNER) });
+  const token = (await login.json()).token;
+  return (method, path, json) => fetch(`${w.app.base}/api/v1${path}`, { method, headers: { authorization: `Bearer ${token}`, ...(json ? { 'content-type': 'application/json' } : {}) }, body: json ? JSON.stringify(json) : undefined });
+}
+
 async function signedIn(w, b = browser(w.app)) {
   const { csrf } = await signInWithCode(w, b, PHONE);
   const call = (method, path, json) => b.request(path, { method, json, headers: { 'x-shopper-csrf': csrf } });
   return { b, call };
 }
 
-test('S-63: a shopper’s deletion request erases their personal data and keeps the tax records, masked', async () => {
+test('S-63: the seller’s erasure of a shopper erases their personal data and keeps the tax records, masked', async () => {
   const w = await world({ google: false });
   try {
     const { b, call } = await signedIn(w);
@@ -53,17 +60,20 @@ test('S-63: a shopper’s deletion request erases their personal data and keeps 
     // Someone else's order with another number stays as it is.
     const other = await placeOrder(w.app.db, w.app.tenant.id, { number: 'A-5003', phone: '+919811111111', name: 'Ravi' });
 
-    assert.equal((await call('POST', '/api/store/data-requests', { kind: 'erasure' })).status, 400, 'deleting needs a confirmation');
-    const res = await call('POST', '/api/store/data-requests', { kind: 'erasure', confirm: true });
+    // D2 decision: a buyer has no self-serve delete, with or without a confirmation; the seller's path erases.
+    assert.equal((await call('POST', '/api/store/data-requests', { kind: 'erasure' })).status, 400, 'a buyer cannot ask for deletion');
+    assert.equal((await call('POST', '/api/store/data-requests', { kind: 'erasure', confirm: true })).status, 400, 'a buyer cannot ask for deletion, confirmed or not');
+    assert.equal((await w.app.db.platform.query('SELECT id FROM shoppers')).length, 1, 'the refusals erased nothing');
+    assert.doesNotMatch(await (await b.request('/account')).text(), /data-erase|Delete my data/, 'the account page has no delete button');
+    const seller = await sellerApi(w);
+    const res = await seller('POST', '/data-requests', { shopperId: shopper.id, kind: 'erasure' });
     assert.equal(res.status, 201);
-    const body = await res.json();
-    assert.equal(body.request.status, 'completed');
-    assert.equal(body.signedOut, true);
-    assert.equal(b.cookies().get('_sid'), undefined, 'signed out on this browser');
-    assert.equal(body.request.summary.ordersMasked, 2);
-    assert.equal(body.request.summary.invoicesMasked, 1);
-    assert.equal(body.request.summary.returnProofs, 1);
-    assert.ok(Object.values(body.request.summary).every((v) => Number.isInteger(v)), 'the record holds counts only');
+    const request0 = await res.json();
+    assert.equal(request0.status, 'completed');
+    assert.equal(request0.summary.ordersMasked, 2);
+    assert.equal(request0.summary.invoicesMasked, 1);
+    assert.equal(request0.summary.returnProofs, 1);
+    assert.ok(Object.values(request0.summary).every((v) => Number.isInteger(v)), 'the record holds counts only');
 
     assert.deepEqual(await w.app.db.platform.query('SELECT id FROM shoppers'), [], 'the account is gone');
     for (const table of ['shopper_addresses', 'shopper_sessions', 'shopper_otps']) {
@@ -94,7 +104,7 @@ test('S-63: a shopper’s deletion request erases their personal data and keeps 
     assert.deepEqual(await w.app.db.platform.query('SELECT reason FROM returns'), [{ reason: '' }]);
 
     const [request] = await w.app.db.platform.query('SELECT kind, status, source, shopper_id, completed_at FROM data_requests');
-    assert.deepEqual([request.kind, request.status, request.source, request.shopper_id], ['erasure', 'completed', 'account', null]);
+    assert.deepEqual([request.kind, request.status, request.source, request.shopper_id], ['erasure', 'completed', 'seller', null]);
     assert.ok(request.completed_at);
     const audit = await w.app.db.platform.query(`SELECT action, details FROM audit_log WHERE action LIKE 'shopper.eras%' ORDER BY id`);
     assert.deepEqual(audit.map((a) => a.action), ['shopper.erasure_requested', 'shopper.erased']);
@@ -112,16 +122,15 @@ test('S-63: a shopper’s deletion request erases their personal data and keeps 
 test('an erasure waits while an order is on its way, and the worker finishes it once the order is done', async () => {
   const w = await world({ google: false });
   try {
-    const { call } = await signedIn(w);
+    await signedIn(w);
     const [shopper] = await w.app.db.platform.query('SELECT id FROM shoppers');
     const order = await placeOrder(w.app.db, w.app.tenant.id, { shopperId: shopper.id, number: 'A-6001' });
     await w.app.db.platform.query(`UPDATE orders SET payment_status = 'paid', fulfilment_status = 'new' WHERE id = $1`, [order.id]);
-    const res = await call('POST', '/api/store/data-requests', { kind: 'erasure', confirm: true });
-    const body = await res.json();
-    assert.equal(body.request.status, 'requested');
-    assert.equal(body.signedOut, false);
-    assert.equal(body.request.summary.waitingOnOrders, 1);
-    assert.match(body.message, /as soon as your open orders are complete/);
+    const res = await (await sellerApi(w))('POST', '/data-requests', { shopperId: shopper.id, kind: 'erasure' });
+    assert.equal(res.status, 201);
+    const request0 = await res.json();
+    assert.equal(request0.status, 'requested');
+    assert.equal(request0.summary.waitingOnOrders, 1);
     assert.equal((await w.app.db.platform.query(`SELECT customer_name FROM orders`))[0].customer_name, 'Asha K', 'the parcel still has its address');
 
     await w.app.db.platform.query(`UPDATE orders SET fulfilment_status = 'shipped' WHERE id = $1`, [order.id]);
@@ -160,7 +169,7 @@ test('a shopper downloads what the store holds about them, and a request at one 
     assert.ok(data.consent.some((c) => c.purpose === 'fulfilment'));
     assert.doesNotMatch(JSON.stringify(data), /B-1|Leaf and Clay/);
 
-    assert.equal((await (await call('POST', '/api/store/data-requests', { kind: 'erasure', confirm: true })).json()).request.status, 'completed');
+    assert.equal((await (await (await sellerApi(w))('POST', '/data-requests', { shopperId: aShopper.id, kind: 'erasure' })).json()).status, 'completed');
     assert.deepEqual((await w.app.db.platform.query('SELECT tenant_id FROM shoppers')).map((s) => s.tenant_id), [leaf.tenant.id], 'the other store’s account stays');
     assert.equal((await w.app.db.platform.query(`SELECT customer_name FROM orders WHERE order_number = 'B-1'`))[0].customer_name, 'Asha K');
     assert.equal((await atB.request('/account')).status, 200, 'still signed in at the other store');

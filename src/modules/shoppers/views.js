@@ -199,7 +199,6 @@ call(id?'PUT':'POST','/api/store/addresses'+(id?'/'+id:''),body).then(function(r
 el('consent-form').addEventListener('submit',function(e){e.preventDefault();var c=function(id){return el(id).checked;};
 call('POST','/api/store/consent?source=account',{choices:{noticeVersion:Number(el('consent-form').dataset.notice),orderUpdates:{whatsapp:c('c-ou-wa'),email:c('c-ou-em')},marketing:{whatsapp:c('c-mk-wa'),email:c('c-mk-em')}}}).then(function(r){el('consent-done').hidden=!r.ok;el('consent-done').textContent=r.ok?'Saved.':(r.body.error||'Not saved.');el('consent-done').hidden=false;});});
 el('data-access').addEventListener('click',function(){call('POST','/api/store/data-requests',{kind:'access'}).then(function(r){if(!r.ok)return alert(r.body.error||'Please try again.');var blob=new Blob([JSON.stringify(r.body.data,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='my-data.json';document.body.appendChild(a);a.click();a.remove();});});
-el('data-erase').addEventListener('click',function(){if(!confirm('Delete your account and personal details at '+store+'? Tax records of your orders are kept with your details removed. This can’t be undone.'))return;call('POST','/api/store/data-requests',{kind:'erasure',confirm:true}).then(function(r){if(!r.ok)return alert(r.body.error||'Please try again.');alert(r.body.message);if(r.body.signedOut)location.href='/';});});
 })();</script>`);
   return page(layout, {
     title: 'My account',
@@ -228,7 +227,7 @@ ${shared.available ? html`<div class="panel"><h2>Saved details for other stores<
 <a class="btn-quiet" href="/account/shared-profile">${shared.on ? 'Manage or turn off' : 'Find out more'}</a></div>` : ''}
 <div class="panel"><h2>Your data</h2>
 <p class="muted">Download what ${store} holds about you, or ask for it to be deleted.</p>
-<div class="row"><button class="btn-quiet" type="button" id="data-access">Download my data</button><button class="btn-quiet" type="button" id="data-erase">Delete my data</button></div></div>
+<div class="row"><button class="btn-quiet" type="button" id="data-access">Download my data</button></div></div>
 </section>${script}`,
   });
 }
