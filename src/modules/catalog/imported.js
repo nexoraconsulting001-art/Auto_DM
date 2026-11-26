@@ -1,3 +1,4 @@
+import { canonicalProductUrl } from '../../contracts/catalog.js';
 import { ValidationError } from '../../util.js';
 import { cleanTags } from './repo.js';
 import { checkOptionsAndVariants, isInStock, legacyOption } from './rules.js';
@@ -176,7 +177,7 @@ export async function applyImport(catalog, productId, draft, { text = true, flag
   }
 
   if (claim && (current.source !== claim.source || current.source_ref !== claim.sourceRef)) Object.assign(changes, { source: claim.source, source_ref: claim.sourceRef });
-  if (draft.externalUrl && draft.externalUrl !== current.external_url) changes.external_url = draft.externalUrl;
+  if (draft.externalUrl && draft.externalUrl !== (canonicalProductUrl(current.external_url) ?? '')) changes.external_url = draft.externalUrl;
   // A product we archived because it left the feed comes back when the feed has it again.
   if (current.fetch_status === 'missing' && !current.active) changes.active = true;
   if (addCategoryIds.length && !edited.has('categories')) {

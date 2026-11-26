@@ -85,10 +85,12 @@ export function shareSource(page) {
  */
 export function createMediaRefresher({ repos, ig, now = () => new Date() }) {
   const running = new Set();
+  // When this process last finished reading a page. A request that loaded the page row before that read was saved still shows the old check time; without this it would read again.
+  const finished = new Map();
   return function refresh(page, { onChange } = {}) {
     const key = `${tenantId()}:${page.id}`;
     if (running.has(key)) return null;
-    const checked = new Date(page.media_checked_at ?? 0).getTime();
+    const checked = Math.max(new Date(page.media_checked_at ?? 0).getTime(), finished.get(key) ?? 0);
     const expired = storyExpired(page, now());
     // An expired story is only ever cleared, once: there is nothing left to read.
     if (expired && !(page.media_url || page.thumbnail_url || page.video_url)) return null;
@@ -112,7 +114,10 @@ export function createMediaRefresher({ repos, ig, now = () => new Date() }) {
         log.warn('page.media_refresh_failed', { page: page.id, status: err?.status, code: err?.code });
         await repos.landingPages.touchMediaCheck(page.id).catch(() => {});
       })
-      .finally(() => running.delete(key));
+      .finally(() => {
+        finished.set(key, now().getTime());
+        running.delete(key);
+      });
     return work;
   };
 }

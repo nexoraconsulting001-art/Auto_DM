@@ -401,7 +401,8 @@ test('8.15, K-55, K-58: the lead form is switched on with its wording, a lead sh
   await creator.getByRole('switch').check();
   await creator.getByLabel('Line above the form').fill('Get first look at new drops');
   await creator.getByRole('button', { name: 'Save' }).click();
-  await expect(toast(page, 'Saved.')).toBeVisible();
+  // Exact: a plain "Saved." also matches the still-showing "New wording saved." toast, and the check would run before this save finished (R3-CAT-9).
+  await expect(page.locator('.toast-area').getByText('Saved.', { exact: true })).toBeVisible();
   const forms = await shop.must('GET', '/lead-forms');
   expect(forms.items.find((item) => item.surface === 'creator')).toEqual({ surface: 'creator', enabled: true, offerLine: 'Get first look at new drops' });
   await settled(page);

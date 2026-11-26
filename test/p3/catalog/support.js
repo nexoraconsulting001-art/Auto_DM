@@ -30,7 +30,8 @@ export async function openWorld(t, { adapters = [], overrides = {} } = {}) {
   sites.mount(STORE, shopify);
   t.after(() => Promise.all([sites.close(), shopify.close()]));
 
-  const shared = { platformDomain: NEUTRAL, publicBaseUrl: '', defaultTenant: '', safeFetchTransport: sites.transport(), fetchHostGapMs: 0, siteAdapters: adapters, ...overrides };
+  // The test is the worker (runJobs drains the pg queue), so the app queues on pg too, whatever QUEUE_DRIVER the production-drivers CI job sets: with Redis the app's jobs would never reach this worker (R3-CAT-2).
+  const shared = { queueDriver: 'pg', platformDomain: NEUTRAL, publicBaseUrl: '', defaultTenant: '', safeFetchTransport: sites.transport(), fetchHostGapMs: 0, siteAdapters: adapters, ...overrides };
   const app = await startApp({ overrides: shared });
   t.after(() => app.close());
 

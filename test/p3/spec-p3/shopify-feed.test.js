@@ -2,6 +2,7 @@
 // its feed is /products.json, page by page until an empty page.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { isPrivateAddress } from './support.js';
 import { CATALOG_LIMITS, IMPORT_REASONS, addP3Shop, assertNoLiveMarkup, generateStorefrontProducts, importFeed, need, plain, setStorefront, textOf, useP3World } from './kit.js';
 
 const world = useP3World();
@@ -34,7 +35,8 @@ test('K-15: importing a store of 312 products gives 312 products with their vari
     const row = await byUrl(shop, p.handle);
     assert.ok(row, `${p.handle} was imported`);
     assert.equal(row.name, p.title);
-    assert.equal(row.source_ref, p.handle, 'The handle is the source reference');
+    // Host-qualified (R3-CAT-6): the handle alone could clash between two stores one business imports from (source_ref is unique per business and source).
+    assert.equal(row.source_ref, `plants.example/${p.handle}`, 'The store and handle are the source reference');
     assert.equal(row.in_stock, p.variants.some((v) => v.available), 'available maps to in_stock');
     const variants = await variantsOf(shop, row.id);
     assert.deepEqual(variants.map((v) => [Number(v.price_paise), Number(v.mrp_paise), v.in_stock, v.sku]), p.variants.map((v) => [v.price, v.compare_at_price, v.available, v.sku]));
@@ -119,7 +121,10 @@ test('K-15: a store address that is private, or redirects somewhere private, is 
       assert.equal(job.created, 0);
     } else assert.equal(res.status, 400, `${storeUrl}: ${res.text.slice(0, 200)}`);
   }
-  assert.ok(world.dialsSince(mark).every((d) => d.address === '93.184.216.34' && d.host === 'toprivate.example'), `Connected to: ${JSON.stringify(world.dialsSince(mark))}`);
+  // Only the hosts this test asked for count: the image-copy jobs of the 312-product imports above may still be dialling plants.example from the shared queue.
+  const mine = world.dialsSince(mark).filter((d) => ['10.0.0.5', 'internal.example', '169.254.169.254', 'localhost', 'toprivate.example'].includes(d.host));
+  assert.ok(mine.every((d) => d.address === '93.184.216.34' && d.host === 'toprivate.example'), `Connected to: ${JSON.stringify(mine)}`);
+  assert.ok(!world.dialsSince(mark).some((d) => isPrivateAddress(d.address)), 'Nothing connected to a private address');
   assert.equal(await count(shop, 'products'), 0);
 });
 

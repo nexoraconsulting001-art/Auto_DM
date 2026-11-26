@@ -97,7 +97,8 @@ export async function openShowcaseWorld({ db, env = process.env, overrides = {},
   for (const sim of Object.values(sims)) await sim.start();
 
   const platformDomain = env.PLATFORM_DOMAIN || 'showcase.test';
-  const dataKey = env.DATA_KEY || crypto.randomBytes(32).toString('base64');
+  // The sample data is invented and never production (assertShowcaseAllowed), so with no DATA_KEY its key is a fixed one: tokens saved by one run can still be read by the next, and a second run need not connect everything again (Q-01).
+  const dataKey = env.DATA_KEY || crypto.createHash('sha256').update('bhava-showcase-sample-data-key').digest('base64');
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const config = {

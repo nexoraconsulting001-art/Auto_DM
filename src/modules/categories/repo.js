@@ -322,7 +322,9 @@ export function categorySequencesRepo(db) {
         const all = await t.query('SELECT id FROM categories WHERE tenant_id = $1 FOR UPDATE', [t0()]);
         const known = new Set(all.map((r) => r.id));
         if (new Set(ids).size !== ids.length) throw refuse('validation_failed', 'A category is in the list twice.', { ids: 'A category is in the list twice' });
-        if (ids.length !== known.size || ids.some((id) => !known.has(id))) throw refuse('conflict', 'Your categories changed while you were arranging them. Reload and try again.');
+        // An id that is not one of this business's categories (another business's, or one deleted meanwhile) is a bad request, as a foreign reel is (K-43); a list that misses some is a stale list (409).
+        if (ids.some((id) => !known.has(id))) throw refuse('validation_failed', 'A category in the list is not one of yours. Reload and try again.', { ids: 'A category in the list is not one of yours' });
+        if (ids.length !== known.size) throw refuse('conflict', 'Your categories changed while you were arranging them. Reload and try again.');
         await t.query(
           'UPDATE categories c SET position = v.position FROM unnest($2::int[], $3::int[]) AS v(id, position) WHERE c.tenant_id = $1 AND c.id = v.id',
           [t0(), ids, ids.map((_, i) => i + 1)],

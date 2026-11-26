@@ -193,9 +193,10 @@ export function shopperBrowser(app, host) {
 
 // ---- the invented-people rule, as a scan --------------------------------------------------------------------------------------
 
-const PHONE_LIKE = /(?<![\d])(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}(?![\d])/g;
+// Not inside a longer word or number: the digits inside a hash or a storage key (a sign-in state, a file name) are not a phone or an id.
+const PHONE_LIKE = /(?<![\w])(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}(?![\w])/g;
 const EMAIL_LIKE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-const IG_ID_LIKE = /(?<![\d.])\d{15,17}(?![\d])/g;
+const IG_ID_LIKE = /(?<![\w.])\d{15,17}(?![\w])/g;
 const normalPhone = (raw) => `+91${String(raw).replace(/\D/g, '').slice(-10)}`;
 
 /**

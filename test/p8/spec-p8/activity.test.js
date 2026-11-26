@@ -6,35 +6,25 @@ import assert from 'node:assert/strict';
 import { seedShowcase } from '../../../scripts/showcase.js';
 import { PEOPLE_RULES, SHOWCASE, problemsWithPerson } from '../../../src/contracts/seed.js';
 import { ACTIVITY_KINDS, createClock, createRng, digestOf, run as runActivity } from '../../../tools/sim/activity/index.mjs';
-import { openP4World } from '../../p4/spec-p4/kit.js';
+import { openShowcaseWorld } from '../../../tools/sim/activity/world.mjs';
+import { openTestDb } from '../../helpers.js';
 import { FULL, ctxOf, showcase, sql, strangers, tenantTables } from './support.js';
 
 const START = '2026-10-16T04:00:00.000Z';
 const DAYS = FULL ? SHOWCASE.days : 3;
 
 async function openSeeded(t, { seed = SHOWCASE.randomSeed, days = DAYS } = {}) {
-  const world = await openP4World();
-  t.after(() => world.close());
-  const loaded = showcase();
-  const results = await seedShowcase({ db: world.db, repos: world.platform, ctx: ctxOf(world), businesses: loaded });
-  const businesses = [];
-  for (const b of loaded) {
-    const result = results.find((r) => r.key === b.key);
-    businesses.push({ ...b, tenantId: result.tenantId, host: `${result.slug}.${world.config.platformDomain}` });
-  }
-  const clock = createClock(START);
-  const outcome = await runActivity({
-    businesses,
-    days,
-    seed,
-    clock,
-    world: {
-      baseUrl: world.base,
-      sims: { meta: world.meta, razorpay: world.rzp, shiprocket: world.ship, whatsapp: world.wa },
-      drain: () => world.settle({ ms: 5000 }),
-    },
+  // The world the activity runs in is the showcase world (the app, its worker and the four simulators), made on a fresh database: run() refuses any other.
+  const db = await openTestDb();
+  const world = await openShowcaseWorld({ db });
+  t.after(async () => {
+    await world.close();
+    await db.close?.();
   });
-  return { world, businesses, outcome, clock };
+  const businesses = await seedShowcase({ world, businesses: showcase() });
+  const clock = createClock(START);
+  const outcome = await runActivity({ businesses, days, seed, clock, world });
+  return { world: { rawDb: db, meta: world.sims.meta, showcase: world }, businesses, outcome, clock };
 }
 
 const rowsOf = (world, text, params = []) => world.rawDb.platform.query(text, params);
