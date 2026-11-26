@@ -111,9 +111,10 @@ test('K-21, K-22, K-23: a homepage and a title-only page are refused with the dr
 test('script in a product’s text never reaches the catalog as markup', async (t) => {
   const world = await openWorld(t);
   const shop = await world.addShop();
-  // The fixture's JSON-LD holds a raw </script>, which ends the block early, as it would in a browser: only the title is left.
+  // The fixture's JSON-LD holds a raw </script> inside valid JSON. The reader runs the block on to the end tag that makes it JSON (R2-CAT-14;
+  // spec-p3 K-10 expects a draft); the markup in the text is stripped, so the owner sees a draft with clean text.
   const broken = await link(shop, 'https://shop.example/products/script-in-text');
-  assert.deepEqual([broken.status, broken.reason, broken.draft.name], ['refused', 'title_only', 'Clay lamp']);
+  assert.deepEqual([broken.status, broken.draft.name, broken.draft.pricePaise], ['draft', 'Clay lamp', 25000]);
   assert.doesNotMatch(JSON.stringify(broken), /<script|onerror|<img|alert/i);
 
   // The same text escaped the way a careful site writes it, so the JSON is whole and the markup arrives inside the strings.
