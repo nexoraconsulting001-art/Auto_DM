@@ -107,15 +107,26 @@ test('who may do what: refunds and the customer list are the owner’s, and no r
 });
 
 test('a Phase 4 route not built yet answers 501, and the Phase 0 store still answers through the modules', async () => {
-  const app = await startApp();
+  // Every Phase 4 route is built now, so the "not built yet" answer is proved by running the app without the leaf modules that
+  // answer four of them (coupons, returns, reviews, loyalty), on a plan that has their features (Phase 7: the plan is
+  // answered before the handler). The rest are owned by modules the store needs (orders, inventory, shoppers, consent), and
+  // must answer as built.
+  const app = await startApp({ modules: MODULES.filter((m) => !['coupons', 'returns', 'reviews', 'loyalty'].includes(m.name)) });
   try {
+    const [{ plan }] = await app.db.platform.query('SELECT plan FROM tenants WHERE id = $1', [app.tenant.id]);
+    await app.db.platform.query('UPDATE tenants SET plan = $2 WHERE id = $1', [app.tenant.id, 't5']);
     const { token } = await (await fetch(`${app.base}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(OWNER) })).json();
     const headers = { authorization: `Bearer ${token}` };
-    for (const route of ['/coupons', '/inventory', '/returns', '/reviews', '/loyalty/settings', '/shoppers', '/privacy', '/order-downloads']) {
+    for (const route of ['/coupons', '/returns', '/reviews', '/loyalty/settings']) {
       const res = await fetch(`${app.base}/api/v1${route}`, { headers });
       assert.equal(res.status, 501, route);
       assert.equal((await res.json()).code, 'not_implemented', route);
     }
+    for (const route of ['/inventory', '/shoppers', '/privacy', '/order-downloads']) {
+      assert.equal((await fetch(`${app.base}/api/v1${route}`, { headers })).status, 200, `${route} is built`);
+    }
+    // The Phase 0 store below is checked on the business's own plan, as before.
+    await app.db.platform.query('UPDATE tenants SET plan = $2 WHERE id = $1', [app.tenant.id, plan]);
     assert.equal((await fetch(`${app.base}/api/v1/orders`, { headers })).status, 200, 'the Phase 0 order list still answers');
 
     const product = await app.repos.products.create({ name: 'Brass lamp', price: '500', active: 'on' });
