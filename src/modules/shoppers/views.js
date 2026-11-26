@@ -80,7 +80,7 @@ export function messagePage(layout, { title, message, action = { href: '/login',
  * The sign-in page (9.3, S-10). A WhatsApp code and Google; inside Instagram's or Facebook's in-app browser, where Google
  * sign-in may not work, the WhatsApp code comes first. `shared` adds the way back in with details saved at another store.
  */
-export function signInPage(layout, { next = '/', notice, googleOn = false, inApp = false, sharedOn = false, error = '', sellerCsrf = '' }) {
+export function signInPage(layout, { next = '/', notice, googleOn = false, inApp = false, sharedOn = false, error = '', sellerCsrf = '', passwordLogin = false }) {
   const store = layout.business.name || 'this store';
   const checkoutNote = next.startsWith('/checkout') ? html`<p class="muted">Sign in, or create an account to place your order. It takes one WhatsApp code, and your bag is saved.</p>` : '';
   const whatsapp = html`<form class="form" id="otp-form" novalidate>
@@ -127,13 +127,13 @@ ${checkoutNote}
 ${sharedOn ? html`<p><a class="btn-quiet" href="/auth/shared?next=${encodeURIComponent(next)}">Saved your details at another store? Continue without a code</a></p>` : ''}
 ${noticeBlock(notice, store)}
 <p class="muted">By signing in you agree that ${store} uses your number to sign you in and to take and deliver your orders. Messages and offers are only sent if you tick them.</p>
-<div class="panel" id="team-sign-in"><h2>Store team</h2>
-<p class="muted">For the owner and staff of , and accounts made with a password before.</p>
+${passwordLogin ? html`<div class="panel" id="team-sign-in"><h2>Store team</h2>
+<p class="muted">For the owner and staff of ${store}, and accounts made with a password before.</p>
 <form class="form" method="post" action="/login"><input type="hidden" name="next" value="${next}">
 <label>Mobile number<input name="phone" type="tel" autocomplete="tel-national" required maxlength="20"></label>
 <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
 <button class="btn" type="submit">Log in</button></form>
-</div>
+</div>` : ''}
 </section>${script}`,
   });
 }
