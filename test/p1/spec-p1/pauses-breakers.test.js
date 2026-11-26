@@ -20,6 +20,20 @@ async function permissionErrors(shop, n) {
   return reel;
 }
 
+async function killWorld(run) {
+  const w = await openWorld();
+  try {
+    await run(w, await consoleUser(w), await consoleUser(w));
+  } finally {
+    await w.close();
+  }
+}
+
+const engageKill = (w, operator, reason = 'Meta notice') => onConsole(w, operator, '/kill-switch', { method: 'POST', body: { scope: 'global', reason } });
+const requestRelease = (w, operator) => onConsole(w, operator, '/kill-switch/release', { method: 'POST', body: { reason: 'All clear' } });
+const approveRelease = (w, operator) => onConsole(w, operator, '/kill-switch/release/approve', { method: 'POST', body: { reason: 'Confirmed' } });
+const killEngaged = async (w) => (await w.rawDb.platform.query(`SELECT engaged FROM platform_switches WHERE key = 'global_kill'`))[0].engaged;
+
 const pauseShop = (shop, body = {}) => shop.call('/compliance/pause', 200, { method: 'POST', body });
 const resumeShop = (shop) => shop.call('/compliance/resume', 200, { method: 'POST' });
 
