@@ -21,7 +21,8 @@ async function seedPlatformData(slice, business, igUserId) {
   await q(`INSERT INTO automation_triggers (tenant_id, automation_id, channel, target_type, media_id, caption, thumbnail_url) VALUES ($1, $2, 'instagram', 'reel', $3, 'Brunch caption', 'https://cdn.invalid/t.jpg')`, [tenant, automation.id, `media-${tenant}`]);
   await q(`INSERT INTO cap_claims (tenant_id, channel, cap, subject_hash, scope_key) VALUES ($1, 'instagram', 'cap.per_comment', 'subject-1', 'c-1')`, [tenant]);
   await q(`INSERT INTO opt_outs (tenant_id, channel, subject_hash, source) VALUES ($1, 'instagram', 'subject-2', 'dm')`, [tenant]);
-  await q(`INSERT INTO account_rate_state (tenant_id, channel, account_id, usage_percent) VALUES ($1, 'instagram', $2, 10)`, [tenant, igUserId]);
+  // The connect's own Meta calls may already have recorded the account's usage header (PRD 4.3), so this sets the row either way.
+  await q(`INSERT INTO account_rate_state (tenant_id, channel, account_id, usage_percent) VALUES ($1, 'instagram', $2, 10) ON CONFLICT (tenant_id, channel, account_id) DO UPDATE SET usage_percent = 10`, [tenant, igUserId]);
   const job = await addJob(slice, tenant, igUserId);
   return { automation: automation.id, job, media: `media-${tenant}` };
 }

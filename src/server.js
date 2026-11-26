@@ -32,7 +32,7 @@ import { createTenantResolver, currentTenant, normalizeHost, withTenant } from '
 import { createPlatform, describePlatform } from './platform/index.js';
 import { createErrorSink } from './platform/error-sink.js';
 import { HEALTH_PATHS, createHealth, drainOnSignals } from './platform/health.js';
-import { log, onError, reportError, requestIds } from './platform/log.js';
+import { log, onError, reportError, requestIds, routeOf } from './platform/log.js';
 import { secretRefreshFailed } from './platform/metrics.js';
 import { guardProduction } from './platform/production-guard.js';
 
@@ -40,6 +40,8 @@ export const verifySignature = verifyHubSignature;
 
 /** A full batch of 1,000 webhook entries at a few hundred bytes each, with room to spare. */
 export const WEBHOOK_BODY_LIMIT = '5mb';
+/** Every address a provider POSTs a webhook to, read from the contracts, so a provider added later gets the webhook limit too. */
+const PROVIDER_WEBHOOK_PATHS = [PROVIDER_PATHS.webhook, ...Object.values(STORE_PROVIDER_PATHS).filter((p) => p.method === 'POST').map((p) => p.path)];
 
 /** Uploaded files, by their unguessable id. Anyone with the link can open one, so nothing private is stored as media. */
 function mediaRoutes({ repos }) {
@@ -105,9 +107,10 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
     next();
   });
   const keepRawBody = (req, _res, buf) => (req.rawBody = buf);
-  // Meta and WhatsApp send up to 1,000 entries in one delivery (PRD 4.3 row 14), and resend an answer of 413 until they give up,
-  // which loses every event in it. Their webhooks get a body limit that fits a full batch; everything else keeps 200 kB.
-  app.use([PROVIDER_PATHS.webhook, STORE_PROVIDER_PATHS.whatsapp.path], express.json({ limit: WEBHOOK_BODY_LIMIT, verify: keepRawBody }));
+  // A provider decides how big its delivery is: Meta and WhatsApp send up to 1,000 entries at once (PRD 4.3 row 14), and a Shopify
+  // product with many variants runs past 200 kB. An answer of 413 makes the provider resend until it gives up, losing the events.
+  // Every provider webhook in the contracts gets a limit that fits a full delivery; everything else keeps 200 kB.
+  app.use(PROVIDER_WEBHOOK_PATHS, express.json({ limit: WEBHOOK_BODY_LIMIT, verify: keepRawBody }));
   app.use(express.json({ limit: '200kb', verify: keepRawBody }));
   app.use(express.urlencoded({ extended: false, limit: '200kb' }));
   app.use('/static', express.static(path.join(config.rootDir, 'public'), { maxAge: '1h' }));
@@ -245,7 +248,7 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
     // A body that isn't JSON or is too big is the sender's fault. The parser's error quotes the body, so it isn't logged.
     const refused = { 'entity.parse.failed': 400, 'entity.too.large': 413 }[err.type];
     if (refused && !res.headersSent) return res.status(refused).json({ error: 'That request could not be read.' });
-    reportError(err, { msg: 'http.error', method: req.method, path: req.path });
+    reportError(err, { msg: 'http.error', method: req.method, path: routeOf(req) });
     if (res.headersSent) return;
     if (req.path.startsWith('/api/') || req.get('accept')?.includes('application/json')) {
       return res.status(500).json({ error: 'Something went wrong on our side. Please try again.' });

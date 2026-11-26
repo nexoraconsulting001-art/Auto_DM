@@ -14,7 +14,7 @@ ${ticker(theme)}
 ${section({ theme, id: 'products-h', kicker: 'In the reel', title: 'Shop it piece by piece', body: [1, 2].map((n) => productCard({ name: product, number: n, imageUrl: 'https://cdn.example/p.jpg', price: priceText({ pricePaise: 489900, mrpPaise: 749900 }), href: 'https://zari.example/saree', productId: 7 })) })}
 ${section({ theme, id: 'more-h', title: 'More reels', body: tileStrip({ items: [{ href: '/r/potli', label: 'Potli', imageUrl: 'https://cdn.example/t.jpg' }] }) })}
 ${trustRow([{ label: 'Ships across India', icon: 'truck' }])}`;
-  return String(buyerPage({ theme, business: { name }, meta: { title: `The Banarasi Edit · ${name}`, description: 'Shop the reel', url: 'https://zari.example/r/banarasi?utm_source=instagram', image: { url: 'https://zari.example/media/abc', width: 1200, height: 630 } }, main, footer: { note: 'Ships from Varanasi', whatsappHref: 'https://wa.me/919320001717' } }));
+  return String(buyerPage({ theme, business: { name }, meta: { title: `The Banarasi Edit · ${name}`, description: 'Shop the reel', url: 'https://zari.example/r/banarasi?utm_source=instagram', image: { url: 'https://zari.example/media/abc', width: 1200, height: 630 } }, main, footer: { note: 'Ships from Varanasi', whatsappHref: 'https://wa.me/919811122233' } }));
 }
 
 async function presetKits() {
@@ -84,7 +84,7 @@ test('K-29: colours, fonts and slots carrying markup can\'t reach the stylesheet
   assert.doesNotMatch(page, /<img src=x/);
   assert.match(page, /--primary:#7A1F3D/, 'a broken colour falls back to the default preset');
   for (const bad of ['javascript:alert(1)', '//evil.example', 'data:text/html,x', ' https://x.example/a b', 'https://x.example/"onmouseover=x']) assert.equal(safeHref(bad), '', bad);
-  for (const good of ['https://x.example/p?a=1&b=2', '/r/brunch', 'https://wa.me/919320001717?text=Hi%20there']) assert.equal(safeHref(good), good);
+  for (const good of ['https://x.example/p?a=1&b=2', '/r/brunch', 'https://wa.me/919811122233?text=Hi%20there']) assert.equal(safeHref(good), good);
 });
 
 test('F-106: the seller\'s seal text and ticker show on the page; the preset\'s show when they set none', async () => {

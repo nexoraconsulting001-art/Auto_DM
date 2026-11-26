@@ -10,10 +10,12 @@ import { tenantId } from '../../tenancy.js';
  * all call send(); none of them calls an adapter.
  *
  * In order, a message is refused when: its shape is wrong; its text names the platform; a marketing email has no
- * unsubscribe link; it is for WhatsApp and the compliance gate says the kill switch is engaged or the business is paused
- * (compliance.sendingPaused('whatsapp'): a login code and an order update stop with everything else); the shopper has not said yes to that purpose on that channel (a login code needs no yes); it is
+ * unsubscribe link; it is for WhatsApp and the compliance gate says the kill switch is engaged, the business is paused or its
+ * WhatsApp breaker is open (compliance.sendingPaused('whatsapp', { breaker: true }): a login code and an order update stop with
+ * everything else; PRD 4.12); the shopper has not said yes to that purpose on that channel (a login code needs no yes); it is
  * marketing inside quiet hours (deferred, not dropped); there is no address; the business has no account for the channel;
- * the WhatsApp template isn't approved. Only then is the provider called, once: a send whose answer was lost is reported
+ * the WhatsApp template isn't approved. Once the breaker's wait is over, one send that passed every other rule goes as its probe
+ * and its outcome closes or reopens the breaker. Only then is the provider called, once: a send whose answer was lost is reported
  * as failed with reason 'unknown_delivery' and retryable false, so nobody sends it twice on a guess.
  *
  * Logs carry ids and reasons only: never a number, an address or a word of the message.
@@ -59,14 +61,19 @@ export function createShopperMessages({ db, platform, providers, config = {}, co
     return { from, fromName: business?.name ?? '', replyTo: settings?.email_reply_to ?? '' };
   }
 
-  /** Every rule, with nothing sent. `ready` is what send() needs to go on. */
-  async function decide(message) {
+  /**
+   * Every rule, with nothing sent. `ready` is what send() needs to go on. With takeProbe (send(), never check()), a message that
+   * passes every rule while the breaker is open may take its probe: `probing` is then true and send() must report the outcome.
+   */
+  async function decide(message, { takeProbe = false } = {}) {
     tenantId();
     const problem = shapeProblem(message);
     if (problem) return { verdict: result('skipped', problem) };
+    let breakerOpen = false;
     if (message.channel === 'whatsapp' && compliance) {
-      const paused = await compliance.sendingPaused('whatsapp');
-      if (paused) return { verdict: result('skipped', paused === 'paused.global' ? R.pausedGlobal : R.pausedBusiness) };
+      const paused = await compliance.sendingPaused('whatsapp', { breaker: true });
+      if (paused === 'paused.breaker') breakerOpen = true;
+      else if (paused) return { verdict: result('skipped', paused === 'paused.global' ? R.pausedGlobal : R.pausedBusiness) };
     }
     const to = message.to ?? {};
     const address = message.channel === 'whatsapp' ? digits(to.phone) : String(to.email ?? '').trim();
@@ -89,11 +96,26 @@ export function createShopperMessages({ db, platform, providers, config = {}, co
 
     const ready = message.channel === 'whatsapp' ? await whatsappReady(message) : await emailReady();
     if (ready.refusal) return { verdict: result('skipped', ready.refusal) };
-    return { verdict: result('sent', R.ok), ready, address };
+    // Last, so a probe is only taken by a message that will reach the provider.
+    const probing = breakerOpen && takeProbe && (await compliance.takeBreakerProbe('whatsapp'));
+    if (breakerOpen && !probing) return { verdict: result('skipped', R.pausedBreaker) };
+    return { verdict: result('sent', R.ok), ready, address, probing };
   }
 
   async function send(message) {
-    const { verdict, ready, address } = await decide(message);
+    const decided = await decide(message, { takeProbe: true });
+    if (!decided.probing) return deliver(message, decided);
+    let outcome = 'unused';
+    try {
+      const answer = await deliver(message, decided);
+      outcome = answer.outcome === 'sent' ? 'sent' : 'failed';
+      return answer;
+    } finally {
+      await compliance.breakerProbeDone('whatsapp', outcome).catch((err) => log.warn('shopper_message.probe_report_failed', { kind: err?.name ?? 'error' }));
+    }
+  }
+
+  async function deliver(message, { verdict, ready, address }) {
     const ids = { channel: message?.channel, purpose: message?.purpose, orderId: message?.orderId ?? null };
     if (verdict.outcome !== 'sent') {
       log.info('shopper_message.not_sent', { ...ids, outcome: verdict.outcome, reason: verdict.reason });

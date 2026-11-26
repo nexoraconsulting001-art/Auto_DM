@@ -8,12 +8,33 @@ import { ERROR_CODES } from './errors.js';
 const INT32_MAX = 2147483647;
 const NO_NUL = /^[^\0]*$/; // Postgres text cannot hold a NUL byte
 
+/**
+ * Refuses a NUL byte, which Postgres text cannot hold (it would answer 500 instead of 400). Every input string schema
+ * not built from `text` and whose own pattern lets \0 through (\S, [^\s...]) ends with this (atk-auth-2).
+ */
+export const noNul = (schema) => schema.regex(NO_NUL, 'Contains a character that isn’t allowed');
+
 /** Trimmed text of at most `max` characters. */
-export const text = (max) => z.string().trim().max(max, `Use ${max} characters or fewer`).regex(NO_NUL, 'Contains a character that isn’t allowed');
+export const text = (max) => noNul(z.string().trim().max(max, `Use ${max} characters or fewer`));
 /** The same, but it can't be empty. */
 export const required = (max, message = 'This is required') => text(max).min(1, message);
 
 export const Id = z.number().int().positive().max(INT32_MAX);
+
+/**
+ * An id another system sends (Meta, WhatsApp, Shopify), kept as text. A JSON number is taken only while it is exact: past 2^53
+ * JSON.parse has already rounded it, and the rounded value can be another business's or another person's id
+ * (17841400000000011 reads as 17841400000000012). Such a number is refused, never guessed at.
+ */
+export const ExternalId = z.union([
+  z.string().min(1),
+  z.number().refine((n) => Number.isSafeInteger(n) && n >= 0, 'An id sent as a number past 2^53 has lost digits').transform(String),
+]);
+/** ExternalId for code that reads a provider's answer without a schema: the id as text, or null when it is missing or inexact. */
+export const externalId = (value) => {
+  const parsed = ExternalId.safeParse(value);
+  return parsed.success ? parsed.data : null;
+};
 export const Count = z.number().int().min(0);
 export const Paise = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 export const PaiseInput = z.number().int('Use whole paise').min(0, 'Can’t be negative').max(INT32_MAX, 'That amount is too large');
@@ -27,7 +48,7 @@ export const IdParams = z.object({ id: IdText });
 export const Timestamp = z.union([z.date().transform((d) => d.toISOString()), z.iso.datetime({ offset: true })]);
 
 /** An uploaded file (/media/<id>) or a web link. */
-export const MediaLink = z.string().trim().max(1000).regex(/^(https?:\/\/\S+|\/media\/[\w-]+)$/i, 'Use an uploaded file or a web link');
+export const MediaLink = noNul(z.string().trim().max(1000).regex(/^(https?:\/\/\S+|\/media\/[\w-]+)$/i, 'Use an uploaded file or a web link'));
 export const MediaLinkOrEmpty = z.union([z.literal(''), MediaLink]);
 
 /** Every list takes these. Pass back `nextCursor` as `cursor` for the next page; a cursor means nothing outside the API. */

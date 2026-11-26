@@ -110,18 +110,18 @@ test('K-32: the DM link opens with no redirect; tapping a product goes straight 
 // ---- K-35 ------------------------------------------------------------------------------------------------------------------
 
 test('K-35: the WhatsApp button opens wa.me with the name, price and link, and one click is counted', async ({ page }) => {
-  await shop.whatsapp('+91 93200 01717');
+  await shop.whatsapp('+91 98111 22233');
   await shop.must('PATCH', '/page-settings', { whatsappOrder: true });
   const product = await shop.product({ name: 'Steel Bottle', pricePaise: 34900 });
   const landing = await shop.page({ productIds: [product.id] });
   const outside = await catchOutside(page);
   await page.goto(`${world.base}/r/${landing.slug}`);
-  const button = page.locator('a[href^="https://wa.me/919320001717"]').filter({ hasText: /whatsapp/i }).first();
+  const button = page.locator('a[href^="https://wa.me/919811122233"]').filter({ hasText: /whatsapp/i }).first();
   await expect(button).toBeVisible();
   const box = await button.boundingBox();
   expect(box.height, 'The button is big enough to tap').toBeGreaterThanOrEqual(40);
   await button.click();
-  await expect.poll(() => outside.some((o) => o.url.startsWith('https://wa.me/919320001717'))).toBe(true);
+  await expect.poll(() => outside.some((o) => o.url.startsWith('https://wa.me/919811122233'))).toBe(true);
   const text = new URL(outside.find((o) => o.url.startsWith('https://wa.me/')).url).searchParams.get('text');
   expect(text).toContain('Steel Bottle');
   expect(text).toContain('₹349');

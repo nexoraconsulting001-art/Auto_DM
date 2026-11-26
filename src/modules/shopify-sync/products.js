@@ -1,3 +1,4 @@
+import { externalId } from '../../contracts/api/common.js';
 import { log, reportError } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { catalogRepo } from '../catalog/repo.js';
@@ -32,7 +33,11 @@ import { fromShopify } from '../imports/shopify.js';
 const DAY_MS = 86_400_000;
 const NUL = /\u0000/g;
 const text = (value, max) => String(value ?? '').replace(NUL, '').slice(0, max);
-const idOf = (value) => (/^[0-9]{1,20}$/.test(String(value ?? '')) ? String(value) : null);
+/** A Shopify id as text. A JSON number past 2^53 arrives already rounded onto a neighbouring id, so it is refused (ExternalId). */
+export const idOf = (value) => {
+  const id = externalId(value);
+  return id && /^[0-9]{1,20}$/.test(id) ? id : null;
+};
 const timeOf = (value) => {
   const at = value ? new Date(value) : null;
   return at && Number.isFinite(at.getTime()) ? at : null;

@@ -14,7 +14,7 @@ async function connectOwn(world, shop, accountId = 'acc_sellerown0001') {
   const { code } = await world.rzp.post('/oauth/code', { accountId });
   const back = await raw(world.port, `${STORE_PROVIDER_PATHS.razorpayOauth.path}?code=${code}&state=${encodeURIComponent(url.searchParams.get('state'))}`, { host: 'payments.bhava.test' });
   assert.equal(back.status, 303, back.text);
-  assert.match(back.headers.location, /\/admin\/settings\?payments=connected$/);
+  assert.match(back.headers.location, /\/admin\/payments\?payments=connected$/);
   // Bhava receives the account's webhooks at the business's own address, signed with the secret it keeps.
   const { key, secret } = await shop.run((p) => p.settings.webhookSecret());
   await world.rzp.post('/webhooks/url', { url: `${world.base}${STORE_PROVIDER_PATHS.razorpayOwn.path.replace(':key', key)}`, accountId, secret });

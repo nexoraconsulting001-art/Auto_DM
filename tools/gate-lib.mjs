@@ -45,7 +45,7 @@ export function parsePhase(arg) {
   return Number(arg);
 }
 
-/** The folder holding docs/, logs/ and tmp/ (C:\bhava here, from any worktree); .gate inside the repo elsewhere. */
+/** The folder holding docs/, logs/ and tmp/ (the folder above the checkout that has docs/FULL-BUILD-PLAN.md, or BHAVA_HOME); .gate inside the repo elsewhere. */
 export function findHome(root = repoRoot) {
   if (process.env.BHAVA_HOME) return process.env.BHAVA_HOME;
   for (let dir = path.dirname(root), up = path.dirname(dir); ; dir = up, up = path.dirname(dir)) {

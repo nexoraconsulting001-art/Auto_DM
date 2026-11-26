@@ -25,3 +25,13 @@ export function canOpen(feature, { user, entitlements = null, accountType = null
   if (!feature.feature || !entitlements) return true;
   return entitlements[feature.feature] !== false;
 }
+
+/**
+ * The plan's entitlements as canOpen takes them, { [feature]: boolean }, from billing.features' answer
+ * ({ plan, features: { [feature]: { on, limit } } }). Anything else is null: not known, so nothing is hidden.
+ */
+export function entitlementsOf(planFeatures) {
+  const features = planFeatures?.features;
+  if (!features || typeof features !== 'object' || Array.isArray(features)) return null;
+  return Object.fromEntries(Object.entries(features).map(([feature, value]) => [feature, value?.on === true]));
+}

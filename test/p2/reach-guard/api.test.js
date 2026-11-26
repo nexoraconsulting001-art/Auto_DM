@@ -95,7 +95,8 @@ test('N-28: slow mode caused by 80002 can\'t be overridden, and the screen doesn
   try {
     await a.db.platform.query(
       `INSERT INTO account_rate_state (tenant_id, channel, account_id, slow_mode_started_at, slow_mode_until, slow_mode_trigger, slow_mode_holds)
-       VALUES ($1, 'instagram', $2, $3::timestamptz, $4::timestamptz, 'buc_80002', jsonb_build_object('buc_80002', $4::timestamptz))`,
+       VALUES ($1, 'instagram', $2, $3::timestamptz, $4::timestamptz, 'buc_80002', jsonb_build_object('buc_80002', $4::timestamptz))
+       ON CONFLICT (tenant_id, channel, account_id) DO UPDATE SET slow_mode_started_at = EXCLUDED.slow_mode_started_at, slow_mode_until = EXCLUDED.slow_mode_until, slow_mode_trigger = EXCLUDED.slow_mode_trigger, slow_mode_holds = EXCLUDED.slow_mode_holds`,
       [a.tenant.id, ACCOUNT, new Date(a.clock.t), new Date(a.clock.t + HOUR)],
     );
     const s = await a.get('/reach-guard');

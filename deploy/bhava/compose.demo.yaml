@@ -1,0 +1,51 @@
+# Demo profile for the QA server. Use it together with compose.yaml:
+#   docker compose -f compose.yaml -f compose.demo.yaml up -d --build
+# Why: the image runs in production mode, which refuses simulator addresses and ships without tools/sim. This profile
+#   - runs web and worker with NODE_ENV=staging (demo.env), so the test copies of Razorpay, Shiprocket, WhatsApp and Shopify are allowed;
+#   - starts those copies in a "sim" container from the same image, with tools/ from the checkout mounted read-only;
+#   - puts web, worker and sim in one network space, so 127.0.0.1:9101-9106 is the same for all three.
+# Instagram stays real (no Meta address is set). Nothing here reaches Razorpay, Shiprocket, WhatsApp or Shopify.
+# Never run "docker compose down -v".
+x-demo: &demo
+  image: bhava-demo-app:local
+  env_file: [demo.env]
+
+services:
+  web:
+    <<: *demo
+  worker:
+    <<: *demo
+    network_mode: "service:web"
+  sim:
+    image: bhava-demo-app:local
+    pull_policy: never
+    restart: unless-stopped
+    env_file: [demo.env]
+    network_mode: "service:web"
+    command: ["node", "tools/sim/index.mjs"]
+    volumes: ["../../tools:/app/tools:ro"]
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9103/').then(()=>process.exit(0),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on: [web]
+  # The email test copy. Read what it was sent with: docker compose ... exec sim-email node -e "fetch('http://127.0.0.1:9107/__sim/sent').then(r=>r.text()).then(console.log)"
+  sim-email:
+    image: bhava-demo-app:local
+    pull_policy: never
+    restart: unless-stopped
+    env_file: [demo.env]
+    network_mode: "service:web"
+    command: ["node", "--input-type=module", "-e", "import { createEmail } from './tools/sim/email/index.mjs'; const s = createEmail(); await s.start({ port: 9107 }); console.log('sim email', s.url);"]
+    volumes: ["../../tools:/app/tools:ro"]
+    mem_limit: 96m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9107/__sim/sent').then(()=>process.exit(0),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on: [web]

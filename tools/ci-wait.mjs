@@ -3,10 +3,12 @@
  * Prints one JSON object: run URL, status, each job's conclusion, and the annotations of failed jobs.
  * Exit 0 all passed, 1 something failed, 2 still running (or no answer) when time ran out.
  *
- * Options: --once (one look, no waiting), --interval-ms, --max-ms, --api URL.
+ * Options: --once (one look, no waiting), --interval-ms, --max-ms, --api URL, --repo owner/name
+ * (default GITHUB_REPOSITORY, else the origin remote).
  * The unauthenticated limit is 60 requests an hour; a default wait uses about 16.
  */
-const REPO = 'nexoraconsulting001-art/Auto_DM';
+import { execFileSync } from 'node:child_process';
+
 const BRANCH = 'bhava/build';
 const PASSED = new Set(['success', 'skipped', 'neutral']);
 
@@ -14,6 +16,19 @@ function option(name, fallback) {
   const at = process.argv.indexOf(`--${name}`);
   return at >= 0 ? process.argv[at + 1] : fallback;
 }
+
+/** owner/name from --repo, GITHUB_REPOSITORY, or the origin remote's URL. */
+function repoName() {
+  const given = option('repo', process.env.GITHUB_REPOSITORY || '');
+  if (given) return given;
+  try {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return url.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?$/)?.[1] ?? '';
+  } catch {
+    return '';
+  }
+}
+const REPO = repoName();
 
 const api = option('api', 'https://api.github.com').replace(/\/+$/, '');
 const once = process.argv.includes('--once');

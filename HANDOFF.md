@@ -4,6 +4,38 @@ Bhava is a white-label platform for Instagram and Facebook commerce. Many busine
 
 The requirements (PRD) and build plan live outside this repo, because the repo is public. Work happens on `bhava/build`.
 
+## Status (26 Nov 2026)
+
+- **Built:** Phases 0 to 10 (store, reels, DMs, checkout, delivery, WhatsApp, owner and shopper apps, billing, Platform Console, production setup).
+- **Final stage (review, attack round, tests), paused:**
+  - Code review: 98 confirmed problems. All critical and high ones are fixed, and most medium ones, each with a regression test and a root-cause note. The 29 low ones are kept for later.
+  - Attack round on money, sign-in, business separation and Meta compliance: 17 confirmed bugs, all fixed with tests.
+  - First full GitHub run after those fixes: about 220 test files still fail, mostly outside the demo path.
+  - Not done yet: Stryker mutation testing, the remaining GitHub fix rounds, and the "no test weakened" audit.
+- **Fixes not merged yet** (pushed to GitHub on 26 Nov; from the first GitHub fix round; partly finished, and the last commit on `fix/t1-signin-codes-sessions-auth`, `fix/final-money-m` and `fix/final-commerce-m` is unreviewed work in progress): `fix/t1-apps-owner-shopper-and-mobile-ci`, `fix/t1-checkout-store-orders-money`, `fix/t1-meta-sends-intake-queue-p1-p6`, `fix/t1-signin-codes-sessions-auth`, plus medium follow-ups on `fix/final-money-m` and `fix/final-commerce-m`.
+- **Open high items** (root cause noted, fix not finished):
+  - The compliance gate does not re-check a business's Meta access before each automated send after go-live.
+  - The owner app's sign-out wipe leaves one empty query entry behind.
+  - Branded app builds cannot find the uploaded icon on real Postgres, possibly a tenant-context gap in background jobs.
+- **Demo server:** the QA server runs the demo profile (`deploy/bhava`). Payments, courier, WhatsApp and email go to test copies, and Instagram is real. It is reached through an sslip.io address built from the server's IP (listed in the private demo notes, not here, because the secret scan refuses server addresses in tracked files). Logins live only on the server and in the private notes, never in this repo.
+- **Next:**
+  1. Merge the unmerged fix branches.
+  2. Run the GitHub test rounds until green, with demo-path failures first.
+  3. Run Stryker on the four risky areas.
+  4. Run the test-weakening audit.
+  5. Build the per-business admin brand setting (white-label admin for managed clients).
+  6. Fix the low-priority list.
+- **Where to pick up:**
+  - Code: this branch (`bhava/build`) plus the fix branches above.
+  - Website: a separate repository, folder `site/`.
+  - Private notes stay off git, because this repo is public. They are kept on the build machine, outside the repository:
+    - PRD and build plan.
+    - Problem notes `p0-attack-r1.md` and `p1..p9-known-problems.md`.
+    - `rca-log.md` and `rca-escalations.md`.
+    - `decisions-needed.md` and `later-low-priority.md`.
+    - `test-changes.md`.
+    - `demo-deploy-notes.md`, which holds the server and demo logins.
+
 ## Rules that never bend
 
 - Every business-owned row has `tenant_id`; every business repo calls `tenantId()` and refuses to run without one. New tables get `tenant_id` and composite foreign keys.

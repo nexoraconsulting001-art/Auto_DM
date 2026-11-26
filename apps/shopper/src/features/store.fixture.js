@@ -10,8 +10,8 @@ import { screen, fireEvent } from '@testing-library/react-native';
 import { features } from './index.js';
 import { createServices } from '../services.js';
 
-/** The platform's name, spelled in pieces so this file does not name it: what no seller-facing screen may show. */
-export const PLATFORM_WORD = new RegExp(['bha', 'va'].join(''), 'i');
+/** The platform's name, from the one place every shopper test takes it (spec/platform-name.js): what no buyer-facing screen may show. */
+export { PLATFORM_NAME as PLATFORM_WORD } from '../../spec/platform-name.js';
 
 export const FIXTURES = path.resolve(__dirname, '../../../../tools/build-brand/fixtures');
 export const brands = fs.readdirSync(FIXTURES).filter((name) => fs.existsSync(path.join(FIXTURES, name, 'brand.json')));
@@ -115,7 +115,9 @@ export function setup(name, store = makeStore(name), extra = {}) {
   return { services, store, opened, disk, queryClient };
 }
 
-export const secure = () => require('expo-secure-store').__dump?.() ?? {};
+// What the tests' in-memory SecureStore holds (tools/jest/after-env.cjs puts it in place of expo-secure-store): only
+// @bhava/app-core's storage.js may import expo-secure-store itself (apps/owner/src/build.test.js, where tokens may live).
+export const secure = () => require('../../../../tools/jest/secure-store-mock.cjs').__dump?.() ?? {};
 export const flatText = () => JSON.stringify(screen.toJSON());
 export const type = (id, value) => fireEvent.changeText(screen.getByTestId(id), value);
 

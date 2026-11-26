@@ -26,6 +26,9 @@ const toReel = (r, base) => ({
   updatedAt: r.updated_at,
 });
 
+/** What the reel's product picker shows: a product's name, price, pictures and whether it is on sale. Nothing else of the catalog. */
+const toProductChoice = (p) => ({ id: p.id, name: p.name, pricePaise: p.price_paise, images: p.images, active: p.active });
+
 const toReelSummary = (r, base) => ({ ...toReel(r, base), productCount: r.product_count, dmCount: r.dm_count, visitCount: r.visit_count, orderCount: r.order_count });
 
 const toReelDetail = (r, base) => ({
@@ -92,6 +95,12 @@ export function reelsApi({ repos, config }, setup) {
   }
 
   return {
+    // Newest changes first, archived last: the catalog's own order (products.list), so the picker lists what the catalog does.
+    'reels.products': async ({ query }) => {
+      const rows = await repos.products.list({ search: query.search });
+      return mapPage(pageOf(rows, query, (p) => [p.active ? 0 : 1, -new Date(p.updated_at).getTime(), -p.id]), toProductChoice);
+    },
+
     'reels.list': async ({ query, req }) => {
       const rows = await repos.reels.list();
       const address = base(req);

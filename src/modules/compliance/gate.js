@@ -348,9 +348,9 @@ export function createGate({ db, repos, config, now, limits, channels }) {
   }
 
   /**
-   * Why nothing may go out on this channel right now, or '': the kill switch, then the business's own pause. For a
-   * sender that is not a job of this queue (ctx.shopperMessages on WhatsApp). The breaker is asked only with
-   * { breaker: true }: it reopens on a probe from this queue, which such a sender never makes.
+   * Why nothing may go out on this channel right now, or '': the kill switch, then the business's own pause, then (with
+   * { breaker: true }) the breaker. For a sender that is not a job of this queue (ctx.shopperMessages on WhatsApp): it asks with
+   * { breaker: true } and, past the breaker's wait, can take its probe through compliance.takeBreakerProbe, so the breaker still closes.
    */
   async function sendingPaused(channel, { breaker = false } = {}) {
     const sw = await switches(channel);

@@ -34,14 +34,18 @@ export function signInHandlers(ctx, services) {
    */
   async function sendCode({ subject, purpose, personId = null }) {
     if (await codes.waiting({ subject, purpose, personId })) return;
-    if (personId) {
-      await limit(ctx.platform, AUTH_LIMITS.codeSendsPerPerson, `${purpose}:${personId}`);
-      // A number someone is linking may be anyone's: it keeps a cap of its own, apart from sign-in's, against spam.
-      if (purpose === 'link') await limit(ctx.platform, AUTH_LIMITS.codeSendsPerNumber, `link:${subject}`);
-    } else {
-      await limit(ctx.platform, AUTH_LIMITS.codeSendsPerNumber, subject);
-    }
-    const code = await codes.issue({ subject, purpose, personId });
+    // Counted under the number's lock, by the one request that makes the code: requests arriving together count once.
+    // Counted in the transaction that makes the code, so a refused send leaves no code and a made one keeps its count.
+    const countSend = async (t) => {
+      if (personId) {
+        await limit(ctx.platform, AUTH_LIMITS.codeSendsPerPerson, `${purpose}:${personId}`, t);
+        // A number someone is linking may be anyone's: it keeps a cap of its own, apart from sign-in's, against spam.
+        if (purpose === 'link') await limit(ctx.platform, AUTH_LIMITS.codeSendsPerNumber, `link:${subject}`, t);
+      } else {
+        await limit(ctx.platform, AUTH_LIMITS.codeSendsPerNumber, subject, t);
+      }
+    };
+    const code = await codes.issue({ subject, purpose, personId, beforeIssue: countSend });
     if (code) await codes.send({ subject, code, purpose });
   }
 
@@ -110,7 +114,8 @@ export async function verifyApple(ctx, { identityToken, nonce }) {
   } catch (err) {
     if (!(err instanceof IdTokenError)) throw err;
     log.warn('accounts.apple_refused', { kind: err.kind });
-    if (err.retryable) throw new ApiError('internal', 'Sign in with Apple isn’t reachable right now. Try again in a minute.');
+    // Apple's keys not answering is not our fault and not a refusal: a 4xx the app shows as "try again in a minute".
+    if (err.retryable) throw new ApiError('rate_limited', 'Sign in with Apple isn’t reachable right now. Try again in a minute.');
     throw refused();
   }
   const once = await ctx.platform.rateLimit.hit('seller_apple_nonce', tokenHash(nonce), { limit: 1, windowMs: APPLE_NONCE_WINDOW_MS });

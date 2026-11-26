@@ -9,6 +9,7 @@ import { Badge, Banner, Button, Card, EmptyState, LoadingRows, Screen, Text, use
 import { useServices } from '../../services.js';
 import { Photo } from '../../shell/parts.js';
 import { NeedSignIn, Problem, useBuy, useSessionState, useStoreQuery } from '../cart/ui.js';
+import { openTab } from '../../shell/menu.js';
 
 export default function WishlistScreen() {
   const { t } = useStrings();
@@ -54,7 +55,7 @@ export default function WishlistScreen() {
       {list.isPending ? <LoadingRows rows={3} label={t('home.common.loading')} testID="wishlist-loading" /> : null}
       <Problem inline error={error} />
       {list.data?.notices?.map((notice) => <Banner key={notice} tone="warn">{notice}</Banner>)}
-      {list.data && !items.length ? <EmptyState testID="wishlist-empty" title={t('wishlist.emptyTitle')} action={<Button label={t('wishlist.browse')} onPress={() => navigation.navigate('catalog.index')} />}>{t('wishlist.emptyBody')}</EmptyState> : null}
+      {list.data && !items.length ? <EmptyState testID="wishlist-empty" title={t('wishlist.emptyTitle')} action={<Button label={t('wishlist.browse')} onPress={() => openTab(navigation, 'catalog.index')} />}>{t('wishlist.emptyBody')}</EmptyState> : null}
       {items.map((item) => (
         <Card key={item.productId} testID={`wish-${item.productId}`}>
           <View style={{ flexDirection: 'row', gap: theme.space[3] }}>

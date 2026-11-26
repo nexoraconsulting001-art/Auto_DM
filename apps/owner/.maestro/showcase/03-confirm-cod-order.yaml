@@ -21,9 +21,9 @@ name: 'Q-11 - Confirm the cash on delivery order in the owner app'
 - tapOn:
     id: tab-orders
 - extendedWaitUntil:
-    visible: ${ORDER_1_NUMBER}
+    visible: '${ORDER_1_NUMBER} · .*'
     timeout: 60000
-- tapOn: ${ORDER_1_NUMBER}
+- tapOn: '${ORDER_1_NUMBER} · .*'
 - extendedWaitUntil:
     visible:
       id: order-action-confirm

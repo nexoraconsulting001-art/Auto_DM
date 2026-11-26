@@ -41,6 +41,24 @@ test('a token is left alone until it has 30 days to live, and then refreshed', a
   assert.deepEqual(expiringKinds(await alertsFor(slice, business.tenant.id)), [], 'a working token never warns');
 });
 
+test('C-05: a due schedule never refreshes a token under 24 hours old or with over 30 days to live', async (t) => {
+  const slice = await startClocked(t);
+  const { business } = await connected(slice);
+  await slice.advance(2 * DAY); // Meta's own clock moves too, so the token Meta issued is old enough for Meta to refresh
+  const due = new Date(slice.clock.now - HOUR);
+  const set = (issuedAgoMs, expiresInMs) => slice.q('UPDATE ig_accounts SET token_issued_at = $2, token_expires_at = $3, next_refresh_at = $4 WHERE ig_user_id = $1', [IG_A, new Date(slice.clock.now - issuedAgoMs), new Date(slice.clock.now + expiresInMs), due]);
+  await set(0.99 * DAY, 20 * DAY);
+  await slice.sweep();
+  assert.equal((await accountRow(slice, IG_A)).token_version, 1, 'Under 24 hours old');
+  await set(20 * DAY, 30.01 * DAY);
+  await slice.sweep();
+  assert.equal((await accountRow(slice, IG_A)).token_version, 1, 'Over 30 days to live');
+  await set(1.01 * DAY, 29.99 * DAY);
+  await slice.sweep();
+  assert.equal((await accountRow(slice, IG_A)).token_version, 2, 'Old enough and close enough');
+  assert.ok((await decisions(slice, business.tenant.id)).some((d) => d.decision === 'token.refreshed'));
+});
+
 test('C-05: when refresh keeps failing the owner is warned at 14, 7, 3 and 1 days, once each', async (t) => {
   const slice = await startClocked(t);
   const { business } = await connected(slice);
@@ -67,7 +85,8 @@ test('a failed refresh is tried every 6 hours for 3 days, then daily', async (t)
   const slice = await startClocked(t);
   await connected(slice);
   await slice.sim.post('/faults', { kind: 'server_error', times: 'forever', match: { path: '/refresh_access_token' } });
-  await slice.q('UPDATE ig_accounts SET token_expires_at = $1, next_refresh_at = $2 WHERE ig_user_id = $3', [new Date(slice.clock.now + 40 * DAY), new Date(slice.clock.now), IG_A]);
+  // Due by PRD 4.2's rule: over 24 hours old, and 30 days or less to live.
+  await slice.q('UPDATE ig_accounts SET token_issued_at = $4, token_expires_at = $1, next_refresh_at = $2 WHERE ig_user_id = $3', [new Date(slice.clock.now + 29 * DAY), new Date(slice.clock.now), IG_A, new Date(slice.clock.now - 2 * DAY)]);
 
   const gaps = [];
   for (let i = 0; i < 14; i++) {
@@ -162,7 +181,7 @@ test('a refusal of an old token cannot end a newer one', async (t) => {
 test('a token that can no longer be decrypted reads as not connected, and is not treated as refused by Meta', async (t) => {
   const slice = await startClocked(t);
   const { business } = await connected(slice);
-  await slice.q(`UPDATE ig_accounts SET access_token_enc = 'v1.gone.aa.bb.cc', next_refresh_at = $2 WHERE ig_user_id = $1`, [IG_A, new Date(slice.clock.now)]);
+  await slice.q(`UPDATE ig_accounts SET access_token_enc = 'v1.gone.aa.bb.cc', next_refresh_at = $2, token_issued_at = $3, token_expires_at = $4 WHERE ig_user_id = $1`, [IG_A, new Date(slice.clock.now), new Date(slice.clock.now - 2 * DAY), new Date(slice.clock.now + 20 * DAY)]);
 
   assert.equal((await business.repos.igAccounts.get(IG_A)).token, '');
   assert.equal(await business.repos.igAccounts.current(), null);

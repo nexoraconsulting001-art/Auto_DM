@@ -59,7 +59,7 @@ function closer() {
 
 /** A shop with a 20-product landing page, a cover picture, the WhatsApp button on and a logo. */
 async function bigPage(t) {
-  const s = await shop(t, { whatsapp: '+91 93200 01717' });
+  const s = await shop(t, { whatsapp: '+91 98111 22233' });
   const ids = [];
   for (let i = 0; i < 20; i++) {
     const image = await s.api.upload(productPhoto(i));
@@ -167,7 +167,7 @@ test('K-32, K-35: a tap opens the product\'s own address directly and is counted
     await page.waitForURL(/wa\.me/);
     expect(outside.length).toBe(1);
     const wa = new URL(outside[0]);
-    expect(`${wa.origin}${wa.pathname}`).toBe('https://wa.me/919320001717');
+    expect(`${wa.origin}${wa.pathname}`).toBe('https://wa.me/919811122233');
     expect(wa.searchParams.get('text')).toBe('Hi, I would like to order Handwoven cotton kurta 1 (₹899). https://shop.test/r/the-big-kurta-edit');
     await expect.poll(async () => (await s.app.db.platform.query(`SELECT name, product_id FROM traffic_events WHERE tenant_id = $1 AND name IN ('outbound_tap', 'whatsapp_tap') ORDER BY id`, [s.tenant.id])))
       .toEqual([{ name: 'outbound_tap', product_id: s.ids[2] }, { name: 'whatsapp_tap', product_id: s.ids[0] }]);

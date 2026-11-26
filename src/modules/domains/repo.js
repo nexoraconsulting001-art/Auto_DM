@@ -5,7 +5,8 @@ const COLS = `domain, status, verify_token, is_primary, verified_at, last_checke
   (status = 'pending' AND now() >= LEAST(COALESCE(check_until, 'infinity'::timestamptz), created_at + interval '72 hours')) AS expired`;
 
 /**
- * Custom domains. A domain is one row in tenant_domains, so two businesses can never both hold it. Everything is about the current
+ * Custom domains. Each business has its own row for a name it claims, and only one row per name can be verified, so two businesses
+ * can never both hold it (migration 940). Everything is about the current
  * business and runs inside its fence, except what must look across businesses: claiming a name and routing a host.
  */
 export function domainsRepo(handle) {
@@ -26,19 +27,22 @@ export function domainsRepo(handle) {
     },
 
     /**
-     * Starts verification, restarting the 72 hours if it had stopped. Until a domain is verified the latest claim holds the row: no one can
-     * squat on a name by adding it first, and only the business whose TXT token is really in DNS can win. A verified domain is
-     * exclusive unless its business is closed. Returns false when the name is held.
+     * Starts verification, restarting the 72 hours if it had stopped. Each business keeps its own claim until the name is verified, so
+     * no one can squat on a name by adding it first, and no later claim can take it from a business whose TXT token is already in
+     * DNS (atk-tenancy-2): whichever claimant's token is really there verifies. A verified domain is exclusive unless its business
+     * is closed. Returns false when the name is held, by another business or already by this one.
      */
     async claim(domain, token, audit) {
       return platform.tx(async (t) => {
         const claimed = await t.query(
           `INSERT INTO tenant_domains AS d (domain, tenant_id, status, verify_token, check_until)
-           VALUES ($1, $2, 'pending', $3, now() + interval '72 hours')
-           ON CONFLICT (domain) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, status = 'pending', verify_token = EXCLUDED.verify_token,
+           SELECT $1, $2, 'pending', $3, now() + interval '72 hours'
+           WHERE NOT EXISTS (SELECT 1 FROM tenant_domains v JOIN tenants b ON b.id = v.tenant_id
+                             WHERE v.domain = $1 AND v.tenant_id <> $2 AND v.status = 'verified' AND b.status <> 'closed')
+           ON CONFLICT (tenant_id, domain) DO UPDATE SET status = 'pending', verify_token = EXCLUDED.verify_token,
              created_at = now(), check_until = EXCLUDED.check_until, verified_at = NULL, last_checked_at = NULL,
              is_primary = false, redirect_to = '', redirect_until = NULL
-           WHERE d.status <> 'verified' OR (SELECT b.status FROM tenants b WHERE b.id = d.tenant_id) = 'closed'
+           WHERE d.status <> 'verified'
            RETURNING domain`,
           [domain, tenantId(), token],
         );
@@ -48,12 +52,33 @@ export function domainsRepo(handle) {
       });
     },
 
+    /**
+     * Records a check of this business's pending claim. When its proof was found the claim becomes the one verified row for the
+     * name: every other business's pending claim on it is dropped, and a closed business's verified row gives way. While another
+     * open business holds the name verified, this claim stays pending.
+     */
     async recordCheck(domain, verified) {
-      await db.query(
-        `UPDATE tenant_domains SET last_checked_at = now(), status = CASE WHEN $3 THEN 'verified' ELSE status END, verified_at = CASE WHEN $3 THEN now() ELSE verified_at END
-         WHERE tenant_id = $1 AND domain = $2 AND status = 'pending'`,
-        [tenantId(), domain, verified],
-      );
+      const tenant = tenantId();
+      if (verified) {
+        const won = await platform.tx(async (t) => {
+          const [mine] = await t.query(`SELECT 1 FROM tenant_domains WHERE tenant_id = $1 AND domain = $2 AND status = 'pending' FOR UPDATE`, [tenant, domain]);
+          if (!mine) return false;
+          const [held] = await t.query(
+            `SELECT 1 FROM tenant_domains v JOIN tenants b ON b.id = v.tenant_id
+             WHERE v.domain = $1 AND v.tenant_id <> $2 AND v.status = 'verified' AND b.status <> 'closed'`,
+            [domain, tenant],
+          );
+          if (held) return false;
+          await t.query('DELETE FROM tenant_domains WHERE domain = $1 AND tenant_id <> $2', [domain, tenant]);
+          await t.query(`UPDATE tenant_domains SET last_checked_at = now(), status = 'verified', verified_at = now() WHERE tenant_id = $1 AND domain = $2`, [tenant, domain]);
+          return true;
+        }).catch((err) => {
+          if (err?.code === '23505') return false; // another business's claim was verified at the same moment
+          throw err;
+        });
+        if (won) return get(domain);
+      }
+      await db.query(`UPDATE tenant_domains SET last_checked_at = now() WHERE tenant_id = $1 AND domain = $2 AND status = 'pending'`, [tenant, domain]);
       return get(domain);
     },
 
@@ -117,7 +142,7 @@ export function domainsRepo(handle) {
     },
 
     async heldByAnother(domain) {
-      const rows = await platform.query('SELECT 1 FROM tenant_domains WHERE domain = $1 AND tenant_id <> $2', [domain, tenantId()]);
+      const rows = await platform.query(`SELECT 1 FROM tenant_domains WHERE domain = $1 AND tenant_id <> $2 AND status = 'verified'`, [domain, tenantId()]);
       return rows.length > 0;
     },
 

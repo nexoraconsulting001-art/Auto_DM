@@ -82,7 +82,7 @@ export function createChecks(ctx) {
       if (!detail?.hasToken) return pending('reconnect');
       const account = await repos.igAccounts.get(detail.igUserId);
       if (!account?.token) return pending('reconnect');
-      const target = detail.loginKind === 'unified' && detail.pageId ? { pageId: detail.pageId, token: account.token } : account;
+      const target = account; // the subscription is on the Instagram account under both logins (see ig-connect/connect.js)
       try {
         const answer = await ctx.meta.client.forAccount(target).subscriptions();
         const apps = Array.isArray(answer?.data) ? answer.data : [];

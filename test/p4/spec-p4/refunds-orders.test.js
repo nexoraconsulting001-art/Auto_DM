@@ -111,11 +111,13 @@ test('S-28: cash collected at the door is refunded by hand, with the reference o
   await shop.handDeliver(order);
   const collected = await shop.orderWhen(order.order_number, (o) => o.payment_status === 'paid', 4000);
   assert.equal(collected.payment_status, 'paid', 'A delivered COD order does not record the cash collected at the door');
+  // The simulator's log is the whole file's (one world, many businesses): only this test's calls are counted.
+  const refundsBefore = (await world.rzp.calls({ method: 'POST', path: '/v1/payments/*/refund' })).length;
   refused(await shop.refund(order.id, { amountPaise: 10000 }), 'A COD refund with no reference', 400);
   const res = need(await shop.refund(order.id, { amountPaise: 10000, reference: 'UPI-UTR-0099' }), 201, 'A COD refund with its reference');
   assert.equal(res.json().method, 'manual');
   assert.equal(res.json().reference, 'UPI-UTR-0099');
-  assert.equal((await world.rzp.calls({ method: 'POST', path: '/v1/payments/*/refund' })).length, 0, 'A COD refund went to the gateway');
+  assert.equal((await world.rzp.calls({ method: 'POST', path: '/v1/payments/*/refund' })).length, refundsBefore, 'A COD refund went to the gateway');
   refused(await shop.refund(order.id, { amountPaise: 49900, reference: 'UPI-UTR-0100' }), 'A manual refund past the cash collected');
 });
 
@@ -205,6 +207,9 @@ test('S-30: a new order cannot jump to delivered, by the API or behind its back 
 test('S-31: cancelling a packed, paid order restores stock, prompts the refund and logs it on the timeline', async () => {
   const shop = await addP4Shop(world);
   const { row, product } = await paidOrder(shop, { stock: 4, qty: 2 });
+  // Paying takes the stock in the order.paid listener (its own transaction, after the payment's): wait for it as for any event.
+  const deadline = Date.now() + 5000;
+  while ((await shop.stockOf(product.id)).stock !== 2 && Date.now() < deadline) await world.quiet(150);
   assert.equal((await shop.stockOf(product.id)).stock, 2, 'Paying did not take the stock');
   ok(await shop.advance(row.id, 'packed'), 'Packing');
   const res = need(await shop.cancel(row.id, { reason: 'out_of_stock', note: 'Damaged in the shop' }), 200, 'Cancelling the packed order').json();

@@ -151,10 +151,10 @@ test('K-11: one product page pasted two ways is one address; a site root is reco
 });
 
 test('K-35 to K-37: the WhatsApp button goes straight to wa.me with the name, price and link, encoded', () => {
-  assert.equal(whatsappDigits('+91 93200 01717'), '919320001717');
+  assert.equal(whatsappDigits('+91 98111 22233'), '919811122233');
   assert.equal(whatsappDigits('12'), null);
-  const link = whatsappOrderLink({ number: '+91 93200 01717', template: 'Hi, I would like {product} ({price}). {url} {constructor}', productName: 'Steel & Brass #2', pricePaise: 34900, url: 'https://shop.example/r/bottles' });
-  assert.ok(link.startsWith('https://wa.me/919320001717?text='));
+  const link = whatsappOrderLink({ number: '+91 98111 22233', template: 'Hi, I would like {product} ({price}). {url} {constructor}', productName: 'Steel & Brass #2', pricePaise: 34900, url: 'https://shop.example/r/bottles' });
+  assert.ok(link.startsWith('https://wa.me/919811122233?text='));
   const text = decodeURIComponent(link.split('?text=')[1]);
   assert.equal(text, 'Hi, I would like Steel & Brass #2 (₹349). https://shop.example/r/bottles {constructor}');
   assert.doesNotMatch(link.split('?text=')[1], /[&#\s]/, 'every & # and space is encoded');

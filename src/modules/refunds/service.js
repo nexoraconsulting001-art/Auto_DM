@@ -30,6 +30,8 @@ import { PaymentError, isGatewayId, lockOrder, paiseOf, raiseAlert, rupees, writ
 const RETRYING = 'retrying';
 /** The payment ran on an own gateway account the store has since replaced: refunded there by the owner, never retried here. */
 const ACCOUNT_CHANGED = 'account_changed';
+/** The gateway reported a refund that doesn't fit ours (another amount, or more than is left): held for ops, never re-asked. */
+const GATEWAY_MISMATCH = 'gateway_mismatch';
 /** Refunds one owner may ask for in a window: enough for a day of returns, not for a runaway script. */
 const REFUND_LIMIT = Object.freeze({ limit: 30, windowMs: 15 * 60_000 });
 
@@ -40,6 +42,8 @@ export const toRefund = (row) => ({
 
 /** The key the gateway knows a refund by. The managed account serves every business, so it names the business too. */
 const gatewayKey = (row) => `t${row.tenant_id}-r${row.id}`;
+/** A managed refund takes back the seller's transfer (S-75); own mode (S-76) and a duplicate payment (never sent) have none. */
+const reversalOf = (payment) => (payment.mode === 'managed' && payment.purpose !== 'duplicate' ? 'pending' : 'none');
 
 const amountField = (message) => new ApiError('validation_failed', message, { fields: { amountPaise: message } });
 
@@ -73,7 +77,9 @@ export function createRefunds(ctx, payments) {
     // Managed: the same part of the seller's Route transfer comes back (S-75). Own mode never has one (S-76). A reversal that
     // Route's transfer.reversed already matched to this refund (payments.applyTransfer) is not counted again (money-7).
     let reversedPaise = 0;
-    if (payment.mode === 'managed' && refund.reversal_status !== 'reversed') {
+    // A shopper's second payment (purpose 'duplicate', atk-money-2) was never sent to the seller: nothing to take back.
+    const duplicate = payment.purpose === 'duplicate';
+    if (payment.mode === 'managed' && !duplicate && refund.reversal_status !== 'reversed') {
       const room = Number(payment.transfer_paise) - Number(payment.reversed_paise);
       const got = paiseOf(reversal?.amountPaise);
       if (got && got > 0) {
@@ -92,7 +98,14 @@ export function createRefunds(ctx, payments) {
       paymentSet.reversed_paise = Number(payment.reversed_paise) + reversedPaise;
       if (paymentSet.reversed_paise >= Number(payment.transfer_paise)) paymentSet.transfer_status = 'reversed';
     }
+    if (duplicate && paymentSet.refunded_paise >= Number(payment.amount_paise)) paymentSet.needs_review = false;
     await changeRow(t, 'payments', payment.id, payment.status, { set: paymentSet });
+    if (duplicate) {
+      // Given back as it came: the order, its paid and refunded totals, the seller's statement and its GST documents are
+      // about the sale, which this never was.
+      await writeAudit(t, { actor, action: 'refund.processed', target: `order:${order.id}`, details: { refundId: Number(refund.id), amountPaise: amount, method: refund.method, reversedPaise: 0, duplicate: true } });
+      return moved.row;
+    }
 
     const refunded = Number(order.refunded_paise) + amount;
     const target = refunded >= Number(order.paid_paise) ? 'refunded' : 'partially_refunded';
@@ -159,6 +172,8 @@ export function createRefunds(ctx, payments) {
     }
     if (answer?.status === 'failed') return db.tx((t) => markFailed(t, row.id, 'gateway_failed'));
     if (answer?.status === 'processed') {
+      const off = differs(row, answer);
+      if (off) return mismatch(row, { id: answer.id, amountPaise: answer.amountPaise }, off);
       const done = await db.tx((t) => markProcessed(t, row.id, { gatewayRefundId: isGatewayId(answer.id) ? answer.id : null, reversal: answer.reversal, actor }));
       kick();
       return done;
@@ -189,8 +204,10 @@ export function createRefunds(ctx, payments) {
         for (const p of captured) left.set(Number(p.id), Number(p.amount_paise) - (await held(t, p.id)));
         const total = [...left.values()].reduce((a, b) => a + b, 0);
         if (amount > total) throw amountField(total > 0 ? `You can refund at most ${rupees(total)} on this order.` : 'This order has been refunded in full already.');
-        // Online first, newest first; cash collected at the door last.
-        const preferred = [...captured].sort((a, b) => (a.provider === 'cod') - (b.provider === 'cod') || Number(b.id) - Number(a.id));
+        // A shopper's extra payment first (atk-money-2: what they paid twice is owed whatever else is refunded), but never for
+        // a return, which gives back the goods' money; then online, newest first; cash collected at the door last.
+        const rank = (p) => (p.purpose === 'duplicate' ? (returnId ? 2 : -1) : p.provider === 'cod' ? 1 : 0);
+        const preferred = [...captured].sort((a, b) => rank(a) - rank(b) || Number(b.id) - Number(a.id));
         const payment = paymentId ? captured.find((p) => Number(p.id) === Number(paymentId)) : preferred.find((p) => left.get(Number(p.id)) >= amount);
         if (paymentId && !payment) throw new ApiError('validation_failed', 'That payment isn’t a captured payment of this order.', { fields: { paymentId: 'Pick a payment of this order' } });
         if (!payment || amount > left.get(Number(payment.id))) {
@@ -204,7 +221,7 @@ export function createRefunds(ctx, payments) {
         const [row] = await t.query(
           `INSERT INTO refunds (tenant_id, order_id, payment_id, amount_paise, method, reference, reason, requested_by, idempotency_key, reversal_status)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-          [tenantId(), order.id, payment.id, amount, manual ? 'manual' : 'gateway', manual ? ref.slice(0, 100) : '', String(reason ?? '').slice(0, 300), actor, idempotencyKey, payment.mode === 'managed' ? 'pending' : 'none'],
+          [tenantId(), order.id, payment.id, amount, manual ? 'manual' : 'gateway', manual ? ref.slice(0, 100) : '', String(reason ?? '').slice(0, 300), actor, idempotencyKey, reversalOf(payment)],
         );
         await writeAudit(t, { actor, action: 'refund.request', target: `order:${order.id}`, details: { refundId: Number(row.id), amountPaise: amount, method: row.method, paymentId: Number(payment.id), ...(returnId ? { returnId: Number(returnId) } : {}) } });
         if (manual) return { row: await markProcessed(t, row.id, { actor }), manual: true };
@@ -287,35 +304,87 @@ export function createRefunds(ctx, payments) {
       return recordOutside(paymentId, entity);
     }
     if (status === 'processed') {
-      const before = target.status;
-      await db.tx((t) => markProcessed(t, target.id, { gatewayRefundId: entity.id, actor: 'webhook:razorpay' }));
-      if (before === 'processed') return 'stale';
+      if (target.status === 'processed') return 'stale';
+      // Only what fits ours is recorded as ours (9.7): another amount, or more than the payment has left (a refund failed,
+      // replaced, then reported processed after all), is a gap for ops at once, never our amount and never an error retried.
+      const off = differs(target, entity);
+      if (off) return mismatch(target, entity, off);
+      try {
+        await db.tx((t) => markProcessed(t, target.id, { gatewayRefundId: entity.id, actor: 'webhook:razorpay' }));
+      } catch (err) {
+        if (!overCaptured(err)) throw err;
+        return mismatch(target, entity, 'over_captured');
+      }
       kick();
       return 'processed';
     }
     if (status === 'failed') {
       if (target.status !== 'requested') return 'stale';
-      await db.tx((t) => markFailed(t, target.id, 'gateway_failed'));
+      await db.tx(async (t) => {
+        await markFailed(t, target.id, 'gateway_failed');
+        // Kept, so a later event about this gateway refund finds this row by it, never by its note or amount.
+        await noteGatewayId(t, target.id, entity.id);
+      });
       return 'processed';
     }
-    if (!target.gateway_refund_id) await db.query('UPDATE refunds SET gateway_refund_id = $3 WHERE tenant_id = $1 AND id = $2 AND gateway_refund_id IS NULL', [tenantId(), target.id, entity.id]);
+    await noteGatewayId(db, target.id, entity.id);
     return 'stale';
+  }
+
+  /** What the database refuses about a refund: more than the payment has left, or a payment not captured. */
+  const overCaptured = (err) => err?.constraint === 'refunds_within_captured' || err?.constraint === 'refunds_payment_captured';
+
+  /** The gateway's id on our refund, once, and only if no other refund of this business has it. */
+  async function noteGatewayId(q, refundId, gatewayRefundId) {
+    if (!isGatewayId(gatewayRefundId)) return;
+    await q.query(
+      `UPDATE refunds SET gateway_refund_id = $3 WHERE tenant_id = $1 AND id = $2 AND gateway_refund_id IS NULL
+         AND NOT EXISTS (SELECT 1 FROM refunds WHERE tenant_id = $1 AND gateway_refund_id = $3)`,
+      [tenantId(), refundId, gatewayRefundId],
+    );
+  }
+
+  /** Why what the gateway says it refunded is not our refund, or null when it is. A report without an amount names none. */
+  function differs(ours, reported) {
+    const got = paiseOf(reported?.amountPaise);
+    return got !== null && got !== undefined && got !== Number(ours.amount_paise) ? 'amount' : null;
+  }
+
+  /**
+   * The gateway reported a refund of ours that doesn't fit it (atk-money-3, atk-money-4). Nothing is recorded as refunded:
+   * the refund keeps its amount held (a requested one) or stays failed, keeps the gateway's id, is no longer asked about by
+   * the sweep, and ops get a refund_mismatch gap with both amounts and an alert, to settle it with the gateway.
+   */
+  async function mismatch(ours, reported, reason) {
+    await db.tx(async (t) => {
+      const order = await lockOrder(t, ours.order_id);
+      await noteGatewayId(t, ours.id, reported?.id);
+      await t.query('UPDATE refunds SET error_code = $3 WHERE tenant_id = $1 AND id = $2 AND status <> $4', [tenantId(), ours.id, GATEWAY_MISMATCH, 'processed']);
+      const details = { reason, refundId: Number(ours.id), gatewayRefund: isGatewayId(reported?.id) ? reported.id : null, oursPaise: Number(ours.amount_paise), gatewayPaise: paiseOf(reported?.amountPaise) ?? 0 };
+      await writeGap(t, { kind: 'refund_mismatch', ref: `refund:${ours.id}`, details });
+      await raiseAlert(t, {
+        kind: 'refund.mismatch', audience: 'ops', severity: 'critical', target: `order:${order.id}`, dedupeKey: `refund-mismatch:${ours.id}`,
+        message: `The gateway reported a refund on order ${order.order_number} that does not match ours (${rupees(ours.amount_paise)}). Nothing was recorded as refunded: check it with the gateway.`,
+      });
+    });
+    log.warn('refunds.gateway_mismatch', { refundId: Number(ours.id), reason });
+    return 'refund_mismatch';
   }
 
   async function recordOutside(paymentId, entity) {
     try {
       await db.tx(async (t) => {
-        const [payment] = await t.query('SELECT order_id, mode FROM payments WHERE tenant_id = $1 AND id = $2', [tenantId(), paymentId]);
+        const [payment] = await t.query('SELECT order_id, mode, purpose FROM payments WHERE tenant_id = $1 AND id = $2', [tenantId(), paymentId]);
         await lockOrder(t, payment.order_id);
         const [row] = await t.query(
           `INSERT INTO refunds (tenant_id, order_id, payment_id, amount_paise, method, reason, requested_by, idempotency_key, gateway_refund_id, reversal_status)
            VALUES ($1, $2, $3, $4, 'gateway', 'Refunded at the gateway', 'webhook:razorpay', $5, $6, $7) ON CONFLICT DO NOTHING RETURNING id`,
-          [tenantId(), payment.order_id, paymentId, entity.amountPaise, `gw-${entity.id}`.slice(0, 80), entity.id, payment.mode === 'managed' ? 'pending' : 'none'],
+          [tenantId(), payment.order_id, paymentId, entity.amountPaise, `gw-${entity.id}`.slice(0, 80), entity.id, reversalOf(payment)],
         );
         if (row) await markProcessed(t, row.id, { gatewayRefundId: entity.id, actor: 'webhook:razorpay' });
       });
     } catch (err) {
-      if (err?.constraint !== 'refunds_within_captured' && err?.constraint !== 'refunds_payment_captured') throw err;
+      if (!overCaptured(err)) throw err;
       await writeGap(db, { kind: 'refund_mismatch', ref: `payment:${paymentId}`, details: { gatewayRefund: entity.id, amountPaise: entity.amountPaise } });
       return 'refund_mismatch';
     }
@@ -355,11 +424,11 @@ export function createRefunds(ctx, payments) {
    */
   async function sweep({ limit = 100 } = {}) {
     const due = await platformDb.query(
-      `SELECT tenant_id, id FROM refunds WHERE method = 'gateway' AND (status = 'requested' OR (status = 'failed' AND error_code = $1))
+      `SELECT tenant_id, id FROM refunds WHERE method = 'gateway' AND ((status = 'requested' AND error_code <> $3) OR (status = 'failed' AND error_code = $1))
          AND updated_at < now() - CASE WHEN created_at > now() - interval '1 hour' THEN interval '2 minutes'
                                         WHEN created_at > now() - interval '1 day' THEN interval '30 minutes' ELSE interval '6 hours' END
          AND created_at > now() - interval '30 days' ORDER BY updated_at LIMIT $2`,
-      [RETRYING, limit],
+      [RETRYING, limit, GATEWAY_MISMATCH],
     );
     const results = [];
     for (const { tenant_id: tid, id } of due) {

@@ -1,5 +1,6 @@
 import net from 'node:net';
 import { domainToASCII } from 'node:url';
+import { platformAppHostOf } from '../../config.js';
 import { RESERVED_SLUGS } from '../../repos/tenants.js';
 import { normalizeHost } from '../../tenancy.js';
 import { ValidationError } from '../../util.js';
@@ -26,17 +27,46 @@ export function toAsciiHost(input) {
   return normalizeHost(domainToASCII(normalizeHost(typed)));
 }
 
-/** True for the neutral domain, anything under it, and the console host: addresses that are the platform's own. */
+const hostOfUrl = (url) => {
+  try {
+    return url ? normalizeHost(new URL(url).hostname) : '';
+  } catch {
+    return '';
+  }
+};
+
+/** Where each business gets its own address, <slug>.<root>: PLATFORM_DOMAIN and SIGNUP_HOST_SUFFIX. */
+const fallbackRoots = (config) => [...new Set([config.platformDomain, config.signupHostSuffix].map(normalizeHost).filter(Boolean))];
+
+/**
+ * Every other host the platform itself answers on (atk-tenancy-3): the console, the host sellers sign in on, the public and
+ * Meta callback base addresses, the marketing site, the neutral email domain and the edge host custom domains point at.
+ */
+const platformHosts = (config) => [...new Set([
+  platformHostOf(config), normalizeHost(platformAppHostOf(config)), hostOfUrl(config.publicBaseUrl), hostOfUrl(config.metaCallbackBaseUrl),
+  hostOfUrl(config.platformSiteUrl), normalizeHost(config.emailNeutralDomain), edgeHost(config),
+].filter(Boolean))];
+
+const under = (host, root) => host === root || host.endsWith(`.${root}`);
+
+/** True for every host the platform answers on and anything under one: addresses that are the platform's own, never a business's domain. */
 export function isPlatformAddress(host, config) {
-  const under = (root) => Boolean(root) && (host === root || host.endsWith(`.${root}`));
-  return under(normalizeHost(config.platformDomain)) || under(platformHostOf(config));
+  return [...fallbackRoots(config), ...platformHosts(config)].some((root) => under(host, root));
 }
 
-/** A host that can never be given a certificate or a store through a business. */
+/**
+ * A host that can never be given a certificate or a store through a business: a platform host or anything under one, a fallback
+ * root, and a reserved label under a fallback root. A business's own fallback address (<slug>.<root>) is not reserved here.
+ */
 export function isReservedHost(host, config) {
-  const root = normalizeHost(config.platformDomain);
-  if (host === root || host === platformHostOf(config)) return true;
-  return Boolean(root) && host.endsWith(`.${root}`) && RESERVED_LABELS.has(host.slice(0, -(root.length + 1)));
+  const hosts = platformHosts(config);
+  if (hosts.includes(host)) return true;
+  for (const root of fallbackRoots(config)) {
+    if (host === root) return true;
+    const label = host.endsWith(`.${root}`) ? host.slice(0, -(root.length + 1)) : '';
+    if (label && !label.includes('.')) return RESERVED_LABELS.has(label);
+  }
+  return hosts.some((root) => host.endsWith(`.${root}`));
 }
 
 /** The domain a seller may add, normalised, or a ValidationError saying why not. */

@@ -118,3 +118,23 @@ test('P-68: "Sign in another way" drops the stored session first, so the lock is
   expect(api.calls.some((c) => c.path === '/auth/refresh')).toBe(false);
   await act(async () => {});
 });
+
+test('seller-ui-9: "Sign in another way" signs out through the one sign-out path, so the locked session’s cached screens go too', async () => {
+  LocalAuthentication.authenticateAsync.mockImplementation(async () => ({ success: false, error: 'authentication_failed' }));
+  const api = fakeApi();
+  const made = servicesFor(api);
+  await made.store.setRefreshToken('r1');
+  await made.store.setLockEnabled(true);
+  made.queryClient.setQueryData(['orders', 'probe'], { items: ['held from the locked session'] });
+  const heard = [];
+  made.session.on('signedOut', (reason) => heard.push(reason));
+  await openApp(api, { services: made });
+  await fireEvent.press(await screen.findByTestId('lock-sign-in'));
+  expect(await screen.findByTestId('sign-in')).toBeTruthy();
+  expect(heard).toEqual(['signed_out']); // the services' listener empties the query cache and every business's saved rows
+  expect(made.queryClient.getQueryData(['orders', 'probe'])).toBeUndefined();
+  expect(await made.store.getRefreshToken()).toBeNull();
+  expect(api.calls.some((c) => c.path === '/auth/refresh')).toBe(false); // the refresh token is still never read without an unlock
+  expect(api.calls.some((c) => c.path.startsWith('/push/devices'))).toBe(false); // a locked session has no token to send it with
+  await act(async () => {});
+});

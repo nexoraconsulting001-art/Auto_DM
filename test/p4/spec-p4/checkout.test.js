@@ -49,8 +49,8 @@ test('S-13: the second address marked default is the one checkout preselects, an
   await shop.item();
   const b = buyer(world, shop);
   await b.signIn();
-  const first = ok(await b.addAddress({ line1: '1 First Street', isDefault: true }), 'The first address').data;
-  const second = ok(await b.addAddress({ line1: '2 Second Street' }), 'The second address').data;
+  const first = ok(await b.addAddress({ line1: '1 First Street', isDefault: true }), 'The first address').data.address;
+  const second = ok(await b.addAddress({ line1: '2 Second Street' }), 'The second address').data.address;
   ok(await b.updateAddress(second.id, { ...address({ line1: '2 Second Street' }), isDefault: true }), 'Marking the second as default');
   const list = ok(await b.addresses(), 'The saved addresses').data;
   const items = list.items ?? list;
@@ -71,7 +71,7 @@ test('S-13: another shopper’s or another business’s address id is nobody’s
   const product = await shop.item();
   const owner = buyer(world, shop);
   await owner.signIn();
-  const mine = ok(await owner.addAddress({ line1: '7 Private Lane' }), 'An address').data;
+  const mine = ok(await owner.addAddress({ line1: '7 Private Lane' }), 'An address').data.address;
   const thief = buyer(world, shop);
   await thief.signIn();
   refused(await thief.updateAddress(mine.id, address({ line1: 'Taken over' })), 'Changing another shopper’s address', [403, 404]);
@@ -92,7 +92,7 @@ test('S-14: a past order keeps the address it was placed with, whatever is edite
   const product = await shop.item();
   const b = buyer(world, shop);
   await b.signIn();
-  const saved = ok(await b.addAddress({ name: 'Asha Rao', line1: '12 Lake Road', city: 'Pune', pincode: '411001' }), 'An address').data;
+  const saved = ok(await b.addAddress({ name: 'Asha Rao', line1: '12 Lake Road', city: 'Pune', pincode: '411001' }), 'An address').data.address;
   const placed = await b.order({ lines: [line(product)], addressId: saved.id });
   ok(await b.updateAddress(saved.id, address({ name: 'Someone Else', line1: '99 New Road', city: 'Mumbai', pincode: '400001', stateCode: '27' })), 'Editing the address');
   const order = await shop.order(placed.orderNumber);
@@ -115,6 +115,8 @@ test('S-15: a double tap, or ten, places exactly one order and one gateway order
   const product = await shop.item({ pricePaise: 49900, stock: 5 });
   const b = buyer(world, shop);
   const body = b.checkoutBody({ lines: [line(product)] });
+  // The simulator's log is the whole file's (one world, many businesses): only this test's calls are counted.
+  const callsBefore = (await world.rzp.calls({ method: 'POST', path: '/v1/orders' })).length;
   const answers = await together(10, () => b.place(body));
   for (const res of answers) noCrash(res, 'A repeated tap');
   const taken = answers.filter((r) => r.status < 300);
@@ -125,7 +127,7 @@ test('S-15: a double tap, or ten, places exactly one order and one gateway order
   const later = ok(await b.place(body), 'The same tap a minute later');
   assert.equal(later.data.orderNumber, taken[0].data.orderNumber);
   const created = await world.rzp.calls({ method: 'POST', path: '/v1/orders' });
-  assert.equal(created.filter((c) => c.body?.receipt === taken[0].data.orderNumber).length, 1, 'The gateway order was created more than once');
+  assert.equal(created.slice(callsBefore).filter((c) => c.body?.receipt === taken[0].data.orderNumber).length, 1, 'The gateway order was created more than once');
   const stock = await shop.stockOf(product.id);
   assert.equal(stock.reserved, 1, 'A double tap held two units');
 });
@@ -371,6 +373,7 @@ test('S-33: a PIN no courier serves blocks the order with a message, before any 
   const product = await shop.item({ pricePaise: 50000 });
   await world.ship.post('/serviceability', { pincode: '799001', serviceable: false });
   const b = buyer(world, shop);
+  const callsBefore = (await world.rzp.calls({ method: 'POST', path: '/v1/orders' })).length;
   const where = ok(await b.api('GET', '/api/store/serviceability?pincode=799001'), 'Serviceability of an unserved PIN').data;
   assert.equal(where.serviceable, false);
   assert.ok(where.message.length > 0);
@@ -379,7 +382,7 @@ test('S-33: a PIN no courier serves blocks the order with a message, before any 
   const res = refused(await b.place(b.checkoutBody({ lines: [line(product)], address: address({ pincode: '799001', stateCode: '16' }) })), 'Ordering to an unserved PIN');
   assert.ok((res.data?.error ?? '').length > 0, 'No message for the shopper');
   assert.equal((await shop.orders()).length, 0);
-  assert.equal((await world.rzp.calls({ method: 'POST', path: '/v1/orders' })).length, 0, 'A gateway order was made for an unserved PIN');
+  assert.equal((await world.rzp.calls({ method: 'POST', path: '/v1/orders' })).length, callsBefore, 'A gateway order was made for an unserved PIN');
 });
 
 test('S-33: a courier that hangs or answers junk never breaks checkout or lets a bad PIN through unseen', async () => {
@@ -455,6 +458,7 @@ test('S-68: a failed advance leaves the order pending, makes no label, and the h
   await shop.payOptions({ partAdvance: true, advanceKind: 'fixed', advanceValue: 10000 });
   const product = await shop.item({ pricePaise: 99900, stock: 2 });
   const b = buyer(world, shop);
+  const labelsBefore = (await world.ship.calls({ method: 'POST', path: '/v1/external/orders/create/adhoc' })).length;
   const placed = await b.order({ lines: [line(product)], paymentMode: 'part_advance' });
   const failed = await world.rzp.post('/pay', { orderId: placed.gateway.gatewayOrderId, outcome: 'failed', webhook: true });
   noCrash(await b.paymentReturn(placed, failed), 'Coming back from a failed payment');
@@ -464,7 +468,7 @@ test('S-68: a failed advance leaves the order pending, makes no label, and the h
   assert.equal(order.payment_status, 'unpaid');
   refused(await shop.send('POST', `/orders/${order.id}/shipments`, {}), 'A label for an order whose advance failed');
   assert.equal((await shop.shipments(order.id)).length, 0);
-  assert.equal((await world.ship.calls({ method: 'POST', path: '/v1/external/orders/create/adhoc' })).length, 0);
+  assert.equal((await world.ship.calls({ method: 'POST', path: '/v1/external/orders/create/adhoc' })).length, labelsBefore);
   await world.age((STORE_LIMITS.holdMinutes + 1) * MINUTE);
   order = await shop.orderWhen(placed.orderNumber, (o) => o.fulfilment_status === 'cancelled');
   assert.equal(order.fulfilment_status, 'cancelled');

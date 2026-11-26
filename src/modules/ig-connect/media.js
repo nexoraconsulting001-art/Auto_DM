@@ -2,6 +2,7 @@ import { ApiError } from '../../contracts/api/index.js';
 import { log } from '../../platform/log.js';
 
 const MEDIA_TYPE = { REELS: 'reel', STORY: 'story' };
+const MEDIA_CALL = 'media_list';
 const typeOf = (media) => MEDIA_TYPE[media.media_product_type] ?? 'post';
 
 function postedAt(value) {
@@ -17,7 +18,7 @@ const decodeCursor = (cursor) => (cursor ? Buffer.from(cursor, 'base64url').toSt
  * One page of the builder's grid (PRD 6.8), read live from Instagram. Nothing is stored, so story media is only ever a reference (PRD 4.14).
  * Stories have their own Graph edge, so "all" puts them ahead of the first page of posts and reels.
  */
-export function createMediaList({ repos, meta }) {
+export function createMediaList({ repos, meta, compliance }) {
   async function read(client, { type, limit, after }) {
     if (type === 'story') return { media: await client.listStories({ limit, after }), stories: null };
     const firstPageOfAll = type === 'all' && !after;
@@ -32,6 +33,9 @@ export function createMediaList({ repos, meta }) {
   return async function list({ type, limit, cursor }) {
     const account = await repos.igAccounts.current();
     if (!account) return { items: [], nextCursor: null };
+    // A read that isn't a message waits behind them when the account is near its limits (PRD 4.3: 75% and 80002).
+    const { allow, reason } = await compliance.readAllowed('instagram', account.igUserId, MEDIA_CALL);
+    if (!allow) throw new ApiError('conflict', 'Instagram is busy right now. Try again in a few minutes.', { reason });
     let answer;
     try {
       answer = await read(meta.client.forAccount(account), { type, limit, after: decodeCursor(cursor) });

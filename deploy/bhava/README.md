@@ -17,7 +17,7 @@ Runs next to the live apps, without touching them.
 
 ```bash
 free -h                                    # all sites share 6 GB; Bhava needs up to about 1.4 GB
-git clone https://github.com/nexoraconsulting001-art/Auto_DM ~/bhava
+git clone <this repository> ~/bhava
 cd ~/bhava && git checkout bhava/build
 cd deploy/bhava && cp .env.example .env && nano .env
 docker compose up -d --build
@@ -94,3 +94,16 @@ On a new server the `bhava_app` login does not exist yet. The restore makes the 
 ## Monitoring
 
 `/readyz` shows whether the app can reach its database and which module drivers it runs. `/metrics` needs `Authorization: Bearer <METRICS_TOKEN>`.
+
+## Demo profile (test copies for payments, courier, WhatsApp)
+
+For a client demo the QA server runs with `compose.demo.yaml` on top of `compose.yaml`: web and worker start with `NODE_ENV=staging` (`demo.env`), and a `sim` container runs the test copies from `tools/sim` on `127.0.0.1:9101-9106` (meta 9101 unused, whatsapp 9102, razorpay 9103, shiprocket 9104, shopify 9105, google 9106). Instagram stays real. Put test values for `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `SHIPROCKET_EMAIL`, `SHIPROCKET_PASSWORD`, `WHATSAPP_APP_SECRET` and `WHATSAPP_VERIFY_TOKEN` in `.env` (never live ones).
+
+```bash
+cd ~/bhava/deploy/bhava
+docker compose -f compose.yaml -f compose.demo.yaml up -d --build
+# load the sample businesses (one-off container, repo folders mounted read-only)
+docker compose -f compose.yaml -f compose.demo.yaml run --rm --no-deps -e SHOWCASE_ALLOW_REMOTE_DB=1 \
+  -v $PWD/../../scripts:/app/scripts:ro -v $PWD/../../seed:/app/seed:ro -v $PWD/../../tools:/app/tools:ro \
+  web node scripts/showcase.js --only first
+```

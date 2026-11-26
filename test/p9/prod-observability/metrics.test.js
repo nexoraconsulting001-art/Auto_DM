@@ -6,12 +6,13 @@ import express from 'express';
 import http from 'node:http';
 import { FORBIDDEN_LABELS, METRICS, metricProblem } from '../../../src/contracts/metrics.js';
 import { createMetrics, errorKind, instrumentQueue, metaCallClass, metaCallResult, webhookProviderOf, webhookResultOf } from '../../../src/platform/metrics.js';
+import { createQueue } from '../../../src/platform/queue.js';
 
 const listen = (app) => new Promise((resolve) => {
   const server = app.listen(0, () => resolve({ server, port: server.address().port }));
 });
 const get = (port, path, { method = 'GET', headers = {} } = {}) => new Promise((resolve, reject) => {
-  const req = http.request({ host: '127.0.0.1', port, path, method, headers }, (res) => {
+  const req = http.request({ agent: false, host: '127.0.0.1', port, path, method, headers }, (res) => {
     let text = '';
     res.on('data', (c) => (text += c));
     res.on('end', () => resolve({ status: res.statusCode, text, headers: res.headers }));
@@ -183,9 +184,13 @@ test('G-04: Meta calls are classed by what they did and how they ended, and a lo
   assert.equal(metricProblem('errors_reported_total', { service: 'web', kind: errorKind('x'.repeat(100)) }), null);
 });
 
-test('G-04: the queue is counted by wrapping drain: runs by result and failures, once however often it is wrapped', async () => {
+test('G-04: the queue is counted through its onRun: runs by result and failures, once however often it is wrapped', async () => {
   const metrics = createMetrics({ strict: true });
-  const queue = { drain: async (name, handler) => { for (const job of [{ id: 1 }, { id: 2 }]) await handler(job).catch(() => {}); return 2; } };
+  // A pg queue whose table hands out two jobs once (the Redis driver runs jobs through the same path: test/final/platform/queue-metrics-redis.test.js).
+  let claimed = false;
+  const rows = [1, 2].map((id) => ({ id, tenant_id: null, payload: {}, attempts: 1, max_attempts: 5 }));
+  const db = { query: async (sql) => (/SET status = 'running'/.test(sql) && !claimed ? ((claimed = true), rows) : []) };
+  const queue = createQueue({ queueDriver: 'pg' }, { db });
   assert.equal(instrumentQueue(metrics, queue), true);
   assert.equal(instrumentQueue(metrics, queue), false);
   assert.equal(instrumentQueue(metrics, {}), false);

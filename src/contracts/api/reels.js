@@ -29,6 +29,13 @@ export const ReelProduct = z.object({ id: Id, name: z.string(), pricePaise: Pais
 export const ReelDetail = Reel.extend({ products: z.array(ReelProduct) });
 
 /**
+ * A product to pick for a reel's store: what the picker shows and nothing more. Reels are for staff with automations, who may
+ * not read the catalog itself (products.list is staff with catalog), and a reel's store needs at least one product.
+ */
+export const ReelProductChoice = ReelProduct.omit({ position: true });
+export const ReelProductQuery = ListQuery.extend({ search: text(80).optional() });
+
+/**
  * Saving creates the reel's store the first time and replaces it after that. A reel is its landing page (PRD 8.10): the DM
  * a comment gets is an automation's (PRD 6.1), made in Automations, where the plan's limits and the message and link checks
  * apply. So the Phase 0 keyword DM fields are refused here, with a message saying where they went (final review D-11); a reel
@@ -67,4 +74,5 @@ export const reelRoutes = {
   'reels.save': { method: 'PUT', path: '/reels/:id', access, params: ReelParams, body: ReelSave, response: ReelDetail },
   'reels.remove': { method: 'DELETE', path: '/reels/:id', access, params: ReelParams, status: 204, response: null },
   'reels.instagramPosts': { method: 'GET', path: '/instagram/posts', access, query: ListQuery, response: page(InstagramPost) },
+  'reels.products': { method: 'GET', path: '/reel-products', access, query: ReelProductQuery, response: page(ReelProductChoice) },
 };

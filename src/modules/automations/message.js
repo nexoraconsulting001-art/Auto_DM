@@ -68,7 +68,9 @@ export const parseFaqPayload = (payload) => {
 export function firstMessage({ automation, variant, mode, firstName, finalUrl, payload }) {
   const twoTap = mode === 'two_tap' && Boolean(finalUrl);
   const message = { text: render(variant.body, { firstName, url: twoTap ? '' : finalUrl }) };
-  if (twoTap) message.button = { payload, title: variant.buttonTitle || automation.tapButtonTitle };
+  // The tap button's text is the automation's own (PRD 6.13, A-72: the owner changes it and new DMs show it). A variant's button
+  // title names a button that opens the link, which a two-tap first message does not have.
+  if (twoTap) message.button = { payload, title: automation.tapButtonTitle };
   else if (finalUrl) message.button = { url: finalUrl, title: variant.buttonTitle || automation.linkButtonTitle };
   if (variant.quickReplies?.length) message.quickReplies = variant.quickReplies;
   return message;

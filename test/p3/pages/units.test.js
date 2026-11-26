@@ -130,8 +130,8 @@ test('F-99: a shared block draws only what its settings say, escaped, and a row 
 
   const banner = String(renderSharedBlock({ block: 'banner', settings: { text: 'New in', imageUrl: '/media/abc', linkUrl: '/c/new' } }, { theme }));
   assert.match(banner, /<a class="banner" href="\/c\/new"><img src="\/media\/abc" alt="" width="520" height="260" loading="lazy"/);
-  const bulk = String(renderSharedBlock({ block: 'bulk_order', settings: { text: 'Ordering for an office?' } }, { theme, whatsappNumber: '919320001717' }));
-  assert.match(bulk, /href="https:\/\/wa\.me\/919320001717\?text=/);
+  const bulk = String(renderSharedBlock({ block: 'bulk_order', settings: { text: 'Ordering for an office?' } }, { theme, whatsappNumber: '919811122233' }));
+  assert.match(bulk, /href="https:\/\/wa\.me\/919811122233\?text=/);
   assert.doesNotMatch(String(renderSharedBlock({ block: 'bulk_order', settings: { text: 'Ordering for an office?' } }, { theme })), /wa\.me/, 'with no number saved there is no WhatsApp button');
   assert.equal(String(renderSharedBlock({ block: 'trust', settings: {} }, { theme, trustItems: [] })), '', 'the trust row shows nothing when the seller promises nothing');
   assert.match(String(renderSharedBlock({ block: 'trust', settings: {} }, { theme, trustItems: [{ label: 'Ships across India', icon: 'truck' }] })), /Ships across India/);

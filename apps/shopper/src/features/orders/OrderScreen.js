@@ -10,6 +10,7 @@ import { useServices } from '../../services.js';
 import { Photo } from '../../shell/parts.js';
 import { NeedSignIn, Problem, Totals, useBag, useBuy, useSessionState, useStoreQuery } from '../cart/ui.js';
 import { paymentWords } from '../checkout/placing.js';
+import { openTab } from '../../shell/menu.js';
 
 export default function OrderScreen() {
   const { t } = useStrings();
@@ -77,7 +78,7 @@ export default function OrderScreen() {
       {query.isPending ? <LoadingRows rows={3} label={t('home.common.loading')} testID="order-loading" /> : null}
       <Problem inline error={error} testID="order-error" />
       {reordered ? (
-        <Banner testID="reorder-result" tone={reordered.missing.length ? 'warn' : 'good'} action={<Button testID="reorder-cart" label={t('orders.goToCart')} onPress={() => navigation.navigate('cart.index')} />}>
+        <Banner testID="reorder-result" tone={reordered.missing.length ? 'warn' : 'good'} action={<Button testID="reorder-cart" label={t('orders.goToCart')} onPress={() => openTab(navigation, 'cart.index')} />}>
           {[t('orders.reordered', { count: reordered.added }), ...reordered.missing.map((m) => t('orders.missing', { name: m.name })), ...reordered.notices].join('\n')}
         </Banner>
       ) : null}

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { SIGNATURE_HEADERS } from '../../contracts/store-routes.js';
 import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
-import { cleanLevel, cleanProduct } from './products.js';
+import { cleanLevel, cleanProduct, idOf } from './products.js';
 import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
 
 /**
@@ -29,7 +29,7 @@ export function createShopifyWebhook(ctx, { products, connection }) {
   /** What is kept of a delivery, by topic. */
   function clean(topic, body) {
     if (topic === 'products/create' || topic === 'products/update') return { product: cleanProduct(body) };
-    if (topic === 'products/delete') return { productId: /^[0-9]{1,20}$/.test(String(body?.id ?? '')) ? String(body.id) : null };
+    if (topic === 'products/delete') return { productId: idOf(body?.id) };
     if (topic === 'inventory_levels/update') return { level: cleanLevel(body) };
     return {};
   }

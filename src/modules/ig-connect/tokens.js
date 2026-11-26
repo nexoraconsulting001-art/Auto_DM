@@ -1,6 +1,6 @@
 import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
-import { DAY, expiryWarning, nextRefreshAt } from './rules.js';
+import { DAY, REFRESH_MIN_AGE_MS, REFRESH_WITHIN_MS, expiryWarning, nextRefreshAt } from './rules.js';
 
 const REFRESH_LEASE_MS = 10 * 60_000;
 const ACTOR = 'system:token-keeper';
@@ -69,11 +69,18 @@ export function createTokenKeeper({ db, repos, meta, now = Date.now, batch = 200
     return swapped === null ? 'superseded' : 'refreshed';
   }
 
+  /**
+   * next_refresh_at is when to look again (the first due time, or the next retry after a failure); PRD 4.2's rule is checked here
+   * too, on the token itself, so a schedule that says "due" can never refresh a token under 24 hours old or with over 30 days left.
+   */
   async function refreshDue(nowMs, tally) {
     const rows = await platform.query(
       `SELECT tenant_id, ig_user_id, token_version FROM ig_accounts
-       WHERE access_token_enc <> '' AND status = 'active' AND next_refresh_at <= $1::timestamptz ORDER BY next_refresh_at LIMIT $2`,
-      [new Date(nowMs), batch],
+       WHERE access_token_enc <> '' AND status = 'active' AND next_refresh_at <= $1::timestamptz
+         AND (token_issued_at IS NULL OR token_issued_at <= $3::timestamptz)
+         AND (token_expires_at IS NULL OR token_expires_at <= $4::timestamptz)
+       ORDER BY next_refresh_at LIMIT $2`,
+      [new Date(nowMs), batch, new Date(nowMs - REFRESH_MIN_AGE_MS), new Date(nowMs + REFRESH_WITHIN_MS)],
     );
     await forEachAccount(rows, (row) => refreshAccount(row, nowMs), tally);
   }

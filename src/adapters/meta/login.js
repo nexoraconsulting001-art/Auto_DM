@@ -1,3 +1,4 @@
+import { externalId } from '../../contracts/api/common.js';
 import { DEFAULT_GRAPH_VERSION } from './client.js';
 import { MetaApiError } from './errors.js';
 import { metaUrls } from './hosts.js';
@@ -25,6 +26,12 @@ export const FACEBOOK_SCOPES = Object.freeze(['pages_show_list', 'pages_manage_m
 
 const splitScopes = (value) => (Array.isArray(value) ? value.map(String) : String(value ?? '').split(/[\s,]+/).filter(Boolean));
 const expiry = (seconds) => (Number.isFinite(seconds) && seconds > 0 ? new Date(Date.now() + seconds * 1000) : null);
+/** An account id from Meta's answer, exact or refused: a JSON number past 2^53 has been rounded onto another account's id. */
+function accountId(value, pathname) {
+  const id = externalId(value);
+  if (!id) throw new MetaApiError({ method: 'GET', pathname, status: 200, kind: 'malformed', delivery: 'none', detail: 'no exact account id in the answer' });
+  return id;
+}
 /** A code copied from a redirect can carry Instagram's trailing #_. */
 const cleanCode = (code) => String(code ?? '').replace(/#_?$/, '');
 
@@ -78,8 +85,8 @@ export function createInstagramLogin(config = {}, { env = process.env, onCall } 
       const { data: long } = await call({ base: urls.graph, method: 'GET', pathname: 'access_token', query: { grant_type: 'ig_exchange_token', client_secret: secret }, token: short.access_token });
       const { data: me } = await call({ base: urls.graph, version, method: 'GET', pathname: 'me', query: { fields: 'id,user_id,username,account_type' }, token: long.access_token });
       return {
-        igUserId: String(me.user_id),
-        appScopedId: String(me.id ?? short.user_id ?? ''),
+        igUserId: accountId(me.user_id, 'me'),
+        appScopedId: externalId(me.id ?? short.user_id) ?? '',
         username: String(me.username ?? ''),
         token: long.access_token,
         expiresAt: expiry(long.expires_in),
@@ -139,18 +146,19 @@ export function createUnifiedLogin(config = {}, { env = process.env, onCall } = 
 
     async connect({ code, redirectUri, igUserId }) {
       const { pages, granted } = await oauth.pagesFor({ code, redirectUri });
-      const linked = pages.filter((p) => p.instagram_business_account?.id);
-      const page = igUserId ? linked.find((p) => String(p.instagram_business_account.id) === String(igUserId)) : linked[0];
+      // A Page whose ids are not exact is left out: a rounded id would be another account's.
+      const linked = pages.filter((p) => externalId(p.instagram_business_account?.id) && externalId(p.id));
+      const page = igUserId ? linked.find((p) => externalId(p.instagram_business_account.id) === String(igUserId)) : linked[0];
       if (!page) throw new Error('No Facebook Page with an Instagram professional account was shared');
       return {
-        igUserId: String(page.instagram_business_account.id),
+        igUserId: accountId(page.instagram_business_account.id, 'me/accounts'),
         appScopedId: '',
         username: String(page.instagram_business_account.username ?? ''),
         token: page.access_token,
         expiresAt: null,
         scopes: granted.map((name) => UNIFIED_TO_CANONICAL[name]).filter(Boolean),
         loginKind: 'unified',
-        pageId: String(page.id),
+        pageId: accountId(page.id, 'me/accounts'),
       };
     },
 
@@ -168,7 +176,7 @@ export function createFacebookLogin(config = {}, { env = process.env, onCall } =
     async connect({ code, redirectUri }) {
       const { pages, granted, expiresAt } = await oauth.pagesFor({ code, redirectUri });
       return {
-        pages: pages.map((p) => ({ pageId: String(p.id), name: String(p.name ?? ''), token: p.access_token, igUserId: p.instagram_business_account?.id ? String(p.instagram_business_account.id) : '' })),
+        pages: pages.filter((p) => externalId(p.id)).map((p) => ({ pageId: externalId(p.id), name: String(p.name ?? ''), token: p.access_token, igUserId: externalId(p.instagram_business_account?.id) ?? '' })),
         scopes: granted,
         expiresAt,
       };

@@ -88,6 +88,24 @@ export function signupApi(ctx) {
     return row ? Number(row.id) : null;
   }
 
+  /**
+   * Whether the day's cap (signup_settings.daily_cap, PRD 5.20) refuses this person's sign-up. It counts every working
+   * business self-serve made today, a first sign-in's included (atk-auth-1), and refuses only a sign-up that would open a
+   * new one: finishing sign-up on the person's own first business that is already working opens nothing new.
+   */
+  async function overCap(q, personId) {
+    const { store } = services();
+    const settings = await store.settings(q);
+    if (settings.dailyCap === null || settings.dailyCap === undefined) return false;
+    if ((await store.madeToday(q)) < settings.dailyCap) return false;
+    const own = await adoptable(q, personId);
+    if (!own) return true;
+    const [row] = await q.query('SELECT signup_opened_at FROM tenants WHERE id = $1', [own]);
+    return !row?.signup_opened_at;
+  }
+
+  const capRefusal = () => new ApiError('forbidden', 'Sign-up is full for today. Please try again tomorrow.', { reason: 'signup.daily_cap' });
+
   /** Makes (or adopts) the business on Free, its owner, the run's link to it and its referral, in one transaction. */
   async function makeBusiness({ run, personId, body, mode }) {
     const { store, db } = services();
@@ -99,6 +117,9 @@ export function signupApi(ctx) {
     for (const slug of slugCandidates(name)) {
       try {
         return await db.tx(async (t) => {
+          // The exact check: under the cap's lock, in the transaction that opens the business (the database checks again, 928).
+          await store.holdCap(t);
+          if (await overCap(t, personId)) throw capRefusal();
           let inviteId = null;
           if (mode === 'invite') {
             inviteId = await store.takeInvite(t, body.inviteCode);
@@ -110,10 +131,13 @@ export function signupApi(ctx) {
           const adopted = Boolean(tenantId);
           let userId;
           if (adopted) {
-            await t.query('UPDATE tenants SET slug = $2, name = $3, account_type = $4, signup_held = false WHERE id = $1', [tenantId, slug, name.slice(0, 80), body.accountType]);
+            await t.query(
+              'UPDATE tenants SET slug = $2, name = $3, account_type = $4, signup_held = false, signup_opened_at = coalesce(signup_opened_at, now()) WHERE id = $1',
+              [tenantId, slug, name.slice(0, 80), body.accountType],
+            );
             [{ id: userId }] = await t.query(`SELECT id FROM users WHERE tenant_id = $1 AND person_id = $2 AND role = 'owner' ORDER BY id LIMIT 1`, [tenantId, personId]);
           } else {
-            [{ id: tenantId }] = await t.query(`INSERT INTO tenants (slug, name, plan, account_type) VALUES ($1, $2, 'free', $3) RETURNING id`, [slug, name.slice(0, 80), body.accountType]);
+            [{ id: tenantId }] = await t.query(`INSERT INTO tenants (slug, name, plan, account_type, signup_opened_at) VALUES ($1, $2, 'free', $3, now()) RETURNING id`, [slug, name.slice(0, 80), body.accountType]);
             [{ id: userId }] = await t.query(
               `INSERT INTO users (tenant_id, name, phone, email, password_hash, role, person_id) VALUES ($1, $2, $3, '', $4, 'owner', $5) RETURNING id`,
               [tenantId, (person.name || name).slice(0, 80), accountPhone(phone?.subject, personId), NO_PASSWORD, personId],
@@ -193,11 +217,9 @@ export function signupApi(ctx) {
         const tenant = await tenantOf(run.tenantId);
         return { tenantId: run.tenantId, slug: tenant.slug, host: businessHost(tenant.slug, ctx.config), runToken: token, next: nextStep(new Set((await store.steps(run)).map((s) => s.step))) ?? 'finished' };
       }
-      // The day's cap on new businesses (signup_settings.daily_cap, Phase 9): a soft ceiling for a launch, read before the
-      // business is made, so two sign-ups in the same instant can pass it by one.
-      if (settings.dailyCap !== null && settings.dailyCap !== undefined && (await store.madeToday()) >= settings.dailyCap) {
-        throw new ApiError('forbidden', 'Sign-up is full for today. Please try again tomorrow.', { reason: 'signup.daily_cap' });
-      }
+      // The day's cap on new businesses (signup_settings.daily_cap, Phase 9), read early so a full day costs no rate-limit
+      // count and no run; makeBusiness checks again under the cap's lock, so sign-ups arriving together can't pass it.
+      if (await services().db.tx((t) => overCap(t, personId))) throw capRefusal();
       await limit(SIGNUP_LIMITS.startsPerAddress, req?.ip);
       await limit(SIGNUP_LIMITS.startsPerPerson, personId);
       if (!run) {

@@ -3,7 +3,9 @@
  * activity, reels, domains): the app opened at a path, signed in as someone, on the stand-in API. Only tests import
  * this file, so it never reaches the app's bundle.
  */
-import * as SecureStore from 'expo-secure-store';
+// The tests' in-memory SecureStore, the one tools/jest/after-env.cjs puts in place of expo-secure-store: only
+// @bhava/app-core's storage.js may import expo-secure-store itself (build.test.js, where tokens may live).
+import SecureStore from '../../../../../tools/jest/secure-store-mock.cjs';
 import { onlineManager } from '@tanstack/react-query';
 import { OWNER, SHOP_A, fakeApi, fakeNetwork, makeServices, renderShell, settle, signedInAs } from '../../shell/testing.js';
 

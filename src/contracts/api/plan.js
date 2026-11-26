@@ -57,7 +57,7 @@ export const ALWAYS_ON = Object.freeze([
   'catalogSettings.get',
   'categories.list', 'categories.reorder', 'categories.get', 'categories.update', 'categories.remove', 'categories.reels', 'categories.rules',
   'categoryRules.remove',
-  'reels.list', 'reels.get', 'reels.save', 'reels.remove', 'reels.instagramPosts',
+  'reels.list', 'reels.get', 'reels.save', 'reels.remove', 'reels.instagramPosts', 'reels.products',
   'orders.list', 'orders.get', 'orders.setStatus', 'orders.timeline', 'orders.advance', 'orders.cancel', 'orders.releaseHold', 'orders.reinstate', 'orders.addNote',
   'orderDownloads.list', 'orderDownloads.create', 'orderDownloads.get',
   'customers.list', 'customers.resetPassword',

@@ -109,6 +109,7 @@ function handlers({ repos, ig, config }) {
       if (!(await repos.reels.get(params.id))) throw new ApiError('not_found');
       await repos.reels.remove(params.id);
     },
+    'reels.products': async ({ query }) => page((await repos.products.list(query)).map((p) => ({ id: p.id, name: p.name, pricePaise: p.price_paise, images: p.images, active: p.active })), query),
     'reels.instagramPosts': async ({ query }) => {
       const instagram = await client();
       if (!instagram) return page([], query);

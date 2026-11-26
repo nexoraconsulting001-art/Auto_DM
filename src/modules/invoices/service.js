@@ -236,6 +236,9 @@ export function createInvoices(ctx) {
       const order = await lockOrder(t, found.order_id);
       const [refund] = await t.query('SELECT * FROM refunds WHERE tenant_id = $1 AND id = $2', [tenantId(), id]);
       if (!order || refund.status !== 'processed') return null;
+      // A shopper's second payment given back (atk-money-2) was never part of the sale: no credit note against its invoice.
+      const [paid] = await t.query('SELECT purpose FROM payments WHERE tenant_id = $1 AND id = $2', [tenantId(), refund.payment_id]);
+      if (paid?.purpose === 'duplicate') return null;
       const [existing] = await t.query('SELECT * FROM invoices WHERE tenant_id = $1 AND refund_id = $2', [tenantId(), id]);
       if (existing) return { invoice: existing, created: false };
       // Money was taken and given back: the sale's own document comes first, if it is somehow missing.
@@ -297,7 +300,8 @@ export function createInvoices(ctx) {
   /**
    * A part-advance order is invoiced in full when the advance is paid (9.13). When it is cancelled, or the parcel comes back
    * to origin, the balance is never collected at the door: a credit note against the invoice takes that balance off, once per
-   * order (migration 913). What was paid online is credited by its own refund's credit note, as for any refund.
+   * order (migration 913). What was paid online is credited by its own refund's credit note, as for any refund. An order
+   * invoiced only after it was cancelled (a late advance) is credited when that advance is refunded (onEvent).
    */
   async function creditBalanceFor(orderId) {
     const result = await once(async (t) => {
@@ -348,7 +352,14 @@ export function createInvoices(ctx) {
   }
 
   async function onEvent(event) {
-    if (event.type === 'refund.processed') return creditNoteFor(event.entityId);
+    if (event.type === 'refund.processed') {
+      // A cancelled part-advance order may have been invoiced only after it was cancelled (its advance came late, S-41), so
+      // the cancellation found nothing to credit. Its advance being refunded settles that it goes no further (money-9).
+      const result = await creditNoteFor(event.entityId);
+      const orderId = event.orderId ?? result?.invoice?.order_id;
+      if (orderId) await creditBalanceFor(orderId);
+      return result;
+    }
     if (event.type === 'order.cancelled' || event.type === 'order.rto_delivered') return creditBalanceFor(event.orderId);
     return issueFor(event.orderId);
   }

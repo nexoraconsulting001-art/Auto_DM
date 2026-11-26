@@ -42,7 +42,7 @@ export function hit(app, path, { host, method = 'GET', headers = {}, body, token
       sent['content-type'] ??= 'application/json';
     }
     if (payload !== undefined) sent['content-length'] = Buffer.byteLength(payload);
-    const req = http.request({ host: '127.0.0.1', port: app.port, path, method, headers: sent }, (res) => {
+    const req = http.request({ agent: false, host: '127.0.0.1', port: app.port, path, method, headers: sent }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {

@@ -36,6 +36,8 @@ test('P-17: replacing the Razorpay key asks for a fresh check first, and the key
   await openApp(api, { signedIn: true });
   await fireEvent.press(await screen.findByTestId('tab-more'));
   await fireEvent.press(await screen.findByTestId('more-payments'));
+  // The key form opens from the Payments screen's "Use keys instead" (the app's own way in, as Maestro P-17 takes it).
+  await fireEvent.press(await screen.findByRole('button', { name: /use keys/i }));
   const secretField = await screen.findByLabelText(/key secret/i);
   expect(secretField.props.secureTextEntry).toBe(true);
   await fireEvent.changeText(await screen.findByLabelText(/key id/i), 'rzp_test_SpecKey123456'); // secret-scan:allow (made up)

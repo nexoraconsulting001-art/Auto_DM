@@ -75,7 +75,7 @@ test('nothing in the catalog, pages, categories or leads can link to another bus
   const category = await one(db, b, `INSERT INTO categories (tenant_id, name, slug) VALUES ($1, 'Bottles', 'bottles') RETURNING id`, [b.id]);
   await assert.rejects(() => one(db, b, 'INSERT INTO category_reels (tenant_id, category_id, page_id, position) VALUES ($1, $2, $3, 0) RETURNING page_id', [b.id, category.id, page.id]), /foreign key/i);
   const text = await one(db, a, `INSERT INTO lead_consent_texts (tenant_id, version, body, channels) VALUES ($1, 1, 'I agree that A may contact me by WhatsApp.', '{whatsapp}') RETURNING id`, [a.id]);
-  await assert.rejects(() => one(db, b, `INSERT INTO leads (tenant_id, first_name, phone, source, consent_text_id) VALUES ($1, 'Asha', '+919320001717', 'landing', $2) RETURNING id`, [b.id, text.id]), /foreign key/i);
+  await assert.rejects(() => one(db, b, `INSERT INTO leads (tenant_id, first_name, phone, source, consent_text_id) VALUES ($1, 'Asha', '+919811122233', 'landing', $2) RETURNING id`, [b.id, text.id]), /foreign key/i);
   assert.deepEqual(await withTenant(b, () => db.query('SELECT id FROM reels')), [], 'RLS hides the other business\'s page');
 });
 
@@ -99,7 +99,7 @@ test('leads hold a first name, one contact and the consent given, and no column 
   assert.deepEqual(columns.filter((c) => /ip|agent|device|message|address|city/.test(c)), []);
   const text = await one(db, a, `INSERT INTO lead_consent_texts (tenant_id, version, body, channels) VALUES ($1, 1, 'I agree that A may contact me by WhatsApp.', '{whatsapp}') RETURNING id`, [a.id]);
   await assert.rejects(() => one(db, a, `INSERT INTO leads (tenant_id, first_name, source, consent_text_id) VALUES ($1, 'Asha', 'landing', $2) RETURNING id`, [a.id, text.id]), /check constraint/i, 'K-55: a contact is required');
-  await assert.rejects(() => one(db, a, `INSERT INTO leads (tenant_id, first_name, phone, source, consent_text_id) VALUES ($1, 'Asha', '93200 01717', 'landing', $2) RETURNING id`, [a.id, text.id]), /check constraint/i, 'international format');
+  await assert.rejects(() => one(db, a, `INSERT INTO leads (tenant_id, first_name, phone, source, consent_text_id) VALUES ($1, 'Asha', '98111 22233', 'landing', $2) RETURNING id`, [a.id, text.id]), /check constraint/i, 'international format');
   await assert.rejects(() => withTenant(a, () => db.query(`UPDATE lead_consent_texts SET body = 'changed wording here' WHERE tenant_id = $1`, [a.id])), /permission denied/i, 'a consent wording is never changed');
 });
 

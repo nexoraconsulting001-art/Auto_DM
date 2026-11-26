@@ -22,6 +22,7 @@ import { ServicesProvider, createServices, useServices, useSession } from './ser
 import { APP_NAME } from './strings.js';
 import { Navigation } from './shell/Navigation.js';
 import { SignInScreen } from './shell/SignInScreen.js';
+import { signOutEverywhere } from './shell/sign-out.js';
 
 function Locked() {
   const { session, lock, store, strings } = useServices();
@@ -40,11 +41,10 @@ function Locked() {
     unlock();
   }, [unlock]);
 
-  // The other way in is a full sign-in: the stored session is dropped first, so the lock is never simply skipped.
-  const signInInstead = useCallback(async () => {
-    await store.clearSession();
-    await session.start();
-  }, [store, session]);
+  // The other way in is a full sign-in. The locked session is signed out first, through the one sign-out path, so the
+  // 'signedOut' listeners drop its query cache and every business's saved rows, and SecureStore is emptied. The refresh
+  // token is never read without an unlock (P-68), so the lock is never simply skipped and nothing is loaded.
+  const signInInstead = useCallback(() => signOutEverywhere({ session, store, requireServer: false }), [store, session]);
 
   return <LockScreen appName={APP_NAME} onUnlock={unlock} onSignInInstead={signInInstead} failed={failed} busy={busy} />;
 }

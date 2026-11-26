@@ -1,6 +1,8 @@
 import { tenantId } from '../../tenancy.js';
+import { requireOwnMedia } from '../../repos/media.js';
 import { ValidationError } from '../../util.js';
 import { ThemeTextUpdate, resolveSlots } from '../../contracts/themes.js';
+import { checkPublicReply } from '../compliance/content.js';
 import { COLOR_KEYS, FONTS, contrastRatio, isHexColor } from './theme.js';
 
 export const DEFAULT_PRESET = 'utsav';
@@ -8,11 +10,6 @@ const MIN_CONTRAST = 4.5;
 const MIN_REPLIES = 5;
 const MAX_REPLIES = 10;
 const MAX_REPLY_LENGTH = 150;
-const REPLY_RULES = [
-  [/https?:\/\/|www\.|\b[a-z0-9-]+\.(?:com|in|net|org|co|io|shop|store|link|ly|me|app)\b/i, 'a link'],
-  [/(?:\+?\d[\s-]?){10,}/, 'a phone number'],
-  [/₹|\brs\.?\s*\d|\binr\s*\d|\d\s*\/-/i, 'a price'],
-];
 
 const LINK_FIELDS = { logoUrl: 'logo_url', logoDarkUrl: 'logo_dark_url', faviconUrl: 'favicon_url' };
 const FONT_FIELDS = { headingFont: 'heading_font', bodyFont: 'body_font' };
@@ -45,7 +42,9 @@ function cleanReplies(value) {
   for (const reply of replies) {
     if (!reply) throw new ValidationError('A reply can’t be empty');
     if (reply.length > MAX_REPLY_LENGTH) throw new ValidationError(`Keep each reply to ${MAX_REPLY_LENGTH} characters`);
-    for (const [pattern, what] of REPLY_RULES) if (pattern.test(reply)) throw new ValidationError(`A public reply can’t contain ${what}`);
+    // The same rules the send path holds a public reply to (PRD 4.9), so what is saved here is what can be posted.
+    const [problem] = checkPublicReply(reply);
+    if (problem) throw new ValidationError(problem.message);
   }
   return replies;
 }
@@ -147,7 +146,9 @@ export function brandKitRepo(db) {
 
       const next = { logo_url: '', logo_dark_url: '', favicon_url: '', heading_font: '', body_font: '', ...current };
       for (const [field, column] of Object.entries(LINK_FIELDS)) {
-        if (input[field] !== undefined) next[column] = cleanLink(input[field], field);
+        if (input[field] === undefined) continue;
+        next[column] = cleanLink(input[field], field);
+        await requireOwnMedia(db, field, next[column]);
       }
       if (!samePreset) Object.assign(next, { heading_font: '', body_font: '' });
       for (const [field, column] of Object.entries(FONT_FIELDS)) {

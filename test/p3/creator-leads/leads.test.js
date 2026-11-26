@@ -331,9 +331,9 @@ test('K-58: a shopper withdraws or erases through their own link, and the seller
   assert.match(row, /^Asha,\+919876543210,asha@example\.com,/);
   assert.match(row, /Withdrawn \d{4}-\d{2}-\d{2},Withdrawn \d{4}-\d{2}-\d{2},Withdrawn \d{4}-\d{2}-\d{2},,"Yes, all"/);
 
-  // Ticking the box again later is fresh consent, for the channels that contact reaches.
+  // Ticking the box again on the public form proves nobody owns that phone, so it never undoes a withdrawal (9.18, D-15).
   assert.equal((await send(w, { cv: '2', phone: '9876543210', email: '' })).status, 200);
-  assert.deepEqual((await consentsOf(w, lead.id)).map((c) => [c.channel, c.withdrawn_at === null]), [['email', false], ['sms', true], ['whatsapp', true]]);
+  assert.deepEqual((await consentsOf(w, lead.id)).map((c) => [c.channel, c.withdrawn_at === null]), [['email', false], ['sms', false], ['whatsapp', false]]);
   assert.equal((await leadsOf(w)).length, 1);
 
   // Deletion on request: the lead and its consent records go, from the shopper's link or by the seller.

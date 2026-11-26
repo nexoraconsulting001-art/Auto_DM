@@ -78,7 +78,7 @@ export function problemText(t, error) {
     const fields = Object.values(error.fields ?? {}).filter((m) => typeof m === 'string' && m && m !== error.message);
     return [error.message, ...fields].join(' ');
   }
-  if (error.status === 403) return t(error.code === 'reauth_required' ? 'reauth.body' : 'error.forbidden');
+  if (error.status === 403) return t(error.code === 'reauth_required' ? 'reauth.body' : errorKey(error)); // a plan refusal is not a role's
   if (error.status === 404) return t('error.notFound');
   return t('error.saveFailed');
 }

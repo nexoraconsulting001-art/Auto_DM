@@ -5,7 +5,7 @@ One structure for every size: the same image, manifests and settings; only count
 ## What scales by itself
 
 - **Web** (HorizontalPodAutoscaler `bhava-web`): 2 to 10 pods on CPU (65%) and memory (80%). Sessions live in the database, so any pod serves anyone.
-- **Worker** (`bhava-worker`): 1 to 6 pods on the queue: the external metric `queue_jobs{status="waiting"}` (from `src/contracts/metrics.js`), 200 waiting jobs per pod. This needs a metrics adapter in the cluster that serves Prometheus series as external metrics, with a rule exposing `queue_jobs` summed by `status`.
+- **Worker** (`bhava-worker`): 1 to 6 pods on the queue: the external metric `queue_jobs{status="queued"}` (jobs ready to run, from the queue's `stats()` in `src/platform/queue.js`), 200 ready jobs per pod. This needs a metrics adapter in the cluster that serves Prometheus series as external metrics, with a rule exposing `queue_jobs` summed by `status`.
 - Disruption budgets keep one web pod and all but one worker pod through node drains.
 
 ## Stages

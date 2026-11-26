@@ -11,9 +11,9 @@ const LINK_LOCK = 4_242_106;
 
 const targetOf = (pageId) => `facebook:${pageId}`;
 
-/** One row of the compliance log, on `runner`, so a change and its row land together. Ids only. */
+/** One row of the compliance log, on `runner`, so a change and its row land together. Ids only. The decision is its reason code (PRD 4.16). */
 const logDecision = (runner, decision, details) => runner.query(
-  `INSERT INTO compliance_events (tenant_id, channel, kind, decision, reason, details) VALUES ($1, 'facebook', 'token', $2, '', $3)`,
+  `INSERT INTO compliance_events (tenant_id, channel, kind, decision, reason, details) VALUES ($1, 'facebook', 'token', $2, $2, $3)`,
   [tenantId(), decision, JSON.stringify(details)],
 );
 

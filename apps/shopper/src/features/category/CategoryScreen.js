@@ -6,6 +6,7 @@ import { useStrings } from '@bhava/app-core/strings';
 import { EmptyState, Screen, Section, Text, useTheme } from '@bhava/ui';
 import { useBrowsePages } from '../../shell/data.js';
 import { Grid, ProductTile, ReelTile, Shown } from '../../shell/parts.js';
+import { openTab } from '../../shell/menu.js';
 
 export default function CategoryScreen() {
   const { t } = useStrings();
@@ -17,7 +18,7 @@ export default function CategoryScreen() {
   const products = query.data?.pages.flatMap((page) => page.products.items) ?? [];
   return (
     <Screen testID="screen-category" scroll={false} contentStyle={{ paddingHorizontal: 0 }}>
-      <Shown query={query} onGone={() => navigation.navigate('catalog.index')}>
+      <Shown query={query} onGone={() => openTab(navigation, 'catalog.index')}>
         {() => (
           <Grid
             testID="category-products"

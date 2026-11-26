@@ -16,8 +16,14 @@ name: Add the seeded product to the cart and open checkout (shared steps)
     timeout: 30000
 - tapOn:
     id: add-to-cart
+# The product page is on the stack above the tabs, so the tab bar is not on screen: once the line is in the bag the page
+# says so and offers the cart itself.
+- extendedWaitUntil:
+    visible:
+      id: added-to-cart
+    timeout: 30000
 - tapOn:
-    id: tab-cart
+    id: added-go-cart
 - extendedWaitUntil:
     visible:
       id: go-checkout

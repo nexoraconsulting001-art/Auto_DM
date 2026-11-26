@@ -13,7 +13,7 @@ export default {
   access: staffWith('automations'),
   feature: null,
   routeIds: [
-    'instagram.connection', 'instagram.connect', 'instagram.disconnect', 'instagram.media',
+    'instagram.connection', 'instagram.connect', 'instagram.connectFinish', 'instagram.disconnect', 'instagram.media',
     'facebook.connection', 'facebook.connect', 'facebook.disconnect', 'facebook.posts', 'facebook.links', 'facebook.suggestions', 'facebook.saveLink', 'facebook.removeLink',
     'console:/connect',
   ],

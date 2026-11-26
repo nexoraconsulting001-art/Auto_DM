@@ -25,7 +25,8 @@ import { creditLines, discountFor, taxedLine, totalsOf } from './money.js';
  * Every change of state runs in one transaction under a per-business advisory lock, so two requests or a request and a
  * webhook for one business are applied one after the other. Inside such a transaction nothing but that transaction is used:
  * the database handle, the platform handle and the repos wait for it (one connection in tests). The provider is called inside
- * it where its answer decides what is written (a new subscription), and after it where it only follows (a queued line).
+ * it where its answer decides what is written: a new subscription, and a queued add-on line (queueItem), whose "find by key,
+ * else add" at the provider is not one step and so must never run twice at once for one line.
  */
 const LOCK_SPACE = 70_701;
 const DAY = 86_400_000;
@@ -45,6 +46,11 @@ const INVOICED_PASS_THROUGH = Object.freeze({
 
 const iso = (value) => (value ? new Date(value).toISOString() : null);
 const day = (value) => (value ? new Date(value).toISOString().slice(0, 10) : null);
+/** The moment a usage month ('YYYY-MM') closes, in India: the first instant of the next month. */
+const monthEnd = (month) => {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 1) - 330 * 60_000);
+};
 const n = (value) => (value === null || value === undefined ? null : Number(value));
 const monthsOf = (cycle) => (cycle === 'yearly' ? 12 : 1);
 
@@ -444,6 +450,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     }
 
     if (target === 'free' && result.effective === 'period_end') await endUnpaid(actor);
+    if (target === 'free' && result.effective === 'now') await endWithSubscription(actor);
     if (result.toFree) {
       // No subscription to end (a plan set by the console): the owner's own move to Free is recorded as theirs.
       await platformDb.query(
@@ -486,24 +493,38 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     return ended.length;
   }
 
-  /** Queues one line with the provider for the next charge. The same key always answers the same line, so a retry never doubles it. */
-  async function queueItem(item, key, { settings, months }) {
-    const s = await subOf(db);
-    if (!s?.provider_subscription_id || s.status === 'cancelled') return null;
-    // A line removed in the meantime is never queued (money-4).
-    const [running] = await db.query('SELECT 1 FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND (ends_at IS NULL OR ends_at > now())', [tenantId(), item.id]);
-    if (!running) return null;
-    const addons = await addonsByCode(db);
-    const offer = asOffer(await offerRow(db, s.offer_code));
-    const buyer = await buyerOf(db, settings);
-    const line = itemLine(item, addons.get(item.addon_code), { offer, settings, placeOfSupply: buyer.stateCode, months });
-    if (line.totalPaise <= 0) {
-      await db.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL', [tenantId(), item.id, `free:${item.id}`]);
-      return null;
-    }
-    const added = await provider().addCharge(s.provider_subscription_id, { name: line.description, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: key });
-    await db.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL', [tenantId(), item.id, added.id]);
-    return added.id;
+  /**
+   * Queues one line with the provider for the next charge, under the business's billing lock (atk-money-1). The provider
+   * cannot make "find the line by its key, else add it" one step (Razorpay add-ons take no idempotency header), so two
+   * callers at once would each add a line. Under the lock the line is read again: one another caller queued, a charge
+   * billed, or a removal ended since the caller read it is left alone. The same key always answers the same line, so a
+   * retry after a lost answer never doubles it.
+   * `since` is the earliest the provider can have made a line with this key (money-6): the item's creation for its first
+   * charge, the start of the queueing window for a renewal. The provider's repeat check looks no further back.
+   */
+  async function queueItem(item, key, { settings, months, since = item.created_at }) {
+    return locked(async (t) => {
+      const s = await subOf(t);
+      if (!s?.provider_subscription_id || s.status === 'cancelled') return null;
+      // Still waiting to be queued, as the caller saw it; a line removed in the meantime is never queued (money-4).
+      const [now] = await t.query(
+        `SELECT * FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL AND billed_through IS NOT DISTINCT FROM $3::timestamptz
+           AND (ends_at IS NULL OR ends_at > now())`,
+        [tenantId(), item.id, iso(item.billed_through)],
+      );
+      if (!now) return null;
+      const addons = await addonsByCode(t);
+      const offer = asOffer(await offerRow(t, s.offer_code));
+      const buyer = await buyerOf(t, settings);
+      const line = itemLine(now, addons.get(now.addon_code), { offer, settings, placeOfSupply: buyer.stateCode, months });
+      if (line.totalPaise <= 0) {
+        await t.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL', [tenantId(), now.id, `free:${now.id}`]);
+        return null;
+      }
+      const added = await provider().addCharge(s.provider_subscription_id, { name: line.description, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: key, since });
+      await t.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL', [tenantId(), now.id, added.id]);
+      return added.id;
+    });
   }
 
   /**
@@ -518,7 +539,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     if (!pid && item.billed_through) return true; // charged already, and nothing queued since
     if (s?.provider_subscription_id) {
       try {
-        await provider().removeCharge(s.provider_subscription_id, pid ? { addonId: pid } : { idempotencyKey: `item:${item.id}:first` });
+        await provider().removeCharge(s.provider_subscription_id, pid ? { addonId: pid } : { idempotencyKey: `item:${item.id}:first`, since: item.created_at });
       } catch (err) {
         if (!(err instanceof ProviderError)) throw err;
         log.warn('billing.drop_deferred', { item: Number(item.id), kind: err.kind, delivery: err.delivery });
@@ -629,6 +650,32 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     const s = await subOf(db);
     for (const item of ended) await dropPending(item, s);
     return ended.length;
+  }
+
+  /**
+   * A cancelled subscription charges nothing more, so the lines it charged end with it (money-10): a recurring line runs to
+   * the end of the period already paid for (when still ahead) and a line never paid for ends now, its charge still waiting
+   * at the provider taken back. A one-time purchase already paid for stays. Features of lines that have ended are switched
+   * off. Called where a subscription is cancelled, and by renewals for cancelled ones, so a paid period that ends later is
+   * switched off then. Does nothing while the subscription is not cancelled. -> how many lines it ended
+   */
+  async function endWithSubscription(actor = 'billing') {
+    const ended = await locked(async (t) => {
+      const s = await subOf(t, { forUpdate: true });
+      if (!s || s.status !== 'cancelled') return null;
+      const paidUntil = s.current_period_end && new Date(s.current_period_end) > at() ? iso(s.current_period_end) : null;
+      const rows = await t.query(
+        `UPDATE subscription_items SET ends_at = GREATEST(starts_at, CASE WHEN billed_through IS NOT NULL AND $2::timestamptz IS NOT NULL THEN $2::timestamptz ELSE now() END)
+         WHERE tenant_id = $1 AND ends_at IS NULL AND NOT (cycle = 'one_time' AND billed_through IS NOT NULL) RETURNING *`,
+        [tenantId(), paidUntil],
+      );
+      await switchOffEnded(t);
+      if (rows.length) await writeAudit(t, { actor, action: 'billing.items_ended', target: 'plan', details: { items: rows.map((r) => Number(r.id)), reason: 'subscription_cancelled' } });
+      return { s, rows };
+    });
+    if (!ended) return 0;
+    for (const item of ended.rows) if (!item.billed_through) await dropPending(item, ended.s);
+    return ended.rows.length;
   }
 
   // ---- invoices ----
@@ -827,7 +874,10 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       await writeAudit(t, { actor: 'billing', action: 'billing.cancelled', target: `subscription:${s.id}` });
       return 'processed';
     });
-    if (outcome === 'processed') await syncPlan(tenantId());
+    if (outcome === 'processed') {
+      await endWithSubscription();
+      await syncPlan(tenantId());
+    }
     return outcome;
   }
 
@@ -862,6 +912,19 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     const settings = await settingsOf(platformDb);
     const done = { queued: 0, passThrough: 0, failed: 0 };
     if (!complete(settings)) return done;
+    // Cancelled subscriptions: lines still open, or a paid period that has since ended with its feature still on (money-10).
+    const ending = await platformDb.query(
+      `SELECT DISTINCT s.tenant_id FROM subscriptions s JOIN subscription_items i ON i.tenant_id = s.tenant_id JOIN addons a ON a.code = i.addon_code
+       WHERE s.status = 'cancelled' AND ((i.ends_at IS NULL AND NOT (i.cycle = 'one_time' AND i.billed_through IS NOT NULL))
+         OR (i.ends_at <= now() AND a.feature IS NOT NULL AND EXISTS (SELECT 1 FROM tenant_features f WHERE f.tenant_id = s.tenant_id AND f.feature = a.feature AND f.enabled)))
+       ORDER BY s.tenant_id`,
+    );
+    for (const { tenant_id: business } of ending) {
+      await withTenant(business, () => endWithSubscription()).catch((err) => {
+        done.failed += 1;
+        reportError(err, { msg: 'billing.end_lines_failed', tenantId: business });
+      });
+    }
     for (const sub of await liveSubscriptions()) {
       await withTenant(sub.tenant_id, async () => {
         try {
@@ -878,7 +941,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
                  AND (ends_at IS NULL OR ends_at > $2::timestamptz) ORDER BY id`,
               [tenantId(), iso(end)],
             );
-            for (const item of due) if (await queueItem(item, `item:${item.id}:${+end}`, { settings, months })) done.queued += 1;
+            for (const item of due) if (await queueItem(item, `item:${item.id}:${+end}`, { settings, months, since: new Date(+end - QUEUE_AHEAD_MS) })) done.queued += 1;
             done.passThrough += await queuePassThrough(s, settings);
           }
         } catch (err) {
@@ -932,7 +995,8 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       // WhatsApp and AI keep the key they always had (one per kind and month); a month's courier charges are named by their last row.
       const key = kind === 'shipping' ? `pt:${tenantId()}:shipping:${month}:${group.last}` : `pt:${tenantId()}:${kind}:${month}`;
       try {
-        const made = await provider().addCharge(s.provider_subscription_id, { name, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: key });
+        // A closed month is charged only once it has closed, so no line for it can be older than the month's end (money-6).
+        const made = await provider().addCharge(s.provider_subscription_id, { name, amountPaise: line.totalPaise, quantity: 1, idempotencyKey: key, since: monthEnd(month) });
         await db.query('UPDATE pass_through_charges SET provider_charge_id = $3 WHERE tenant_id = $1 AND id = ANY($2::bigint[])', [tenantId(), claimed.map((r) => Number(r.id)), made?.id ? String(made.id).slice(0, 80) : null]);
       } catch (err) {
         await db.query('UPDATE pass_through_charges SET queued_at = NULL WHERE tenant_id = $1 AND id = ANY($2::bigint[]) AND invoice_id IS NULL', [tenantId(), claimed.map((r) => Number(r.id))]);
@@ -983,6 +1047,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
           if (!moved) return;
           if (moved.how === 'free') {
             done.freed += 1;
+            await endWithSubscription();
             await syncPlan(tenantId());
             await provider().cancel(moved.s.provider_subscription_id, { atCycleEnd: false }).catch((err) => reportError(err, { msg: 'billing.cancel_failed' }));
           } else {

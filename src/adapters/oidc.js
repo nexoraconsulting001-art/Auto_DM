@@ -26,11 +26,13 @@ const MAX_KEYS_BYTES = 64 * 1024;
 const CLOCK_SKEW_S = 60;
 
 /**
- * The issuer's signing keys (a JWKS document), fetched with a timeout and no redirects and kept for `cacheMs`.
- * A key id that is not in the cached set means the issuer rotated its keys: the set is fetched again, but at most
- * once per `minRefetchMs`, so a stream of tokens with made-up key ids cannot turn this server into a load on the issuer.
+ * The issuer's signing keys (a JWKS document), fetched with a timeout and no redirects and kept for `cacheMs`, which is
+ * `minRefetchMs` unless set: a key the issuer has stopped publishing (it rotates without notice) is trusted at most that
+ * long after the set was last fetched, not for an hour (PRD 10.3, F-109). A key id that is not in the cached set also
+ * means a rotation: the set is fetched again, but at most once per `minRefetchMs`, so a stream of tokens with made-up
+ * key ids cannot turn this server into a load on the issuer. While the issuer can't be reached, the last set verifies.
  */
-export function createKeySet({ url, timeoutMs = 10_000, cacheMs = 60 * 60_000, minRefetchMs = 60_000, fetch: send = (...args) => globalThis.fetch(...args), now = Date.now }) {
+export function createKeySet({ url, timeoutMs = 10_000, minRefetchMs = 60_000, cacheMs = minRefetchMs, fetch: send = (...args) => globalThis.fetch(...args), now = Date.now }) {
   let keys = new Map();
   let fetchedAt = -Infinity;
   let loading = null;

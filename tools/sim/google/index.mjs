@@ -46,7 +46,10 @@ function readIdToken(token) {
   return JSON.parse(Buffer.from(payload, 'base64url').toString());
 }
 
-export function createGoogle({ clientId = 'sim-google-client', clientSecret = 'sim-google-secret', sellerClientId = 'sim-seller-google-client', sellerClientSecret = 'sim-seller-google-secret' } = {}) {
+/** The sellers' OAuth client this simulator knows by default: what a server pointed at it is given as SELLER_GOOGLE_CLIENT_*. */
+export const SIM_SELLER_CLIENT = Object.freeze({ id: 'sim-seller-google-client', secret: 'sim-seller-google-secret' });
+
+export function createGoogle({ clientId = 'sim-google-client', clientSecret = 'sim-google-secret', sellerClientId = SIM_SELLER_CLIENT.id, sellerClientSecret = SIM_SELLER_CLIENT.secret } = {}) {
   const signer = createSigner();
   let nextTokenFault = null;
   const secretOf = (id) => (id === clientId ? clientSecret : id === sellerClientId ? sellerClientSecret : null);

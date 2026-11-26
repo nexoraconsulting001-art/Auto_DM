@@ -62,7 +62,7 @@ export function createIgConnect({ fetchImpl, now } = {}) {
     const connect = createConnect({ db: ctx.db, repos: ctx.repos, meta: ctx.meta, config: ctx.config, platform: ctx.platform, gates });
     const callbacks = createCallbacks({ db: ctx.db, repos: ctx.repos, config: ctx.config, gates });
     const keeper = createTokenKeeper({ db: ctx.db, repos: ctx.repos, meta: ctx.meta, ...(now ? { now } : {}) });
-    const made = { gates, connect, callbacks, keeper, media: createMediaList({ repos: ctx.repos, meta: ctx.meta }) };
+    const made = { gates, connect, callbacks, keeper, media: createMediaList({ repos: ctx.repos, meta: ctx.meta, compliance: ctx.compliance }) };
     built.set(ctx, made);
     return made;
   }

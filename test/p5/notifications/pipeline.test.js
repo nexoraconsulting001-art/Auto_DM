@@ -27,9 +27,14 @@ const order = async (mode = 'prepaid') => {
   await w.app.ctx.orderEvents.drain();
   return made;
 };
+// The furthest the clock has been: a test may set it to a fixed day in the past (quiet hours), and the next must still
+// start after every row written so far, or its events would meet groups "made" in its future.
+let furthest = 0;
 const reset = async () => {
   // Each test starts well clear of the last one's collapse groups.
-  w.clock.advance(10 * MINUTE);
+  furthest = Math.max(furthest, w.clock.ms);
+  w.clock.set(furthest + 10 * MINUTE);
+  furthest = w.clock.ms;
   await w.sims.push.post('/reset');
   await w.sims.email.post('/reset');
   await w.sims.whatsapp.post('/reset');
@@ -290,7 +295,7 @@ test('F-58: a token alert email is Bhava-branded, from Bhava\'s sender, with the
   const images = mail.html.match(/<img\b[^>]*>/g) ?? [];
   assert.equal(images.length, 1);
   assert.ok(images[0].includes(n.WORKSPACE_BADGE) && images[0].includes(logo), 'the logo, once, as the workspace badge');
-  assert.match(mail.html, new RegExp(`href="https?://[^"]+/admin/settings/instagram"`), 'a direct link to the record in the console');
+  assert.match(mail.html, new RegExp(`href="https?://[^"]+/admin/connect"`), 'a direct link to the record in the console');
   assert.equal(/background(-image)?\s*:[^;"']*url\(/i.test(mail.html), false);
   const [alert] = await w.sql(`SELECT notified_at FROM alerts WHERE tenant_id = $1 AND dedupe_key = 'expiry_7d:ME:1'`, [w.tenant.id]);
   assert.ok(alert.notified_at, 'the alert is marked as taken');

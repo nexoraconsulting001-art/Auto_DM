@@ -6,7 +6,8 @@ import { cartRepo } from '../cart/repo.js';
 import { buyable, priceLines, publicLine } from '../checkout/pricing.js';
 import { loyaltyFor } from '../loyalty/index.js';
 import { shopperServices } from '../shoppers/index.js';
-import { trackingToken } from '../shipping/util.js';
+import { returnOption } from '../returns/index.js';
+import { trackingPath } from '../shipping/util.js';
 import { parseBody } from '../storefront/http.js';
 import { visitorIdFrom } from '../../platform/visitor.js';
 import { appCall, cursorNumber, notFound } from './http.js';
@@ -94,19 +95,20 @@ export function mountOrderRoutes(app, ctx) {
     const order = await ownOrder(req.appSession.shopperId, req.params.orderNumber);
     if (!order) throw notFound('We couldn’t find that order in your account.');
     const tid = tenantId();
-    const [items, events, shipments, invoices, returnsOn] = await Promise.all([
+    const [items, events, shipments, invoices, returnHref] = await Promise.all([
       itemsOf(order.id),
       db.query(`SELECT to_status, created_at FROM order_events WHERE tenant_id = $1 AND order_id = $2 AND entity = 'order' AND to_status <> '' ORDER BY id`, [tid, order.id]),
       db.query(`SELECT id, status, awb, courier_name FROM shipments WHERE tenant_id = $1 AND order_id = $2 AND kind = 'forward' ORDER BY id`, [tid, order.id]),
       db.query('SELECT number FROM invoices WHERE tenant_id = $1 AND order_id = $2 ORDER BY id', [tid, order.id]),
-      repos.entitlements.can('store.returns'),
+      // Only while a return can be asked for now: returns on, inside the window, something eligible (S-57), as on the web.
+      returnOption(ctx, order),
     ]);
     const scans = shipments.length
       ? await db.query(`SELECT shipment_id, status, location, occurred_at FROM shipment_events WHERE tenant_id = $1 AND shipment_id = ANY($2::bigint[]) AND status <> '' ORDER BY occurred_at DESC, id DESC`, [tid, shipments.map((s) => s.id)])
       : [];
     const a = order.shipping_address ?? { name: order.customer_name, line1: order.address, city: order.city, state: order.state, pincode: order.pincode };
     const token = order.public_token ?? '';
-    const track = token ? trackingToken(tid, order.id, token) : null;
+    const track = trackingPath(tid, order.id, token);
     const timeline = [{ status: 'placed', at: order.created_at }];
     for (const e of events) if (timeline.at(-1).status !== e.to_status) timeline.push({ status: e.to_status, at: e.created_at });
     return {
@@ -123,12 +125,12 @@ export function mountOrderRoutes(app, ctx) {
         },
         timeline,
         shipments: shipments.map((s) => ({
-          courier: s.courier_name ?? '', awb: s.awb ?? '', status: s.status, expectedAt: null, trackingPath: track ? `/track/${track}` : '',
+          courier: s.courier_name ?? '', awb: s.awb ?? '', status: s.status, expectedAt: null, trackingPath: track,
           scans: scans.filter((e) => e.shipment_id === s.id).map((e) => ({ at: e.occurred_at, text: STEP_WORDS[e.status] ?? '', location: e.location ?? '' })).filter((e) => e.text),
         })),
         invoices: token ? invoices.map((inv) => ({ number: inv.number, path: `/order/${encodeURIComponent(token)}/invoice/${encodeURIComponent(inv.number)}` })) : [],
         canCancel: order.flow === 'checkout' && CANCELLABLE.has(order.fulfilment_status) && !order.shipped_at,
-        canReturn: returnsOn && order.fulfilment_status === 'delivered',
+        canReturn: Boolean(returnHref),
         canReorder: items.some((i) => i.product_id !== null),
       },
     };

@@ -95,7 +95,7 @@ test('S-13: checkout preselects the address marked default', async ({ page }) =>
   const b = buyer(world, shop);
   const phone = await b.signIn();
   await b.addAddress({ line1: '1 First Street', isDefault: true });
-  const second = (await b.addAddress({ line1: '2 Second Street' })).data;
+  const second = (await b.addAddress({ line1: '2 Second Street' })).data.address;
   await b.updateAddress(second.id, { name: 'Asha Rao', phone, line1: '2 Second Street', line2: '', landmark: '', city: 'Pune', stateCode: '27', pincode: '411001', kind: 'home', isDefault: true });
   await page.context().addCookies(Object.entries(b.jar).map(([name, value]) => ({ name, value, url: world.base })));
   await addToBag(page);

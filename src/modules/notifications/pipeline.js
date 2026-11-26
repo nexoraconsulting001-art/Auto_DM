@@ -161,8 +161,11 @@ export function createPipeline({ platformDb, push, providers, config, clock, dev
     const reachable = channel === 'push' ? contact.devices > 0 : channel === 'email' ? Boolean(contact.email) : Boolean(contact.phone);
     if (!reachable) return insert({ status: 'dropped', reason: 'no_address' });
     // The collapse hold runs from when the event happened, not from when this worker got to it: a worker that is behind
-    // never adds its lag to the hold.
-    const happened = ev.created_at ? new Date(ev.created_at) : now;
+    // never adds its lag to the hold. The event's age is measured on the database's clock (now() - created_at, both the
+    // database's), then taken from this worker's clock: one clock per comparison, so a skew between the two never
+    // shortens or ends a hold.
+    const ageMs = Number(ev.age_ms);
+    const happened = Number.isFinite(ageMs) ? new Date(now.getTime() - Math.max(0, ageMs)) : now;
     const holds = channel === 'push' && spec.collapse && !spec.critical;
     let at = deliverAt(ev.kind, channel, prefs, holds && happened < now ? happened : now);
     // A hold that is already over goes now, unless quiet hours have begun since.
@@ -227,7 +230,8 @@ export function createPipeline({ platformDb, push, providers, config, clock, dev
     const now = clock();
     return platformDb.tx(async (t) => {
       const events = await t.query(
-        `SELECT e.id, e.tenant_id, e.kind, e.event_key, e.audience, e.channels, e.data, e.link, e.created_at, tn.name AS business
+        `SELECT e.id, e.tenant_id, e.kind, e.event_key, e.audience, e.channels, e.data, e.link, e.created_at,
+                extract(epoch FROM (now() - e.created_at)) * 1000 AS age_ms, tn.name AS business
          FROM notification_events e JOIN tenants tn ON tn.id = e.tenant_id
          WHERE e.fanned_out_at IS NULL ORDER BY e.id LIMIT $1 FOR UPDATE OF e SKIP LOCKED`,
         [limit],

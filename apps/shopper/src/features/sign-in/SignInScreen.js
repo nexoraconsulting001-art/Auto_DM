@@ -8,6 +8,7 @@ import { useServices } from '../../services.js';
 import { useBootstrap } from '../../shell/data.js';
 import { useBrandName } from '../../shell/parts.js';
 import { Problem, useSessionState } from '../cart/ui.js';
+import { openTab } from '../../shell/menu.js';
 
 export default function SignInScreen() {
   const { t } = useStrings();
@@ -27,7 +28,7 @@ export default function SignInScreen() {
   const options = bootstrap.data?.signIn ?? { whatsapp: true, google: true, apple: false };
   const apple = config.app.platform === 'ios' && options.apple !== false;
 
-  const done = () => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('account.index'));
+  const done = () => (navigation.canGoBack() ? navigation.goBack() : openTab(navigation, 'account.index'));
 
   async function run(task) {
     setBusy(true);

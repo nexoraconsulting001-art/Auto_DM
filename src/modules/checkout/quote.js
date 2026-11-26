@@ -131,7 +131,9 @@ export async function buildQuote(q, ctx, { lines: linesIn, address = null, phone
   }
 
   const options = await paymentOptions(q);
-  const online = onlineReady(options);
+  // Online payment is also a plan feature (store.payments), as payments.settings.checkout and payments.start have it: a
+  // store without it is never offered a way to pay that payments.start would then refuse (money-8).
+  const online = onlineReady(options) && (await entitlementsRepo(q).can('store.payments'));
   const pincode = address?.pincode ?? '';
   const reach = await serviceability(ctx, pincode);
   if (!reach.serviceable) notices.push('We don’t deliver to this PIN code yet. Try another address.');
@@ -150,6 +152,8 @@ export async function buildQuote(q, ctx, { lines: linesIn, address = null, phone
   if (!options.cod) codReason = 'Cash on delivery isn’t offered by this store.';
   else if (options.codMaxPaise !== null && codTotal > options.codMaxPaise) codReason = capReason;
   else codReason = doorReason;
+  // A store that offers cash on delivery tells the shopper why this order can't have it, beside the bag's other notices (S-22).
+  if (options.cod && codReason) notices.push(codReason);
   const split = advanceSplit(options, beforeFees);
   let advanceReason = '';
   if (!options.partAdvance) advanceReason = 'Part payment isn’t offered by this store.';

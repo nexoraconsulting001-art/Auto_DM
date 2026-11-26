@@ -3,7 +3,7 @@ import { HEALTH_STATUSES } from '../health.js';
 import { KYC_STATES, OPERATOR_STEPS, STEP_NAMES, STEP_STATUSES } from '../onboarding.js';
 import { CHANGE_STATES, SERVICES, SERVICE_MODES, TASK_REF_MAX } from '../services.js';
 import { IMPERSONATION_MODES, IMPERSONATION_ROLES, PLATFORM_ROLES } from './access.js';
-import { Count, Id, IdParams, IdText, ListQuery, Timestamp, page, required, text } from './common.js';
+import { Count, Id, IdParams, IdText, ListQuery, Timestamp, noNul, page, required, text } from './common.js';
 
 /**
  * The Platform Console's Phase 7 routes for PRD 5.5, 5.6, 5.8, 5.9, 5.10 and 5.17. platform.js spreads them into
@@ -16,7 +16,7 @@ const superAdmin = Object.freeze(['super_admin']);
 const onboardingTeam = Object.freeze(['super_admin', 'support', 'onboarding']);
 const serviceTeam = Object.freeze(['super_admin', 'service_operator']);
 const Reason = required(500, 'Give a reason');
-const Email = z.string().trim().toLowerCase().max(200).regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Enter a valid email');
+const Email = noNul(z.string().trim().toLowerCase().max(200).regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Enter a valid email'));
 
 // ---- Sign-in (5.5): an emailed code, then TOTP -------------------------------------------------------------------------
 

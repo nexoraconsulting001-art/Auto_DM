@@ -113,25 +113,25 @@ export const NOTIFY_EVENTS = Object.freeze({
     label: 'A connection is about to run out', audience: 'owner', channels: ['push', 'email', 'inapp'],
     one: { title: 'Reconnect {account} soon', body: 'The connection runs out in {days} days. Reconnect to keep your automations running.' },
     many: { title: '{count} connections run out soon', body: 'Reconnect them to keep your automations running.' },
-    email: 'alert', whatsapp: '', link: '/settings/instagram',
+    email: 'alert', whatsapp: '', link: '/connect',
   }),
   'token.invalid': event({
     label: 'A connection stopped working', audience: 'owner', channels: ['push', 'email', 'whatsapp', 'inapp'], critical: true,
     one: { title: 'Reconnect {account} now', body: 'The connection stopped working, so replies are paused. Reconnect to resume.' },
     many: { title: '{count} connections stopped working', body: 'Replies are paused. Reconnect to resume.' },
-    email: 'alert', whatsapp: 'bhava_token_invalid', link: '/settings/instagram',
+    email: 'alert', whatsapp: 'bhava_token_invalid', link: '/connect',
   }),
   'dm.usage_80': event({
     label: 'Messages nearly used up', audience: 'owner', channels: ['email', 'inapp'],
     one: { title: 'You have used {percent}% of this month\'s messages', body: 'See your plan to add more before they run out.' },
     many: { title: 'You have used {percent}% of this month\'s messages', body: 'See your plan to add more before they run out.' },
-    email: 'alert', whatsapp: '', link: '/settings/plan',
+    email: 'alert', whatsapp: '', link: '/billing',
   }),
   'dm.usage_100': event({
     label: 'Messages used up', audience: 'owner', channels: ['push', 'email', 'inapp'], critical: true,
     one: { title: 'This month\'s messages are used up', body: 'Automatic replies have stopped. Change your plan to resume.' },
     many: { title: 'This month\'s messages are used up', body: 'Automatic replies have stopped. Change your plan to resume.' },
-    email: 'alert', whatsapp: 'bhava_usage_full', link: '/settings/plan',
+    email: 'alert', whatsapp: 'bhava_usage_full', link: '/billing',
   }),
   needs_human: event({
     label: 'Conversations that need a person', audience: 'inbox', channels: ['push', 'inapp'], collapse: true,
@@ -173,7 +173,7 @@ export const NOTIFY_EVENTS = Object.freeze({
     label: 'Changes to your team', audience: 'owner', channels: ['email', 'inapp'], mandatory: true,
     one: { title: 'Your team changed', body: 'Someone was added to, changed in or removed from the team of {business}.' },
     many: { title: 'Your team changed', body: '{count} changes were made to the team of {business}.' },
-    email: 'security', whatsapp: '', link: '/settings/team',
+    email: 'security', whatsapp: '', link: '/team',
   }),
   'device.signed_in': event({
     label: 'New sign-ins', audience: 'owner', channels: ['push', 'email', 'inapp'], critical: true, mandatory: true,
@@ -192,7 +192,7 @@ export const NOTIFY_EVENTS = Object.freeze({
     label: 'Your app in store review', audience: 'owner', channels: ['push', 'email', 'inapp'],
     one: { title: 'Your app\'s review moved on', body: 'See where the app for {business} stands.' },
     many: { title: 'Your app\'s review moved on', body: 'See where the app for {business} stands.' },
-    email: 'account', whatsapp: '', link: '/app',
+    email: 'account', whatsapp: '', link: '/app-publishing',
   }),
   // Phase 6 (P-61): the owner's app went live, needs a change, or its build stopped. The store link itself is on the screen the
   // push opens and in the email; the push text holds no address.

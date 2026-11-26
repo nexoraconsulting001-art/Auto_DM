@@ -14,12 +14,17 @@ import { reportError } from './log.js';
  *   work(queue, handler, { concurrency }) starts processing; handler(job) runs as job.tenantId's business.
  *       Throw to retry with backoff, up to maxAttempts.
  *   every(queue, intervalMs, payload) enqueues one job per interval, however many servers call it.
- *   stats() -> { [queue]: { queued, running, failed, unknown } }      close()
+ *   stats() -> { [queue]: { queued, delayed, running, failed, unknown } } for every queue any process has used:
+ *       queued is ready to run now, delayed waits for its time (a delay or a retry's backoff).
+ *   oldestWaiting() -> { [queue]: seconds } how long the oldest ready job of each queue has waited (queues with one only).
+ *   onRun(listener) listener({ queue, result: 'ok' | 'failed' }) after every run of a job in this process (metrics).
+ *   close()
+ * A job that throws is reported (reportError 'job.failed') by the one run path both drivers share (runJob).
  */
-export function createQueue(config = {}, { db } = {}) {
+export function createQueue(config = {}, { db, bullmq, redis } = {}) {
   const driver = config.queueDriver || 'pg';
   if (driver === 'pg') return pgQueue(db?.platform ?? db, config); // the queue serves every business from one table
-  if (driver === 'redis') return redisQueue(config);
+  if (driver === 'redis') return redisQueue(config, { bullmq, redis }); // bullmq and redis: stand-ins for the tests
   throw new Error(`Unknown QUEUE_DRIVER "${driver}" (use pg or redis)`);
 }
 
@@ -27,8 +32,43 @@ export const backoffMs = (attempt) => Math.min(60 * 60_000, 1000 * 2 ** Math.max
 
 const workerId = () => `${os.hostname()}:${process.pid}`;
 
+/** One report for a job that threw, in both drivers (the log scrubs the message): final is true when no retry follows. */
+function reportJobFailure(err, { queue, attempt, maxAttempts, final }) {
+  reportError(err, { msg: 'job.failed', queue, attempt, final: final ?? attempt >= maxAttempts });
+}
+
 async function runHandler(handler, job) {
   return job.tenantId ? withTenant(job.tenantId, () => handler(job)) : handler(job);
+}
+
+/** The listeners of onRun(): one that throws is reported and never changes how the job ended. */
+function runListeners() {
+  const listeners = [];
+  return {
+    add: (fn) => listeners.push(fn),
+    emit(event) {
+      for (const fn of listeners) {
+        try {
+          fn(event);
+        } catch (err) {
+          reportError(err, { msg: 'queue.listener_failed', queue: event.queue });
+        }
+      }
+    },
+  };
+}
+
+/** Runs one job in either driver: tells the onRun listeners how it ended and reports a job that throws, then rethrows it. */
+async function runJob(listeners, handler, job, { maxAttempts }) {
+  try {
+    const out = await runHandler(handler, job);
+    listeners.emit({ queue: job.queue, result: 'ok' });
+    return out;
+  } catch (err) {
+    listeners.emit({ queue: job.queue, result: 'failed' });
+    reportJobFailure(err, { queue: job.queue, attempt: job.attempt, maxAttempts, final: err?.name === 'UnrecoverableError' ? true : undefined });
+    throw err;
+  }
 }
 
 function pgQueue(db, config) {
@@ -36,7 +76,79 @@ function pgQueue(db, config) {
   const pollMs = config.queuePollMs ?? 500;
   const leaseMs = config.queueLeaseMs ?? 5 * 60_000;
   const loops = [];
+  const listeners = runListeners();
   let closed = false;
+
+  // How the work loops find work. A loop with nothing to run waits here, and one probe every pollMs asks the jobs table once
+  // which of the waiting loops' queues have a ready job, so idle polling costs one read a poll for the whole process, not a
+  // write per queue: with ~60 queues worked, per-queue claim polling (and a stale sweep on each) used most of the database.
+  // Stale running jobs are swept on a clock of their own: a lease can't expire faster than leaseMs, so a sweep every tenth of
+  // it finds a dead worker's job just as soon as before.
+  const idle = new Map(); // queue -> Set of resolve functions of the loops waiting on it
+  let probeTimer = null;
+  let probing = null;
+  let lastSweep = 0;
+  const sweepEveryMs = Math.max(pollMs, Math.floor(leaseMs / 10));
+
+  async function sweepIfDue() {
+    const at = Date.now();
+    if (at - lastSweep < sweepEveryMs) return;
+    lastSweep = at;
+    await recoverStale();
+  }
+
+  function wake(queue) {
+    const waiting = idle.get(queue);
+    if (!waiting) return;
+    idle.delete(queue);
+    for (const resolve of waiting) resolve();
+  }
+
+  async function probe() {
+    try {
+      await sweepIfDue();
+      const names = [...idle.keys()];
+      if (!names.length) return;
+      const rows = await db.query(`SELECT DISTINCT queue FROM jobs WHERE status = 'queued' AND run_at <= now() AND queue = ANY($1::text[])`, [names]);
+      for (const row of rows) wake(row.queue);
+    } catch (err) {
+      reportError(err, { msg: 'queue.poll_failed' });
+    }
+  }
+
+  function scheduleProbe() {
+    if (probeTimer || closed) return;
+    probeTimer = setTimeout(async () => {
+      probing = probe();
+      await probing;
+      probing = null;
+      probeTimer = null;
+      if (idle.size && !closed) scheduleProbe();
+    }, pollMs);
+  }
+
+  function waitForWork(queue) {
+    return new Promise((resolve) => {
+      if (!idle.has(queue)) idle.set(queue, new Set());
+      idle.get(queue).add(resolve);
+      scheduleProbe();
+    });
+  }
+
+  /** Claims up to `limit` ready jobs of one queue and runs them, one after another. Returns how many ran. */
+  async function runReady(queue, handler, limit) {
+    const rows = await claim(queue, limit);
+    for (const row of rows) {
+      const job = { id: String(row.id), queue, tenantId: row.tenant_id, payload: row.payload, attempt: row.attempts };
+      try {
+        await runJob(listeners, handler, job, { maxAttempts: row.max_attempts });
+        await finish(row);
+      } catch (err) {
+        await finish(row, err);
+      }
+    }
+    return rows.length;
+  }
 
   /** Running jobs whose worker stopped renewing them: rerun if safe, otherwise mark unknown. */
   async function recoverStale() {
@@ -86,33 +198,26 @@ function pgQueue(db, config) {
          RETURNING id`,
         [queue, tenantId, JSON.stringify(payload), delayMs, dedupeKey, maxAttempts, retryInFlight],
       );
+      // A loop of this process waiting on the queue starts now; other processes' loops find it at their next probe.
+      if (row && !(delayMs > 0)) wake(queue);
       return row ? String(row.id) : null;
     },
-    /** Runs ready jobs once (also used by tests). Returns how many ran. */
+    /** Runs ready jobs once (also used by tests), after sweeping stale running jobs. Returns how many ran. */
     async drain(queue, handler, { limit = 100 } = {}) {
       await recoverStale();
-      const rows = await claim(queue, limit);
-      for (const row of rows) {
-        const job = { id: String(row.id), queue, tenantId: row.tenant_id, payload: row.payload, attempt: row.attempts };
-        try {
-          await runHandler(handler, job);
-          await finish(row);
-        } catch (err) {
-          await finish(row, err);
-        }
-      }
-      return rows.length;
+      return runReady(queue, handler, limit);
     },
     work(queue, handler, { concurrency = 1 } = {}) {
       const loop = async () => {
         while (!closed) {
           let ran = 0;
           try {
-            ran = await this.drain(queue, handler, { limit: concurrency });
+            await sweepIfDue();
+            ran = await runReady(queue, handler, concurrency);
           } catch (err) {
             reportError(err, { msg: 'queue.poll_failed', queue });
           }
-          if (!ran && !closed) await new Promise((r) => setTimeout(r, pollMs));
+          if (!ran && !closed) await waitForWork(queue);
         }
       };
       loops.push(loop());
@@ -121,13 +226,21 @@ function pgQueue(db, config) {
       const slot = Math.floor(Date.now() / intervalMs);
       return this.enqueue(queue, payload, { dedupeKey: `every:${slot}`, retryInFlight: true });
     },
+    onRun: (fn) => listeners.add(fn),
     async stats() {
       const rows = await db.query(
-        `SELECT queue, status, count(*)::int AS n FROM jobs WHERE status IN ('queued', 'running', 'failed', 'unknown') GROUP BY queue, status`,
+        `SELECT queue, CASE WHEN status = 'queued' AND run_at > now() THEN 'delayed' ELSE status END AS status, count(*)::int AS n
+           FROM jobs WHERE status IN ('queued', 'running', 'failed', 'unknown') GROUP BY 1, 2`,
       );
       const out = {};
-      for (const r of rows) (out[r.queue] ??= { queued: 0, running: 0, failed: 0, unknown: 0 })[r.status] = r.n;
+      for (const r of rows) (out[r.queue] ??= emptyCounts())[r.status] = r.n;
       return out;
+    },
+    async oldestWaiting() {
+      const rows = await db.query(
+        `SELECT queue, extract(epoch FROM now() - min(run_at))::float AS age FROM jobs WHERE status = 'queued' AND run_at <= now() GROUP BY queue`,
+      );
+      return Object.fromEntries(rows.map((r) => [r.queue, Math.max(0, Number(r.age))]));
     },
     /** Deletes finished jobs older than `days`. */
     async cleanup(days = 14) {
@@ -135,15 +248,27 @@ function pgQueue(db, config) {
     },
     async close() {
       closed = true;
+      clearTimeout(probeTimer);
+      probeTimer = null;
+      for (const queue of [...idle.keys()]) wake(queue);
       await Promise.all(loops);
+      await probing;
     },
   };
 }
 
-function redisQueue(config) {
+const emptyCounts = () => ({ queued: 0, delayed: 0, running: 0, failed: 0, unknown: 0 });
+
+/** The Redis set of every queue name any process has worked or enqueued to, so the web process's stats see the worker's queues. */
+export const QUEUE_REGISTRY_KEY = 'bhava:queues';
+
+/** When a BullMQ job became ready: its creation plus its first delay, or the start of its last attempt when it is a retry. */
+export const readyAt = (job) => Math.max(Number(job.timestamp) + Number(job.opts?.delay ?? 0), Number(job.processedOn ?? 0));
+
+function redisQueue(config, injected = {}) {
   if (!config.redisUrl) throw new Error('REDIS_URL is required when QUEUE_DRIVER=redis');
   let libPromise;
-  const lib = () => (libPromise ??= import('bullmq'));
+  const lib = () => (libPromise ??= injected.bullmq ? Promise.resolve(injected.bullmq) : import('bullmq'));
   const connection = () => {
     const u = new URL(config.redisUrl);
     return {
@@ -157,6 +282,22 @@ function redisQueue(config) {
   };
   const queues = new Map();
   const workers = [];
+  const listeners = runListeners();
+  let registryClient;
+  const registry = () => (registryClient ??= injected.redis
+    ? Promise.resolve(injected.redis)
+    : import('ioredis').then(({ default: Redis }) => new Redis(connection())));
+  const registered = new Set();
+  async function register(name) {
+    if (registered.has(name)) return;
+    await (await registry()).sadd(QUEUE_REGISTRY_KEY, name);
+    registered.add(name);
+  }
+  /** Every queue name in the registry and this process's own, sorted. */
+  async function names() {
+    const listed = await (await registry()).smembers(QUEUE_REGISTRY_KEY);
+    return [...new Set([...listed, ...registered])].sort();
+  }
   async function queueFor(name) {
     if (!queues.has(name)) {
       const { Queue } = await lib();
@@ -168,6 +309,7 @@ function redisQueue(config) {
   return {
     driver: 'redis',
     async enqueue(queue, payload = {}, { tenantId = null, delayMs = 0, dedupeKey = null, maxAttempts = 5, retryInFlight = false } = {}) {
+      await register(queue);
       const q = await queueFor(queue);
       const jobId = dedupeKey ? String(dedupeKey).replace(/:/g, '_') : undefined; // BullMQ ids can't contain ':'
       if (jobId) {
@@ -188,14 +330,15 @@ function redisQueue(config) {
     work(queue, handler, { concurrency = 1 } = {}) {
       const start = (async () => {
         const { Worker, UnrecoverableError } = await lib();
+        await register(queue);
         const worker = new Worker(queue, async (bjob) => {
           // A job started before but never finished means its worker died mid-run. Unless it is
           // safe to repeat, it ends as 'unknown' instead of running again (same rule as the pg driver).
           if (!bjob.data.retryInFlight && (bjob.attemptsStarted ?? 0) > (bjob.attemptsMade ?? 0) + 1) {
             throw new UnrecoverableError('unknown: worker stopped while running');
           }
-          const job = { id: String(bjob.id), queue, tenantId: bjob.data.tenantId, payload: bjob.data.payload, attempt: bjob.attemptsMade + 1 };
-          return runHandler(handler, job);
+          const job = { id: String(bjob.id), queue, tenantId: bjob.data.tenantId, payload: bjob.data.payload, attempt: (bjob.attemptsMade ?? 0) + 1 };
+          return runJob(listeners, handler, job, { maxAttempts: bjob.opts?.attempts ?? 1 });
         }, { connection: connection(), concurrency, maxStalledCount: 1 });
         worker.on('error', (err) => reportError(err, { msg: 'queue.worker_error', queue }));
         workers.push(worker);
@@ -206,12 +349,23 @@ function redisQueue(config) {
       const slot = Math.floor(Date.now() / intervalMs);
       return this.enqueue(queue, payload, { dedupeKey: `every-${slot}`, retryInFlight: true });
     },
+    onRun: (fn) => listeners.add(fn),
     async stats() {
       const out = {};
-      for (const [name, q] of queues) {
+      for (const name of await names()) {
+        const q = await queueFor(name);
         const c = await q.getJobCounts('waiting', 'delayed', 'active', 'failed');
-        const unknown = (await q.getFailed(0, 1000)).filter((j) => /^unknown:/.test(j.failedReason || '')).length;
-        out[name] = { queued: c.waiting + c.delayed, running: c.active, failed: c.failed - unknown, unknown };
+        const unknown = c.failed ? (await q.getFailed(0, 1000)).filter((j) => /^unknown:/.test(j?.failedReason || '')).length : 0;
+        out[name] = { queued: c.waiting, delayed: c.delayed, running: c.active, failed: c.failed - unknown, unknown };
+      }
+      return out;
+    },
+    async oldestWaiting() {
+      const out = {};
+      const now = Date.now();
+      for (const name of await names()) {
+        const [oldest] = (await (await queueFor(name)).getWaiting(0, 0)).filter(Boolean); // BullMQ lists the oldest first here
+        if (oldest) out[name] = Math.max(0, (now - readyAt(oldest)) / 1000);
       }
       return out;
     },
@@ -219,6 +373,7 @@ function redisQueue(config) {
     async close() {
       await Promise.all(workers.map((w) => w.close()));
       await Promise.all([...queues.values()].map((q) => q.close()));
+      if (registryClient && !injected.redis) await (await registryClient).quit();
     },
   };
 }

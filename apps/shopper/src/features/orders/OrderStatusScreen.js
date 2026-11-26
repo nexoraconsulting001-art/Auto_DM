@@ -13,6 +13,7 @@ import { useServices } from '../../services.js';
 import { Problem, useBuy, useSessionState, useStoreQuery } from '../cart/ui.js';
 import { paymentWords } from '../checkout/placing.js';
 import { NotificationExplainer } from '../notifications/Explainer.js';
+import { openTab } from '../../shell/menu.js';
 
 export default function OrderStatusScreen() {
   const { t } = useStrings();
@@ -68,7 +69,7 @@ export default function OrderStatusScreen() {
       {order?.next === 'pay' ? <Button testID="status-pay" label={t('orders.payNow')} onPress={() => navigation.replace('payment.index', { token })} /> : null}
       {settled || order?.next === 'pending' ? <Button testID="status-track" kind="secondary" label={t('orders.track')} onPress={() => navigation.navigate('tracking.index', { token })} /> : null}
       {order && state.status === 'signedIn' ? <Button testID="status-order" kind="secondary" label={t('orders.viewOrder')} onPress={() => navigation.navigate('orders.order', { orderNumber: order.orderNumber })} /> : null}
-      <Button testID="status-shop" kind="quiet" label={t('orders.keepShopping')} onPress={() => navigation.navigate('catalog.index')} />
+      <Button testID="status-shop" kind="quiet" label={t('orders.keepShopping')} onPress={() => openTab(navigation, 'catalog.index')} />
       <NotificationExplainer enabled={placed} orderToken={token} />
     </Screen>
   );

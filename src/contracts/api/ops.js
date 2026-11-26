@@ -64,6 +64,7 @@ export const SERVICE_ROUTES = Object.freeze({
   'reels.list': { service: REELS },
   'reels.get': { service: REELS },
   'reels.instagramPosts': { service: REELS },
+  'reels.products': { service: REELS },
   'reels.save': { service: REELS, reads: 'reels.get' },
   'reels.remove': { service: REELS, reads: 'reels.get' },
   'categories.reels': { service: REELS },
