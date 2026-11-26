@@ -46,6 +46,7 @@ export const MessagingEvent = z.object({
     mid: z.string(),
     text: z.string().optional(),
     is_echo: z.boolean().optional(),
+    app_id: z.union([z.string(), z.number()]).optional(), // on an echo: the app that sent it (absent when typed in Instagram's own app)
     reply_to: z.object({ story: z.object({ id: ObjectId, url: z.string().optional() }).optional() }).optional(),
     attachments: z.array(z.object({ type: z.string(), payload: z.object({ url: z.string().optional() }).optional() })).optional(),
     quick_reply: z.object({ payload: z.string() }).optional(),

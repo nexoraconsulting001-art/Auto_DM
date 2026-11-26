@@ -231,7 +231,7 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     if (e.read) return { ...base, ...person, type: 'seen', mid: e.read.mid ?? '', watermark: e.read.watermark ?? null, text: '' };
     const m = e.message;
     if (!m) return null;
-    if (m.is_echo) return { ...base, type: 'echo', recipientId: e.recipient.id, mid: m.mid, text: m.text ?? '' };
+    if (m.is_echo) return { ...base, type: 'echo', recipientId: e.recipient.id, mid: m.mid, appId: m.app_id == null ? '' : String(m.app_id), text: m.text ?? '' };
     const attachments = m.attachments ?? [];
     const mention = attachments.find((a) => a.type === 'story_mention');
     if (mention) return { ...base, ...person, type: 'story_mention', mid: m.mid, text: '', mediaRef: mention.payload?.url ?? '' };
@@ -477,6 +477,9 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     const event = { ...ev, subject, personId: ev.recipientId };
     const [ours] = await db.query('SELECT 1 FROM outbound_jobs WHERE tenant_id = $1 AND message_id = $2', [tenantId(), ev.mid]);
     if (ours) return 'done';
+    // Meta stamps an echo with the app that sent it: ours is never the owner typing, however late it comes (A-22).
+    const ownApp = ev.channel === 'facebook' ? config?.fbAppId : config?.igAppId;
+    if (ownApp && ev.appId === String(ownApp)) return 'done';
     const [sending] = await db.query(`SELECT 1 FROM outbound_jobs WHERE tenant_id = $1 AND channel = $2 AND subject_hash = $3 AND status = 'sending' LIMIT 1`, [tenantId(), ev.channel, subject]);
     if (sending && row.attempts < MAX_ATTEMPTS) return 'defer';
     // A send whose receipt carried no id, or was lost, looks exactly like the owner typing. A recent one of ours to this person decides it.
