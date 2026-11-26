@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { requirePlatformRole } from '../../../src/auth.js';
+import { PLATFORM_ROLES } from '../../../src/contracts/api/access.js';
 import { MODULES } from '../../../src/modules/index.js';
 import { OWNER, login, setup, startApp } from '../../helpers.js';
 import { withConsoleApi } from '../console-port/support/console-api.js';
@@ -79,7 +80,8 @@ test('platform users have their own table and no business', async () => {
   assert.equal(user.role, 'support');
   assert.equal('password_hash' in user, false);
   assert.equal((await db.query(`SELECT 1 FROM information_schema.columns WHERE table_name = 'platform_users' AND column_name = 'tenant_id'`)).length, 0);
-  await assert.rejects(() => platform.platformUsers.create({ ...STAFF, role: 'owner' }), /super_admin or support/);
+  // The Phase 7 ops contract (cc58897) added onboarding and service_operator; a business role is still refused.
+  await assert.rejects(() => platform.platformUsers.create({ ...STAFF, role: 'owner' }), new RegExp(`Role must be one of ${PLATFORM_ROLES.join(', ')}`));
   await assert.rejects(() => platform.platformUsers.create(STAFF), /already exists/);
   await assert.rejects(() => db.query(`INSERT INTO platform_users (email, password_hash, role) VALUES ('a@b.c', 'h', 'owner')`), /check constraint/);
   assert.ok(await platform.platformUsers.verify('ASHA@bhava.example', STAFF.password));
@@ -141,7 +143,12 @@ test('platform users can sign in only on the platform host', async () => {
 test('the platform host never serves a business, even with a default business', async () => {
   const app = await consoleApp();
   try {
-    for (const path of ['/', '/shop', '/admin', '/account', '/api/products?ids=1']) {
+    // '/' opens the Platform Console's own web app (Phase 7, cc58897), never a business page.
+    const home = await onConsole(app, '/');
+    assert.equal(home.status, 302);
+    assert.equal(home.headers.get('location'), '/console/');
+    assert.doesNotMatch(await home.text(), /Test store|My store/);
+    for (const path of ['/shop', '/admin', '/account', '/api/products?ids=1']) {
       const res = await onConsole(app, path);
       assert.equal(res.status, 404, path);
       assert.doesNotMatch(await res.text(), /Test store|My store/, path);
