@@ -3,8 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { addReel } from '../../p0/spec-p0/support.js';
-import { TAG_HOSTS, UA, addP2Shop, dayAgo, hit, need, shopper, unique, useP2World } from './support.js';
+import { addProduct, addReel } from '../../p0/spec-p0/support.js';
+import { TAG_HOSTS, UA, addP2Shop, dayAgo, hit, need, placeStoreOrder, setOrderStatusDirect, shopper, unique, useP2World } from './support.js';
 
 const world = useP2World();
 const ALL_HOSTS = [...TAG_HOSTS.meta, ...TAG_HOSTS.ga4];
@@ -29,6 +29,21 @@ const reelPage = async (shop) => `/r/${(await addReel(shop, String(100_000_000 +
 const page = async (shop, path) => need(await hit(world, path, { host: shop.host, headers: { 'user-agent': UA.phone } }), 200, 'The page');
 const csp = (res) => String(res.headers['content-security-policy'] ?? '');
 const settled = (shop) => shop.settle({ ms: 3000, roundMs: 300 });
+/**
+ * A shopper's browser that already has its visitor cookie, as one that opened a page does: the page, or the first beacon, hands it the cookie,
+ * and consent is asked about a visitor (platform.consent needs a subject), so a very first beacon with no cookie can never be sent on.
+ */
+async function returning(shop, options) {
+  const visitor = shopper(world, shop, options);
+  await visitor.send({ name: 'page_view', path: '/a' });
+  return visitor;
+}
+/** Places an order on the seller's site, as a signed-in shopper with the visitor's cookie, and the owner marks it paid: the one thing that makes a Purchase (7.14). */
+async function paidOrder(shop, visitor) {
+  const order = await placeStoreOrder(world, shop, visitor, await addProduct(shop, 'Lamp', { price: '1299' }));
+  await setOrderStatusDirect(shop, order.id, 'paid');
+  return order;
+}
 const metaEvents = async (tag) => world.meta.get('/capi/events', { pixelId: tag.pixelId });
 const googleEvents = async (tag) => world.google.get('/ga4/events', { measurementId: tag.measurementId });
 const nothingSent = async (tag, what) => {
@@ -170,33 +185,34 @@ test('N-68: consent is asked per shopper: one shopper\'s yes is no one else\'s',
 
 // ---- N-69 ------------------------------------------------------------------------------------------------------------
 
-async function acceptAndBuy(shop, tag, eventId = `order-${unique()}`) {
+async function acceptAndBuy(shop, tag) {
   world.consent.grant();
   const visitor = shopper(world, shop);
   await visitor.send({ name: 'page_view', path: '/r/a', pageKind: 'landing' });
-  await visitor.send({ name: 'payment_success', path: '/order/x', pageKind: 'checkout', valuePaise: 129900, eventId });
-  await visitor.send({ name: 'order', path: '/order/x', pageKind: 'checkout', valuePaise: 129900, eventId });
+  const order = await paidOrder(shop, visitor);
   await settled(shop);
+  const eventId = `order-${order.id}`;
   await fetch(`${world.meta.url}/tr?id=${tag.pixelId}&ev=Purchase&eid=${eventId}`);
-  return eventId;
+  return { eventId, order };
 }
 
 test('N-69: accept then buy: one purchase in Meta after removing duplicates, and one GA4 purchase, both with the order value', async () => {
   const shop = await addP2Shop(world);
   const tag = await tagsOn(shop);
   try {
-    const eventId = await acceptAndBuy(shop, tag);
+    const { eventId, order } = await acceptAndBuy(shop, tag);
     const { received, deduped } = await metaEvents(tag);
     const serverPurchases = received.filter((e) => e.eventName === 'Purchase' && e.source === 'server');
     assert.equal(serverPurchases.length, 1, 'One server event');
     assert.equal(serverPurchases[0].eventId, eventId, 'It shares its id with the browser hit');
     assert.equal(deduped.filter((e) => e.eventName === 'Purchase').length, 1, 'Meta counts it once');
-    assert.equal(Number(serverPurchases[0].customData.value), 1299, 'The value in rupees');
+    assert.ok(order.totalPaise >= 129900, 'The order is worth at least the lamp');
+    assert.equal(Number(serverPurchases[0].customData.value), order.totalPaise / 100, 'The value in rupees, read from the order');
     assert.equal(serverPurchases[0].customData.currency, 'INR');
     const events = await googleEvents(tag);
     assert.equal(events.purchases, 1);
     const purchase = events.accepted.find((e) => e.name === 'purchase');
-    assert.equal(Number(purchase.params.value), 1299);
+    assert.equal(Number(purchase.params.value), order.totalPaise / 100);
     assert.equal(purchase.params.currency, 'INR');
     assert.ok(purchase.params.transaction_id, 'GA4 needs a transaction id to count a purchase once');
   } finally {
@@ -228,7 +244,7 @@ test('N-69: the event queue holds no IP, no user agent and no plain email or pho
   const ip = '203.0.113.10';
   world.consent.grant();
   try {
-    await shopper(world, shop, { ip, ua: UA.instagram }).send({ name: 'product_view', path: '/a', eventId: `e${unique()}` });
+    await (await returning(shop, { ip, ua: UA.instagram })).send({ name: 'product_view', path: '/a', eventId: `e${unique()}` });
     await settled(shop);
     const dump = JSON.stringify(await shop.tagRows());
     assert.equal(dump.includes(ip), false);
@@ -245,7 +261,7 @@ test('N-69: cart and purchase events are tier 3: tier 2 sends page view and view
   const tag = await tagsOn(shop);
   world.consent.grant();
   try {
-    const visitor = shopper(world, shop);
+    const visitor = await returning(shop);
     await visitor.send({ name: 'page_view', path: '/a', eventId: `e${unique()}` });
     await visitor.send({ name: 'add_to_cart', path: '/a', eventId: `e${unique()}` });
     await settled(shop);
@@ -263,7 +279,7 @@ test('N-69: Meta timing out once is retried, with one purchase counted', async (
   await world.meta.fault({ kind: 'server_error', status: 500, times: 1, match: { path: `*/${tag.pixelId}/events` } });
   world.consent.grant();
   try {
-    await shopper(world, shop).send({ name: 'order', path: '/order/x', valuePaise: 500, eventId: `order-${unique()}` });
+    await paidOrder(shop, await returning(shop));
     await settled(shop);
     const [row] = (await shop.tagRows()).filter((r) => r.provider === 'meta');
     assert.ok(row, 'A queued server event');
@@ -305,8 +321,8 @@ test('N-70: each business\'s server events go to its own pixel, with its own tok
     const tagB = await tagsOn(b);
     const idA = `a${unique()}`;
     const idB = `b${unique()}`;
-    await shopper(world, a).send({ name: 'product_view', path: '/a', eventId: idA });
-    await shopper(world, b).send({ name: 'product_view', path: '/a', eventId: idB });
+    await (await returning(a)).send({ name: 'product_view', path: '/a', eventId: idA });
+    await (await returning(b)).send({ name: 'product_view', path: '/a', eventId: idB });
     await settled(a);
     await settled(b);
     const sentA = (await metaEvents(tagA)).received.map((e) => e.eventId);
@@ -353,7 +369,7 @@ test('N-71: a revoked Conversions token: events fail and are retried, and the he
   const tag = await failingPixel(shop);
   world.consent.grant();
   try {
-    await shopper(world, shop).send({ name: 'product_view', path: '/a', eventId: `e${unique()}` });
+    await (await returning(shop)).send({ name: 'product_view', path: '/a', eventId: `e${unique()}` });
     await settled(shop);
     const [row] = (await shop.tagRows()).filter((r) => r.provider === 'meta');
     assert.ok(row, 'A queued event');
@@ -374,7 +390,7 @@ test('N-71: retries wait between attempts, and stop after being refused for good
   await failingPixel(shop);
   world.consent.grant();
   try {
-    await shopper(world, shop).send({ name: 'product_view', path: '/a', eventId: `e${unique()}` });
+    await (await returning(shop)).send({ name: 'product_view', path: '/a', eventId: `e${unique()}` });
     await settled(shop);
     const [first] = (await shop.tagRows()).filter((r) => r.provider === 'meta');
     if (first.status === 'queued') assert.ok(new Date(first.next_attempt_at) > new Date(), 'The next try is later');
@@ -449,8 +465,9 @@ test('N-72: a tag turned off stops what was already waiting', async () => {
     const shop = await addP2Shop(world);
     const tag = await tagsOn(shop);
     await shop.sql(`UPDATE jobs SET status = 'done' WHERE status = 'queued' AND tenant_id = $1`, [shop.tenantId]).catch(() => {});
+    const visitor = await returning(shop);
     world.stopWorker();
-    await shopper(world, shop).send({ name: 'product_view', path: '/a', eventId: `e${unique()}` });
+    await visitor.send({ name: 'product_view', path: '/a', eventId: `e${unique()}` });
     await shop.patch('/tags', { meta: { enabled: false }, ga4: { enabled: false } }, 200, 'Off');
     world.startWorker();
     await settled(shop);

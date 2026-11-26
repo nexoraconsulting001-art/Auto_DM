@@ -29,6 +29,8 @@ import { createGoogle } from '../../../tools/sim/google/index.mjs';
 import { DEFAULT_SCOPES, createMeta, hubSignature } from '../../../tools/sim/meta/index.mjs';
 import { TEST_DATA_KEY, openTestDb } from '../../helpers.js';
 import { addStaff as p0AddStaff, api, hit, need, nextPhone, pause, signIn } from '../../p0/spec-p0/support.js';
+import { csrfFor } from '../../../src/modules/shoppers/keys.js';
+import { ADDRESS, placeBody } from '../../p4/checkout/support.js';
 import { DAY, HOUR, MINUTE, SECOND, addShop, unique } from '../../p1/spec-p1/support.js';
 
 export { DAY, HOUR, MINUTE, SECOND, addShop, unique, consoleUser, onConsole, hit, need, api, signIn, signInCookie, pause, nextPhone, captureLogs, assertNoPlatformText } from '../../p1/spec-p1/support.js';
@@ -273,7 +275,8 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
   }
   addWorker();
 
-  const clearPeriodicMarks = () => rawDb.platform.query(`DELETE FROM jobs WHERE dedupe_key LIKE 'every:%' AND status NOT IN ('queued', 'running')`);
+  // The funnel's per-business sync is keyed by the 5-minute bucket it ran in (traffic/index.js fanOut), so a second run in the same bucket is dropped: it goes with the marks.
+  const clearPeriodicMarks = () => rawDb.platform.query(`DELETE FROM jobs WHERE (dedupe_key LIKE 'every:%' OR dedupe_key LIKE 'traffic-sync:%') AND status NOT IN ('queued', 'running')`);
 
   /** Runs every periodic job now, whatever its interval. */
   async function tick() {
@@ -796,3 +799,40 @@ export function fileAt(world, shop, fileUrl, { token = shop.token, cookie, heade
 }
 
 export const reportingKeyHeaders = (key) => ({ authorization: `Bearer ${key}`, 'x-api-key': key });
+
+/**
+ * An order placed on the seller's site as a tier 3 shopper does (PRD 9.6): through the store checkout, signed in with a verified number,
+ * carrying the visitor cookie. It replaced POST /api/orders, which no longer exists. Cash on delivery is placed at once.
+ */
+let shopperSerial = 0;
+export async function placeStoreOrder(world, shop, visitor, product) {
+  const id = shop.tenantId;
+  await shop.sql(
+    `INSERT INTO payment_settings (tenant_id, mode, kyc_status, cod, cod_fee_paise, part_advance, advance_kind, advance_value, hold_minutes)
+     VALUES ($1, 'managed', 'pending', true, 0, false, 'fixed', 0, 30) ON CONFLICT (tenant_id) DO UPDATE SET cod = true`,
+    [id],
+  );
+  const phone = `+9199${String(70_000_000 + ++shopperSerial * 7).padStart(8, '0')}`;
+  const [{ id: shopperId }] = await shop.sql(
+    `INSERT INTO shoppers (tenant_id, phone, phone_verified_at) VALUES ($1, $2, now()) RETURNING id`, [id, phone],
+  );
+  const sid = crypto.randomBytes(32).toString('base64url');
+  await shop.sql(
+    `INSERT INTO shopper_sessions (tenant_id, shopper_id, token_hash, method, expires_at) VALUES ($1, $2, $3, 'whatsapp_otp', now() + interval '1 day')`,
+    [id, shopperId, crypto.createHash('sha256').update(sid).digest('hex')],
+  );
+  const res = need(await hit(world, '/api/store/checkout', {
+    host: shop.host, method: 'POST',
+    headers: { cookie: `_sid=${sid}; _vid=${visitor.visitorId}`, 'x-shopper-csrf': csrfFor(world.config, sid) },
+    body: placeBody(product.id, { paymentMode: 'cod', address: { ...ADDRESS, phone: phone.slice(3) } }),
+  }), 201, 'Placing the order').json();
+  const [row] = await shop.sql('SELECT id, total_paise FROM orders WHERE tenant_id = $1 ORDER BY id DESC LIMIT 1', [id]);
+  return { ...res, id: row.id, totalPaise: row.total_paise };
+}
+
+/**
+ * The order's status, set where the order is stored. A cash on delivery order placed through the checkout moves only through its own steps
+ * (pack, ship, deliver, cancel), so the "paid", "payment_submitted" and "awaiting_payment" states the figures are checked against are put
+ * on it directly: what is under test is what the funnel and the tags do with an order in that state.
+ */
+export const setOrderStatusDirect = (shop, orderId, status) => shop.sql('UPDATE orders SET status = $3, updated_at = now() WHERE tenant_id = $1 AND id = $2', [shop.tenantId, orderId, status]);
