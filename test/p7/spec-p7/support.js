@@ -228,7 +228,8 @@ export async function appSignIn(world, phone, host = APP) {
   const headers ={ 'x-forwarded-host': host, 'x-forwarded-for': from, 'content-type': 'application/json' };
   const start = await hit(world, '/api/v1/auth/start', { host, method: 'POST', headers, body: { phone } });
   assert.equal(start.status, 202, `auth.start answered ${start.status}: ${start.text.slice(0, 200)}`);
-  const otp = await world.codeFor(phone);
+  // A number kept the way users.phone holds it (ten digits) is still the one the code was sent to, as +91.
+  const otp = await world.codeFor(/^[6-9][0-9]{9}$/.test(String(phone)) ? `+91${phone}` : phone);
   const verify = need(await hit(world, '/api/v1/auth/verify', { host, method: 'POST', headers, body: { phone, code: otp, transport: 'cookie' } }), 201, 'auth.verify');
   const cookie = String(verify.headers['set-cookie']).split(';')[0];
   const csrf = json(verify).csrf;
