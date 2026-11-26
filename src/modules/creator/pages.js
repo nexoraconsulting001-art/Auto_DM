@@ -2,7 +2,7 @@ import { platformSiteUrlOf } from '../../config.js';
 import { referralLink } from '../../contracts/billing.js';
 import { BUYER_ROUTES, DEFAULT_BLOCKS, isReservedPath } from '../../contracts/buyer-pages.js';
 import { whatsappDigits } from '../../contracts/catalog.js';
-import { buyerPage, gzipOnEnd, loadBuyerLayout, notFoundPage, safeHref, section, sendBuyerPage, ticker } from '../../views/buyer/index.js';
+import { sealBadge, buyerPage, gzipOnEnd, loadBuyerLayout, notFoundPage, safeHref, section, sendBuyerPage, ticker } from '../../views/buyer/index.js';
 import { html, raw } from '../../views/html.js';
 import { absolute, categoryProducts, chipRow, likeText, nowOf, pageBase, productList, reelTile, searchProducts, searchTerms, tileStyles } from '../categories/buyer.js';
 import { tileImage } from '../categories/repo.js';
@@ -72,7 +72,7 @@ ${more ? html`<div class="more-tiles" data-more="${more.url}" data-grid="${id}">
     const digits = page.show_whatsapp && whatsappAllowed ? whatsappDigits(settings.support_whatsapp) : null;
     const placed = blocks ?? DEFAULT_BLOCKS.creator.map((block) => ({ block, settings: {} }));
     const shows = (block) => placed.some((b) => b.block === block);
-    const head = profileHead({ name, bio: page.bio, photo: sized(photo, 'card'), website, whatsapp: digits && shows('whatsapp') ? `https://wa.me/${digits}` : '' });
+    const head = profileHead({ seal: sealBadge(theme), name, bio: page.bio, photo: sized(photo, 'card'), website, whatsapp: digits && shows('whatsapp') ? `https://wa.me/${digits}` : '' });
     const leadForm = shows('lead_form') ? await leadFormFor(ctx, req, { theme, surface: 'creator', pageSlug: page.slug, back: `/${page.slug}` }) : '';
 
     /** The page's sections in the business's block order, with `shelves` as the shelves block. */

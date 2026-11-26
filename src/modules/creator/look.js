@@ -36,7 +36,8 @@ const pick = (table, name, fallback) => (Object.hasOwn(table, name) ? table[name
 
 const BASE = [
   '.creator .site-header{display:none}',
-  '.creator-cover{height:124px;border-radius:0 0 28px 28px;background:radial-gradient(circle at 86% 20%,var(--accent) 0 30px,transparent 31px),radial-gradient(circle at 10% 125%,var(--glow) 0 112px,transparent 113px),radial-gradient(circle at 58% -34%,var(--glow) 0 92px,transparent 93px),var(--primary)}',
+  '.creator-cover{position:relative;height:124px;border-radius:0 0 28px 28px;background:radial-gradient(circle at 86% 20%,var(--accent) 0 30px,transparent 31px),radial-gradient(circle at 10% 125%,var(--glow) 0 112px,transparent 113px),radial-gradient(circle at 58% -34%,var(--glow) 0 92px,transparent 93px),var(--primary)}',
+  '.creator-cover .seal{left:14px;right:auto;top:12px;bottom:auto;width:84px;height:84px}',
   '.creator-head{margin-top:-64px;padding:0 20px;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}',
   '.creator-photo{width:120px;height:120px;flex:none;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--accent);color:var(--on-accent);font-family:var(--display);font-weight:var(--display-weight);font-size:40px;letter-spacing:.02em;border:4px solid var(--ground);box-shadow:0 12px 26px -16px rgba(0,0,0,.55)}',
   '.creator-photo img{width:100%;height:100%;object-fit:cover;background:var(--card)}',
@@ -91,11 +92,11 @@ const spark = raw('<svg width="14" height="14" viewBox="0 0 22 22" aria-hidden="
  * The profile header: the cover, the photo or the name's initials, the name, the about line, and up to two buttons (the
  * website, WhatsApp). `photo`, `website` and `whatsapp` are links already checked by the caller; '' leaves each out.
  */
-export function profileHead({ name, bio = '', photo = '', website = '', whatsapp = '' }) {
+export function profileHead({ name, bio = '', photo = '', website = '', whatsapp = '', seal = '' }) {
   const picture = safeHref(photo);
   const site = safeHref(website);
   const wa = safeHref(whatsapp);
-  return html`<div class="creator-cover" aria-hidden="true"></div>
+  return html`<div class="creator-cover" aria-hidden="true">${seal}</div>
 <section class="creator-head" aria-labelledby="creator-name">
 <span class="creator-photo">${picture ? html`<img src="${picture}" alt="" width="120" height="120" decoding="async">` : html`<span aria-hidden="true">${initials(name)}</span>`}</span>
 <h1 id="creator-name">${name}</h1>
