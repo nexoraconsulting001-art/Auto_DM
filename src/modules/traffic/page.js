@@ -63,7 +63,8 @@ function sameSite(req) {
   }
 }
 
-const previewFromPage = (req) => /[?&]preview=/.test(req.get('referer') ?? '');
+// The page's own address is a preview address when the browser says so in the referer, or when the beacon itself reports the page it is on (path).
+const previewFromPage = (req, beacon = null) => /[?&]preview=/.test(req.get('referer') ?? '') || /[?&]preview=/.test(beacon?.path ?? '');
 
 /** The signed-in person behind a hit, if any: the beacon runs before the app's sign-in step. */
 function whoIsSignedIn(req, res, ctx) {
@@ -113,7 +114,7 @@ export function registerBeacon(app, ctx, { ingest, destinations }) {
       await withTenant(tenant, async () => {
         const automated = automatedKind(req.get('user-agent'));
         if (automated) return ingest.preview(automated, beacon.pageKind);
-        if (previewFromPage(req)) return ingest.preview('owner_preview', beacon.pageKind);
+        if (previewFromPage(req, beacon)) return ingest.preview('owner_preview', beacon.pageKind);
         const user = await whoIsSignedIn(req, res, ctx);
         if (TEAM_ROLES.has(user?.role)) return ingest.preview('team', beacon.pageKind);
         return ingest.hit(beacon, { visitorId, anonToken, mintedVisitorId, ua: req.get('user-agent') ?? '', ip: String(req.ip ?? '').replace(/^::ffff:/, ''), host: req.hostname, user });

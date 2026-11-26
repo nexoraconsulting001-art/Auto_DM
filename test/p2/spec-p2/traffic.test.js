@@ -194,6 +194,8 @@ test('N-45: nonsense in a visitor cookie is replaced, not stored and not a crash
 async function returningVisitor(shop) {
   const visitor = shopper(world, shop);
   await visitor.send({ name: 'page_view', path: '/a', src: 'instagram_comment_dm' });
+  // The first beacon hands the browser its cookie; the visitor is known from the next one, as from the next page a real browser opens.
+  await visitor.send({ name: 'page_view', path: '/a', src: 'instagram_comment_dm' });
   await settled(shop);
   await world.travel(DAY + MINUTE);
   await visitor.send({ name: 'page_view', path: '/a', src: 'bio_link' });
@@ -338,7 +340,12 @@ test('N-16: a real shopper\'s visit with the same address but no ?preview=1 coun
 
 test('N-48: 12 visitors active in the last 30 minutes show within 15 s, with top pages and sources', async () => {
   const shop = await addP2Shop(world);
-  for (let i = 0; i < 12; i++) await shopper(world, shop).send({ name: 'landing_view', path: '/r/launch', pageKind: 'landing', pageRef: 'launch', src: 'bio_link' });
+  for (let i = 0; i < 12; i++) {
+    const visitor = shopper(world, shop);
+    await visitor.send({ name: 'landing_view', path: '/r/launch', pageKind: 'landing', pageRef: 'launch', src: 'bio_link' });
+    // The first beacon hands the browser its cookie; its pages are the visitor's from the next one on.
+    await visitor.send({ name: 'page_view', path: '/r/launch', pageKind: 'landing', pageRef: 'launch', src: 'bio_link' });
+  }
   const started = Date.now();
   let res;
   do {
