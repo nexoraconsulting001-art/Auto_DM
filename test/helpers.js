@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { after } from 'node:test';
-import { APP_ROLE, openDb } from '../src/db/index.js';
+import { APP_ROLE, MIGRATIONS_DIR, openDb } from '../src/db/index.js';
 import { bindTenant, createRepos } from '../src/repos/index.js';
 import { createApp } from '../src/server.js';
 import { config } from '../src/config.js';
@@ -62,6 +64,53 @@ async function dropCreatedDatabases() {
 // Registered while the file loads, so it belongs to the file and not to whichever test happens to open the first database.
 if (process.env.TEST_DATABASE_URL) after(dropCreatedDatabases);
 
+// Every test needs a database with all the migrations applied, and applying them one by one (one transaction each, a hundred or so)
+// is most of what a test costs on a real server: it is why the whole suite on the production drivers did not fit in 40 minutes.
+// So the migrated database is made once per server and per set of migration files (a template named from a hash of their
+// contents), and every test's database is a copy of it (CREATE DATABASE ... TEMPLATE), which is a file-level copy.
+let templateName = null;
+
+function migrationsHash() {
+  const hash = crypto.createHash('sha256');
+  for (const file of fs.readdirSync(MIGRATIONS_DIR).filter((f) => /^\d{3}_[\w-]+\.sql$/.test(f)).sort()) {
+    hash.update(file).update('|').update(fs.readFileSync(path.join(MIGRATIONS_DIR, file))).update('|');
+  }
+  return hash.digest('hex').slice(0, 20);
+}
+
+/** The name of this server's migrated template database, made now if it is not there. Safe across test processes started together. */
+function migratedTemplate(url) {
+  templateName ??= (async () => {
+    const name = `t_tpl_${migrationsHash()}`;
+    const building = `${name}_wip`;
+    const admin = await openDb({ url, migrate: false, poolSize: 1 });
+    try {
+      // One connection, so the lock is held until it is released (or the connection ends): one process builds, the rest wait.
+      await admin.query('SELECT pg_advisory_lock($1)', [4_242_077]);
+      const [{ found }] = await admin.query('SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1) AS found', [name]);
+      if (!found) {
+        // A build that was cut short leaves the _wip database behind; it is never used, only replaced.
+        await admin.exec(`DROP DATABASE IF EXISTS ${building} WITH (FORCE)`);
+        await admin.exec(`CREATE DATABASE ${building}`);
+        const target = new URL(url);
+        target.pathname = `/${building}`;
+        const migrated = await openDb({ url: target.href, poolSize: 1 });
+        await migrated.close();
+        // A database that has a connection cannot be a template, and the name is what says it is complete.
+        await admin.exec(`ALTER DATABASE ${building} RENAME TO ${name}`);
+      }
+      await admin.query('SELECT pg_advisory_unlock($1)', [4_242_077]);
+    } finally {
+      await admin.close();
+    }
+    return name;
+  })().catch((err) => {
+    templateName = null;
+    throw err;
+  });
+  return templateName;
+}
+
 const DEFAULT_LOGINS = process.env.TEST_DB_LOGINS === '2' ? 2 : 1;
 
 /** The app login's connection for an owner connection: the same database as the role bhava_app, with one password for the whole test server. */
@@ -85,7 +134,8 @@ export async function openTestDb({ migrate = true, logins = DEFAULT_LOGINS } = {
   if (!url) return openDb({ migrate });
   const admin = await openDb({ url, migrate: false, poolSize: 1 });
   const name = `t_${crypto.randomUUID().replace(/-/g, '')}`;
-  await admin.exec(`CREATE DATABASE ${name}`);
+  // Only a test that wants the migrations applied by the database itself starts from a copy of the migrated template.
+  await admin.exec(migrate ? `CREATE DATABASE ${name} TEMPLATE ${await migratedTemplate(url)}` : `CREATE DATABASE ${name}`);
   createdDatabases.add(name);
   await admin.close();
   const target = new URL(url);

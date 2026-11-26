@@ -11,7 +11,7 @@ import { loadShowcase, parseArgs as showcaseArgs, seedShowcase, ShowcaseError } 
 import { parseArgs as migrateArgs, readSource } from '../../../scripts/migrate-business.js';
 import { platformRoutesSource } from '../../../scripts/gen-platform-routes.mjs';
 import { PLATFORM_ROUTES } from '../../../shared/api-client/platform-routes.js';
-import { FEEDBACK_PLATFORM_OWNERS, FEEDBACK_STATES, FeedbackCreate, FeedbackUpdate, platformRoutes } from '../../../src/contracts/api/platform.js';
+import { FEEDBACK_PLATFORM_OWNERS, FEEDBACK_STATES, FeedbackCreate, FeedbackItem, FeedbackUpdate, platformRoutes } from '../../../src/contracts/api/platform.js';
 import { CONFLICT_KINDS, LEGACY_TABLES, MIGRATION_STRIPS, MigrationOptions, MigrationReport, MigrationSource, countsBalance, nextOrderNumber } from '../../../src/contracts/migration.js';
 import { PEOPLE_RULES, SHOWCASE, SeedCatalogue, ShowcaseSeed, fromLegacyCatalogue, inventedPerson, problemsWithPeople, problemsWithPerson } from '../../../src/contracts/seed.js';
 import { MODULES } from '../../../src/modules/index.js';
@@ -229,7 +229,7 @@ test('migrations 800 and 810: the three tables are the platform’s, fenced and 
   assert.equal((await one('SELECT count(*)::int AS n FROM migration_runs WHERE tenant_id = $1', [other.tenant.id])).n, 0, 'a closed business takes its runs with it');
 });
 
-test('the feedback routes: three Platform Console routes owned by the feedback module, refused to nobody signed in, 501 until built', async (t) => {
+test('the feedback routes: three Platform Console routes owned by the feedback module, refused to nobody signed in, answering their contract', async (t) => {
   const ids = ['platform.feedback', 'platform.createFeedback', 'platform.updateFeedback'];
   assert.deepEqual(FEEDBACK_PLATFORM_OWNERS, { feedback: ids });
   assert.deepEqual(ids.map((id) => [platformRoutes[id].method, platformRoutes[id].path, platformRoutes[id].status ?? 200]), [['GET', '/feedback', 200], ['POST', '/tenants/:id/feedback', 201], ['PATCH', '/feedback/:id', 200]]);
@@ -249,14 +249,22 @@ test('the feedback routes: three Platform Console routes owned by the feedback m
 
   const app = await startWorld(t);
   const admin = await consoleUser(app);
-  const calls = [['/feedback', 'GET'], ['/tenants/1/feedback', 'POST'], ['/feedback/1', 'PATCH']];
+  const shop = await addBusiness(app, { slug: 'fb-shop', name: 'Feedback Shop' });
+  const calls = [['/feedback', 'GET'], [`/tenants/${shop.tenant.id}/feedback`, 'POST'], ['/feedback/1', 'PATCH']];
   for (const [url, method] of calls) {
-    const body = method === 'GET' ? undefined : {};
-    assert.equal((await hit(app, url, { host: CONSOLE_HOST, method, body })).status, 401, `${method} ${url} with nobody signed in`);
-    const res = await onConsole(app, admin, url, { method, body });
-    assert.equal(res.status, 501, `${method} ${url}`);
-    assert.equal(res.json().code, 'not_implemented');
+    assert.equal((await hit(app, url, { host: CONSOLE_HOST, method, body: method === 'GET' ? undefined : {} })).status, 401, `${method} ${url} with nobody signed in`);
   }
+  // Built (these answered 501 not_implemented while the module was a stub): the contract's own answers.
+  assert.equal((await onConsole(app, admin, '/tenants/' + shop.tenant.id + '/feedback', { method: 'POST', body: {} })).status, 400, 'an empty note is refused');
+  const created = await onConsole(app, admin, '/tenants/' + shop.tenant.id + '/feedback', { method: 'POST', body: { saidBy: 'The owner', area: 'Orders', text: 'Hard to find' } });
+  assert.equal(created.status, 201);
+  const item = FeedbackItem.parse(created.json());
+  const listed = await onConsole(app, admin, '/feedback');
+  assert.equal(listed.status, 200);
+  assert.ok(JSON.stringify(listed.json()).includes(String(item.id)), 'the new note is listed');
+  const planned = await onConsole(app, admin, '/feedback/' + item.id, { method: 'PATCH', body: { state: 'planned' } });
+  assert.equal(planned.status, 200);
+  assert.equal(FeedbackItem.parse(planned.json()).state, 'planned');
   const onboarder = await consoleUser(app, 'onboarding');
   assert.equal((await onConsole(app, onboarder, '/feedback')).status, 403);
 });

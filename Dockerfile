@@ -81,6 +81,7 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # ---- the worker: background jobs, health on WORKER_HEALTH_PORT ---------------------------------------------------------
 FROM runtime AS worker
+USER node
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.WORKER_HEALTH_PORT||3001)+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
@@ -88,6 +89,7 @@ CMD ["node", "src/worker.js"]
 
 # ---- the web server (the default target) -------------------------------------------------------------------------------
 FROM runtime AS web
+USER node
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]

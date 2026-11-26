@@ -83,7 +83,8 @@ export function createSecretRotation(ctx, { batch = REWRAP_BATCH, budgetMs = 20_
     if (n > 0) metrics?.inc?.('secret_rewrap_rows_total', { result }, n);
   };
 
-  async function start() {
+  /** Makes the secret_rewraps rows for the current key (idempotent), and walks again a column that failed or was written to since. */
+  async function makeRows() {
     const { keyId, format } = target();
     for (const c of columns) {
       // A column that failed before starts a fresh pass: the operator has fixed what it could not read.
@@ -103,6 +104,11 @@ export function createSecretRotation(ctx, { batch = REWRAP_BATCH, budgetMs = 20_
         );
       }
     }
+  }
+
+  async function start() {
+    const { keyId, format } = target();
+    await makeRows();
     if (queue?.enqueue) await queue.enqueue(REWRAP_JOB, {}, { retryInFlight: true });
     log.info('secrets.rewrap.started', { keyId, format, columns: columns.length });
     return progress();
@@ -116,6 +122,10 @@ export function createSecretRotation(ctx, { batch = REWRAP_BATCH, budgetMs = 20_
   async function step() {
     const goal = target();
     const { keyId, format } = goal;
+    // A worker that comes up on a new master key (the runbook: "let the worker pick it up after the restart") has no rows for it yet:
+    // the first step makes them, so the job needs no one to have called start().
+    const [known] = await db.query('SELECT 1 AS known FROM secret_rewraps WHERE key_id = $1 AND format = $2 LIMIT 1', [keyId, format]);
+    if (!known) await makeRows();
     const result = await db.tx(async (t) => {
       const q = t.query;
       await q(`SET LOCAL statement_timeout = '30s'`);

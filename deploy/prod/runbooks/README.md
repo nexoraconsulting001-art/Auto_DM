@@ -13,7 +13,7 @@ What a person does, step by step, with the command for each step and how to tell
 | [dns-and-cutover.md](dns-and-cutover.md) | Moving DNS with Cloudflare in front: TLS mode, sellers' domains, provider webhooks, the cut-over order and going back |
 | [scaling.md](scaling.md) | From 50 to 1,000 businesses: what to raise and what to watch |
 
-Written by other tracks, not here: `incident.md` (the alerts of `../monitoring`), `go-live.md` (the order of `npm run golive`) and `cutover.md` for an old single-shop app (the Phase 8 importer's dry run). Until they exist, their tracks' READMEs are the reference.
+Written by other tracks, not here: `incident.md` (the alerts of `../monitoring`) and `go-live.md` (the order of `npm run golive`). Until they exist, their tracks' READMEs are the reference.
 
 Conventions used in every runbook:
 

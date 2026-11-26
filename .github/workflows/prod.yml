@@ -85,7 +85,10 @@ jobs:
           docker run --rm -v "$PWD/deploy/prod:/tf" -w /tf/terraform hashicorp/terraform:1.9 init -backend=false -input=false
           docker run --rm -v "$PWD/deploy/prod:/tf" -w /tf/terraform hashicorp/terraform:1.9 validate
       - name: The alert rules are valid (promtool check rules)
-        run: docker run --rm -v "$PWD/deploy/prod/monitoring:/m:ro" --entrypoint promtool prom/prometheus:v2.54.1 check rules /m/rules/*.yaml
+        # /m exists only inside the container; the shell on the runner would leave /m/rules/*.yaml as a literal. List the files from the host path, name them as the container sees them.
+        run: |
+          files=$(cd deploy/prod/monitoring && printf '/m/%s ' rules/*.yaml)
+          docker run --rm -v "$PWD/deploy/prod/monitoring:/m:ro" --entrypoint promtool prom/prometheus:v2.54.1 check rules $files
       - name: Every alert fires and clears (promtool test rules)
         run: docker run --rm -v "$PWD/deploy/prod/monitoring:/m:ro" -w /m/rules/tests --entrypoint promtool prom/prometheus:v2.54.1 test rules .
       - uses: actions/setup-node@v4
