@@ -367,6 +367,13 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
       const shifted = ['started_at', 'last_hit_at'].reduce((expr, key) => `CASE WHEN outbound_host::jsonb ? '${key}' THEN jsonb_set(${expr}, '{${key}}', to_jsonb(to_char(((outbound_host::jsonb ->> '${key}')::timestamptz - interval '${interval}') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')), false) ELSE ${expr} END`, 'outbound_host::jsonb');
       const withDay = days ? `CASE WHEN outbound_host::jsonb ? 'day' THEN jsonb_set(${shifted}, '{day}', to_jsonb(to_char((outbound_host::jsonb ->> 'day')::date - ${days}, 'YYYY-MM-DD')), false) ELSE ${shifted} END` : shifted;
       await t.exec(`UPDATE traffic_events SET outbound_host = (${withDay})::text WHERE outbound_host LIKE '{%'`);
+      // A trip keeps the days (or the media times) that caused it, as JSON. Clearing counts the days after the last of them, so they move too.
+      await t.exec(
+        `UPDATE reach_guard_trips SET observed = (SELECT COALESCE(jsonb_agg(
+           CASE WHEN e ? 'day' THEN jsonb_set(e, '{day}', to_jsonb(to_char((e ->> 'day')::date - ${days}, 'YYYY-MM-DD')), false)
+                WHEN e ? 'postedAt' THEN jsonb_set(e, '{postedAt}', to_jsonb(to_char(((e ->> 'postedAt')::timestamptz - interval '${interval}') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')), false)
+                ELSE e END ORDER BY n), '[]'::jsonb) FROM jsonb_array_elements(observed) WITH ORDINALITY AS x(e, n)) WHERE jsonb_typeof(observed) = 'array'`,
+      );
     });
     if (sim) await meta.post('/clock', { advanceMs: ms });
   }
