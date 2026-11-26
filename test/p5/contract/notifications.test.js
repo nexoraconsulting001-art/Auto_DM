@@ -27,6 +27,8 @@ const KINDS = [
   'return.requested', 'report.weekly', 'report.monthly', 'staff.changed', 'device.signed_in', 'account.deletion_requested', 'app.review_state',
   // Phase 6 (the shopper app contract): the owner's app went live, needs a change, or its build stopped.
   'app.live', 'app.rejected', 'app.build_failed',
+  // B-MSG-6: automatic messages held while Meta access was lost were dropped after 24 hours.
+  'meta_access.dropped',
 ];
 
 let app;
@@ -47,7 +49,7 @@ after(async () => {
   await whatsapp?.close();
 });
 
-test('the kinds are data: nineteen seeded, each with channels, wording for one and many, a layout, a template and a link', () => {
+test('the kinds are data: twenty seeded, each with channels, wording for one and many, a layout, a template and a link', () => {
   assert.deepEqual(n.NOTIFY_CHANNELS, ['push', 'email', 'whatsapp', 'inapp']);
   assert.deepEqual([...n.NOTIFY_KINDS].sort(), [...KINDS].sort());
   for (const kind of n.NOTIFY_KINDS) {

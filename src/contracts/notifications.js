@@ -121,6 +121,12 @@ export const NOTIFY_EVENTS = Object.freeze({
     many: { title: '{count} connections stopped working', body: 'Replies are paused. Reconnect to resume.' },
     email: 'alert', whatsapp: 'bhava_token_invalid', link: '/connect',
   }),
+  'meta_access.dropped': event({
+    label: 'Messages dropped while Meta access was lost', audience: 'owner', channels: ['push', 'email', 'inapp'],
+    one: { title: 'Automatic messages were dropped', body: 'Meta did not accept your connection for over 24 hours. Fix it to start sending again.' },
+    many: { title: 'Automatic messages were dropped', body: 'Meta did not accept your connection for over 24 hours. Fix it to start sending again.' },
+    email: 'alert', whatsapp: '', link: '/connect',
+  }),
   'dm.usage_80': event({
     label: 'Messages nearly used up', audience: 'owner', channels: ['email', 'inapp'],
     one: { title: 'You have used {percent}% of this month\'s messages', body: 'See your plan to add more before they run out.' },
@@ -244,6 +250,7 @@ export const NOTIFY_SOURCES = Object.freeze({
     'token.expiring': 'token.expiring',
     'token.rejected': 'token.invalid',
     'token.deauthorized': 'token.invalid',
+    'expired.meta_access': 'meta_access.dropped',
   }),
   orderEvents: Object.freeze({ 'order.confirmed': 'order.new', 'payment.failed': 'payment.failed' }),
   reportPeriods: Object.freeze({ weekly: 'report.weekly', monthly: 'report.monthly' }),

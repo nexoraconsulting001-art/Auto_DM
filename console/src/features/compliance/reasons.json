@@ -52,6 +52,7 @@
     "comment.deleted": "The comment was deleted before the reply went out.",
     "comment.edited": "The comment was edited, so it no longer asks for this.",
     "recipient.unavailable": "This person can’t be messaged.",
+    "expired.meta_access": "Meta didn’t accept your connection for over 24 hours, so this was dropped.",
 
     "cap.per_comment": "This comment already got its one reply.",
     "cap.per_media": "This person was already sent a DM for this post.",
@@ -89,6 +90,7 @@
     "paused.global": "Bhava paused all messages for a while.",
     "paused.breaker": "Sending stopped by itself after errors from Instagram.",
     "paused.reconnect": "Instagram needs reconnecting.",
+    "paused.meta_access": "Meta isn’t accepting your connection. This waits up to 24 hours for it to be fixed.",
     "held.review": "Waiting for a review.",
     "held.dm_limit": "Your plan’s monthly DM limit was reached.",
     "cancelled.owner": "You discarded this.",

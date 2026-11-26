@@ -7,11 +7,12 @@ import { tenantId, withTenant } from '../../tenancy.js';
 import { createBreaker } from './breaker.js';
 import { createBudgets } from './budgets.js';
 import { createChannels } from './channels.js';
-import { budgetMultiplier, callAllowed, createGate, evaluate, evaluateCreation, expiryReason, finalMessage, triggerOf } from './gate.js';
+import { META_ACCESS_DROPPED, META_ACCESS_HELD, META_ACCESS_HOLD_MS, budgetMultiplier, callAllowed, createGate, evaluate, evaluateCreation, expiryReason, finalMessage, triggerOf } from './gate.js';
 import { createInbound } from './inbound.js';
 import { complianceRepo } from './repo.js';
 import { createSlowMode } from './slow-mode.js';
 import { sendOutcomeLabels } from '../../platform/metrics.js';
+import { scheduleStatus } from '../automations/schedule.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -822,6 +823,71 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     return rows.length;
   }
 
+  /**
+   * B-MSG-6: this business's jobs held because Meta access was lost (META_ACCESS_HELD). A held job is not written to again until it is
+   * released or ended, so its updated_at is when it was held. One held for META_ACCESS_HOLD_MS is dropped with META_ACCESS_DROPPED, and
+   * the seller is told once for that loss of access: one alert, which the notifications module sends on. The alert is raised before
+   * anything is dropped, so a drop is never left untold. While access is back, the others go back in the queue and meet every rule
+   * again when they are sent (window, opt-out and consent, caps, budgets); one whose automation is outside its hours waits for them
+   * (PRD 6.8) as outside_hours, and one whose automation has ended is cancelled by releaseFor.
+   */
+  async function settleMetaAccessHeld(business, at) {
+    const cutoff = new Date(+at - META_ACCESS_HOLD_MS);
+    const [settings] = await db.query('SELECT gate_passed_at, gate_lost_at FROM compliance_settings WHERE tenant_id = $1', [business]);
+    const [{ old }] = await db.query(
+      `SELECT count(*)::int AS old FROM outbound_jobs WHERE tenant_id = $1 AND status = 'held' AND reason = $2 AND updated_at <= $3::timestamptz`,
+      [business, META_ACCESS_HELD, cutoff],
+    );
+    if (old) {
+      // One loss of access is one notice, however many messages it cost. A loss that has already ended is named by the day.
+      const loss = settings?.gate_lost_at ? new Date(settings.gate_lost_at).toISOString() : `restored:${Math.floor(+at / DAY)}`;
+      await repos.alerts?.raise({
+        kind: META_ACCESS_DROPPED, severity: 'critical', target: '', dedupeKey: `${META_ACCESS_DROPPED}:${loss}`,
+        message: 'Meta has not accepted your business’s connection for more than 24 hours, so automatic messages that were waiting have been dropped. Fix the connection to start sending again.',
+      });
+      const dropped = await db.query(
+        `UPDATE outbound_jobs SET status = 'expired', reason = $3, lease_until = NULL, locked_by = NULL, updated_at = $2::timestamptz
+         WHERE tenant_id = $1 AND status = 'held' AND reason = $4 AND updated_at <= $5::timestamptz RETURNING *`,
+        [business, at, META_ACCESS_DROPPED, META_ACCESS_HELD, cutoff],
+      );
+      for (const job of dropped) {
+        await db.query('DELETE FROM cap_claims WHERE tenant_id = $1 AND job_id = $2', [business, job.id]);
+        await writeLog(actionOf(job), skipResult('expired', META_ACCESS_DROPPED), { subject: job.subject_hash, jobId: job.id });
+      }
+    }
+    if (settings && !settings.gate_passed_at && settings.gate_lost_at) return; // still lost: the rest keep waiting
+
+    const waiting = await db.query(
+      `SELECT j.id, a.id AS automation_id, a.starts_at, a.ends_at, a.daily_start::text, a.daily_end::text, t.timezone
+       FROM outbound_jobs j JOIN tenants t ON t.id = j.tenant_id LEFT JOIN automations a ON a.tenant_id = j.tenant_id AND a.id = j.automation_id
+       WHERE j.tenant_id = $1 AND j.status = 'held' AND j.reason = $2`,
+      [business, META_ACCESS_HELD],
+    );
+    const queued = [];
+    const outside = [];
+    for (const row of waiting) {
+      const status = row.automation_id
+        ? scheduleStatus({ startsAt: row.starts_at, endsAt: row.ends_at, dailyStart: row.daily_start, dailyEnd: row.daily_end }, new Date(at), row.timezone ?? undefined)
+        : { open: true };
+      if (status.open) queued.push(row.id);
+      else if (!status.ended) outside.push(row.id);
+    }
+    if (queued.length) {
+      await db.query(
+        `UPDATE outbound_jobs SET status = 'queued', reason = '', lease_until = NULL, run_at = $3::timestamptz, updated_at = $3::timestamptz
+         WHERE tenant_id = $1 AND id = ANY($2::bigint[]) AND status = 'held' AND reason = $4`,
+        [business, queued, at, META_ACCESS_HELD],
+      );
+    }
+    if (outside.length) {
+      await db.query(
+        `UPDATE outbound_jobs SET status = 'held', reason = 'outside_hours', run_at = $3::timestamptz, updated_at = $3::timestamptz
+         WHERE tenant_id = $1 AND id = ANY($2::bigint[]) AND status = 'held' AND reason = $4`,
+        [business, outside, at, META_ACCESS_HELD],
+      );
+    }
+  }
+
   /** Puts held jobs whose reason has lifted back in the queue, to go at the normal budget, never as a burst (PRD 4.12). */
   async function releaseFor() {
     const business = tenantId();
@@ -833,6 +899,7 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
               (SELECT status FROM tenants WHERE id = $1) AS status`,
       [business],
     );
+    await settleMetaAccessHeld(business, at);
     if (!flags.global_kill) await db.query(`UPDATE outbound_jobs SET ${queuedAgain} WHERE tenant_id = $1 AND status = 'held' AND reason = 'paused.global'`, [business, at]);
     if (await dmQuotaLeft({ kind: 'dm', purpose: 'release' })) await requeueDmLimit();
     if (!flags.paused && !['paused', 'suspended', 'closed', 'killed'].includes(flags.status)) await db.query(`UPDATE outbound_jobs SET ${queuedAgain} WHERE tenant_id = $1 AND status = 'held' AND reason = 'paused.tenant'`, [business, at]);

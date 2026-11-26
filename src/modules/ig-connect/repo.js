@@ -53,9 +53,20 @@ export function igConnectRepo(db) {
         ];
         const failing = results.filter((gate) => !gate.passed).map((gate) => gate.code);
         const passed = failing.length === 0;
+        // Meta access is lost (B-MSG-6) when a business that had passed stops passing with an account still connected: the
+        // send gate holds automated sends while gate_lost_at is set. A seller who disconnected on purpose has not lost it.
         await t.query(
-          `UPDATE compliance_settings SET gate_passed_at = CASE WHEN $2::boolean THEN COALESCE(gate_passed_at, now()) ELSE NULL END, updated_at = now() WHERE tenant_id = $1`,
-          [business, passed],
+          `UPDATE compliance_settings SET
+             gate_lost_at = CASE
+               WHEN $2::boolean THEN NULL
+               WHEN gate_lost_at IS NOT NULL THEN gate_lost_at
+               WHEN $3::boolean AND (gate_passed_at IS NOT NULL OR EXISTS (
+                 SELECT 1 FROM compliance_events e WHERE e.tenant_id = $1 AND e.kind = 'gate' AND e.decision = 'gate.passed'
+               )) THEN now()
+               ELSE NULL END,
+             gate_passed_at = CASE WHEN $2::boolean THEN COALESCE(gate_passed_at, now()) ELSE NULL END, updated_at = now()
+           WHERE tenant_id = $1`,
+          [business, passed, Boolean(account)],
         );
         const [last] = await t.query(`SELECT details FROM compliance_events WHERE tenant_id = $1 AND kind = 'gate' ORDER BY id DESC LIMIT 1`, [business]);
         const unchanged = JSON.stringify(last?.details?.failing ?? null) === JSON.stringify(failing);

@@ -223,6 +223,22 @@ test('A-40: a manual reply is stopped by a pause', async () => {
   await assertNoDm(shop);
 });
 
+test('B-MSG-6: while Meta access is lost a manual reply is refused with a clear error, not held to go later', async () => {
+  const shop = await addShop(world);
+  const { thread } = await threadWith(shop);
+  // What ig-connect's gate check records when a business that had passed every gate stops passing them.
+  await shop.sql('UPDATE compliance_settings SET gate_passed_at = NULL, gate_lost_at = now() WHERE tenant_id = $1', [shop.tenantId]);
+  await world.switchLag();
+  const res = await reply(shop, thread.id);
+  assert.equal(res.status, 409, res.text.slice(0, 300));
+  const body = res.json();
+  assert.equal(body.reason, 'paused.meta_access');
+  assert.match(body.error, /Meta is not accepting your business’s connection/);
+  await assertNoDm(shop);
+  const waiting = await shop.sql(`SELECT count(*)::int AS n FROM outbound_jobs WHERE tenant_id = $1 AND purpose = 'manual'`, [shop.tenantId]);
+  assert.equal(waiting[0].n, 0, 'nothing is queued to go later');
+});
+
 test('A-40: two replies at the same moment are two messages, each sent once', async () => {
   const shop = await addShop(world);
   const { thread } = await threadWith(shop);
