@@ -404,10 +404,17 @@ test('N-71: retries wait between attempts, and stop after being refused for good
 
 test('N-71: the owner is alerted after 3 failed days in a row, once', async () => {
   const shop = await addP2Shop(world);
-  await tagsOn(shop);
-  await failedDays(shop, 'meta', [2, 1, 0]);
-  await settled(shop);
-  await settled(shop);
+  await failingPixel(shop);
+  // Two failed days behind it, and the third is today's own failed send: the streak is looked at when a send fails (traffic/tags.js sendBatch).
+  await failedDays(shop, 'meta', [2, 1]);
+  world.consent.grant();
+  try {
+    await (await returning(shop)).send({ name: 'product_view', path: '/a', eventId: `e${unique()}` });
+    await settled(shop);
+    await settled(shop);
+  } finally {
+    world.consent.unanswered();
+  }
   assert.equal((await shop.alerts()).filter((a) => /tag|pixel|conversion/i.test(`${a.kind} ${a.message}`)).length, 1);
 });
 
