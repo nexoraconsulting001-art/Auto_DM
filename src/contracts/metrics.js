@@ -20,7 +20,7 @@ export const METRIC_TYPES = Object.freeze(['counter', 'gauge', 'histogram']);
 export const ROUTE_GROUPS = Object.freeze([
   'home', 'store', 'other', 'about', 'account', 'admin', 'api', 'app-listing-assets', 'assets', 'auth', 'billing', 'c', 'checkout', 'console', 'health',
   'healthz', 'login', 'logout', 'me', 'media', 'metrics', 'order', 'orders', 'p', 'policies', 'products', 'r', 'readyz', 'reels', 'report-files',
-  'review', 'shared', 'shop', 'signup', 'startupz', 'static', 'unsubscribe', 'webhook',
+  'review', 'shared', 'shop', 'signup', 'startupz', 'static', 'unsubscribe', 'webhook', 'webhooks', 'lead', 'oauth',
 ]);
 
 /** Labels and what each may hold. `values` is the whole set; `pattern` with `max` bounds an open one. */

@@ -60,8 +60,8 @@ export function freshState(options = {}) {
   };
 }
 
-/** Numeric, like Instagram's own ids. */
-export const nextId = (ctx) => String(17_900_000_000_000_000n + BigInt(++ctx.s.seq));
+/** Numeric, like Instagram's own ids, in the 9000 range this project reserves for sample data (src/contracts/seed.js PEOPLE_RULES.instagram), so a row holding one never reads as a real Instagram id. 90009 and 16 digits: apart from the sample reels (90002, 90003) and app-scoped ids (90009, 17 digits). */
+export const nextId = (ctx) => String(9_000_900_000_000_000n + BigInt(++ctx.s.seq));
 
 export function makeAccount({ igUserId, appScopedId, username, name, accountType, followersCount, followsCount, biography, website, profilePictureUrl, impressions, subscribedFields, appRole }) {
   return {
