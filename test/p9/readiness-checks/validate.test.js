@@ -79,7 +79,7 @@ test('a template that names a region, or a region outside India, is caught', () 
 
 test('the production workflow builds both architectures, validates from public images, and runs the three checks on service containers with no secret', () => {
   const workflow = read('.github/workflows/prod.yml');
-  for (const needle of ['linux/${{ matrix.arch }}', 'ubuntu-24.04-arm', 'npm run ${{ matrix.check }}', 'check:r05', 'check:r06', 'check:r07', 'npm run prod:validate', 'postgresql-client-16', 'minio/minio:RELEASE', 'tools/prod-checks/**']) {
+  for (const needle of ['linux/${{ matrix.arch }}', 'ubuntu-24.04-arm', 'npm run ${{ matrix.check }}', 'check:r05', 'check:r06', 'check:r07', 'npm run prod:validate', 'postgresql-client-16', 'bitnamilegacy/minio:2025.7.23-debian-12-r5', 'tools/prod-checks/**']) {
     assert.ok(workflow.includes(needle), needle);
   }
   for (const image of Object.values(TOOL_IMAGES)) assert.ok(workflow.includes(image), `the workflow runs ${image}`);

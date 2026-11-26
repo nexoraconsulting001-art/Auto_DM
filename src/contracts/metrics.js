@@ -12,7 +12,7 @@ import { z } from 'zod';
  * - Per-business numbers (errors, Meta calls and usage, queue depth, for the Platform Console, G-14) are not metrics.
  *   They are analytics events (BUSINESS_OPS_EVENTS), written as the business through platform.analytics.track() and read
  *   through its rollups, so the fence keeps one business's numbers from another's and nothing grows without bound.
- * - `since` is the phase that first emits it: 0 is there today; 9 is this phase's tracks (runtime, monitoring).
+ * - `since` is the phase that first emits it: 0 is emitted today; 9 is not emitted yet (a metric moves to 0 when its track emits it).
  */
 export const METRIC_TYPES = Object.freeze(['counter', 'gauge', 'histogram']);
 
@@ -50,30 +50,30 @@ export const METRICS = Object.freeze({
   http_requests_in_flight: metric('gauge', ['service'], 'Requests being answered now'),
   // The queue.
   queue_jobs: metric('gauge', ['queue', 'status'], 'Jobs by queue and state', 0),
-  queue_oldest_job_seconds: metric('gauge', ['queue'], 'Age of the oldest job waiting'),
-  job_failures_total: metric('counter', ['queue'], 'Jobs that failed a run'),
-  job_runs_total: metric('counter', ['queue', 'result'], 'Jobs run, by result'),
+  queue_oldest_job_seconds: metric('gauge', ['queue'], 'Age of the oldest job waiting', 0),
+  job_failures_total: metric('counter', ['queue'], 'Jobs that failed a run', 0),
+  job_runs_total: metric('counter', ['queue', 'result'], 'Jobs run, by result', 0),
   // Webhooks: received, written down, and worked through.
   webhook_comments_total: metric('counter', ['result'], 'Comment webhooks handled (Phase 0 path)', 0),
   webhook_received_total: metric('counter', ['provider', 'result'], 'Webhook requests received; result is accepted, bad_signature or refused'),
-  webhook_stored_total: metric('counter', ['provider'], 'Webhook events stored before the 200'),
-  webhook_processed_total: metric('counter', ['provider', 'result'], 'Stored webhook events worked through'),
+  webhook_stored_total: metric('counter', ['provider'], 'Webhook events stored before the 200', 0),
+  webhook_processed_total: metric('counter', ['provider', 'result'], 'Stored webhook events worked through', 0),
   // The compliance gate.
-  compliance_outcomes_total: metric('counter', ['channel', 'outcome', 'family'], 'Send decisions, by the family of the reason'),
-  sends_accepted_total: metric('counter', ['channel'], 'Messages a provider accepted'),
+  compliance_outcomes_total: metric('counter', ['channel', 'outcome', 'family'], 'Send decisions, by the family of the reason', 0),
+  sends_accepted_total: metric('counter', ['channel'], 'Messages a provider accepted', 0),
   // Outside services.
-  meta_calls_total: metric('counter', ['call_class', 'result'], 'Calls to Meta'),
-  meta_usage_ratio: metric('gauge', ['call_class'], 'Highest share of a Meta rate limit in use, 0 to 1, over every account'),
-  provider_calls_total: metric('counter', ['provider', 'result'], 'Calls to every other outside service'),
+  meta_calls_total: metric('counter', ['call_class', 'result'], 'Calls to Meta', 0),
+  meta_usage_ratio: metric('gauge', ['call_class'], 'Highest share of a Meta rate limit in use, 0 to 1, over every account', 0),
+  provider_calls_total: metric('counter', ['provider', 'result'], 'Calls to every other outside service', 0),
   // Housekeeping.
   backup_last_success_seconds: metric('gauge', [], 'When the last backup finished, as a Unix time', 0),
   backup_age_seconds: metric('gauge', [], 'Seconds since the last backup finished'),
-  db_pool_connections: metric('gauge', ['pool', 'state'], 'Database connections by pool and state'),
+  db_pool_connections: metric('gauge', ['pool', 'state'], 'Database connections by pool and state', 0),
   secret_refresh_failures_total: metric('counter', [], 'Refreshes of the secret source that failed; the last good values stayed'),
   secret_rewrap_rows_total: metric('counter', ['result'], 'Stored secrets moved to the current master key'),
-  errors_reported_total: metric('counter', ['service', 'kind'], 'Errors passed to reportError'),
-  process_draining: metric('gauge', ['service'], '1 while the process is shutting down'),
-  businesses: metric('gauge', ['plan', 'state'], 'Businesses by plan and status'),
+  errors_reported_total: metric('counter', ['service', 'kind'], 'Errors passed to reportError', 0),
+  process_draining: metric('gauge', ['service'], '1 while the process is shutting down', 0),
+  businesses: metric('gauge', ['plan', 'state'], 'Businesses by plan and status', 0),
 });
 
 /** `queue_jobs` and `businesses` use the label name `status`/`state` for a job or business state, not an HTTP status. */

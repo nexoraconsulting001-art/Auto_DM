@@ -81,9 +81,9 @@ jobs:
         run: docker run --rm -v "$RUNNER_TEMP/k8s:/k8s:ro" ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary /k8s/all.yaml
       - name: The Terraform templates validate, with no backend
         run: |
-          docker run --rm -v "$PWD/deploy/prod/terraform:/tf" -w /tf hashicorp/terraform:1.9 fmt -check -recursive
-          docker run --rm -v "$PWD/deploy/prod/terraform:/tf" -w /tf hashicorp/terraform:1.9 init -backend=false -input=false
-          docker run --rm -v "$PWD/deploy/prod/terraform:/tf" -w /tf hashicorp/terraform:1.9 validate
+          docker run --rm -v "$PWD/deploy/prod:/tf" -w /tf/terraform hashicorp/terraform:1.9 fmt -check -recursive
+          docker run --rm -v "$PWD/deploy/prod:/tf" -w /tf/terraform hashicorp/terraform:1.9 init -backend=false -input=false
+          docker run --rm -v "$PWD/deploy/prod:/tf" -w /tf/terraform hashicorp/terraform:1.9 validate
       - name: The alert rules are valid (promtool check rules)
         run: docker run --rm -v "$PWD/deploy/prod/monitoring:/m:ro" --entrypoint promtool prom/prometheus:v2.54.1 check rules /m/rules/*.yaml
       - name: Every alert fires and clears (promtool test rules)
@@ -115,6 +115,7 @@ jobs:
         env: { POSTGRES_PASSWORD: ci }
         ports: ['5432:5432']
         options: >-
+          --shm-size=256m
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 3s --health-retries 20
       redis:
@@ -160,7 +161,7 @@ jobs:
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioci -e MINIO_ROOT_PASSWORD=minioci-secret \
-            minio/minio:RELEASE.2024-12-18T13-15-44Z server /data
+            bitnamilegacy/minio:2025.7.23-debian-12-r5
           for i in $(seq 1 30); do curl -fs http://localhost:9000/minio/health/ready && break; sleep 1; done
           node --input-type=module -e "
             import { S3Client, CreateBucketCommand } from '@aws-sdk/client-s3';
