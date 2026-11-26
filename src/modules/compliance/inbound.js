@@ -231,7 +231,7 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     if (e.read) return { ...base, ...person, type: 'seen', mid: e.read.mid ?? '', watermark: e.read.watermark ?? null, text: '' };
     const m = e.message;
     if (!m) return null;
-    if (m.is_echo) return { ...base, type: 'echo', recipientId: e.recipient.id, mid: m.mid, text: m.text ?? '' };
+    if (m.is_echo) return { ...base, type: 'echo', recipientId: e.recipient.id, mid: m.mid, appId: m.app_id == null ? '' : String(m.app_id), text: m.text ?? '' };
     const attachments = m.attachments ?? [];
     const mention = attachments.find((a) => a.type === 'story_mention');
     if (mention) return { ...base, ...person, type: 'story_mention', mid: m.mid, text: '', mediaRef: mention.payload?.url ?? '' };
@@ -313,6 +313,18 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     return handled;
   }
 
+  /**
+   * Meta does not promise order: a comment's delete can be stored before the comment itself (C-15). Its delivery is kept under
+   * `<id>:remove` (commentKey), so a comment whose delete is already here gets nothing, as if the delete had come after it.
+   */
+  async function deletedAlready(ev) {
+    const [row] = await db.query(
+      'SELECT 1 FROM inbound_events WHERE tenant_id = $1 AND channel = $2 AND field = $3 AND object_id = $4',
+      [tenantId(), ev.channel, ev.field, commentKey(ev.commentId, 'remove')],
+    );
+    return Boolean(row);
+  }
+
   /** PRD 4.6: a comment that is just STOP. Blocklisted, and nothing goes back to it: no DM, no public reply, no confirmation. */
   async function onComment(ev) {
     if (['remove', 'removed', 'delete', 'deleted'].includes(ev.verb)) {
@@ -329,6 +341,10 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     }
     const subject = await log.subjectHash(ev.channel, ev.personId);
     const event = { ...ev, subject };
+    if (await deletedAlready(ev)) {
+      await note(event, 'comment.deleted');
+      return;
+    }
     const own = await ownIds(ev);
     if (own.has(ev.personId)) {
       await note(event, 'own_account');
@@ -461,6 +477,9 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     const event = { ...ev, subject, personId: ev.recipientId };
     const [ours] = await db.query('SELECT 1 FROM outbound_jobs WHERE tenant_id = $1 AND message_id = $2', [tenantId(), ev.mid]);
     if (ours) return 'done';
+    // Meta stamps an echo with the app that sent it: ours is never the owner typing, however late it comes (A-22).
+    const ownApp = ev.channel === 'facebook' ? config?.fbAppId : config?.igAppId;
+    if (ownApp && ev.appId === String(ownApp)) return 'done';
     const [sending] = await db.query(`SELECT 1 FROM outbound_jobs WHERE tenant_id = $1 AND channel = $2 AND subject_hash = $3 AND status = 'sending' LIMIT 1`, [tenantId(), ev.channel, subject]);
     if (sending && row.attempts < MAX_ATTEMPTS) return 'defer';
     // A send whose receipt carried no id, or was lost, looks exactly like the owner typing. A recent one of ours to this person decides it.

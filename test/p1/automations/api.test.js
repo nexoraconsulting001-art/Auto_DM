@@ -38,7 +38,8 @@ test('A-44: an automation saves with a keyword, a message, a link and no product
   const saved = await save(app);
   assert.equal(saved.state, 'draft');
   assert.equal(saved.slug, 'diwali-reel');
-  assert.equal(saved.finalUrl, 'https://seller.test/p');
+  // The link as a DM carries it: the 4 UTM tags, on by default (PRD 6.6, A-32); the test predates the links track.
+  assert.equal(saved.finalUrl, 'https://seller.test/p?utm_source=instagram&utm_medium=dm&utm_campaign=diwali-reel&utm_content=R1');
   assert.equal(saved.linkMode, 'two_tap');
   assert.deepEqual(saved.triggers.map((t) => [t.channel, t.targetType, t.mediaId]), [['instagram', 'reel', 'R1']]);
   assert.deepEqual(saved.variants.map((v) => [v.label, v.body, v.weight]), [['A', 'Here it is', 1]]);

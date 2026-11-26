@@ -162,7 +162,8 @@ test('an alert is raised for one business, once per key, and read only there', a
 });
 
 test('a route not built yet answers 501 only to those allowed to call it', async () => {
-  const app = await startApp();
+  // automations.* is built now (Phase 1), so the app runs without the module that answers it: the route is "not built yet".
+  const app = await startApp({ modules: MODULES.filter((m) => m.name !== 'automations') });
   try {
     assert.equal((await fetch(`${app.base}/api/v1/automations`)).status, 401);
     const res = await fetch(`${app.base}/api/v1/automations`, { headers: { authorization: `Bearer ${await signIn(app.base)}` } });

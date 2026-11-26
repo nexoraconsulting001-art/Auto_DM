@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { ComplianceAction } from '../../../src/contracts/compliance.js';
 import { NoTenantError } from '../../../src/tenancy.js';
 import { REEL_ID } from '../../helpers.js';
-import { DAY, HOUR, LINK, PERSON, REEL, STORY, another, closeWorld, fakeMeta, inWorld, world } from './support.js';
+import { DAY, HOUR, LINK, PERSON, REEL, STORY, another, tagged, closeWorld, fakeMeta, inWorld, world } from './support.js';
 
 const ACTOR = { actor: 'user:1' };
 const story = (extra = {}) => ({ triggerType: 'story_reply', keywords: [], matchMode: 'any', anyModeAcknowledged: true, linkMode: 'one_tap', triggers: [{ targetType: 'story', mediaId: STORY }], ...extra });
@@ -105,15 +105,15 @@ test('A-13: a reply to a story with an automation asks for one DM with that stor
   const automation = await w.create(story());
   await w.handle(await w.events.storyReply({ mid: 'M1' }));
   const [{ action, options }] = asked(w);
-  assert.deepEqual([action.kind, action.purpose, action.recipientId, action.personId, action.automationId, action.mediaId, action.message.button.url], ['dm', 'trigger', PERSON, PERSON, automation.id, STORY, LINK]);
+  assert.deepEqual([action.kind, action.purpose, action.recipientId, action.personId, action.automationId, action.mediaId, action.message.button.url], ['dm', 'trigger', PERSON, PERSON, automation.id, STORY, tagged(automation, STORY)]);
   assert.equal(action.idempotencyKey, 'story_reply:M1');
   assert.deepEqual(options, { trigger: 'story_reply', inReplyTo: 'M1' });
 }));
 
 test('A two-tap story automation still sends the link at once: there is no private reply to tap', inWorld(async (w) => {
-  await w.create(story({ linkMode: 'two_tap' }));
+  const automation = await w.create(story({ linkMode: 'two_tap' }));
   await w.handle(await w.events.storyReply({}));
-  assert.equal(asked(w)[0].action.message.button.url, LINK);
+  assert.equal(asked(w)[0].action.message.button.url, tagged(automation, STORY));
 }));
 
 test('A-14: a story reply with no story automation and no any-story rule is unmapped', inWorld(async (w) => {
@@ -275,11 +275,11 @@ test('A-25, A-67: on a two-tap automation the first DM is a postback button with
 }));
 
 test('A-25: on a one-tap automation the first DM\'s button opens the direct link, and the button text is the owner\'s', inWorld(async (w) => {
-  await w.create({ linkMode: 'one_tap', variants: [{ label: 'A', body: 'See it: {url}', buttonTitle: 'See it' }] });
+  const automation = await w.create({ linkMode: 'one_tap', variants: [{ label: 'A', body: 'See it: {url}', buttonTitle: 'See it' }] });
   await w.handle(await w.events.comment({}));
   const { message } = asked(w)[0].action;
-  assert.deepEqual(message.button, { url: LINK, title: 'See it' });
-  assert.equal(message.text, `See it: ${LINK}`);
+  assert.deepEqual(message.button, { url: tagged(automation, REEL), title: 'See it' });
+  assert.equal(message.text, `See it: ${tagged(automation, REEL)}`);
 }));
 
 test('A-72: changing the button text changes new DMs', inWorld(async (w) => {
@@ -296,9 +296,9 @@ test('a plan without one tap gets two taps at send, even if the automation says 
 }));
 
 test('A-26: the fallback goes with the job, filled in', inWorld({ meta: fakeMeta({ people: { 'P-KNOWN': { name: 'Asha K' } } }) }, async (w) => {
-  await w.create({ linkMode: 'one_tap', variants: [{ label: 'A', body: 'Here', fallbackText: 'Hi {first_name}: {url}' }] });
+  const automation = await w.create({ linkMode: 'one_tap', variants: [{ label: 'A', body: 'Here', fallbackText: 'Hi {first_name}: {url}' }] });
   await w.handle(await w.events.comment({ from: 'P-KNOWN' }));
-  assert.equal(asked(w)[0].options.fallbackText, `Hi Asha: ${LINK}`);
+  assert.equal(asked(w)[0].options.fallbackText, `Hi Asha: ${tagged(automation, REEL)}`);
 }));
 
 test('A-28: with no name available the DM still reads correctly, and with one it is used', inWorld({ meta: fakeMeta({ people: { 'P-KNOWN': { name: 'Asha Kumar' } } }) }, async (w) => {
@@ -493,7 +493,7 @@ test('Send test goes to a tester whose window is open, through send(), and repor
   const result = await w.inBusiness(() => w.engine.sendTest(automation, tester));
   assert.equal(result.outcome, 'sent');
   const [action] = w.compliance.sent;
-  assert.deepEqual([action.kind, action.purpose, action.recipientId, action.isTest, action.message.button.url], ['dm', 'test', PERSON, true, LINK]);
+  assert.deepEqual([action.kind, action.purpose, action.recipientId, action.isTest, action.message.button.url], ['dm', 'test', PERSON, true, tagged(automation, REEL)]);
   w.clock.at += 24 * HOUR;
   assert.deepEqual(await w.inBusiness(() => w.engine.sendTest(automation, tester)), { outcome: 'skipped', reason: 'window.closed' });
   assert.equal(await w.inBusiness(() => w.engine.sendTest(automation, tester, 'C')).then((r) => r.reason), 'window.closed');

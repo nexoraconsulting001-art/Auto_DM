@@ -41,7 +41,8 @@ test('off by default: no tag, no hosts in the policy, and Bhava adds nothing of 
   for (const host of ALL_HOSTS) assert.ok(!res.headers['content-security-policy'].includes(host), host);
   assert.ok(!/fbq\(|gtag\(|googletagmanager|fbevents/.test(res.text));
   const settings = (await api(world, '/tags')).body;
-  assert.deepEqual([settings.available, settings.meta.enabled, settings.ga4.enabled, settings.consentReady], [true, false, false, false]);
+  // consentReady says the consent module has registered (platform.consent.built); it has since Phase 4, so it is true here.
+  assert.deepEqual([settings.available, settings.meta.enabled, settings.ga4.enabled, settings.consentReady], [true, false, false, true]);
 });
 
 test('N-67: pixel on and the banner unanswered: no request to Meta or Google, and the session still counts', async (t) => {

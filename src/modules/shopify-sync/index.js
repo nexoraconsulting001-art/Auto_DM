@@ -101,26 +101,27 @@ export const shopifySync = {
   },
 
   api: (ctx) => {
-    const sync = shopifyFor(ctx);
+    // Made on first use, so listing the routes needs nothing of ctx (as loyalty and billing do).
+    const sync = () => shopifyFor(ctx);
     return {
-      'shopify.get': () => sync.connection.view(),
+      'shopify.get': () => sync().connection.view(),
       'shopify.connect': async ({ body, user }) => {
         if (!(await ctx.repos.entitlements.can('shopify.sync'))) throw new ApiError('forbidden', 'Shopify sync isn’t on your plan.', { reason: 'plan' });
-        const view = await sync.connection.connect(body, actorOf(user));
+        const view = await sync().connection.connect(body, actorOf(user));
         await queueReconcile(ctx);
         return view;
       },
-      'shopify.setMode': ({ body, user }) => sync.connection.setMode(body, actorOf(user)),
+      'shopify.setMode': ({ body, user }) => sync().connection.setMode(body, actorOf(user)),
       'shopify.disconnect': async ({ user }) => {
-        await sync.connection.disconnect(actorOf(user));
+        await sync().connection.disconnect(actorOf(user));
       },
       'shopify.reconcile': async () => {
-        const view = await sync.connection.view();
+        const view = await sync().connection.view();
         if (!view.connected) throw new ApiError('conflict', 'Connect your Shopify store first.');
         await queueReconcile(ctx);
         return view;
       },
-      'shopify.conflicts': ({ query }) => sync.conflicts(query),
+      'shopify.conflicts': ({ query }) => sync().conflicts(query),
     };
   },
 
