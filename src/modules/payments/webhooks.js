@@ -5,6 +5,7 @@ import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { isGatewayId, methodOf, opsAlert, paiseOf } from './util.js';
 import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
+import { createWebhookDrain } from '../../platform/webhook-drain.js';
 
 /**
  * Payment webhooks (PRD 9.7). Every delivery is verified on its exact bytes before anything is read (a bad signature is 401
@@ -256,58 +257,23 @@ export function createWebhooks(ctx, service) {
     }
   }
 
-  /** One pass over what is waiting, oldest first. A failure waits longer before each try (5 s, 20 s, 80 s, ... up to an hour). */
-  async function dispatch({ limit = BATCH } = {}) {
-    const rows = await platformDb.query(
-      `SELECT * FROM provider_webhook_events
-       WHERE provider IN ('razorpay', 'cashfree') AND status = 'received'
-         AND (attempts = 0 OR received_at < now() - make_interval(secs => least(3600, 5 * power(4, attempts - 1))))
-       ORDER BY id LIMIT $1`,
-      [limit],
-    );
-    const results = [];
-    for (const row of rows) results.push(await processOne(row));
-    return results;
-  }
-
-  /** Runs passes until nothing is waiting that can be done now. */
-  async function drain() {
-    const all = [];
-    for (let pass = 0; pass < 100; pass++) {
-      const results = await dispatch();
-      all.push(...results);
-      if (results.length < BATCH) break;
-    }
-    return all;
-  }
-
-  let running = null;
-  let again = false;
-  /** Work through new events soon, in this process. Safe to call from anywhere; one run at a time. */
-  function kick() {
-    if (running) {
-      again = true;
-      return;
-    }
-    running = (async () => {
-      try {
-        do {
-          again = false;
-          await drain();
-        } while (again);
-      } catch (err) {
-        reportError(err, { msg: 'payments.webhooks_drain_failed' });
-      } finally {
-        running = null;
-      }
-    })();
-  }
-
-  /** For tests and the worker: waits for a run in progress, then drains what is left. */
-  async function settle() {
-    while (running) await running;
-    return drain();
-  }
+  /**
+   * The web app (at once) and the worker (each minute) both work the store's events through the one shared drainer
+   * (platform/webhook-drain.js, R4-WH-1): an event is claimed before it is worked, so it is applied once, and an event waits
+   * while any earlier event of the same payment (its gateway payment, its gateway order, a refund or transfer of it) is still
+   * to be finished, so a refund is never weighed before the capture it refunds and a late failure never races a capture.
+   * Only the store's scopes: Bhava's own billing events are provider 'razorpay' too, under scope 'billing', and are billing's.
+   */
+  const { dispatch, drain, kick, settle } = createWebhookDrain({
+    db: platformDb, name: 'payments.webhooks', providers: ['razorpay', 'cashfree'], scopes: ['managed', 'tenant:%'], order: 'strict', batch: BATCH, process: processOne,
+    subjects: {
+      sql: `array_remove(ARRAY[payload->'payment'->>'id', payload->'payment'->>'orderId', payload->'order'->>'id', payload->'refund'->>'paymentId', payload->'transfer'->>'source', payload->'account'->>'id'], NULL)`,
+      of: (row) => {
+        const ev = row.payload ?? {};
+        return [ev.payment?.id, ev.payment?.orderId, ev.order?.id, ev.refund?.paymentId, ev.transfer?.source, ev.account?.id];
+      },
+    },
+  });
 
   return { managed, own, cashfree, store, dispatch, drain, kick, settle, route };
 }
