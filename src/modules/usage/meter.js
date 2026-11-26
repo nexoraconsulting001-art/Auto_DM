@@ -194,6 +194,8 @@ export function createMeter({ db, config = {}, notify = null, compliance = null 
    * The 80% and 100% alerts of included DMs plus packs, once each per business and month (F-86, F-112). The mark is set by
    * an UPDATE that only one caller can win, in the same transaction as the outbox row, so two workers crossing the line at
    * once tell the owner once. Reaching both at once (a downgrade, a big jump) sends the 100% one and marks both.
+   * The alert's used and percent are the count this caller read when it crossed the line (decided, R3-MONEY-P1): with
+   * workers counting at the same moment that may be one or two short of the settled count, never below the mark.
    */
   async function checkAlerts({ at = now() } = {}) {
     if (!notify?.emit) return [];
