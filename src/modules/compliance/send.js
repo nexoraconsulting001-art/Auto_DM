@@ -429,7 +429,12 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     const plain = { ...action, message: fallbackMessage(action.message, options.fallbackText) };
     const again = await gate.load(plain, { subject: state.subject ?? job?.subject_hash ?? '', account: state.account });
     const verdict = evaluate(plain, again, { at: +now(), limits, trigger: options.trigger ?? '' });
-    if (!verdict.allow) return mapError(err, action, state.account);
+    if (!verdict.allow) {
+      // The gate stopped the plain text (an opt-out, a pause, a closed window since the first try): that rule is the job's outcome and the
+      // logged reason, as for any send the gate refuses. Meta's refusal of the first message stays in the facts (status, code, error class).
+      const refused = await mapError(err, action, state.account);
+      return { ...refused, outcome: verdict.outcome, reason: verdict.reason, retryAt: verdict.retryAt ?? null };
+    }
     try {
       return delivered(await dispatch({ ...plain, message: finalMessage(plain, again) }, state.account, options), 'sent_fallback', 'fallback.validation');
     } catch (second) {
