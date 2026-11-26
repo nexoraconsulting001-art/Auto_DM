@@ -155,6 +155,9 @@ jobs:
         with: { node-version: 22, cache: npm }
       - name: Install the server, the console and the shared client (no app packages)
         run: ${{ env.SERVER_INSTALL }}
+      # Tests that load the console's own pages (test/p0/admin-api/moved.test.js) answer 503 until the console is built.
+      - name: The seller console builds
+        run: npm run build:console
       # minio/minio is no longer on Docker Hub (MinIO stopped publishing images); this is Bitnami's last MinIO build (same image in prod.yml and deploy/prod/compose/compose.ci.yaml).
       - name: Start MinIO (S3) and create the bucket
         run: |
