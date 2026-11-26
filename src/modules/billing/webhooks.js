@@ -14,9 +14,16 @@ import { countWebhookProcessed, countWebhookStored } from '../../platform/metric
  * an email, a phone or a name), stored in provider_webhook_events under scope 'billing', and only then answered 200. The
  * work is done from that table, here at once and by the worker's sweep for anything left: each event id once, each payment
  * id one payment and one invoice, and an event older than the state already applied changes no status ('stale').
+ *
+ * The web app (at once) and the worker (each minute) both work through the table, so a drainer first takes an event: while
+ * an event is 'received', processed_at is when a drainer took it, and nobody else touches it until that drainer has
+ * finished it or let it go (or LEASE has passed, for a drainer that died). An event whose subscription has an earlier event
+ * being worked on right now waits for it, so events are applied in the order they came and each one is finished (and so
+ * counted by lastApplied) before the next is weighed (R4-MONEY-2).
  */
 const BATCH = 50;
 const MAX_ATTEMPTS = 8;
+const LEASE = '5 minutes';
 const EVENT_ID = /^[A-Za-z0-9_.:-]{1,200}$/;
 const SIGNATURE = /^[0-9a-f]{64}$/i;
 const PROVIDER_ID = /^[A-Za-z0-9_]{1,80}$/;
@@ -108,7 +115,8 @@ export function createBillingWebhooks(ctx, service) {
   async function failed(row, err) {
     const why = `${err?.name ?? 'Error'}${err?.code ? `:${err.code}` : ''}${err?.kind ? `:${err.kind}` : ''}`.slice(0, 300);
     const [after] = await platformDb.query(
-      `UPDATE provider_webhook_events SET attempts = attempts + 1, last_error = $2, status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE status END
+      `UPDATE provider_webhook_events SET attempts = attempts + 1, last_error = $2, status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE status END,
+         processed_at = CASE WHEN attempts + 1 >= $3 THEN now() ELSE NULL END
        WHERE id = $1 AND status = 'received' RETURNING status, tenant_id`,
       [row.id, why, MAX_ATTEMPTS],
     );
@@ -149,7 +157,37 @@ export function createBillingWebhooks(ctx, service) {
     return { tenantId, run: () => service.applyPeriod({ ev, eventAtMs, lastMs }) };
   }
 
+  /** Takes the event for this drainer, or says another one has it. */
+  async function claim(row) {
+    const mine = await platformDb.query(
+      `UPDATE provider_webhook_events SET processed_at = now()
+       WHERE id = $1 AND status = 'received' AND (processed_at IS NULL OR processed_at < now() - $2::interval) RETURNING id`,
+      [row.id, LEASE],
+    );
+    return mine.length > 0;
+  }
+  const letGo = (row) => platformDb.query(`UPDATE provider_webhook_events SET processed_at = NULL WHERE id = $1 AND status = 'received'`, [row.id]);
+
+  /** Whether an earlier event of the same subscription is being worked on by another drainer right now. */
+  async function earlierInHand(row) {
+    const subId = row.payload?.subscription?.id;
+    if (!subId) return false;
+    const earlier = await platformDb.query(
+      `SELECT 1 FROM provider_webhook_events
+       WHERE provider = 'razorpay' AND scope = $1 AND status = 'received' AND id < $2 AND payload->'subscription'->>'id' = $3
+         AND processed_at >= now() - $4::interval LIMIT 1`,
+      [BILLING_WEBHOOK.scope, row.id, subId, LEASE],
+    );
+    return earlier.length > 0;
+  }
+
+  /** One event, if this drainer gets it: null when another drainer has it or has an earlier one of its subscription. */
   async function processOne(row) {
+    if (!(await claim(row))) return null;
+    if (await earlierInHand(row)) {
+      await letGo(row);
+      return null;
+    }
     try {
       const routed = await route(row);
       if (routed.ignore) {
@@ -166,26 +204,36 @@ export function createBillingWebhooks(ctx, service) {
     }
   }
 
-  /** One pass over what is waiting, oldest first; a failure waits longer before each try. */
-  async function dispatch({ limit = BATCH } = {}) {
+  /** One pass over what is waiting and nobody has in hand, oldest first; a failure waits longer before each try. -> what this drainer did */
+  async function dispatch({ limit = BATCH, tried = new Set() } = {}) {
     const rows = await platformDb.query(
       `SELECT * FROM provider_webhook_events
        WHERE provider = 'razorpay' AND scope = $1 AND status = 'received'
          AND (attempts = 0 OR received_at < now() - make_interval(secs => least(3600, 5 * power(4, attempts - 1))))
+         AND (processed_at IS NULL OR processed_at < now() - $3::interval) AND NOT (id = ANY($4::bigint[]))
        ORDER BY id LIMIT $2`,
-      [BILLING_WEBHOOK.scope, limit],
+      [BILLING_WEBHOOK.scope, limit, LEASE, [...tried]],
     );
     const results = [];
-    for (const row of rows) results.push(await processOne(row));
+    for (const row of rows) {
+      tried.add(Number(row.id));
+      const result = await processOne(row);
+      if (result) results.push(result);
+    }
     return results;
   }
 
+  /**
+   * Passes until one finds nothing to do, so an event another drainer left waiting behind this one's is taken up here. An
+   * event is tried once per drain: one that failed waits for its next turn.
+   */
   async function drain() {
     const all = [];
+    const tried = new Set();
     for (let pass = 0; pass < 100; pass++) {
-      const results = await dispatch();
+      const results = await dispatch({ tried });
       all.push(...results);
-      if (results.length < BATCH) break;
+      if (!results.length) break;
     }
     return all;
   }
