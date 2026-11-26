@@ -325,6 +325,11 @@ test('F-45: an operator cannot change the owner\'s phone or email, in read or wr
       assert.notEqual(res.status, 200);
     }
   }
+  // User decision 2026-11-26 (F-45): PATCH /settings with a phone or email is refused, pointing to the verified change flow.
+  const settings = await s.call('PATCH', '/settings', { phone: '9999999999', email: 'evil@example.com' });
+  assert.equal(settings.status, 400, settings.text);
+  assert.deepEqual(Object.keys(settings.data?.fields ?? {}).sort(), ['email', 'phone']);
+  assert.match(settings.data.error, /Ways to sign in/);
   const after = await one(world, `SELECT id, phone, email FROM users WHERE tenant_id = $1 AND role = 'owner'`, [shop.tenantId]);
   assert.deepEqual(after, owner);
   assert.equal((await one(world, 'SELECT plan FROM tenants WHERE id = $1', [shop.tenantId])).plan, 't3');

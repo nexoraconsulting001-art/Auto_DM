@@ -82,7 +82,7 @@ function validated(schema, value) {
   const parsed = schema.safeParse(value);
   if (parsed.success) return parsed.data;
   const fields = fieldErrors(parsed.error.issues);
-  const messages = Object.values(fields);
+  const messages = [...new Set(Object.values(fields))]; // one sentence said of several fields is said once
   throw new ApiError('validation_failed', messages.length === 1 ? messages[0] : 'Please check the highlighted details.', { fields });
 }
 
