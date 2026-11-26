@@ -28,6 +28,8 @@
     "test": "node --import ./tools/net-guard.mjs --test --test-force-exit --test-concurrency=4 \"test/**/*.test.js\"",
     "test:ci": "node --import ./tools/net-guard.mjs --test --test-force-exit --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./tools/ci-annotate.mjs --test-reporter-destination=stdout \"test/**/*.test.js\"",
     "test:shard": "node tools/ci-shard.mjs run",
+    "test:one": "node tools/run-test.mjs",
+    "test:cleanup": "node tools/test-cleanup.mjs",
     "test:phase": "node tools/test-phase.mjs",
     "gate": "node tools/gate.mjs",
     "ledger": "node tools/ledger.mjs",
