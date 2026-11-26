@@ -9,7 +9,9 @@ import { test } from 'node:test';
 import crypto from 'node:crypto';
 import { CONSOLE_HOST, assert, hit, json, need, one, totp, unique, useBillingWorld } from '../../p7/spec-p7/support.js';
 
-const world = useBillingWorld();
+// Real Postgres: one connection holds the code's row and eight guesses wait on it at once, so the owner's pool needs ten
+// (the test database's default of three, two for the owner with two logins, let none reach the lock: R3-MONEY-7).
+const world = useBillingWorld({ poolSize: 20 });
 const ip = () => `198.18.${crypto.randomInt(0, 255)}.${crypto.randomInt(1, 250)}`;
 const post = (path, body, from) => hit(world, path, { host: CONSOLE_HOST, method: 'POST', body, headers: { 'x-forwarded-for': from } });
 
@@ -45,7 +47,7 @@ test('eight wrong emailed codes queued on one code get at most five looks, and t
   const burst = () => Promise.all(Array.from({ length: 8 }, () => post('/sign-in/verify', { email, code: wrong }, ip())));
   let answers;
   if (world.rawDb.kind === 'postgres') {
-    // Real Postgres: hold the row while the guesses queue on it (fewer than the app's pool of ten connections).
+    // Real Postgres: hold the row while the guesses queue on it (fewer than this world's pool, see useBillingWorld above).
     await world.rawDb.platform.tx(async (t) => {
       await t.query('SELECT id FROM platform_login_codes WHERE id = $1 FOR UPDATE', [code.id]);
       answers = burst();

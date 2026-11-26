@@ -72,7 +72,7 @@ export const address = (fields = {}) => ({ name: 'Asha Rao', phone: newPhone(), 
 
 // ---- the world ------------------------------------------------------------------------------------------------------------
 
-export async function openP4World({ overrides = {}, worker = true, defaultTenant = '' } = {}) {
+export async function openP4World({ overrides = {}, worker = true, defaultTenant = '', poolSize } = {}) {
   const rzp = createRazorpay();
   const ship = createShiprocket();
   const wa = createWhatsApp();
@@ -86,6 +86,7 @@ export async function openP4World({ overrides = {}, worker = true, defaultTenant
     world = await openP3World({
       worker,
       defaultTenant,
+      poolSize,
       overrides: {
         providerTimeoutMs: 1500,
         orderEventsPollMs: 40,
