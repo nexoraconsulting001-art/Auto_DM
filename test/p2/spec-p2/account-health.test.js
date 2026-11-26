@@ -9,7 +9,13 @@ const NO_INSIGHTS = ['instagram_business_basic', 'instagram_business_manage_mess
 const setExpiry = (shop, ms) => shop.sql(`UPDATE ig_accounts SET token_expires_at = now() + ($3::bigint * interval '1 millisecond') WHERE tenant_id = $1 AND ig_user_id = $2`, [shop.tenantId, shop.igUserId, Math.round(ms)]);
 const code = (health, name) => health.deductions.find((d) => d.code === name);
 const text = (deduction) => `${deduction?.message ?? ''} ${deduction?.fix ?? ''}`;
+/**
+ * The worker looks at an account at most every 15 minutes (reach-guard sweep, EVALUATE_EVERY_MS) and a screen reuses a score under 10 minutes old
+ * (PRD 5.9: a check runs at most every 10 min per tenant), so a change made a moment ago is only seen once the account is due: make it due, as
+ * shop.evaluate() does, then let the worker run.
+ */
 const recompute = async (shop) => {
+  await shop.sql('UPDATE reach_guard_state SET evaluated_at = NULL WHERE tenant_id = $1', [shop.tenantId]);
   await shop.settle({ ms: 2500, roundMs: 250 });
   return shop.health();
 };
