@@ -23,7 +23,8 @@ async function give(app, shop, { errors = 0, calls = 0, throttled = 0, usage = n
 const ops = (app, who, shop, query = '') => onConsole(app, who, `/tenants/${shop.tenant.id}/ops${query}`);
 
 async function twoShops(t) {
-  const app = await startWorld(t);
+// These read and write the Postgres events and jobs tables themselves, and a shared ClickHouse or Redis would hold other tests' rows under the same small tenant ids: they run on the pg drivers, as the p1/p2/p3 suites do.
+  const app = await startWorld(t, { overrides: { queueDriver: 'pg', analyticsDriver: 'pg' } });
   const admin = await consoleUser(app);
   const a = await addBusiness(app, { slug: 'ops-alpha', name: 'Alpha Candles' });
   const b = await addBusiness(app, { slug: 'ops-beta', name: 'Beta Spices' });
@@ -123,7 +124,7 @@ test('G-14: the answer holds numbers and dates only: no name, no message text, n
 });
 
 test('G-14: the per-business numbers are in the console only: /metrics never shows them, and a business\'s own staff never reach them', async (t) => {
-  const app = await startWorld(t, { overrides: { metricsToken: 'metrics-token-ops-spec-0123456789' } }); // secret-scan:allow
+  const app = await startWorld(t, { overrides: { metricsToken: 'metrics-token-ops-spec-0123456789', queueDriver: 'pg', analyticsDriver: 'pg' } }); // secret-scan:allow
   const a = await addBusiness(app, { slug: 'ops-solo', name: 'Solo Shop' });
   await give(app, a, { errors: 4, calls: 4, usage: 71, queue: { depth: 31, oldest: 123 } });
   const metrics = await (await fetch(`${app.base}/metrics`, { headers: { authorization: 'Bearer metrics-token-ops-spec-0123456789' } })).text();

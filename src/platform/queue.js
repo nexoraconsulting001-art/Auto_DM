@@ -274,6 +274,8 @@ function redisQueue(config, injected = {}) {
     return {
       host: u.hostname,
       port: Number(u.port || 6379),
+      // The database number in the address (redis://host/3), as ioredis reads it for the cache and the readiness probe.
+      db: /^\/\d+$/.test(u.pathname) ? Number(u.pathname.slice(1)) : undefined,
       username: u.username || undefined,
       password: u.password ? decodeURIComponent(u.password) : undefined,
       tls: u.protocol === 'rediss:' ? {} : undefined,

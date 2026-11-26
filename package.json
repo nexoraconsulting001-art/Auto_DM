@@ -76,7 +76,8 @@
     "@stryker-mutator/core": "^10.1.1",
     "autocannon": "^9.0.0",
     "embedded-postgres": "16.15.0-beta.19",
-    "fast-check": "^4.10.2"
+    "fast-check": "^4.10.2",
+    "js-yaml": "^3.15.2"
   },
   "overrides": {
     "react": "19.3.0",
