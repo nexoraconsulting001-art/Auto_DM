@@ -45,7 +45,8 @@ export const restoreHash = (token) => crypto.createHash('sha256').update(String(
  */
 export function createCartReminders(ctx, { clock = () => new Date() } = {}) {
   const { db, repos, shopperMessages, platform, config } = ctx;
-  const platformDb = db.platform ?? db;
+  // Read when used, not when the module is built: a module's api(ctx) is also built with no database, to list its routes.
+  const platformDb = () => db.platform ?? db;
   const settings = alertSettingsFor(ctx);
 
   // ---- the owner's switch and numbers ----
@@ -310,7 +311,7 @@ ${items.length ? html`<ul style="margin:0 0 16px;padding-left:18px">${items.map(
 
   /** The job: every business with reminders on, and every business with a reminder due. */
   async function run() {
-    const tenants = await platformDb.query(
+    const tenants = await platformDb().query(
       `SELECT tenant_id FROM alert_settings WHERE cart_reminders
        UNION SELECT DISTINCT tenant_id FROM cart_reminders WHERE status = 'scheduled' AND scheduled_for <= now()`,
     );

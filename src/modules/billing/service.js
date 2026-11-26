@@ -506,9 +506,12 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     return locked(async (t) => {
       const s = await subOf(t);
       if (!s?.provider_subscription_id || s.status === 'cancelled') return null;
-      // Still waiting to be queued, as the caller saw it; a line removed in the meantime is never queued (money-4).
+      // Still waiting to be queued, as the caller saw it; a line removed in the meantime is never queued (money-4). The caller
+      // saw billed_through through the driver, which keeps milliseconds and drops the microseconds Postgres stores, so the
+      // check is made at that resolution: an exact match on a value set by SQL (now(), a period copied from the provider's
+      // row) would never hold, and the line would never be charged again.
       const [now] = await t.query(
-        `SELECT * FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL AND billed_through IS NOT DISTINCT FROM $3::timestamptz
+        `SELECT * FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL AND date_trunc('milliseconds', billed_through) IS NOT DISTINCT FROM $3::timestamptz
            AND (ends_at IS NULL OR ends_at > now())`,
         [tenantId(), item.id, iso(item.billed_through)],
       );
@@ -936,10 +939,13 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
           for (const item of fresh) if (await queueItem(item, `item:${item.id}:first`, { settings, months })) done.queued += 1;
           const end = s.current_period_end ? new Date(s.current_period_end) : null;
           if (end && end - at() <= QUEUE_AHEAD_MS) {
+            // Compared with the period end in the database, not with `end`: that came through the driver, which drops the
+            // microseconds Postgres keeps, so a line billed through exactly the period end would look a little past it.
             const due = await db.query(
-              `SELECT * FROM subscription_items WHERE tenant_id = $1 AND cycle = 'monthly' AND provider_item_id IS NULL AND billed_through IS NOT NULL AND billed_through <= $2::timestamptz
-                 AND (ends_at IS NULL OR ends_at > $2::timestamptz) ORDER BY id`,
-              [tenantId(), iso(end)],
+              `SELECT i.* FROM subscription_items i JOIN subscriptions s ON s.tenant_id = i.tenant_id
+               WHERE i.tenant_id = $1 AND i.cycle = 'monthly' AND i.provider_item_id IS NULL AND i.billed_through IS NOT NULL AND i.billed_through <= s.current_period_end
+                 AND (i.ends_at IS NULL OR i.ends_at > s.current_period_end) ORDER BY i.id`,
+              [tenantId()],
             );
             for (const item of due) if (await queueItem(item, `item:${item.id}:${+end}`, { settings, months, since: new Date(+end - QUEUE_AHEAD_MS) })) done.queued += 1;
             done.passThrough += await queuePassThrough(s, settings);

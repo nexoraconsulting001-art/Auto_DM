@@ -311,13 +311,14 @@ export async function addP4Shop(world, { whatsapp = true, pay = true, pickup = t
       if (!made) await sql(`INSERT INTO consent_notices (tenant_id, version, body_en, body_hi) VALUES ($1, 1, 'We use your details to deliver your order.', 'हम आपके विवरण का उपयोग करते हैं।') ON CONFLICT DO NOTHING`, [id]);
       shop.noticeVersion = (await shop.one('SELECT max(version) AS v FROM consent_notices WHERE tenant_id = $1', [id])).v ?? 1;
     },
-    async invoiceReady({ gstin = `${stateCode}ABCDE1234F1Z5`, prefix = 'INV' } = {}) {
-      const body = { legalName: `${shop.name} Traders`, gstin, stateCode, address: '4 Mill Lane, Pune', invoicePrefix: prefix };
+    // The invoice state is the shop's unless the caller names another (F-54 bills a business in another state).
+    async invoiceReady({ stateCode: state = stateCode, gstin = `${state}ABCDE1234F1Z5`, prefix = 'INV' } = {}) {
+      const body = { legalName: `${shop.name} Traders`, gstin, stateCode: state, address: '4 Mill Lane, Pune', invoicePrefix: prefix };
       if (await tryApi('Saving invoice settings', 'PATCH', '/invoice-settings', body)) return;
       await sql(
         `INSERT INTO invoice_settings (tenant_id, legal_name, gstin, state_code, address, invoice_prefix) VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (tenant_id) DO UPDATE SET legal_name = EXCLUDED.legal_name, gstin = EXCLUDED.gstin, state_code = EXCLUDED.state_code, invoice_prefix = EXCLUDED.invoice_prefix`,
-        [id, body.legalName, gstin, stateCode, body.address, prefix],
+        [id, body.legalName, gstin, state, body.address, prefix],
       );
     },
 

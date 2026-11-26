@@ -61,7 +61,8 @@ const toAlert = (r) => ({
 
 export function createOrderAlerts(ctx, settings) {
   const { db, repos, shopperMessages } = ctx;
-  const platformDb = db.platform ?? db;
+  // Read when used, not when the module is built: a module's api(ctx) is also built with no database, to list its routes.
+  const platformDb = () => db.platform ?? db;
 
   async function loadOrder(orderId) {
     const [order] = await db.query(`SELECT ${ORDER_COLUMNS} FROM orders WHERE tenant_id = $1 AND id = $2`, [tenantId(), orderId]);
@@ -209,7 +210,7 @@ export function createOrderAlerts(ctx, settings) {
 
   /** Every row that is due, across businesses: retries after backoff, deferred ones, and any a crash left behind. */
   async function sweep({ limit = 200 } = {}) {
-    const due = await platformDb.query(
+    const due = await platformDb().query(
       `SELECT tenant_id, id FROM order_alerts WHERE status = 'queued' AND next_attempt_at <= now() ORDER BY next_attempt_at, id LIMIT $1`,
       [limit],
     );

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { usageMonthOf } from '../../../src/contracts/billing.js';
-import { addStaff, change, dmMeter, hit, impersonate, json, key, need, one, consoleUser, setDmUsed, shopOn, sql, authorize, charge, useBillingWorld, unique } from './support.js';
+import { addStaff, change, dmMeter, hit, impersonate, json, key, need, one, consoleUser, setDmUsed, shopOn, sql, authorize, charge, subscribe, useBillingWorld, unique } from './support.js';
 
 const world = useBillingWorld();
 
@@ -11,9 +11,14 @@ const heldJobs = (shop) => sql(world, `SELECT id, status, reason FROM outbound_j
 const usedNow = async (shop) => Number((await one(world, `SELECT used FROM usage_months WHERE tenant_id = $1 AND meter = 'dms' AND month = $2`, [shop.tenantId, usageMonthOf()]))?.used ?? 0);
 const alerts = (shop, kind) => sql(world, `SELECT id FROM notification_events WHERE tenant_id = $1 AND kind = $2`, [shop.tenantId, kind]);
 
-/** A business on tier 1 (5,000 included) with a live automation, its meter at `used`. */
-async function meterShop(used, plan = 't1', included = 5000) {
-  const shop = await shopOn(world, plan);
+/**
+ * A business on tier 1 (5,000 included) with a live automation, its meter at `used`. `paying`: on the plan the way an owner
+ * gets there (chosen, authorised and charged), so it has the subscription a DM pack is billed on (PRD 5.12: packs, like
+ * every add-on, are lines on the Razorpay subscription).
+ */
+async function meterShop(used, plan = 't1', included = 5000, { paying = false } = {}) {
+  const shop = await shopOn(world, paying ? 'free' : plan);
+  if (paying) await subscribe(world, shop, plan);
   await setDmUsed(world, shop, used, { included });
   const auto = await shop.automate();
   return { shop, auto };
@@ -44,7 +49,7 @@ test('F-86: at 79% nothing is said; the DM that reaches 80% alerts the owner onc
 });
 
 test('F-86: reaching 100% alerts once more, a pack lifts it, and crossing 80% again of the new allowance is not a second 80% alert in the same month', async () => {
-  const { shop, auto } = await meterShop(4999);
+  const { shop, auto } = await meterShop(4999, 't1', 5000, { paying: true });
   await comments(shop, auto, 1);
   await shop.settle();
   await world.quiet(600);
@@ -106,7 +111,7 @@ test('F-112: one DM over the limit is held, never counted, and the count never p
 });
 
 test('F-112: an expired held DM is not sent when the limit lifts, and a pack lifts the hold for the ones that are still good', async () => {
-  const { shop, auto } = await meterShop(5000);
+  const { shop, auto } = await meterShop(5000, 't1', 5000, { paying: true });
   await comments(shop, auto, 2);
   await shop.settle();
   assert.equal((await heldJobs(shop)).length, 2);

@@ -28,7 +28,8 @@ test('an order reads back in paise with its items', withApp(async ({ api, repos 
 
   const detail = await ok(await api('GET', `/orders/${placed.id}`));
   assert.equal(detail.orderNumber, placed.order_number);
-  assert.deepEqual(detail.items.map(({ id: _id, ...rest }) => rest), [{ productId: pot.id, name: 'Clay pot', image: 'https://cdn.example/p.jpg', pricePaise: 19950, option: 'M', qty: 2 }]);
+  // The Phase 4 item fields (src/contracts/api/orders.js OrderItem) are answered for a Phase 0 order too, empty.
+  assert.deepEqual(detail.items.map(({ id: _id, ...rest }) => rest), [{ productId: pot.id, name: 'Clay pot', image: 'https://cdn.example/p.jpg', pricePaise: 19950, option: 'M', qty: 2, variantId: null, sku: '', hsnCode: '', gstRateBp: 0, discountPaise: 0, taxPaise: 0 }]);
   await refused(await api('GET', '/orders/999999'), 404, 'not_found');
 }));
 

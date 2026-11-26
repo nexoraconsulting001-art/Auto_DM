@@ -175,8 +175,8 @@ export function ordersApi({ db, repos, platform, orderEvents }) {
         const order = await checkoutOrder(t, params.id);
         if (!order) return null;
         if (order.hold_reason) throw new ApiError('conflict', 'This order is on hold. Release the hold first.');
-        await changeOrder(t, order.id, { fulfilment: body.to, actor: actorOf(user), reason: body.note ? 'With a note' : '' });
-        if (body.note) await addOrderNote(t, order.id, { actor: actorOf(user), note: body.note });
+        // The note is the move's own: one timeline entry, new -> packed with "Packed from the app" (S-32).
+        await changeOrder(t, order.id, { fulfilment: body.to, actor: actorOf(user), note: body.note ?? '' });
         return order;
       });
       if (!done) return null;

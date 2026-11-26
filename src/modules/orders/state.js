@@ -15,7 +15,7 @@ export * from '../../contracts/orders.js';
  * caller does with it (stock, coupon use, a payment row) and the order event the database writes for it commit together
  * or not at all. Nothing here sends a message or calls a provider: listeners on ctx.orderEvents do that, after commit.
  *
- *   changeOrder(t, orderId, { fulfilment?, payment?, actor, reason?, cancelReason?, set?, ifAllowed? })
+ *   changeOrder(t, orderId, { fulfilment?, payment?, actor, reason?, note?, cancelReason?, set?, ifAllowed? })
  *       -> { order, changed: { fulfilment, payment }, skipped }
  *   holdOrder(t, orderId, holdReason, { actor, reason? })      releaseOrder(t, orderId, { actor, reason? })
  *   addOrderNote(t, orderId, { actor, note })
@@ -53,9 +53,13 @@ const cleanActor = (actor) => {
   return value;
 };
 
-/** Tells the database who is making the change, for this transaction only. The timeline trigger reads it. */
-async function stamp(t, actor, reason = '') {
-  await t.query(`SELECT set_config('app.order_actor', $1, true), set_config('app.order_reason', $2, true)`, [cleanActor(actor), String(reason ?? '').slice(0, 200)]);
+/**
+ * Tells the database who is making the change, why, and the seller's note on it, for this transaction only. The timeline
+ * trigger reads them (migration 950: the note goes on the fulfilment move's own entry). Every change sets all three, so
+ * nothing carries over to the next change in the same transaction.
+ */
+async function stamp(t, actor, reason = '', note = '') {
+  await t.query(`SELECT set_config('app.order_actor', $1, true), set_config('app.order_reason', $2, true), set_config('app.order_note', $3, true)`, [cleanActor(actor), String(reason ?? '').slice(0, 200), String(note ?? '').trim().slice(0, 1000)]);
 }
 
 async function lockOrder(t, orderId) {
@@ -81,7 +85,7 @@ function assignments(set, allowed, firstParam) {
  * Moves a checkout order's fulfilment status, its payment status, or both in one statement (paying an order confirms it:
  * { payment: 'paid', fulfilment: 'new' }). The payment move is judged first, so a fulfilment guard sees the money as it will be.
  */
-export async function changeOrder(t, orderId, { fulfilment, payment, actor, reason = '', cancelReason, set, ifAllowed = false } = {}) {
+export async function changeOrder(t, orderId, { fulfilment, payment, actor, reason = '', note = '', cancelReason, set, ifAllowed = false } = {}) {
   if (fulfilment !== undefined && !FULFILMENT_STATUSES.includes(fulfilment)) throw new OrderStateError('invalid', `Unknown fulfilment status "${fulfilment}"`);
   if (payment !== undefined && !PAYMENT_STATUSES.includes(payment)) throw new OrderStateError('invalid', `Unknown payment status "${payment}"`);
   if (cancelReason !== undefined && !CANCEL_REASONS.includes(cancelReason)) throw new OrderStateError('invalid', `Unknown cancel reason "${cancelReason}"`);
@@ -120,7 +124,7 @@ export async function changeOrder(t, orderId, { fulfilment, payment, actor, reas
 
   // The reason a cancelled order was cancelled stays with it; the database clears it if the order ever comes back.
   const reasonNow = changed.fulfilment && next.fulfilment_status === 'cancelled' ? cancelReason ?? 'other' : order.cancel_reason;
-  await stamp(t, actor, reason);
+  await stamp(t, actor, reason, note);
   const [updated] = await t.query(
     `UPDATE orders SET fulfilment_status = $3, payment_status = $4${[...extra.columns.map((c) => `, ${c}`)].join('')}, cancel_reason = $${5 + extra.values.length}
      WHERE tenant_id = $1 AND id = $2 RETURNING *`,

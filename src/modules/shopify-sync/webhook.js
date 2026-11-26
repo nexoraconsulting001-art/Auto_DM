@@ -24,7 +24,8 @@ const sha256 = (raw) => crypto.createHash('sha256').update(raw).digest('hex');
 
 export function createShopifyWebhook(ctx, { products, connection }) {
   const { db, platform, providers } = ctx;
-  const platformDb = db.platform ?? db;
+  // Read when used, not when the module is built: a module's api(ctx) is also built with no database, to list its routes.
+  const platformDb = () => db.platform ?? db;
 
   /** What is kept of a delivery, by topic. */
   function clean(topic, body) {
@@ -38,7 +39,7 @@ export function createShopifyWebhook(ctx, { products, connection }) {
     const raw = Buffer.isBuffer(req.rawBody) ? req.rawBody : null;
     const domain = String(req.get(SIGNATURE_HEADERS.shopifyShop) ?? '').trim().toLowerCase();
     const [conn] = /^[a-z0-9][a-z0-9-]{0,60}\.myshopify\.com$/.test(domain)
-      ? await platformDb.query('SELECT tenant_id, webhook_secret_enc FROM shopify_connections WHERE shop_domain = $1', [domain])
+      ? await platformDb().query('SELECT tenant_id, webhook_secret_enc FROM shopify_connections WHERE shop_domain = $1', [domain])
       : [];
     let secret = '';
     try {
@@ -60,7 +61,7 @@ export function createShopifyWebhook(ctx, { products, connection }) {
     const topic = String(req.get(SIGNATURE_HEADERS.shopifyTopic) ?? '').toLowerCase();
     const header = String(req.get(SIGNATURE_HEADERS.shopifyWebhookId) ?? '');
     const eventId = WEBHOOK_ID.test(header) ? header : `sha256:${sha256(raw)}`;
-    const [row] = await platformDb.query(
+    const [row] = await platformDb().query(
       `INSERT INTO provider_webhook_events (provider, scope, event_id, event_type, payload, tenant_id) VALUES ('shopify', $1, $2, $3, $4::jsonb, $5)
        ON CONFLICT (provider, scope, event_id) DO NOTHING RETURNING id`,
       [`tenant:${conn.tenant_id}`, eventId, TOPIC.test(topic) ? topic : '', JSON.stringify(clean(topic, body)), conn.tenant_id],
@@ -96,14 +97,14 @@ export function createShopifyWebhook(ctx, { products, connection }) {
     const tenant = Number(String(row.scope).slice('tenant:'.length));
     try {
       const outcome = await withTenant(tenant, () => work(row));
-      await platformDb.query(
+      await platformDb().query(
         `UPDATE provider_webhook_events SET status = $2, outcome = $3, attempts = attempts + 1, last_error = '', processed_at = now() WHERE id = $1 AND status = 'received'`,
         [row.id, ['processed', 'created'].includes(outcome) ? 'processed' : 'ignored', String(outcome).slice(0, 60)],
       );
       countWebhookProcessed(platform?.metrics, 'shopify', ['processed', 'created'].includes(outcome) ? 'processed' : 'ignored');
     } catch (err) {
       reportError(err, { msg: 'shopify.webhook_failed', event: Number(row.id) });
-      const [after] = await platformDb.query(
+      const [after] = await platformDb().query(
         `UPDATE provider_webhook_events SET attempts = attempts + 1, last_error = $2, status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE status END WHERE id = $1 AND status = 'received' RETURNING status`,
         [row.id, String(err?.code ?? err?.kind ?? err?.name ?? 'error').slice(0, 300), MAX_ATTEMPTS],
       );
@@ -114,7 +115,7 @@ export function createShopifyWebhook(ctx, { products, connection }) {
   async function drain() {
     let total = 0;
     for (let pass = 0; pass < 100; pass++) {
-      const rows = await platformDb.query(
+      const rows = await platformDb().query(
         `SELECT * FROM provider_webhook_events WHERE provider = 'shopify' AND status = 'received'
            AND (attempts = 0 OR received_at < now() - make_interval(secs => least(3600, 5 * power(4, attempts - 1))))
          ORDER BY id LIMIT $1`,

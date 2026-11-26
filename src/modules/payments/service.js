@@ -87,6 +87,32 @@ export function createPayments(ctx) {
   }
 
   /**
+   * One gateway order per payment row, however many starts arrive at once (S-15). Starts in this process for the same row
+   * share one call; starts in other processes wait on the row's lock and then read the stored id, so the gateway is asked
+   * exactly once. The lock is held across the gateway call (bounded by the provider timeout) by at most one start per row
+   * per process, so a burst of taps holds one connection, not one per tap. A managed order names the linked account in its
+   * notes. -> the payment row with its gateway_order_id
+   */
+  const gatewayStarts = new Map();
+  function gatewayOrderFor(row, order, creds, mode) {
+    const key = `${tenantId()}:${row.id}`;
+    const running = gatewayStarts.get(key);
+    if (running) return running;
+    const call = db.tx(async (t) => {
+      const [locked] = await t.query('SELECT * FROM payments WHERE tenant_id = $1 AND id = $2 FOR UPDATE', [tenantId(), row.id]);
+      if (!locked) throw new PaymentError('not_found', 'We couldn’t find that order.');
+      if (locked.gateway_order_id) return locked;
+      const amount = Number(locked.amount_paise);
+      const created = await creds.adapter.createOrder(creds.account, { amountPaise: amount, receipt: order.order_number, notes: mode === 'managed' ? { account: creds.accountRef } : {} });
+      if (!isGatewayId(created?.id) || created.amountPaise !== amount) throw new ProviderError({ provider: 'razorpay', kind: 'malformed', delivery: 'unknown' });
+      const [stored] = await t.query('UPDATE payments SET gateway_order_id = $3 WHERE tenant_id = $1 AND id = $2 RETURNING *', [tenantId(), row.id, created.id]);
+      return stored;
+    }).finally(() => gatewayStarts.delete(key));
+    gatewayStarts.set(key, call);
+    return call;
+  }
+
+  /**
    * The gateway order for an order that is to be paid online, made with the exact amount in paise and the order number as
    * its receipt. One payment row per gateway order; a failed attempt and its retry share both (9.7).
    */
@@ -127,14 +153,7 @@ export function createPayments(ctx) {
     if (prepared.done) return { paymentId: null, done: true, gateway: null };
 
     let { row } = prepared;
-    if (!row.gateway_order_id) {
-      // Outside any transaction: the gateway may take ten seconds. A managed order names the linked account in its notes.
-      const created = await creds.adapter.createOrder(creds.account, { amountPaise: Number(row.amount_paise), receipt: prepared.order.order_number, notes: mode === 'managed' ? { account: creds.accountRef } : {} });
-      if (!isGatewayId(created?.id) || created.amountPaise !== Number(row.amount_paise)) throw new ProviderError({ provider: 'razorpay', kind: 'malformed', delivery: 'unknown' });
-      const [stored] = await db.query('UPDATE payments SET gateway_order_id = $3 WHERE tenant_id = $1 AND id = $2 AND gateway_order_id IS NULL RETURNING *', [tenantId(), row.id, created.id]);
-      // Two starts at once: the first to store its gateway order wins and the other's is never offered to anyone.
-      row = stored ?? (await db.query('SELECT * FROM payments WHERE tenant_id = $1 AND id = $2', [tenantId(), row.id]))[0];
-    }
+    if (!row.gateway_order_id) row = await gatewayOrderFor(row, prepared.order, creds, mode);
     const options = creds.adapter.checkoutOptions(creds.account, { gatewayOrderId: row.gateway_order_id, amountPaise: Number(row.amount_paise), display: await display(baseUrl) });
     return {
       paymentId: Number(row.id),
@@ -249,8 +268,12 @@ export function createPayments(ctx) {
 
       const paid = await sumCaptured(t, order.id);
       const target = row.purpose === 'advance' ? 'advance_paid' : 'paid';
-      const changed = await changeOrder(t, order.id, { payment: target, fulfilment: 'new', actor, reason: 'payment captured', set: { paid_paise: paid }, ifAllowed: true });
-      if (changed.order.fulfilment_status === 'cancelled') {
+      // Money after the hold ran out (S-41) moves the money only. Whether the order comes back is the stock's call: the
+      // order.paid listener (inventory/stock.js) brings it back when every line is still on hand, and otherwise keeps it
+      // cancelled as "Paid, out of stock" for the owner to reinstate once stock arrives (orders.reinstate) or to refund.
+      const lateAfterHold = order.fulfilment_status === 'cancelled' && order.cancel_reason === 'hold_expired';
+      const changed = await changeOrder(t, order.id, { payment: target, ...(lateAfterHold ? {} : { fulfilment: 'new' }), actor, reason: 'payment captured', set: { paid_paise: paid }, ifAllowed: true });
+      if (changed.order.fulfilment_status === 'cancelled' && !lateAfterHold) {
         // The money arrived for an order that was cancelled and cannot come back: the owner has it to give back.
         await holdOrder(t, order.id, 'review', { actor, reason: 'paid after the order was cancelled' });
         await raiseAlert(t, { kind: 'payment.after_cancel', severity: 'critical', message: `Order ${order.order_number} was paid after it was cancelled. Refund ${rupees(row.amount_paise)} to the shopper.`, target: `order:${order.id}`, dedupeKey: `payment-late:${row.id}` });

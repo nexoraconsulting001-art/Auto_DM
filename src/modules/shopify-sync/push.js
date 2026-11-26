@@ -27,7 +27,8 @@ const backoffSeconds = (attempt) => Math.min(3600, 30 * 2 ** Math.max(0, attempt
 
 export function createPushes(ctx, { connection, products }) {
   const { db, repos } = ctx;
-  const platformDb = db.platform ?? db;
+  // Read when used, not when the module is built: a module's api(ctx) is also built with no database, to list its routes.
+  const platformDb = () => db.platform ?? db;
 
   /** The order event listener: an order that goes ahead is queued for Shopify, and pushed straight away. */
   async function onOrderConfirmed(event) {
@@ -225,7 +226,7 @@ export function createPushes(ctx, { connection, products }) {
 
   /** Every push that is due, across businesses. */
   async function sweep({ limit = 100 } = {}) {
-    const due = await platformDb.query(
+    const due = await platformDb().query(
       `SELECT p.tenant_id, p.order_id FROM shopify_order_pushes p JOIN shopify_connections c ON c.tenant_id = p.tenant_id AND c.status = 'active'
        WHERE p.status = 'pending' AND p.next_attempt_at <= now() ORDER BY p.next_attempt_at LIMIT $1`,
       [limit],
@@ -238,7 +239,7 @@ export function createPushes(ctx, { connection, products }) {
         reportError(err, { msg: 'shopify.push_sweep_failed', orderId });
       }
     }
-    const cancels = await platformDb.query(
+    const cancels = await platformDb().query(
       `SELECT p.tenant_id, p.order_id FROM shopify_order_pushes p JOIN shopify_connections c ON c.tenant_id = p.tenant_id AND c.status = 'active'
        WHERE p.cancel_status = 'pending' AND p.cancel_next_at <= now() ORDER BY p.cancel_next_at LIMIT $1`,
       [limit],
