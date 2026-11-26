@@ -88,7 +88,7 @@ for (const screen of SCREENS) {
 test('a feature the plan lacks reads as that, with the server\'s words and no retry that can\'t work', async ({ page }) => {
   await page.route(/\/api\/v1\/reviews(\?|$)/, (route) => route.fulfill(planRefusal('Reviews aren’t on your plan.')));
   await open(page, world, shop.owner, '/reviews');
-  await expect(page.getByRole('heading', { name: 'This isn’t on your plan' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Not included in your current plan' })).toBeVisible();
   await expect(page.getByText('Reviews aren’t on your plan.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
   await expectHealthy(page);

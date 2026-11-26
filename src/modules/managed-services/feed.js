@@ -1,4 +1,4 @@
-import { ApiError, isAllowed, routes } from '../../contracts/api/index.js';
+import { ApiError, isAllowed, planOff, routes } from '../../contracts/api/index.js';
 import { MASKED, SERVICES, SERVICE_SCOPES, canMoveChange, canUndoChange, maskSecrets, serviceFeature } from '../../contracts/services.js';
 import { log } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
@@ -94,7 +94,7 @@ export function teamFeedApi(ctx) {
     if (route.feature) {
       let on = false;
       for (const name of [route.feature].flat()) on ||= await ctx.repos.entitlements.can(name);
-      if (!on) throw new ApiError('plan.feature_off', 'This isn’t on your plan.');
+      if (!on) throw planOff([route.feature].flat()[0]);
     }
   }
 

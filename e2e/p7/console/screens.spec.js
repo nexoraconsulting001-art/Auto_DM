@@ -168,7 +168,7 @@ test('F-37 F-38: a plan refusal from any screen shows an upgrade prompt that lea
   await sheet.getByLabel('Question', { exact: true }).fill('Do you ship to Goa?');
   await sheet.getByLabel('Answer', { exact: true }).fill('Yes, in four days.');
   await sheet.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByTestId('upgrade-bar')).toContainText('not on your plan');
+  await expect(page.getByTestId('upgrade-bar')).toContainText('Not included in your current plan');
   await sheet.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByTestId('upgrade-prompt')).toBeVisible();
   await page.getByTestId('upgrade-prompt').getByRole('link', { name: 'See plans' }).click();

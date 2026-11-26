@@ -1,4 +1,4 @@
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planLimitMessage } from '../../contracts/api/index.js';
 import { tenantId } from '../../tenancy.js';
 
 /** Automation states that count against the plan's automations limit: they can send. */
@@ -25,7 +25,7 @@ export async function automationLimitHook(automation, ctx) {
   const plan = await repos.entitlements.lowestPlan(['automations'], { moreThan: limit });
   throw new ApiError(
     'plan.limit_reached',
-    plan ? `Your plan runs ${limit} automations at once. Pause one, or move to the ${plan.name} plan for more.` : `Your plan runs ${limit} automations at once. Pause one first.`,
+    planLimitMessage(limit, plan?.name),
     { reason: 'plan', feature: 'automations', limit, used, plan: plan?.code },
   );
 }

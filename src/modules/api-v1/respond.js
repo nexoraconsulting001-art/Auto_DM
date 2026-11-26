@@ -27,6 +27,7 @@ export function sendApiError(err, req, res) {
     ...(failure.fields ? { fields: failure.fields } : {}),
     ...(failure.reason ? { reason: failure.reason } : {}),
     ...(failure.storeUrl ? { storeUrl: failure.storeUrl } : {}),
+    ...(failure.upgradeUrl ? { upgradeUrl: failure.upgradeUrl } : {}),
     ...(failure.feature ? { feature: failure.feature } : {}),
     ...(failure.plan ? { plan: failure.plan } : {}),
     ...(Number.isInteger(failure.limit) ? { limit: failure.limit } : {}),

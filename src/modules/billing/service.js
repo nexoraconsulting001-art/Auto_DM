@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { ProviderError } from '../../adapters/http.js';
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planOff } from '../../contracts/api/index.js';
 import { financialYearOf, planRank, usageMonthOf } from '../../contracts/billing.js';
 import { log, reportError } from '../../platform/log.js';
 import { tenantId, withTenant } from '../../tenancy.js';
@@ -580,7 +580,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
         const s = await subOf(t, { forUpdate: true });
         const items = await runningItems(t);
         const why = await unavailable(t, addon, { tenant, settings, items });
-        if (why === 'needs_plan') throw new ApiError('plan.feature_off', 'This isn’t available on your plan.', { reason: 'needs_plan', plan: addon.min_plan });
+        if (why === 'needs_plan') throw planOff(addon.feature ?? addon.code, { reason: 'needs_plan', plan: addon.min_plan });
         if (why === 'included') throw new ApiError('conflict', 'Your plan already includes this.', { reason: 'included' });
         if (why === 'already_has') throw new ApiError('conflict', 'You already have this.', { reason: 'already_has' });
         if (!s?.provider_subscription_id || s.status === 'cancelled') throw new ApiError('conflict', 'Pick a paid plan first.', { reason: 'needs_subscription' });

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planOff } from '../../contracts/api/index.js';
 import { CATALOG_LIMITS as L, CatalogRuleError, IMPORT_REASONS, PLAN_REASON, canonicalProductUrl, checkMrp } from '../../contracts/catalog.js';
 import { log, reportError } from '../../platform/log.js';
 import { ImageError } from '../../platform/images.js';
@@ -96,7 +96,7 @@ export function createImports(ctx) {
   const budgetMs = config.importBudgetMs ?? 180_000;
 
   async function mustBeInPlan() {
-    if (!(await repos.entitlements.can('catalog.import'))) throw new ApiError('forbidden', 'Importing products isn’t part of your plan.', { reason: PLAN_REASON });
+    if (!(await repos.entitlements.can('catalog.import'))) throw planOff('catalog.import', { reason: PLAN_REASON });
   }
 
   /** Queues the copy of a product's first image into the business's media (8.3). Once per product and image. */

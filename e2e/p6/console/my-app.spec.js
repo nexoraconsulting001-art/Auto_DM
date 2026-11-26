@@ -99,7 +99,7 @@ test('P-27: the server’s plan refusal reads as an upgrade note, not as a failu
     config: BOTH,
     overrides: { 'GET /app-publishing/submissions': () => refusal(403, 'Your plan does not include the iOS app.', { reason: 'plan.not_included' }) },
   });
-  await expect(page.getByRole('heading', { name: 'This isn’t on your plan' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Not included in your current plan' })).toBeVisible();
   await expect(page.getByText('Your plan does not include the iOS app.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
   await expectHealthy(page);

@@ -5,6 +5,9 @@
  */
 export const PLAN_OFF = 'plan.feature_off';
 export const LIMIT_REACHED = 'plan.limit_reached';
+/** The words of every plan refusal, the server's own (PLAN_REFUSAL_MESSAGE, user decision 2026-11-26), and where upgrading is. */
+export const PLAN_REFUSAL_TITLE = 'Not included in your current plan';
+export const UPGRADE_PATH = '/billing';
 export const PLAN_CODES = Object.freeze(['free', 't1', 't2', 't3', 't4', 't5']);
 export const CYCLES = Object.freeze(['monthly', 'yearly']);
 export const METER_LABELS = Object.freeze({ dms: 'Automated DMs', whatsapp_messages: 'WhatsApp messages', ai_units: 'AI replies' });
@@ -64,9 +67,9 @@ export function promptText(error, { planNameOf = (code) => code } = {}) {
   const higher = error?.plan ? planNameOf(error.plan) : '';
   if (isLimitReached(error)) {
     const used = typeof error.limit === 'number' ? `You have used all ${error.limit}. ` : '';
-    return { title: 'You have reached your limit', body: `${used}${higher ? `${higher} gives you more.` : 'A higher plan gives you more.'}` };
+    return { title: PLAN_REFUSAL_TITLE, body: `${used}Upgrade: ${higher ? `${higher} gives you more.` : 'a higher plan gives you more.'}` };
   }
-  return { title: 'This is not on your plan', body: higher ? `${higher} includes it.` : 'An add-on or a higher plan turns it on.' };
+  return { title: PLAN_REFUSAL_TITLE, body: higher ? `Upgrade: ${higher} includes it.` : 'Upgrade: an add-on or a higher plan turns it on.' };
 }
 
 /** Only an https link, or this site's own path, is ever followed for a document. */

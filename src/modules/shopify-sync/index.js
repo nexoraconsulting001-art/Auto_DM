@@ -1,4 +1,4 @@
-import { ApiError } from '../../contracts/api/errors.js';
+import { ApiError, planOff } from '../../contracts/api/errors.js';
 import { STORE_PROVIDER_PATHS } from '../../contracts/store-routes.js';
 import { ProviderError } from '../../adapters/http.js';
 import { log, reportError } from '../../platform/log.js';
@@ -106,7 +106,7 @@ export const shopifySync = {
     return {
       'shopify.get': () => sync().connection.view(),
       'shopify.connect': async ({ body, user }) => {
-        if (!(await ctx.repos.entitlements.can('shopify.sync'))) throw new ApiError('forbidden', 'Shopify sync isn’t on your plan.', { reason: 'plan' });
+        if (!(await ctx.repos.entitlements.can('shopify.sync'))) throw planOff('shopify.sync', { reason: 'plan' });
         const view = await sync().connection.connect(body, actorOf(user));
         await queueReconcile(ctx);
         return view;

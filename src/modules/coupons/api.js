@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ApiError } from '../../contracts/api/errors.js';
+import { ApiError, planOff } from '../../contracts/api/errors.js';
 import { CartLine } from '../../contracts/store-routes.js';
 import { STORE_LIMITS } from '../../contracts/orders.js';
 import { tenantId } from '../../tenancy.js';
@@ -71,7 +71,7 @@ const isUnique = (err) => err?.code === '23505';
 
 export function couponsApi({ db, repos }) {
   const included = async () => {
-    if (!(await repos.entitlements.can(FEATURE))) throw new ApiError('forbidden', 'Discount codes come with the store plan.');
+    if (!(await repos.entitlements.can(FEATURE))) throw planOff(FEATURE);
   };
   const load = async (id, q = db, lock = false) => (await q.query(`SELECT * FROM coupons WHERE tenant_id = $1 AND id = $2${lock ? ' FOR UPDATE' : ''}`, [tenantId(), id]))[0] ?? null;
 

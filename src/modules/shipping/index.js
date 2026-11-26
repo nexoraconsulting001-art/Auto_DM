@@ -1,4 +1,4 @@
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planOff } from '../../contracts/api/index.js';
 import { STORE_PROVIDER_PATHS } from '../../contracts/store-routes.js';
 import { reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
@@ -68,7 +68,7 @@ export function shippingFor(ctx) {
 const actorOf = (user) => `user:${user.id}`;
 
 async function needPlan(ctx) {
-  if (!(await ctx.repos.entitlements.can(SHIPPING_FEATURE))) throw new ApiError('forbidden', 'Shipping isn’t on your plan.', { reason: 'plan' });
+  if (!(await ctx.repos.entitlements.can(SHIPPING_FEATURE))) throw planOff(SHIPPING_FEATURE, { reason: 'plan' });
 }
 
 /**

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { ApiError } from '../../contracts/api/errors.js';
+import { ApiError, planOff } from '../../contracts/api/errors.js';
 import { log, reportError } from '../../platform/log.js';
 import { tenantId, withTenant } from '../../tenancy.js';
 import { pageOfFetched, readCursor } from '../admin-api/paging.js';
@@ -349,7 +349,7 @@ export function createLoyalty(ctx) {
   // ---- the owner ---------------------------------------------------------------------------------------------------
 
   async function needPlan() {
-    if (!(await featureOn())) throw new ApiError('forbidden', 'Loyalty points are an add-on that isn’t on your plan.', { reason: 'plan' });
+    if (!(await featureOn())) throw planOff(FEATURE, { reason: 'plan' });
   }
 
   const SETTING_COLUMNS = Object.freeze({

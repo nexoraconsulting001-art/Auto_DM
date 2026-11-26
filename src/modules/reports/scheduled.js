@@ -1,4 +1,4 @@
-import { ApiError, canSeeRevenue } from '../../contracts/api/index.js';
+import { ApiError, canSeeRevenue, planOff } from '../../contracts/api/index.js';
 import { log, reportError } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { isRowId, pageOfFetched, readCursor } from '../admin-api/paging.js';
@@ -83,7 +83,7 @@ export function createScheduled(ctx, { sources }) {
   }
 
   async function requirePlan() {
-    if (!(await repos.entitlements.can('reports.scheduled'))) throw new ApiError('forbidden', 'Scheduled reports are available from tier 2.');
+    if (!(await repos.entitlements.can('reports.scheduled'))) throw planOff('reports.scheduled');
   }
 
   async function create(body, user) {

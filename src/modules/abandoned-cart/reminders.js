@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { ApiError } from '../../contracts/api/errors.js';
+import { ApiError, planOff } from '../../contracts/api/errors.js';
 import { STORE_LIMITS } from '../../contracts/orders.js';
 import { quietUntil } from '../../contracts/shopper-messages.js';
 import { formatRupees } from '../../contracts/catalog.js';
@@ -61,7 +61,7 @@ export function createCartReminders(ctx, { clock = () => new Date() } = {}) {
   }
 
   async function setEnabled(enabled, actor) {
-    if (enabled && !(await repos.entitlements.can('store.cart_reminders'))) throw new ApiError('forbidden', 'Cart reminders aren’t on your plan.', { reason: 'plan' });
+    if (enabled && !(await repos.entitlements.can('store.cart_reminders'))) throw planOff('store.cart_reminders', { reason: 'plan' });
     await settings.save({ cart_reminders: enabled }, actor, 'cart_reminders.updated');
     if (!enabled) await db.query(`UPDATE cart_reminders SET status = 'cancelled', stop_reason = 'off' WHERE tenant_id = $1 AND status = 'scheduled'`, [tenantId()]);
     return view();

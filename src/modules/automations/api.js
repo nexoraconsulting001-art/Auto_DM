@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planLimitMessage } from '../../contracts/api/index.js';
 import { COMPLIANCE_LIMITS as L } from '../../contracts/compliance.js';
 import { checkContent } from '../compliance/content.js';
 import { META_ACCESS_HELD } from '../compliance/gate.js';
@@ -50,7 +50,16 @@ export function automationsApi(ctx) {
     async 'automations.create'({ body, user }) {
       await checkSave(stored(body, body.triggerType), deps);
       const limit = await repos.entitlements.limit('automations');
-      return present(await repos.automations.create(stored(body, body.triggerType), { createdBy: user.id, limit, actor: actorOf(user) }));
+      try {
+        return present(await repos.automations.create(stored(body, body.triggerType), { createdBy: user.id, limit, actor: actorOf(user) }));
+      } catch (err) {
+        // At the limit: the plan that has more, for the upgrade prompt.
+        if (err?.code === 'plan.limit_reached' && !err.plan) {
+          const more = await repos.entitlements.lowestPlan(['automations'], { moreThan: limit });
+          if (more) Object.assign(err, { plan: more.code, message: planLimitMessage(limit, more.name) });
+        }
+        throw err;
+      }
     },
 
     async 'automations.get'({ params }) {

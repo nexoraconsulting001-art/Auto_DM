@@ -1,5 +1,5 @@
 import { ADDON_FEATURES, AI_THRESHOLD } from '../../contracts/addons.js';
-import { ApiError } from '../../contracts/api/errors.js';
+import { ApiError, planOff } from '../../contracts/api/errors.js';
 import { reportError } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 
@@ -92,7 +92,7 @@ export function aiRepliesApi(ctx, serviceFor) {
     /** Switching on needs the add-on and an active FAQ entry; switching off and the threshold never need anything. */
     async 'aiReplies.save'({ body, user }) {
       if (body.enabled === true) {
-        if (!(await ctx.repos.entitlements.can(FEATURE))) throw new ApiError('plan.feature_off', 'This is an add-on that isn’t on your plan.', { reason: 'plan', feature: FEATURE });
+        if (!(await ctx.repos.entitlements.can(FEATURE))) throw planOff(FEATURE);
         if (!(await faqCount())) throw new ApiError('validation_failed', 'Add at least one question and answer first.', { fields: { enabled: 'Add at least one question and answer first' } });
       }
       try {

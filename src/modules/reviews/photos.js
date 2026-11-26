@@ -1,5 +1,5 @@
 import multer from 'multer';
-import { ApiError } from '../../contracts/api/errors.js';
+import { ApiError, planOff } from '../../contracts/api/errors.js';
 import { IMAGE_UPLOAD } from '../../contracts/api/media.js';
 import { STORE_LIMITS } from '../../contracts/orders.js';
 import { ReviewCreate } from '../../contracts/store-routes.js';
@@ -56,7 +56,8 @@ export function reviewWithPhotos(ctx, repo) {
     try {
       res.set('Cache-Control', 'no-store');
       if (!fromThisStore(req)) throw new ApiError('forbidden', 'This request didn’t come from the store’s own page.');
-      if (!(await storeOn(ctx.repos)) || !(await ctx.repos.entitlements.can(REVIEWS_FEATURE))) throw new ApiError('not_found', 'There is nothing here.');
+      // Not on the plan: the plan refusal (403), never a 404 (user decision 2026-11-26); a buyer reads it, so no console link.
+      if (!(await storeOn(ctx.repos)) || !(await ctx.repos.entitlements.can(REVIEWS_FEATURE))) throw planOff(REVIEWS_FEATURE, { upgradeUrl: null });
       await parts(req, res);
       const fields = req.body ?? {};
       const body = parseBody(ReviewCreate, Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, ['productId', 'rating'].includes(k) ? whole(v) : v])));

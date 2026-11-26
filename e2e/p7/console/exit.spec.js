@@ -91,7 +91,7 @@ test('sign up, hit a Free-plan limit, upgrade, and see the invoice', async ({ pa
   await sheet.getByLabel('Question', { exact: true }).fill('Do you ship to Goa?');
   await sheet.getByLabel('Answer', { exact: true }).fill('Yes, in four days.');
   await sheet.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByTestId('upgrade-bar')).toContainText('not on your plan');
+  await expect(page.getByTestId('upgrade-bar')).toContainText('Not included in your current plan');
   expect((await one(world, 'SELECT count(*)::int AS n FROM faq_entries WHERE tenant_id = $1', [tenantId]).catch(() => ({ n: 0 }))).n).toBe(0);
   await sheet.getByRole('button', { name: 'Cancel' }).click();
 

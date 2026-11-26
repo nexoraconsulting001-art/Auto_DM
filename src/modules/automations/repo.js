@@ -1,4 +1,4 @@
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planLimitMessage } from '../../contracts/api/index.js';
 import { tenantId } from '../../tenancy.js';
 import { slugify } from '../../util.js';
 import { isRowId, pageOfFetched, readCursor } from '../admin-api/paging.js';
@@ -177,7 +177,8 @@ export function automationsRepo(db) {
         const id = await db.tx(async (t) => {
           await t.query('SELECT pg_advisory_xact_lock($1::int, $2::int)', [CREATE_LOCK, tenantId()]);
           const [{ n }] = await t.query(`SELECT count(*)::int AS n FROM automations WHERE tenant_id = $1 AND state <> 'archived'`, [tenantId()]);
-          if (n >= limit) throw new ApiError('validation_failed', `Your plan includes ${limit} automations. Archive one or upgrade to add another.`);
+          // The plan's limit is a plan refusal (403 plan.limit_reached), as the router's own (user decision 2026-11-26, F-35).
+          if (n >= limit) throw new ApiError('plan.limit_reached', planLimitMessage(limit), { reason: 'plan', feature: 'automations', limit, used: n });
           const values = { ...columnsFrom(input), slug: await freeSlug(t, input.name), any_mode_acknowledged: input.anyModeAcknowledged ? new Date() : null, created_by: createdBy };
           const columns = Object.keys(values);
           const [row] = await t.query(

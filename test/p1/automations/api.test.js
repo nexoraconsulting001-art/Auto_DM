@@ -99,14 +99,16 @@ test('story and DM automations need a plan that includes them', withApp(async (a
 test('the free plan stops at 3 automations, counted without archived ones', withApp(async (app) => {
   const made = [];
   for (let i = 0; i < 3; i++) made.push(await save(app, { name: `A${i}`, triggers: [{ targetType: 'reel', mediaId: `R${i}` }] }));
-  await refused(await app.api('POST', '/automations', body({ name: 'A3', triggers: [{ targetType: 'reel', mediaId: 'R9' }] })), 400, 'validation_failed');
+  // User decision 2026-11-26 (F-35): the plan's limit is the plan refusal, 403 plan.limit_reached with the upgrade path.
+  const full = await refused(await app.api('POST', '/automations', body({ name: 'A3', triggers: [{ targetType: 'reel', mediaId: 'R9' }] })), 403, 'plan.limit_reached');
+  assert.deepEqual([full.feature, full.limit, full.used, full.upgradeUrl], ['automations', 3, 3, '/admin/billing']);
   await ok(await app.api('POST', `/automations/${made[0].id}/state`, { state: 'archived' }));
   await save(app, { name: 'A3', triggers: [{ targetType: 'reel', mediaId: 'R9' }] });
 }));
 
 test('the free plan\'s limit holds when the saves arrive together', withApp(async (app) => {
   const saves = await Promise.all(Array.from({ length: 6 }, (_, i) => app.api('POST', '/automations', body({ name: `A${i}`, triggers: [{ targetType: 'reel', mediaId: `R${i}` }] }))));
-  assert.deepEqual(saves.map((r) => r.status).sort(), [201, 201, 201, 400, 400, 400]);
+  assert.deepEqual(saves.map((r) => r.status).sort(), [201, 201, 201, 403, 403, 403]); // 403 plan.limit_reached: user decision 2026-11-26 (F-35)
 }));
 
 test('two automations can\'t use one reel, and archiving frees it', paidApp(async (app) => {
