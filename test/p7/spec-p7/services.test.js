@@ -134,6 +134,9 @@ test('F-92: a service that lapses a second ago and a write that races it never a
   assert.notEqual((await shop.getProduct(product.id)).pricePaise, 7);
 });
 
+/** The sequence answers items (src/contracts/api/categories.js SequenceItem); saving takes their page ids. */
+const pageIds = (items) => items.map((i) => i.pageId);
+
 async function categoryOf(shop, n = 3) {
   const category = await shop.category(`Lamps ${unique()}`);
   const pages = [];
@@ -149,13 +152,13 @@ test('F-93: with "approve first", an operator\'s reorder waits as a draft until 
   const { category, pages } = await categoryOf(shop);
   const op = await consoleUser(world, 'service_operator');
   const s = await startService(world, shop, op, 'reel_management', 'TASK-93');
-  const original = await shop.sequence(category.id);
+  const original = pageIds(await shop.sequence(category.id));
   const reversed = [...original].reverse();
   const res = await s.call('PUT', `/categories/${category.id}/reels`, { pinned: [], order: reversed });
   assert.equal(res.status, 202, res.text.slice(0, 160));
   assert.equal(res.data.draft, true);
   assert.ok(res.data.changeId);
-  assert.deepEqual(await shop.sequence(category.id), original, 'nothing changed yet');
+  assert.deepEqual(pageIds(await shop.sequence(category.id)), original, 'nothing changed yet');
   const [draft] = await changesOf(shop);
   assert.equal(draft.state, 'draft');
   const feed = json(need(await shop.send('GET', '/team-feed?state=draft'), 200, 'Drafts'));
@@ -164,7 +167,7 @@ test('F-93: with "approve first", an operator\'s reorder waits as a draft until 
   const stranger = await shopOn(world, 't3');
   assert.equal((await stranger.send('POST', `/team-feed/${res.data.changeId}/approve`)).status, 404);
   need(await shop.send('POST', `/team-feed/${res.data.changeId}/approve`), 200, 'Approving');
-  assert.deepEqual(await shop.sequence(category.id), reversed, 'now it is live');
+  assert.deepEqual(pageIds(await shop.sequence(category.id)), reversed, 'now it is live');
   assert.equal((await one(world, 'SELECT state FROM service_changes WHERE id = $1', [res.data.changeId])).state, 'approved');
   assert.ok([400, 409].includes((await shop.send('POST', `/team-feed/${res.data.changeId}/approve`)).status), 'approving twice');
   assert.ok([400, 409].includes((await shop.send('POST', `/team-feed/${res.data.changeId}/reject`)).status), 'rejecting an approved one');
@@ -172,7 +175,7 @@ test('F-93: with "approve first", an operator\'s reorder waits as a draft until 
   const second = await s.call('PUT', `/categories/${category.id}/reels`, { pinned: [], order: original });
   assert.equal(second.status, 202);
   need(await shop.send('POST', `/team-feed/${second.data.changeId}/reject`), 200, 'Rejecting');
-  assert.deepEqual(await shop.sequence(category.id), reversed, 'a rejected draft never applies');
+  assert.deepEqual(pageIds(await shop.sequence(category.id)), reversed, 'a rejected draft never applies');
   assert.ok([400, 409].includes((await shop.send('POST', `/team-feed/${second.data.changeId}/approve`)).status));
   void pages;
 });
@@ -184,7 +187,7 @@ test('F-93: approving a draft runs the route\'s own checks again, and a draft th
   const { category } = await categoryOf(shop);
   const op = await consoleUser(world, 'service_operator');
   const s = await startService(world, shop, op, 'reel_management', 'TASK-93B');
-  const original = await shop.sequence(category.id);
+  const original = pageIds(await shop.sequence(category.id));
   const draft = await s.call('PUT', `/categories/${category.id}/reels`, { pinned: [], order: [...original].reverse() });
   assert.equal(draft.status, 202);
   // The seller deletes the category before approving: the old request no longer fits.
@@ -265,7 +268,8 @@ test('F-95: undoing a change another business made, one that is a draft, or one 
   const refused = await shop.send('POST', `/team-feed/${make.id}/undo`);
   assert.ok([400, 409].includes(refused.status), `nothing to put back for a creation: ${refused.status}`);
   assert.equal((await shop.send('POST', '/team-feed/999999/undo')).status, 404);
-  assert.equal((await shop.send('POST', `/team-feed/abc/undo`)).status, 400);
+  // A path id that is not an id is no such change: the router answers 404 for every route (api-v1 pathParams), not 400.
+  assert.equal((await shop.send('POST', `/team-feed/abc/undo`)).status, 404);
   // A manager may undo; staff may not.
   const staff = await addStaff(world, shop, { permissions: ['catalog'] });
   const asStaff = await hit(world, `/api/v1/team-feed/${change.id}/undo`, { host: shop.host, method: 'POST', token: staff.token });
