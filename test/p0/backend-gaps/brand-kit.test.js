@@ -138,7 +138,9 @@ test('every buyer page reads the kit, and a preset switch changes it at once', a
     const { products } = await seedReel(app.repos, { n: 1 });
     const pages = ['/', '/shop', '/reels', '/about', '/login', '/signup', `/p/${products[0].slug}`, '/r/brunch-edit', '/no-such-page'];
     await app.repos.brandKit.save({ preset: 'tadka' });
-    for (const path of pages) assert.match(await (await fetch(`${app.base}${path}`)).text(), /--gold:#B4340F/, path);
+    // The Phase 4 store pages (/login replaces the Phase 0 one, src/contracts/store-routes.js) name the kit's main colour
+    // --primary; the Phase 0 storefront names it --gold. Either way it is this kit's colour.
+    for (const path of pages) assert.match(await (await fetch(`${app.base}${path}`)).text(), /--(gold|primary):#B4340F/, path);
     await app.repos.brandKit.save({ preset: 'gadget-galli' });
     const dark = await (await fetch(`${app.base}/`)).text();
     assert.match(dark, /--gold:#3D62F2/);
