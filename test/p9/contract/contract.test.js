@@ -20,7 +20,7 @@ import {
   SignupGuardVerdict, blockingOpen, goliveExitCode, isTestValue,
 } from '../../../src/contracts/golive.js';
 import {
-  BUSINESS_OPS_EVENTS, ERROR_EVENT_FIELDS, EXTERNAL_METRICS, ErrorEvent, FORBIDDEN_LABELS, LABEL_OVERRIDES, METRICS, METRIC_LABELS, METRIC_TYPES, UPTIME_SLO, metricProblem, metricSeriesNames,
+  BUSINESS_OPS_EVENTS, BusinessOps, ERROR_EVENT_FIELDS, EXTERNAL_METRICS, ErrorEvent, FORBIDDEN_LABELS, LABEL_OVERRIDES, METRICS, METRIC_LABELS, METRIC_TYPES, UPTIME_SLO, metricProblem, metricSeriesNames,
 } from '../../../src/contracts/metrics.js';
 import { REWRAP_JOB, REWRAP_STATUSES, SECRET_COLUMNS, SECRET_KINDS, oldKeysRetirable, redactUrl } from '../../../src/contracts/secrets.js';
 import { MODULES } from '../../../src/modules/index.js';
@@ -592,9 +592,13 @@ test('the go-live route, its client method, and the two modules that answer the 
   assert.deepEqual(named('secret-rotation').owns, { migrations: ['900_secrets_envelope.sql'], tables: ['secret_rewraps'], api: [], store: [], platform: [], jobs: [REWRAP_JOB] });
   assert.deepEqual(named('golive').owns, { migrations: ['910_signup_cap.sql'], tables: [], api: [], store: [], platform: ['platform.goliveStatus'], jobs: [] });
   assert.deepEqual(named('business-ops').owns, { migrations: [], tables: [], api: [], store: [], platform: ['platform.businessOps'], jobs: [] });
-  for (const what of ['start', 'step', 'progress']) assert.throws(() => createSecretRotation({})[what](), (e) => e.code === 'not_implemented');
-  await assert.rejects(createGolive({}).status(), (e) => e.code === 'not_implemented');
-  assert.deepEqual(await createGolive({}).signupVerdict(), { ok: false, missing: ['golive.not_built'] });
+  // Built (no longer the "not_implemented" stubs): the re-wrap job refuses to start with no database, and the checklist answers its contract.
+  for (const what of ['start', 'step', 'progress']) await assert.rejects(createSecretRotation({})[what](), (e) => e.code === 'no_database', what);
+  const checklist = createGolive({}, { env: {} });
+  assert.ok(GoliveStatus.safeParse(await checklist.status()).success, 'status() answers GoliveStatus');
+  const verdict = SignupGuardVerdict.parse(await checklist.signupVerdict());
+  assert.equal(verdict.ok, false, 'nothing is configured, so blocking items are open');
+  assert.ok(verdict.missing.length > 0 && verdict.missing.every((id) => !id.endsWith('.not_built')));
 
   const app = await startWorld(t);
   const shop = await addBusiness(app, { slug: 'one', name: 'One' });
@@ -602,7 +606,8 @@ test('the go-live route, its client method, and the two modules that answer the 
   for (const url of ['/golive', `/tenants/${shop.tenant.id}/ops`]) {
     assert.equal((await hit(app, url, { host: CONSOLE_HOST })).status, 401, `${url} with nobody signed in`);
     const res = await onConsole(app, admin, url);
-    assert.deepEqual([res.status, res.json().code], [501, 'not_implemented'], url);
+    assert.equal(res.status, 200, url);
+    assert.ok((url === '/golive' ? GoliveStatus : BusinessOps).safeParse(res.json()).success, `${url} answers its contract`);
   }
   assert.equal((await onConsole(app, await consoleUser(app, 'onboarding'), '/golive')).status, 403);
   assert.equal((await hit(app, '/golive', { host: shop.host })).status === 200, false, 'not on a business’s address');
@@ -638,7 +643,11 @@ test('sign-up’s guard: public waits for the checklist where it is enforced, fo
   const admin = await consoleUser(app);
   const put = (body, who = admin) => onConsole(app, who, '/signup', { method: 'PUT', body });
   const refused = await put({ mode: 'public', reason: 'launch day' });
-  assert.deepEqual([refused.status, refused.json().code, refused.json().fields], [409, 'conflict', { golive: 'golive.not_built' }]);
+  // Built: the verdict names the blocking items still open (ids from GOLIVE_ITEMS), space separated, and nothing is "not built".
+  assert.deepEqual([refused.status, refused.json().code, Object.keys(refused.json().fields)], [409, 'conflict', ['golive']]);
+  const open = refused.json().fields.golive.split(' ');
+  const blockingIds = GOLIVE_ITEMS.filter((i) => i.blocks).map((i) => i.id);
+  assert.ok(open.length > 0 && open.every((id) => blockingIds.includes(id)), 'only blocking go-live items are named');
   assert.equal((await onConsole(app, admin, '/signup')).json().mode, 'invite', 'nothing changed');
   assert.equal((await put({ mode: 'public', reason: 'launch day', force: true })).status, 400, 'force needs its own reason');
   assert.equal((await put({ mode: 'public', reason: 'launch day', force: true, forceReason: 'approved by the founder' }, await consoleUser(app, 'support'))).status, 403, 'a super admin only');
@@ -648,7 +657,7 @@ test('sign-up’s guard: public waits for the checklist where it is enforced, fo
   assert.deepEqual([closed.status, closed.json().mode, closed.json().dailyCap], [200, 'closed', 40]);
   const audit = await (app.db.platform ?? app.db).query(`SELECT details FROM audit_log WHERE action = 'signup.mode_set' ORDER BY id`);
   assert.deepEqual(audit.map((r) => r.details), [
-    { mode: 'public', reason: 'launch day', dailyCap: 40, forced: true, forceReason: 'approved by the founder', missing: ['golive.not_built'] },
+    { mode: 'public', reason: 'launch day', dailyCap: 40, forced: true, forceReason: 'approved by the founder', missing: open },
     { mode: 'closed', reason: 'pause' },
   ]);
 
@@ -659,7 +668,7 @@ test('sign-up’s guard: public waits for the checklist where it is enforced, fo
   assert.deepEqual([(await onConsole(plain, other, '/signup', { method: 'PUT', body: { mode: 'public', reason: 'open' } })).json().mode], ['public']);
 });
 
-test('the scripts: arguments, the list of readiness checks, and "not built" until a track builds each', async () => {
+test('the scripts: arguments, the list of readiness checks, and "not built" for any check whose file is not there yet', async () => {
   const scripts = json('package.json').scripts;
   assert.deepEqual([scripts.golive, scripts['check:r05'], scripts['check:r06'], scripts['check:r07'], scripts['prod:validate']],
     ['node scripts/golive.js', 'node tools/readiness/index.mjs r05', 'node tools/readiness/index.mjs r06', 'node tools/readiness/index.mjs r07', 'node tools/readiness/index.mjs validate']);
@@ -668,7 +677,9 @@ test('the scripts: arguments, the list of readiness checks, and "not built" unti
   assert.deepEqual(goliveArgs(['--json', '--blocking', '--owner', 'user', '--offline']), { json: true, blocking: true, owner: 'user', offline: true });
   assert.throws(() => goliveArgs(['--owner', 'them']), GoliveArgError);
   assert.throws(() => goliveArgs(['--print-secrets']), GoliveArgError);
-  await assert.rejects(runGolive({}), (e) => e.code === 'not_implemented');
+  // Built: the command answers the GoliveStatus contract (offline: no probe is asked) and its exit code follows the blocking items.
+  const offline = GoliveStatus.parse(await runGolive(goliveArgs(['--offline'])));
+  assert.equal(goliveExitCode(offline), blockingOpen(offline.items).length ? 1 : 0);
 
   assert.deepEqual(Object.keys(READINESS_CHECKS), ['r05', 'r06', 'r07', 'validate']);
   assert.deepEqual(Object.values(READINESS_CHECKS).map((c) => [c.requirement, c.scenario]), [['G-10', 'R-05'], ['G-11', 'R-06'], ['G-12', 'R-07'], ['G-08', '']]);
