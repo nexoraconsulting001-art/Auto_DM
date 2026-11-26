@@ -313,6 +313,18 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     return handled;
   }
 
+  /**
+   * Meta does not promise order: a comment's delete can be stored before the comment itself (C-15). Its delivery is kept under
+   * `<id>:remove` (commentKey), so a comment whose delete is already here gets nothing, as if the delete had come after it.
+   */
+  async function deletedAlready(ev) {
+    const [row] = await db.query(
+      'SELECT 1 FROM inbound_events WHERE tenant_id = $1 AND channel = $2 AND field = $3 AND object_id = $4',
+      [tenantId(), ev.channel, ev.field, commentKey(ev.commentId, 'remove')],
+    );
+    return Boolean(row);
+  }
+
   /** PRD 4.6: a comment that is just STOP. Blocklisted, and nothing goes back to it: no DM, no public reply, no confirmation. */
   async function onComment(ev) {
     if (['remove', 'removed', 'delete', 'deleted'].includes(ev.verb)) {
@@ -329,6 +341,10 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     }
     const subject = await log.subjectHash(ev.channel, ev.personId);
     const event = { ...ev, subject };
+    if (await deletedAlready(ev)) {
+      await note(event, 'comment.deleted');
+      return;
+    }
     const own = await ownIds(ev);
     if (own.has(ev.personId)) {
       await note(event, 'own_account');
