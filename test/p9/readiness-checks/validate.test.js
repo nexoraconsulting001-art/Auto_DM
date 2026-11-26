@@ -12,6 +12,8 @@ test('metricsIn reads the metric names of an expression and nothing else', () =>
   assert.deepEqual(metricsIn('sum by (queue) (queue_jobs{status="queued"}) > 500 and sum by (queue) (queue_jobs{status="queued"} offset 15m)'), ['queue_jobs']);
   assert.deepEqual(metricsIn('histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{code=~"5.."}[$__rate_interval]))) / on (route) group_left ignoring(code) up'), ['http_request_duration_seconds_bucket', 'up']);
   assert.deepEqual(metricsIn('1 - (a_total / b_total) > 0.05 unless c_gauge'), ['a_total', 'b_total', 'c_gauge']);
+  // A recording rule's name ends in its window (probe:uptime_error_budget_burn_rate:5m); the digits are part of the name, not a number.
+  assert.deepEqual(metricsIn('probe:uptime_error_budget_burn_rate:1h > 14.4 and probe:uptime_error_budget_burn_rate:5m > 14.4'), ['probe:uptime_error_budget_burn_rate:1h', 'probe:uptime_error_budget_burn_rate:5m']);
   assert.deepEqual(dashboardExpressions({ panels: [{ targets: [{ expr: 'up' }] }, { panels: [{ targets: [{ expr: 'rate(x_total[5m])' }] }] }], templating: { list: [{ type: 'query', query: 'label_values(up, job)' }] } }), ['up', 'rate(x_total[5m])', 'up']);
 });
 
