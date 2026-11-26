@@ -472,7 +472,12 @@ export function buyer(world, shop, { ua = UA.phone, ip = `203.0.113.${crypto.ran
 
     // sign-in
     sendCode: (phone, purpose = 'sign_in', extra = {}) => self.api('POST', '/api/store/otp/send', { phone, purpose, ...extra }),
-    verifyCode: (phone, code, purpose = 'sign_in', extra = {}) => self.api('POST', '/api/store/otp/verify', { phone, purpose, code, ...extra }),
+    /** A right sign-in code makes this the signed-in shopper's number, which me() looks up (as signIn() does). */
+    async verifyCode(phone, code, purpose = 'sign_in', extra = {}) {
+      const res = await self.api('POST', '/api/store/otp/verify', { phone, purpose, code, ...extra });
+      if (purpose === 'sign_in' && res.status >= 200 && res.status < 300) self.phone = phone;
+      return res;
+    },
     /** Signs in with a WhatsApp code, as the sign-in page does. */
     async signIn(phone = newPhone()) {
       ok(await self.sendCode(phone), 'Asking for a sign-in code');
