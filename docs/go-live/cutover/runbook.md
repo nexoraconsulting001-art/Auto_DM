@@ -19,7 +19,7 @@ Write down before you start: the old app's address and host, the new business's 
 ## 1. Dry run
 
 ```
-npm run migrate-business -- --source <export file> --tenant <slug>
+npm run migrate-business -- --source <export-file> --tenant <slug>
 ```
 
 A dry run is the default. It writes nothing at all and prints counts per table and every conflict by code, never a row. Read it with the owner:
@@ -37,8 +37,10 @@ A dry run is the default. It writes nothing at all and prints counts per table a
 ## 3. Import
 
 ```
-npm run migrate-business -- --source <export file> --tenant <slug> --run --reason "<why>" [--reels drop|reassign] [--by <operator email>]
+npm run migrate-business -- --source <export-file> --tenant <slug> --run --reason "<why>"
 ```
+
+If step 4 applies, add `--reels drop` or `--reels reassign` to this command; to name who ran it, add `--by <operator-email>`.
 
 The real import runs in one transaction: any error, any blocking conflict, or counts that do not balance roll every row back, and nothing is half imported. It is safe to run again: rows already imported are skipped, and a finished run of the same export answers "already imported". `--reason` goes in the audit log with who and when.
 
@@ -68,7 +70,7 @@ Only after every check passes, and with the owner on the phone.
 4. **Old links.** The old host sends a permanent redirect for old paths to the same path on the new host (PRD 6), so links in old messages keep working.
 5. Tell the owner the shop is open. Watch the first hour: new orders, the compliance log, the health screen.
 
-## 6. Going back
+## 6. Going back (roll back)
 
 Until step 5 is done, going back is only: leave the old app as it is, take it out of maintenance mode, tell the owner. The Bhava business can stay and be re-imported later.
 
