@@ -7,6 +7,7 @@ import { WHATSAPP_LIMITS } from '../../contracts/addons.js';
 import { writeAudit } from '../audit/index.js';
 import { checkContent, linksIn } from '../compliance/content.js';
 import { linkProblem } from '../links/rules.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * The add-on's console routes (src/contracts/api/addons.js, whatsappRoutes). The router has already checked who may call
@@ -101,7 +102,7 @@ export function whatsappApi(ctx) {
            VALUES ($1, $2, $3, $4, $5, $6, 'active', now(), now())
            ON CONFLICT (tenant_id) DO UPDATE SET waba_id = EXCLUDED.waba_id, phone_number_id = EXCLUDED.phone_number_id, display_number = EXCLUDED.display_number,
              display_name = EXCLUDED.display_name, access_token_enc = EXCLUDED.access_token_enc, status = 'active', connected_at = now(), updated_at = now()`,
-          [tenantId(), account.wabaId, account.phoneNumberId, String(number.displayNumber ?? '').slice(0, 20), String(number.verifiedName ?? '').slice(0, 120), platform.secrets.encrypt(account.accessToken)],
+          [tenantId(), account.wabaId, account.phoneNumberId, String(number.displayNumber ?? '').slice(0, 20), String(number.verifiedName ?? '').slice(0, 120), platform.secrets.encrypt(account.accessToken, secretBinding('whatsapp_accounts', 'access_token_enc', { tenant_id: tenantId() }))],
         );
         // Another WhatsApp Business account has its own templates and reviews: read them again rather than trust the old ones.
         if (before && before.waba_id !== account.wabaId) {

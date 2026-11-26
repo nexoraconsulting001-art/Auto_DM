@@ -3,6 +3,7 @@ import { neutralFrom } from '../../adapters/email/index.js';
 import { ProviderError } from '../../adapters/http.js';
 import { log } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * The shopper-message gate (ctx.shopperMessages): the only path to WhatsApp or email for a message to a shopper. The rules
@@ -43,7 +44,7 @@ export function createShopperMessages({ db, platform, providers, config = {}, co
       [tenantId(), message.template.purpose, message.template.language ?? 'en'],
     );
     if (!template || template.status !== 'approved') return { refusal: R.templatePending };
-    return { account: { wabaId: account.waba_id, phoneNumberId: account.phone_number_id, accessToken: platform.secrets.decrypt(account.access_token_enc) }, template };
+    return { account: { wabaId: account.waba_id, phoneNumberId: account.phone_number_id, accessToken: platform.secrets.decrypt(account.access_token_enc, secretBinding('whatsapp_accounts', 'access_token_enc', { tenant_id: tenantId() })) }, template };
   }
 
   async function emailReady() {

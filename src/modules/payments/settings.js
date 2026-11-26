@@ -7,6 +7,7 @@ import { log } from '../../platform/log.js';
 import { tenantId, withTenant } from '../../tenancy.js';
 import { writeAudit } from '../audit/index.js';
 import { PaymentError, maskId, rupees } from './util.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * How one business takes money (PRD 9.6): the ways to pay it has on, its cash-on-delivery rules, and which gateway account
@@ -87,13 +88,15 @@ export function createSettings({ db, repos, config, providers, secrets }) {
     ownAccount: maskId(r.own_account_id), webhookUrl: webhookUrlOf(r),
   });
 
+  /** The record a payment secret is sealed to (R2-SEC-1): this business's payment_settings row, and the column. */
+  const sealedTo = (column, tid = tenantId()) => secretBinding('payment_settings', column, { tenant_id: tid });
   const needSecrets = () => {
     if (!secrets?.configured) throw new ApiError('conflict', 'A payment account can’t be connected yet. Please contact support.');
   };
   /** A fresh address key and secret for this business's own webhook, kept if it already has them. */
   const webhookColumns = (r) => (r.webhook_key && r.webhook_secret_enc
     ? { webhook_key: r.webhook_key, webhook_secret_enc: r.webhook_secret_enc }
-    : { webhook_key: crypto.randomBytes(24).toString('base64url'), webhook_secret_enc: secrets.encrypt(crypto.randomBytes(32).toString('base64url')) });
+    : { webhook_key: crypto.randomBytes(24).toString('base64url'), webhook_secret_enc: secrets.encrypt(crypto.randomBytes(32).toString('base64url'), sealedTo('webhook_secret_enc')) });
 
   const sign = (payload) => crypto.createHmac('sha256', `${config.sessionSecret}:razorpay-oauth`).update(payload).digest('base64url');
   function makeState(user) {
@@ -115,13 +118,13 @@ export function createSettings({ db, repos, config, providers, secrets }) {
   }
 
   const readTokens = (r) => {
-    const stored = JSON.parse(secrets.decrypt(r.oauth_access_enc));
-    return { accessToken: stored.a, publicToken: stored.p ?? '', refreshToken: r.oauth_refresh_enc ? secrets.decrypt(r.oauth_refresh_enc) : '' };
+    const stored = JSON.parse(secrets.decrypt(r.oauth_access_enc, sealedTo('oauth_access_enc')));
+    return { accessToken: stored.a, publicToken: stored.p ?? '', refreshToken: r.oauth_refresh_enc ? secrets.decrypt(r.oauth_refresh_enc, sealedTo('oauth_refresh_enc')) : '' };
   };
   async function saveTokens(runner, tokens) {
     await runner.query(
       'UPDATE payment_settings SET oauth_access_enc = $2, oauth_refresh_enc = $3, oauth_expires_at = $4, updated_at = now() WHERE tenant_id = $1',
-      [tenantId(), secrets.encrypt(JSON.stringify({ a: tokens.accessToken, p: tokens.publicToken ?? '' })), tokens.refreshToken ? secrets.encrypt(tokens.refreshToken) : '', tokens.expiresAt ?? null],
+      [tenantId(), secrets.encrypt(JSON.stringify({ a: tokens.accessToken, p: tokens.publicToken ?? '' }), sealedTo('oauth_access_enc')), tokens.refreshToken ? secrets.encrypt(tokens.refreshToken, sealedTo('oauth_refresh_enc')) : '', tokens.expiresAt ?? null],
     );
   }
 
@@ -360,7 +363,7 @@ export function createSettings({ db, repos, config, providers, secrets }) {
       const [found] = await (db.platform ?? db).query('SELECT tenant_id, webhook_secret_enc, own_account_id FROM payment_settings WHERE webhook_key = $1', [key]);
       if (!found?.webhook_secret_enc || !secrets?.configured) return null;
       try {
-        return { tenantId: found.tenant_id, secret: secrets.decrypt(found.webhook_secret_enc), ownAccountId: found.own_account_id };
+        return { tenantId: found.tenant_id, secret: secrets.decrypt(found.webhook_secret_enc, sealedTo('webhook_secret_enc', found.tenant_id)), ownAccountId: found.own_account_id };
       } catch (err) {
         // A secret sealed with a key that is no longer configured: no delivery can be verified, so none is taken.
         log.warn('payments.webhook_secret_unreadable', { tenantId: found.tenant_id, error: err.name });
@@ -371,7 +374,7 @@ export function createSettings({ db, repos, config, providers, secrets }) {
     /** The secret the seller's gateway signs its webhooks with. Never part of an API answer. */
     async webhookSecret() {
       const current = await row();
-      return current.webhook_secret_enc ? { key: current.webhook_key, secret: secrets.decrypt(current.webhook_secret_enc), url: webhookUrlOf(current) } : null;
+      return current.webhook_secret_enc ? { key: current.webhook_key, secret: secrets.decrypt(current.webhook_secret_enc, sealedTo('webhook_secret_enc')), url: webhookUrlOf(current) } : null;
     },
   };
 }

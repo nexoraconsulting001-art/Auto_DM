@@ -5,6 +5,7 @@ import { log } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { tenantBaseUrl } from '../admin-api/urls.js';
 import { writeAudit } from '../audit/index.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * A business's own Shopify app (PRD 9.11): its shop's myshopify.com address, its Admin API token and the secret Shopify signs
@@ -86,7 +87,7 @@ export function createConnection(ctx) {
     if (!c || (!evenPaused && c.status !== 'active') || !c.access_token_enc) return null;
     let accessToken;
     try {
-      accessToken = platform.secrets.decrypt(c.access_token_enc);
+      accessToken = platform.secrets.decrypt(c.access_token_enc, secretBinding('shopify_connections', 'access_token_enc', { tenant_id: tenantId() }));
     } catch {
       return null;
     }
@@ -113,7 +114,7 @@ export function createConnection(ctx) {
            VALUES ($1, $2, $3, $4, $5, 'active', now(), '', now())
            ON CONFLICT (tenant_id) DO UPDATE SET shop_domain = EXCLUDED.shop_domain, mode = EXCLUDED.mode, access_token_enc = EXCLUDED.access_token_enc,
              webhook_secret_enc = EXCLUDED.webhook_secret_enc, status = 'active', connected_at = now(), last_error = '', updated_at = now()`,
-          [tenantId(), domain, mode, platform.secrets.encrypt(accessToken), platform.secrets.encrypt(webhookSecret)],
+          [tenantId(), domain, mode, platform.secrets.encrypt(accessToken, secretBinding('shopify_connections', 'access_token_enc', { tenant_id: tenantId() })), platform.secrets.encrypt(webhookSecret, secretBinding('shopify_connections', 'webhook_secret_enc', { tenant_id: tenantId() }))],
         );
         // Another shop's ids mean nothing here.
         if (before && before.shop_domain !== domain) await t.query('DELETE FROM shopify_links WHERE tenant_id = $1', [tenantId()]);

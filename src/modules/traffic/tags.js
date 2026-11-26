@@ -7,6 +7,7 @@ import { tenantId, withTenant } from '../../tenancy.js';
 import { ValidationError } from '../../util.js';
 import { writeAudit } from '../audit/index.js';
 import { clockOf, localParts, timeZoneOf } from './time.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 const SENDING_LEASE_MS = 2 * 60_000;
 const MAX_ATTEMPTS = 8;
@@ -58,9 +59,10 @@ const toView = (row, { available, consentReady }) => ({
 export function tagSettingsRepo(db, { secrets }) {
   const select = async (runner = db) => (await runner.query('SELECT * FROM tag_settings WHERE tenant_id = $1', [tenantId()]))[0] ?? null;
 
-  function encrypted(value) {
+  /** Sealed to this business's row and its column (R2-SEC-1). */
+  function encrypted(value, column) {
     if (!secrets.configured) throw new ValidationError('Tokens can’t be stored yet. Please contact support.');
-    return secrets.encrypt(value);
+    return secrets.encrypt(value, secretBinding('tag_settings', column, { tenant_id: tenantId() }));
   }
 
   return {
@@ -73,10 +75,10 @@ export function tagSettingsRepo(db, { secrets }) {
         const next = {
           meta_enabled: patch.meta?.enabled ?? row?.meta_enabled ?? false,
           meta_pixel_id: patch.meta?.pixelId ?? row?.meta_pixel_id ?? '',
-          meta_capi_token_enc: patch.meta?.capiToken ? encrypted(patch.meta.capiToken) : (row?.meta_capi_token_enc ?? ''),
+          meta_capi_token_enc: patch.meta?.capiToken ? encrypted(patch.meta.capiToken, 'meta_capi_token_enc') : (row?.meta_capi_token_enc ?? ''),
           ga4_enabled: patch.ga4?.enabled ?? row?.ga4_enabled ?? false,
           ga4_measurement_id: patch.ga4?.measurementId ?? row?.ga4_measurement_id ?? '',
-          ga4_api_secret_enc: patch.ga4?.apiSecret ? encrypted(patch.ga4.apiSecret) : (row?.ga4_api_secret_enc ?? ''),
+          ga4_api_secret_enc: patch.ga4?.apiSecret ? encrypted(patch.ga4.apiSecret, 'ga4_api_secret_enc') : (row?.ga4_api_secret_enc ?? ''),
         };
         if (next.meta_enabled && !next.meta_pixel_id) throw new ValidationError('Enter the Pixel ID first');
         if (next.ga4_enabled && !next.ga4_measurement_id) throw new ValidationError('Enter the measurement ID first');
@@ -121,8 +123,8 @@ export function createTags(ctx) {
 
   /** The seller's token, decrypted only here, just before a send. */
   function credentials(row, provider) {
-    if (provider === 'meta') return row.meta_capi_token_enc ? { pixelId: row.meta_pixel_id, token: platform.secrets.decrypt(row.meta_capi_token_enc) } : null;
-    return row.ga4_api_secret_enc ? { measurementId: row.ga4_measurement_id, apiSecret: platform.secrets.decrypt(row.ga4_api_secret_enc) } : null;
+    if (provider === 'meta') return row.meta_capi_token_enc ? { pixelId: row.meta_pixel_id, token: platform.secrets.decrypt(row.meta_capi_token_enc, secretBinding('tag_settings', 'meta_capi_token_enc', row)) } : null;
+    return row.ga4_api_secret_enc ? { measurementId: row.ga4_measurement_id, apiSecret: platform.secrets.decrypt(row.ga4_api_secret_enc, secretBinding('tag_settings', 'ga4_api_secret_enc', row)) } : null;
   }
 
   /** What the current business has on. Bhava has no tag of its own: with nothing configured there is nothing here. */

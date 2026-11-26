@@ -36,6 +36,7 @@ export const GOLIVE_EXTRA_DETAILS = Object.freeze({
   notScraped: 'Nothing is being scraped.',
   noReceiver: 'Alerts reach nobody.',
   notEnvelope: 'Some stored secrets are not under the current key in the envelope form.',
+  notBound: 'Stored secrets sealed to their records are not required yet (SECRETS_REQUIRE_BINDING).',
   brokenRule: 'Breaks a production rule.',
   signOffInvalid: 'The sign-off file is not valid.',
   signOffBadEntry: 'The sign-off has no valid name, role or date.',

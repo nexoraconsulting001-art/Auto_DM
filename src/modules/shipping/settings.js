@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { ApiError } from '../../contracts/api/index.js';
 import { log, reportError } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
+import { secretBinding } from '../../contracts/secrets.js';
 import { writeAudit } from '../audit/index.js';
 import { opsAlert } from './alerts.js';
 import { cleanText, failureFields, failureOf, stateName, tenDigits } from './util.js';
@@ -79,7 +80,7 @@ export function createSettings(ctx) {
   const ownLogin = (r) => {
     if (!r.own_email || !r.own_password_enc) return null;
     try {
-      return { email: r.own_email, password: secrets.decrypt(r.own_password_enc) };
+      return { email: r.own_email, password: secrets.decrypt(r.own_password_enc, secretBinding('shipping_settings', 'own_password_enc', { tenant_id: tenantId() })) };
     } catch (err) {
       reportError(err, { msg: 'shipping.own_password_unreadable' });
       return null;
@@ -172,7 +173,7 @@ export function createSettings(ctx) {
       if (Object.keys(fields).length) throw new ApiError('validation_failed', Object.values(fields)[0], { fields });
       if (newPassword !== null) {
         if (!secrets?.configured) throw new ApiError('conflict', 'Your own courier account can’t be connected yet. Please contact support.');
-        next.own_password_enc = secrets.encrypt(newPassword);
+        next.own_password_enc = secrets.encrypt(newPassword, secretBinding('shipping_settings', 'own_password_enc', { tenant_id: tenantId() }));
       }
       if (patch.ownEmail === '') next.own_password_enc = newPassword !== null ? next.own_password_enc : '';
       if (next.mode === 'own' && (!next.own_email || !next.own_password_enc)) {

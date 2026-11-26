@@ -420,7 +420,9 @@ export const PROBES = Object.freeze({
       if (lower(p.config.secretsFormat) !== 'v2') return missing('notEnvelope');
       if (!p.db || !p.secrets?.configured) return unknown();
       const { remaining } = await createSecretRotation({ db: p.db, platform: { secrets: p.secrets } }).retirable();
-      return remaining.length === 0 ? ok() : missing('notEnvelope');
+      if (remaining.length) return missing('notEnvelope');
+      // R2-SEC-1: every value is now sealed to its record, so one that is not must be refused.
+      return p.secrets.requireBinding ? ok() : missing('notBound');
     },
   },
   'runtime.production_guard': {

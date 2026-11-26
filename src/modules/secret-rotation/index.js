@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { REWRAP_BATCH, REWRAP_JOB, RewrapProgress, SECRET_COLUMNS, oldKeysRetirable } from '../../contracts/secrets.js';
+import { REWRAP_BATCH, REWRAP_JOB, RewrapProgress, SECRET_COLUMNS, oldKeysRetirable, secretBinding } from '../../contracts/secrets.js';
 import { log as defaultLog, reportError } from '../../platform/log.js';
 
 /**
@@ -9,7 +9,12 @@ import { log as defaultLog, reportError } from '../../platform/log.js';
  * SECRET_COLUMNS (src/contracts/secrets.js) by its primary key, REWRAP_BATCH rows a step, each step its own short
  * transaction, and writes each value again with platform.secrets.rewrap(): the wrapped data key changes, the value's
  * ciphertext does not, and a v1 value becomes v2. A row is skipped when it is NULL or '', and when it is already under
- * the current key.
+ * the current key and sealed to its own record.
+ *
+ * R2-SEC-1: each row is read with the columns its value is sealed to (SECRET_COLUMNS `bind`), and rewrap() binds a value
+ * written before the binding to that row. A value bound to another record (one copied in from elsewhere) is not moved:
+ * it counts as a failure, so the column ends `failed` and the old key stays needed until someone looks at it. Once
+ * every column is done, SECRETS_REQUIRE_BINDING can be set and an unbound value is refused everywhere.
  *
  * Why nothing is lost, and nothing is ever readable by neither key:
  * - The batch, its writes and the place it reached (secret_rewraps.last_id) commit together. A crash anywhere in a step
@@ -32,6 +37,8 @@ import { log as defaultLog, reportError } from '../../platform/log.js';
  *   createSecretRotation(ctx).progress()   -> RewrapProgress
  *   createSecretRotation(ctx).retirable()  -> { ok, remaining: [{ table, column, count }], oldKeyIds }: may DATA_KEY_OLD go?
  */
+/** The base64url length of a v2 wrapped part that holds a data key and a binding id (src/platform/secrets.js). */
+const BOUND_WRAP_LENGTH = 64;
 const IDENT = /^[a-z_][a-z0-9_]{0,62}$/;
 const ident = (name) => {
   if (!IDENT.test(name)) throw new Error('Not a table or column name');
@@ -69,9 +76,15 @@ export function createSecretRotation(ctx, { batch = REWRAP_BATCH, budgetMs = 20_
   };
   const columnOf = (table, column) => columns.find((c) => c.table === table && c.column === column) ?? null;
 
-  /** SQL that is true for a stored value still under another key or, when v2 is written, in the v1 form. */
+  /**
+   * SQL that is true for a stored value still under another key or, when v2 is written, in the v1 form or a v2 form not
+   * sealed to a record (its wrapped part is the bare data key). Whether it is sealed to its own record needs the row's
+   * binding, and a v1 value says so only when opened: the walk checks both.
+   */
   const staleWhere = (col, format, at) =>
-    format === 'v2' ? `(split_part(${col}, '.', 1) <> 'v2' OR split_part(${col}, '.', 2) <> $${at})` : `split_part(${col}, '.', 2) <> $${at}`;
+    format === 'v2'
+      ? `(split_part(${col}, '.', 1) <> 'v2' OR split_part(${col}, '.', 2) <> $${at} OR length(split_part(${col}, '.', 5)) <> ${BOUND_WRAP_LENGTH})`
+      : `split_part(${col}, '.', 2) <> $${at}`;
 
   async function remainingIn(q, def, { keyId, format }) {
     const col = ident(def.column);
@@ -144,11 +157,12 @@ export function createSecretRotation(ctx, { batch = REWRAP_BATCH, budgetMs = 20_
       }
       const keys = def.key;
       const keyCols = keys.map(ident).join(', ');
+      const bindCols = (def.bind ?? []).filter((c) => !keys.includes(c)).map((c) => `, ${ident(c)}`).join('');
       const col = ident(def.column);
       const after = row.last_id ? splitKey(row.last_id, keys.length) : null;
       const from = after ? `AND (${keyCols}) > (${keys.map((_, i) => `$${i + 1}`).join(', ')})` : '';
       const rows = await q(
-        `SELECT ${keyCols}, ${col} AS value FROM ${ident(def.table)}
+        `SELECT ${keyCols}${bindCols}, ${col} AS value FROM ${ident(def.table)}
           WHERE ${col} IS NOT NULL AND ${col} <> '' ${from}
           ORDER BY ${keyCols} LIMIT ${size} FOR UPDATE SKIP LOCKED`,
         after ?? [],
@@ -158,15 +172,22 @@ export function createSecretRotation(ctx, { batch = REWRAP_BATCH, budgetMs = 20_
       let failed = 0;
       const match = keys.map((k, i) => `${ident(k)} = $${i + 3}`).join(' AND ');
       for (const r of rows) {
-        if (!secrets.needsRotation(r.value)) {
+        let binding;
+        try {
+          binding = secretBinding(def.table, def.column, r);
+        } catch {
+          failed += 1;
+          continue;
+        }
+        if (!secrets.needsRotation(r.value, binding)) {
           skipped += 1;
           continue;
         }
         let next;
         try {
-          next = secrets.rewrap(r.value);
-          // Proved before it is written: the new form reads, and reads as the same secret.
-          if (next === r.value || secrets.decrypt(next) !== secrets.decrypt(r.value)) throw new Error('mismatch');
+          next = secrets.rewrap(r.value, binding);
+          // Proved before it is written: the new form reads, as this row's, and reads as the same secret.
+          if (next === r.value || secrets.decrypt(next, binding) !== secrets.decrypt(r.value)) throw new Error('mismatch');
         } catch {
           failed += 1;
           continue;

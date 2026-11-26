@@ -3,6 +3,7 @@ import { tenantId } from '../../tenancy.js';
 import { ValidationError } from '../../util.js';
 import { RELEASED_BY_OWNER } from '../../repos/connections.js';
 import { writeAudit } from '../audit/index.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /** status_reason of a connection the seller ended. It reads as "not connected", and frees the account for another business (src/repos/connections.js). */
 export const DISCONNECTED_BY_OWNER = RELEASED_BY_OWNER;
@@ -54,10 +55,12 @@ const LOSSES = Object.freeze({
  * that lost its token, or whose token can no longer be decrypted, comes back with none, so nothing can send with it.
  */
 export function igAccountsRepo(db, { secrets }) {
+  /** The record a token is sealed to (R2-SEC-1): this business's row of the account. */
+  const sealedTo = (igUserId) => secretBinding('ig_accounts', 'access_token_enc', { tenant_id: tenantId(), ig_user_id: String(igUserId) });
   function reveal(row) {
     if (!row.access_token_enc || row.status !== 'active') return '';
     try {
-      return secrets.decrypt(row.access_token_enc);
+      return secrets.decrypt(row.access_token_enc, secretBinding('ig_accounts', 'access_token_enc', row));
     } catch {
       log.warn('ig_accounts.undecryptable', { igUserId: row.ig_user_id });
       return '';
@@ -134,7 +137,7 @@ export function igAccountsRepo(db, { secrets }) {
         `UPDATE ig_accounts SET access_token_enc = $3, token_updated_at = now(), token_version = token_version + 1, token_issued_at = now(), token_expires_at = NULL,
            next_refresh_at = now() + interval '24 hours', refresh_failures = 0, status = 'active', status_reason = '', status_changed_at = now()
          WHERE tenant_id = $1 AND ig_user_id = $2 RETURNING ig_user_id`,
-        [tenantId(), String(igUserId), secrets.encrypt(value)],
+        [tenantId(), String(igUserId), secrets.encrypt(value, sealedTo(igUserId))],
       );
       if (!rows.length) throw new ValidationError('This Instagram account is not linked to this business');
     },
@@ -185,7 +188,7 @@ export function igAccountsRepo(db, { secrets }) {
     async saveConnection({ igUserId, appScopedId = '', username = '', token, expiresAt = null, scopes = [], loginKind = 'instagram', pageId = '', connectedBy = null, nextRefreshAt = null }) {
       const id = String(igUserId);
       if (!token) throw new ValidationError('An access token is required');
-      const encrypted = secrets.encrypt(token);
+      const encrypted = secrets.encrypt(token, sealedTo(id));
       return db.tx(async (t) => {
         const [row] = await t.query(
           `UPDATE ig_accounts SET username = $3, app_scoped_id = $4, login_kind = $5, page_id = $6, status = 'active', status_reason = '', status_changed_at = now(),
@@ -254,7 +257,7 @@ export function igAccountsRepo(db, { secrets }) {
     async swapToken(igUserId, expectedVersion, { token, expiresAt = null, nextRefreshAt = null }) {
       const id = String(igUserId);
       if (!token) throw new ValidationError('An access token is required');
-      const encrypted = secrets.encrypt(token);
+      const encrypted = secrets.encrypt(token, sealedTo(id));
       return db.tx(async (t) => {
         const [row] = await t.query(
           `UPDATE ig_accounts SET access_token_enc = $4, token_version = token_version + 1, token_updated_at = now(), token_issued_at = now(),

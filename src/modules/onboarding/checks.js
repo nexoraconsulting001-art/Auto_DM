@@ -6,6 +6,7 @@ import { isPlatformAddress } from '../domains/rules.js';
 import { paymentsFor } from '../payments/index.js';
 import { shippingFor } from '../shipping/index.js';
 import { addressComplete, pickupReady } from '../shipping/settings.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * One function per live check of STEP_CHECKS (src/contracts/onboarding.js). Each looks at the current business and answers
@@ -139,7 +140,7 @@ export function createChecks(ctx) {
       if (shipping.own_email && shipping.own_password_enc) {
         const login = (() => {
           try {
-            return ctx.platform?.secrets?.decrypt(shipping.own_password_enc) ?? null;
+            return ctx.platform?.secrets?.decrypt(shipping.own_password_enc, secretBinding('shipping_settings', 'own_password_enc', { tenant_id: tenantId() })) ?? null;
           } catch {
             return null;
           }

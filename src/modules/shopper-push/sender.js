@@ -4,6 +4,7 @@ import { readServiceAccount } from '../../adapters/push/fcm.js';
 import { log } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { ValidationError } from '../../util.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * The one sender of a push to a shopper (PRD 10.11). It asks the notifications module's push adapter for a sender built
@@ -52,21 +53,21 @@ async function loadCredentials(ctx) {
   if (!row) return {};
   const [config] = await ctx.db.query('SELECT ios_bundle_id FROM app_configs WHERE tenant_id = $1', [tenantId()]);
   const creds = {};
-  const decrypt = (value, platform) => {
+  const decrypt = (value, platform, column) => {
     try {
-      return ctx.platform.secrets.decrypt(value);
+      return ctx.platform.secrets.decrypt(value, secretBinding('app_push_credentials', column, { tenant_id: tenantId() }));
     } catch {
       log.warn('shopper_push.credentials_unreadable', { platform });
       return null;
     }
   };
   if (row.fcm_service_account_enc && row.fcm_status !== 'invalid' && row.fcm_project_id) {
-    const serviceAccount = decrypt(row.fcm_service_account_enc, 'android');
+    const serviceAccount = decrypt(row.fcm_service_account_enc, 'android', 'fcm_service_account_enc');
     if (serviceAccount) creds.fcm = { projectId: row.fcm_project_id, serviceAccount };
   }
   const topic = config?.ios_bundle_id || row.apns_topic;
   if (row.apns_key_enc && row.apns_status !== 'invalid' && row.apns_key_id && row.apns_team_id && topic) {
-    const key = decrypt(row.apns_key_enc, 'ios');
+    const key = decrypt(row.apns_key_enc, 'ios', 'apns_key_enc');
     if (key) creds.apns = { keyId: row.apns_key_id, teamId: row.apns_team_id, key, topic, env: row.apns_env };
   }
   return creds;

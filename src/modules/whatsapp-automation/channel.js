@@ -1,6 +1,7 @@
 import { ADDON_FEATURES, WHATSAPP_CHANNEL, WHATSAPP_LIMITS, WHATSAPP_WINDOW_CLOSED_CODE } from '../../contracts/addons.js';
 import { ProviderError } from '../../adapters/http.js';
 import { tenantId } from '../../tenancy.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * WhatsApp as a channel of the compliance gate (PRD 6.12): what registerChannel('whatsapp', ...) is given. This file is
@@ -38,7 +39,7 @@ export function whatsappChannel({ db, platform, providers, repos }) {
       if (!row) return null;
       let token = '';
       try {
-        token = row.access_token_enc ? platform.secrets.decrypt(row.access_token_enc) : '';
+        token = row.access_token_enc ? platform.secrets.decrypt(row.access_token_enc, secretBinding('whatsapp_accounts', 'access_token_enc', { tenant_id: tenantId() })) : '';
       } catch {
         token = ''; // a token that no longer decrypts (the key changed) reads as needing a reconnect
       }

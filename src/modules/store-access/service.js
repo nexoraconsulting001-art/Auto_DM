@@ -5,6 +5,7 @@ import { StoreAccessUpdate } from '../../contracts/api/apps.js';
 import { log } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { writeAudit } from '../audit/index.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * The business's own developer accounts and our access to them (PRD 10.9). See index.js for the interface.
@@ -223,7 +224,7 @@ function createStoreAccess(ctx) {
         const { keyId, issuerId, privateKey } = body.ascKey;
         checkAscKey(privateKey);
         if (!secrets.configured) throw new ApiError('conflict', 'Keys can’t be stored yet. Please contact support.');
-        const sealed = secrets.encrypt(JSON.stringify({ t: tenantId(), p: platform, k: keyId, i: issuerId, pk: String(privateKey) }));
+        const sealed = secrets.encrypt(JSON.stringify({ t: tenantId(), p: platform, k: keyId, i: issuerId, pk: String(privateKey) }), secretBinding('store_access', 'key_enc', { tenant_id: tenantId(), platform }));
         for (const [column, value] of [['credential_kind', 'asc_api_key'], ['key_id', keyId], ['issuer_id', issuerId], ['key_enc', sealed], ['key_last4', keyLast4(privateKey)]]) set(column, value);
         changed.push('ascKey:set');
       }
@@ -251,7 +252,7 @@ function createStoreAccess(ctx) {
   function openKey(row) {
     if (!row?.key_enc || row.credential_kind !== 'asc_api_key') return null;
     try {
-      const sealed = JSON.parse(secrets.decrypt(row.key_enc));
+      const sealed = JSON.parse(secrets.decrypt(row.key_enc, secretBinding('store_access', 'key_enc', { tenant_id: tenantId(), platform: row.platform })));
       if (sealed.t !== tenantId() || sealed.p !== row.platform || sealed.k !== row.key_id) return null;
       return { keyId: row.key_id, issuerId: row.issuer_id, privateKey: sealed.pk };
     } catch {

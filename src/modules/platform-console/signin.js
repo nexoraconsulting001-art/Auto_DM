@@ -3,6 +3,7 @@ import { PLATFORM_LOGIN } from '../../contracts/api/platform-ops.js';
 import { log, reportError } from '../../platform/log.js';
 import { Refusal, mountRoute, platformAudit } from './mount.js';
 import { generateLoginCode, generateRecoveryCodes, generateSecret, hashLoginCode, hashRecoveryCode, otpauthUrl, verifyTotp } from './totp.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * Signing in to the Platform Console (PRD 5.5): an emailed code, then the authenticator. Never a seller's phone or password,
@@ -29,21 +30,24 @@ const TICKET_TRIES = 5;
 
 const describe = (user) => ({ id: user.id, email: user.email, name: user.name, role: user.role });
 
-function readState(secrets, stored) {
+/** The record a TOTP secret is sealed to (R2-SEC-1): its platform user's row. */
+const sealedTo = (userId) => secretBinding('platform_users', 'totp_secret_enc', { id: userId });
+
+function readState(secrets, stored, userId) {
   if (!stored) return null;
   try {
-    const value = JSON.parse(secrets.decrypt(stored));
+    const value = JSON.parse(secrets.decrypt(stored, sealedTo(userId)));
     return typeof value?.secret === 'string' ? { secret: value.secret, lastStep: Number.isSafeInteger(value.lastStep) ? value.lastStep : -1 } : null;
   } catch {
     // An old value stored as the bare secret.
     try {
-      return { secret: secrets.decrypt(stored), lastStep: -1 };
+      return { secret: secrets.decrypt(stored, sealedTo(userId)), lastStep: -1 };
     } catch {
       return null;
     }
   }
 }
-const writeState = (secrets, state) => secrets.encrypt(JSON.stringify({ secret: state.secret, lastStep: state.lastStep }));
+const writeState = (secrets, state, userId) => secrets.encrypt(JSON.stringify({ secret: state.secret, lastStep: state.lastStep }), sealedTo(userId));
 
 /** The sign-in email. Bhava's own words to Bhava's own team: no business, no shopper. */
 function codeMail(code) {
@@ -143,7 +147,7 @@ export function registerSignIn(router, ctx, auth) {
     if (!user.totp_enrolled_at) {
       if (!secrets.configured) throw new Refusal(503, 'The console can’t set up an authenticator right now. Contact your admin.', 'not_configured');
       const secret = generateSecret();
-      const updated = await pdb.query(`UPDATE platform_users SET totp_secret_enc = $2 WHERE id = $1 AND totp_enrolled_at IS NULL RETURNING id`, [user.id, writeState(secrets, { secret, lastStep: -1 })]);
+      const updated = await pdb.query(`UPDATE platform_users SET totp_secret_enc = $2 WHERE id = $1 AND totp_enrolled_at IS NULL RETURNING id`, [user.id, writeState(secrets, { secret, lastStep: -1 }, user.id)]);
       if (updated.length) enrol = { secret, otpauthUrl: otpauthUrl(secret, user.email) };
     }
     const ticket = crypto.randomBytes(32).toString('base64url');
@@ -210,7 +214,7 @@ export function registerSignIn(router, ctx, auth) {
 
   /** 'totp' or 'recovery' when the code is good and now spent, otherwise null. */
   async function acceptCode(user, code, enrolling) {
-    const state = readState(secrets, user.totp_secret_enc);
+    const state = readState(secrets, user.totp_secret_enc, user.id);
     if (!state) return null;
     if (code.includes('-')) {
       if (enrolling) return null;
@@ -224,7 +228,7 @@ export function registerSignIn(router, ctx, auth) {
     if (step === null) return null;
     const moved = await pdb.query(
       `UPDATE platform_users SET totp_secret_enc = $3, totp_enrolled_at = COALESCE(totp_enrolled_at, now()) WHERE id = $1 AND totp_secret_enc = $2 RETURNING id`,
-      [user.id, user.totp_secret_enc, writeState(secrets, { secret: state.secret, lastStep: step })],
+      [user.id, user.totp_secret_enc, writeState(secrets, { secret: state.secret, lastStep: step }, user.id)],
     );
     return moved.length ? 'totp' : null;
   }

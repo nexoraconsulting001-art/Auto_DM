@@ -137,6 +137,9 @@ export const config = {
   dataKeyOld: process.env.DATA_KEY_OLD || '',
   // The form encrypt() writes: v1, or v2 (envelope: a data key per value, wrapped by DATA_KEY). Both always read. Production needs v2.
   secretsFormat: process.env.SECRETS_FORMAT === 'v2' ? 'v2' : 'v1',
+  // R2-SEC-1: refuse a stored secret that is not sealed to its record. Set it once the re-wrap job (which binds every
+  // stored value to its row) reports done; until then values written before the binding still read.
+  secretsRequireBinding: process.env.SECRETS_REQUIRE_BINDING === 'true',
   // Where the settings in SECRET_SETTINGS below come from (src/platform/secret-source.js): env, file (SECRETS_DIR) or http
   // (SECRETS_URL, SECRETS_TOKEN_FILE, SECRETS_PATH_PREFIX, read again every SECRETS_REFRESH_SECONDS). <SETTING>_FILE always wins.
   secretsDriver: (process.env.SECRETS_DRIVER || 'env').trim().toLowerCase(),

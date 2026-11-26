@@ -8,6 +8,7 @@ import { claimConnection, tellPassedOver } from '../ig-accounts/claim.js';
 import { tenantBaseUrl } from '../admin-api/urls.js';
 import { messagePage } from './pages.js';
 import { SCOPES_TO_GO_LIVE, SCOPE_INSIGHTS, READ_RECEIPTS_FIELD, WEBHOOK_FIELD_SCOPES, nextRefreshAt } from './rules.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 const STATE_TTL_MS = 10 * 60_000;
 const DEFAULT_RETURN = '/admin/settings';
@@ -173,13 +174,13 @@ export function createConnect({ db, repos, meta, config, platform, gates }) {
          WHERE finish_hash = $1 AND provider = $2 AND finished_at IS NULL AND expires_at > now() FOR UPDATE
        )
        UPDATE oauth_states o SET finished_at = now(), pending_login_enc = '' FROM taken WHERE o.state_hash = taken.state_hash
-       RETURNING o.tenant_id, o.user_id, o.return_to, o.via, taken.pending_login_enc AS pending`,
+       RETURNING o.state_hash, o.tenant_id, o.user_id, o.return_to, o.via, taken.pending_login_enc AS pending`,
       [hashState(token), meta.login.kind],
     );
     if (!row) return null;
     let login = null;
     try {
-      login = row.pending ? JSON.parse(platform.secrets.decrypt(row.pending)) : null;
+      login = row.pending ? JSON.parse(platform.secrets.decrypt(row.pending, secretBinding('oauth_states', 'pending_login_enc', row))) : null;
     } catch (err) {
       reportError(err, { msg: 'ig_connect.pending_unreadable' });
     }
@@ -246,7 +247,7 @@ export function createConnect({ db, repos, meta, config, platform, gates }) {
     const finishToken = crypto.randomBytes(32).toString('base64url');
     await platformDb.query(
       'UPDATE oauth_states SET finish_hash = $2, pending_login_enc = $3 WHERE state_hash = $1',
-      [state.state_hash, hashState(finishToken), platform.secrets.encrypt(JSON.stringify(got.login))],
+      [state.state_hash, hashState(finishToken), platform.secrets.encrypt(JSON.stringify(got.login), secretBinding('oauth_states', 'pending_login_enc', state))],
     );
     return res.redirect(303, onward(req, tenant, state, { finishToken }));
   }
