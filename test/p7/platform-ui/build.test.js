@@ -38,7 +38,8 @@ test('F-90: each screen is a file of its own, loaded when it is opened, so a rol
 
 test('F-91: nothing of the seller’s console or API is in the bundle, and nothing of the console names a seller’s address', () => {
   const all = Object.entries(text).filter(([name]) => name.endsWith('.js') || name.endsWith('.html')).map(([, body]) => body).join('\n');
-  for (const sentinel of ['/api/v1', 'Bhava for Business', '/admin/', 'Welcome to Bhava. Your creator page is ready']) assert.ok(!all.includes(sentinel), `the bundle holds ${sentinel}`);
+  // Seller-console-only text. "Bhava for Business" alone is not one: the console's go-live next steps (Phase 9) name the owner app to the team.
+  for (const sentinel of ['/api/v1', 'No devices listed yet', 'The Bhava for Business app on your phones', '/admin/', 'Welcome to Bhava. Your creator page is ready']) assert.ok(!all.includes(sentinel), `the bundle holds ${sentinel}`);
   assert.ok(all.includes('/tenants'), 'the console’s own routes are there');
   for (const name of Object.keys(text)) assert.ok(!/admin|seller/i.test(name), `${name}: a seller-named file in the console build`);
 });

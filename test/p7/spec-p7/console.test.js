@@ -54,7 +54,9 @@ test('F-37: an owner cannot resume a business support paused: the message is "Pa
   }
   assert.equal(await isPaused(shop, op), true);
   const status = json(need(await shop.send('GET', '/compliance/status'), 200, 'Compliance status'));
-  assert.match(JSON.stringify(status), /support/i, 'the owner is shown who paused it');
+  // The status names who paused it by the contract's code (pausedBy 'ops' is support, src/contracts/api/compliance.js); the words are the screen's.
+  assert.equal(status.pausedBy, 'ops', 'the owner is shown who paused it');
+  assert.equal(status.canResume, false, 'and cannot resume it');
   const pauses = json(need(await opCall(world, op, 'GET', `/pauses?tenantId=${shop.tenantId}`), 200, 'The pause list'));
   const mine = pauses.items.find((p) => p.scope === 'business' && p.engaged);
   assert.ok(mine, 'the console lists it');

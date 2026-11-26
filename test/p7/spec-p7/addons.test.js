@@ -6,7 +6,8 @@ import crypto from 'node:crypto';
 import { COMPLIANCE_LIMITS } from '../../../src/contracts/compliance.js';
 import { createAi } from '../../../tools/sim/ai/index.mjs';
 import { createWhatsApp } from '../../../tools/sim/whatsapp/index.mjs';
-import { startApp } from '../../helpers.js';
+import { TEST_DATA_KEY, startApp } from '../../helpers.js';
+import { createSecrets } from '../../../src/platform/secrets.js';
 import { withTenant } from '../../../src/tenancy.js';
 import { INSIDE_MS, OUTSIDE_MS } from '../../p1/spec-p1/support.js';
 import { STORE_PROVIDER_PATHS, SIGNATURE_HEADERS, assertSellerBrand, clearFaults, hit, json, need, one, openBillingWorld, shopOn, sql, unique, key } from './support.js';
@@ -16,7 +17,7 @@ let ai;
 before(async () => {
   ai = createAi();
   await ai.start();
-  world = await openBillingWorld({ overrides: { aiDriver: 'chat_completions', aiBaseUrl: `${ai.url}/v1`, aiApiKey: 'sim-ai-key', aiModel: 'sim-model-1' } });
+  world = await openBillingWorld({ overrides: { aiDriver: 'chat_completions', aiBaseUrl: `${ai.url}/v1`, aiApiKey: 'sim-ai-key', aiModel: 'sim-model-1', aiTimeoutMs: 2000 } });
 });
 after(async () => {
   await world?.close();
@@ -29,9 +30,9 @@ const script = (mode, extra = {}) => ai.post('/script', { mode, ...extra });
 const feature = (shop, name) => sql(world, `INSERT INTO tenant_features (tenant_id, feature, enabled, limit_value) VALUES ($1, $2, true, NULL) ON CONFLICT (tenant_id, feature) DO UPDATE SET enabled = true`, [shop.tenantId, name]);
 
 /** A tier 1 business with the AI add-on, one FAQ entry and the reply switched on. */
-async function aiShop({ faq = [['How long does delivery take?', 'Delivery in 3 to 5 days.']], threshold, enable = true } = {}) {
+async function aiShop({ faq = [['How long does delivery take?', 'Delivery in 3 to 5 days.']], threshold, enable = true, plan = 't1' } = {}) {
   await script('grounded');
-  const shop = await shopOn(world, 't1');
+  const shop = await shopOn(world, plan);
   await feature(shop, 'ai_replies');
   const entries = [];
   for (const [question, answer] of faq) entries.push(json(need(await shop.send('POST', '/faq', { question, answer }), 201, 'An FAQ entry')));
@@ -46,6 +47,8 @@ async function ask(shop, text, rest = {}) {
   return { person, dms: await shop.dms({ recipientId: person.id }) };
 }
 const aiLog = async (shop, outcome) => json(need(await shop.send('GET', `/ai-replies/log${outcome ? `?outcome=${outcome}` : ''}`), 200, 'The AI log')).items;
+/** Every attempt the model service saw, a faulted one too (a request that is held or dropped never reaches the service's own /requests list). */
+const attemptCount = async () => (await ai.calls({ method: 'POST', path: '/v1/chat/completions' })).length;
 const requestCount = async () => {
   const r = await ai.get('/requests');
   return Array.isArray(r) ? r.length : (r.requests ?? []).length;
@@ -63,7 +66,7 @@ test('A-55: a question the FAQ answers gets one AI reply, logged with the FAQ id
   assert.equal(entry.outcome, 'answered');
   assert.deepEqual(entry.sourceIds, [`faq:${shop.faq[0].id}`]);
   assert.ok(entry.score >= 0.8, `score ${entry.score}`);
-  assert.equal(entry.reason, null);
+  assert.equal(entry.reason, '', 'no reason: the contract writes an empty code, not null');
   assert.ok(entry.model);
   assert.equal(entry.channel, 'instagram');
   // The note the gate adds is the seller's: disclosure present whatever the setting.
@@ -87,16 +90,16 @@ test('A-55: the provider is sent the FAQ, the catalog fields and the question on
   assert.ok(text.includes('Brass lamp'));
   assert.ok(!text.includes('Secret competitor sari'), "another business's catalog");
   assert.ok(!text.includes(person.username) && !text.includes(String(person.id)), 'no shopper identity');
-  assert.ok(!text.includes(String(shop.tenantId) + '"'), 'no business id');
+  // Entry ids (faq:2, product:2) can equal a business number by chance, and a product's own link names the shop's address, so a business id is looked for as a field.
+  assert.ok(!/"[A-Za-z_]*(tenant|business)[A-Za-z_]*"\s*:/i.test(text), 'no business id');
   assert.ok(!/test-ig-token|access|token/i.test(JSON.stringify(mine[0].document)), 'no credentials in the document');
 });
 
 test('A-55: the same DM delivered twice gets one reply and one log row, and a second question gets its own', async () => {
   const shop = await aiShop();
   const person = world.fan('twice');
-  const mid = `mid.${unique()}`;
-  await shop.dm(person, 'how many days for delivery?', { mid });
-  await shop.dm(person, 'how many days for delivery?', { mid });
+  // Meta redelivers the same bytes: the simulator sends this one delivery twice (it does not read a mid given to it).
+  await shop.dm(person, 'how many days for delivery?', { duplicates: 2 });
   await shop.settle();
   assert.equal((await shop.dms({ recipientId: person.id })).length, 1);
   assert.equal((await aiLog(shop)).length, 1);
@@ -186,10 +189,10 @@ test('A-56: a model that fails, is slow, answers junk or refuses sends nothing, 
   const shop = await aiShop();
   for (const mode of ['junk', 'wrong_shape', 'refused', 'throttled', 'timeout']) {
     await script(mode, { times: 1 });
-    const before_ = await requestCount();
+    const before_ = await attemptCount();
     const { dms } = await ask(shop, 'how many days for delivery?');
     assert.equal(dms.length, 0, mode);
-    assert.equal((await requestCount()) - before_, 1, `${mode}: one attempt, no retry`);
+    assert.equal((await attemptCount()) - before_, 1, `${mode}: one attempt, no retry`);
   }
   await script('grounded');
   const log = await aiLog(shop);
@@ -234,7 +237,7 @@ test('A-57: a discount that IS in the FAQ is not an invention, and a draft that 
 });
 
 test('A-58: a DM that matches a keyword rule while AI replies are on gets only the keyword rule\'s reply', async () => {
-  const shop = await aiShop({ faq: [['What is the price?', 'Prices start at 499 rupees.']] });
+  const shop = await aiShop({ plan: 't3', faq: [['What is the price?', 'Prices start at 499 rupees.']] });
   const forms = [[{ channel: 'instagram', targetType: 'dm' }], [{ channel: 'instagram', targetType: 'any_dm' }], []];
   let made;
   for (const triggers of forms) {
@@ -280,21 +283,25 @@ test('A-59: a refund request, a complaint, an order problem or an angry message 
 });
 
 test('A-60: an AI reply that is queued as the 24 hour window closes is not sent, with window.closed, and the thread is handed over; one second inside is sent', async () => {
+  // The reply is queued while the business is paused (as test/p1 windows.test.js holds a reply), then time passes, then the pause ends.
+  // Stopping the worker would hold the shopper's DM itself, and it would then be stamped with the later time.
+  const held = async (shop, person, ageMs) => {
+    need(await shop.send('POST', '/compliance/pause', { reason: 'holiday' }), 200, 'Pause');
+    await world.switchLag();
+    await shop.dm(person, 'how many days for delivery?');
+    await shop.settle();
+    await world.travel(ageMs, { sim: true });
+    need(await shop.send('POST', '/compliance/resume', {}), 200, 'Resume');
+    await world.switchLag();
+    await shop.settle();
+  };
   const inside = await aiShop();
-  world.stopWorker();
   const a = world.fan('inside');
-  await inside.dm(a, 'how many days for delivery?');
-  await world.travel(WINDOW - INSIDE_MS, { sim: true });
-  world.startWorker();
-  await inside.settle();
+  await held(inside, a, WINDOW - INSIDE_MS);
   assert.equal((await inside.dms({ recipientId: a.id })).length, 1, 'thirty seconds before the window ends it still goes');
   const outside = await aiShop();
-  world.stopWorker();
   const b = world.fan('outside');
-  await outside.dm(b, 'how many days for delivery?');
-  await world.travel(WINDOW + OUTSIDE_MS, { sim: true });
-  world.startWorker();
-  await outside.settle();
+  await held(outside, b, WINDOW + OUTSIDE_MS);
   assert.equal((await outside.dms({ recipientId: b.id })).length, 0, 'a second after the window it does not');
   const reasons = (await outside.jobs(`purpose = 'ai_reply'`)).map((j) => j.reason);
   assert.ok(reasons.includes('window.closed') || (await aiLog(outside)).some((l) => l.reason === 'window.closed'), `reasons: ${reasons}`);
@@ -348,7 +355,9 @@ test('A-61: a shopper sends "saree" to the business number: one reply in the win
   const body = waText(sent[0]);
   assert.match(body, /utm_source=whatsapp/);
   assert.match(body, new RegExp(shop.host.replace(/\./g, '\\.')), 'the seller\'s own link');
-  assert.doesNotMatch(body, /bit\.ly|bhava|\/r\/|\/go\//i, 'a direct link: no redirect or shortener');
+  // /r/<slug> is the reel's own landing page on the seller's address (buyer-pages), not a redirect: only a shortener or Bhava's /go/ redirect is one.
+  assert.doesNotMatch(body, /bit\.ly|bhava|\/go\//i, 'a direct link: no redirect or shortener');
+  assert.match(body, /\/r\/[\w-]+\?utm_source=whatsapp/, 'the reel landing page');
   assert.equal(sent[0].from ?? shop.phoneId, shop.phoneId, 'from the business\'s own number');
   assertSellerBrand(sent, 'The WhatsApp reply');
   // The same message delivered twice, and in capitals with spaces, is still one reply each.
@@ -398,7 +407,7 @@ test('A-62: a marketing message to a number with no opt-in, a withdrawn one, an 
   try {
     const { tenant, ctx } = app;
     const phoneId = `7${crypto.randomInt(100_000_000, 999_999_999)}`;
-    await app.db.platform.query(`INSERT INTO whatsapp_accounts (tenant_id, waba_id, phone_number_id, display_number, access_token_enc, status, display_name) VALUES ($1, 'waba1', $2, '+919800000000', $3, 'active', 'Test store')`, [tenant.id, phoneId, app.platform.secrets.encrypt('sim-whatsapp-token')]);
+    await app.db.platform.query(`INSERT INTO whatsapp_accounts (tenant_id, waba_id, phone_number_id, display_number, access_token_enc, status, display_name) VALUES ($1, 'waba1', $2, '+919800000000', $3, 'active', 'Test store')`, [tenant.id, phoneId, createSecrets({ dataKey: TEST_DATA_KEY }).encrypt('sim-whatsapp-token')]);
     await wa.post('/numbers', { phoneId, displayName: 'Test store', displayNumber: '+919800000000' });
     await app.db.platform.query(`INSERT INTO tenant_features (tenant_id, feature, enabled, limit_value) VALUES ($1, 'whatsapp_automation', true, NULL) ON CONFLICT (tenant_id, feature) DO UPDATE SET enabled = true`, [tenant.id]);
     const to = '919811122233';
@@ -472,7 +481,8 @@ test('A-64: STOP on WhatsApp records the opt-out once, in any case and with punc
   const list = json(need(await shop.send('GET', '/whatsapp/optins?purpose=marketing'), 200, 'Opt-ins'));
   assert.ok(list.items.some((i) => i.withdrawnAt));
   assert.doesNotMatch(JSON.stringify(list), new RegExp(from.slice(-8)), 'no phone number in the list');
-  const confirmations = (await waSent(from)).length;
+  // The saree link was the keyword answer before the shopper stopped; any other message to them is a confirmation.
+  const confirmations = (await waSent(from)).filter((m) => !/stop.example/.test(waText(m))).length;
   assert.ok(confirmations <= 1, 'at most one confirmation');
   const next = await shop.send('GET', '/whatsapp/optins');
   assert.equal(next.status, 200);
@@ -561,7 +571,9 @@ test('A-66: connecting a number takes the owner, the add-on and a state that wor
   const other = await shopOn(world, 't1');
   await feature(other, 'whatsapp_automation');
   await world.wa.post('/signup/codes', { code: 'good-code-1', token: 'sim-whatsapp-token' });
+  // A business made by the shop kit already has its own WhatsApp number (for buyer codes): the state of another business must change nothing of it.
+  const ownBefore = json(need(await other.send('GET', '/whatsapp'), 200, 'Status'));
   assert.ok((await other.send('POST', '/whatsapp/connect/finish', { ...body, code: 'good-code-1' })).status >= 400, "another business's state");
-  assert.equal(json(need(await other.send('GET', '/whatsapp'), 200, 'Status')).connected, false);
+  assert.deepEqual(json(need(await other.send('GET', '/whatsapp'), 200, 'Status')), ownBefore, 'the other business number is as it was');
   assert.equal((await shop.send('POST', '/whatsapp/connect/finish', { code: 'x', state: 'y', wabaId: 'abc', phoneNumberId: '1' })).status, 400);
 });

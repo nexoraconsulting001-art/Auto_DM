@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { INVITE_EXPIRED_MESSAGE, OPERATOR_TARGET_MS, stepsFor } from '../../../src/contracts/onboarding.js';
 import { connectInstagramFlow } from '../../p1/spec-p1/support.js';
 import {
-  APP, appSignIn, buyer, consoleUser, finishConnect, hit, json, key, need, one, opCall, pause, shopOn, sql, unique, useBillingWorld,
+  APP, appSignIn, buyer, clearFaults, consoleUser, finishConnect, hit, json, key, need, one, opCall, pause, shopOn, sql, subscribe, unique, useBillingWorld,
 } from './support.js';
 
 const world = useBillingWorld();
@@ -26,10 +26,11 @@ async function invite(shop, op, via = []) {
 
 /** A business whose Instagram is not yet connected: the owner's first job. */
 async function freshShop(plan = 't1', options = {}) {
-  const shop = await shopOn(world, plan, { igConnected: false, pay: false, pickup: false, notice: false, whatsapp: false, ...options });
-  shop.newIg = numericId();
-  await world.meta.post('/accounts', { igUserId: shop.newIg, username: `own_${unique()}`, subscribedFields: ['comments', 'messages', 'messaging_postbacks', 'mentions'], appRole: true });
-  shop.igUserId = shop.newIg;
+  // The Instagram account the owner will connect is the one the business is made with, so what the kit posts for it (reels, comments, DMs) is on it.
+  const igUserId = numericId();
+  const shop = await shopOn(world, plan, { igUserId, igConnected: false, pay: false, pickup: false, notice: false, whatsapp: false, ...options });
+  shop.newIg = igUserId;
+  await world.meta.post('/accounts', { igUserId, username: `own_${unique()}`, subscribedFields: ['comments', 'messages', 'messaging_postbacks', 'mentions'], appRole: true });
   return shop;
 }
 
@@ -79,8 +80,8 @@ test('F-27: an invite opened on day 8 asks for a new link, a second use fails, a
   const third = await invite(shop, op);
   assert.notEqual(resent.token, third.token);
   assert.ok((await openInvite(resent.token)).status >= 400, 'the revoked link');
+  assert.equal((await sql(world, `SELECT 1 FROM onboarding_invites WHERE tenant_id = $1 AND revoked_at IS NULL AND used_at IS NULL AND expires_at > now()`, [shop.tenantId])).length, 1, 'one live link: an opened one is spent, not live');
   need(await openInvite(third.token), 200, 'The new link');
-  assert.equal((await sql(world, `SELECT 1 FROM onboarding_invites WHERE tenant_id = $1 AND revoked_at IS NULL AND expires_at > now()`, [shop.tenantId])).length, 1);
   // A link's expiry is never more than 7 days.
   const row = await one(world, `SELECT created_at, expires_at FROM onboarding_invites WHERE tenant_id = $1 AND revoked_at IS NULL`, [shop.tenantId]);
   assert.ok(new Date(row.expires_at) - new Date(row.created_at) <= 7 * DAY);
@@ -183,7 +184,8 @@ test('F-30: denying only the insights permission still goes live, in slow mode, 
 test('F-31: the operator\'s active time from the console form to the invite is logged by step and stays under 10 minutes; waits and invented times are not counted', async () => {
   const shop = await freshShop('t1');
   const op = await consoleUser(world, 'onboarding');
-  const t0 = Date.now() - 20 * 60_000;
+  // The work ran from minute 0 to minute 24: all of it already happened (a time in the future is refused, src/modules/onboarding/console.js).
+  const t0 = Date.now() - 30 * 60_000;
   const at = (min) => new Date(t0 + min * 60_000).toISOString();
   const post = (body) => opCall(world, op, 'POST', `/tenants/${shop.tenantId}/onboarding/timings`, body);
   const steps = [['form', 0, 3], ['brand_read', 4, 6], ['import', 20, 22], ['review', 22, 23], ['invite', 23, 24]];
@@ -209,7 +211,8 @@ test('F-77: a tier 3 owner finishes the checklist with no keys: payments on Bhav
   await connectInstagramFlow(world, shop);
   need(await shop.send('POST', '/setup/terms', { version: '2026-01' }), 200, 'Terms');
   const list = await checklist(shop);
-  assert.deepEqual(list.steps.filter((s) => s.required).map((s) => s.step).sort(), ['instagram', 'payments', 'shipping', 'terms']);
+  // The contract asks for the owner's own domain from tier 2 up, so tier 3 has it too (src/contracts/onboarding.js); it needs no key of any provider.
+  assert.deepEqual(list.steps.filter((s) => s.required).map((s) => s.step).sort(), ['domain', 'instagram', 'payments', 'shipping', 'terms']);
   assert.equal(step(list, 'own_keys').required, false);
   assert.equal(list.checkoutOpen, false);
   const link = json(need(await shop.send('POST', '/setup/kyc-link'), 200, 'The KYC link'));
@@ -220,6 +223,7 @@ test('F-77: a tier 3 owner finishes the checklist with no keys: payments on Bhav
   need(await shop.send('PUT', '/setup/pickup-address', { name: 'Dispatch', phone: '9811100001', line1: '4 Mill Lane', city: 'Pune', state: 'Maharashtra', pincode: '411002' }), 200, 'Pickup address');
   assert.equal((await checklist(shop)).done, false, 'KYC is still open');
   await world.rzp.post('/accounts/kyc', { id: account.linked_account_id, status: 'activated' });
+  await sql(world, `INSERT INTO tenant_domains (tenant_id, domain, status) VALUES ($1, $2, 'verified')`, [shop.tenantId, `own-${unique()}.example.org`]);
   need(await shop.send('POST', '/setup/check', {}), 200, 'Checking every step');
   const done = await checklist(shop);
   assert.equal(done.checkoutOpen, true);
@@ -267,6 +271,7 @@ test('F-79: invalid own Razorpay keys fail the test call, are not saved, are not
   await world.rzp.post('/faults', { kind: 'rate_limit', status: 401, times: 3, body: { error: { code: 'BAD_REQUEST_ERROR', description: 'Authentication failed' } } });
   const secret = `sec_${unique()}_not_valid`;
   const res = await shop.send('PUT', '/setup/own-keys', { provider: 'razorpay', keyId: 'rzp_' + 'test_invalid000', keySecret: secret });
+  await clearFaults(world.rzp); // the call needs one answer of the three: the rest must not reach another test
   assert.ok(res.status >= 400 && res.status < 500, `invalid keys: ${res.status} ${res.text.slice(0, 160)}`);
   assert.ok(!res.text.includes(secret), 'the secret is never echoed');
   const state = await checklist(shop);
@@ -310,12 +315,15 @@ test('F-80: a courier that hangs or answers junk leaves the shipping step open a
   const shop = await freshShop('t3');
   await world.ship.post('/faults', { kind: 'malformed', times: 2 });
   const res = await shop.send('PUT', '/setup/pickup-address', { name: 'Desk', phone: '9811100088', line1: `${unique()} Road`, city: 'Pune', state: 'Maharashtra', pincode: '411002' });
+  await clearFaults(world.ship); // what the call did not use must not reach another test
   assert.ok(res.status < 600 && res.status !== 500 || res.status === 502 || res.status === 503, `junk from the courier: ${res.status}`);
   assert.notEqual(step(await checklist(shop), 'shipping').status, 'done');
 });
 
 test('F-108: a self-serve tier 1 business that buys done-for-you setup gets an invite that attaches to the same account, with its data untouched', async () => {
-  const shop = await shopOn(world, 't1');
+  const shop = await shopOn(world, 'free');
+  // Done-for-you setup is bought on a plan the business pays for: it starts a tier 1 subscription first (the answer is 409 needs_subscription without one).
+  await subscribe(world, shop, 't1');
   const auto = await shop.automate();
   const product = await shop.product();
   const counts = async () => Object.fromEntries(await Promise.all(['tenants', 'users', 'automations', 'products', 'ig_accounts'].map(async (t) => [t, Number((await one(world, `SELECT count(*) AS n FROM ${t}${t === 'tenants' ? '' : ' WHERE tenant_id = $1'}`, t === 'tenants' ? [] : [shop.tenantId])).n)])));

@@ -253,7 +253,7 @@ test('a service operator in the router: only the service’s routes, every write
   assert.equal((await changes()).length, 3, 'nothing was written after it lapsed');
 });
 
-test('the console host: its web app is served there and nowhere else, sign-in routes are public and not built, password sign-in is behind PASSWORD_LOGIN', async (t) => {
+test('the console host: its web app is served there and nowhere else, sign-in routes are public and built (stub era: 501), password sign-in is behind PASSWORD_LOGIN', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bhava-console-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.mkdirSync(path.join(dir, 'assets'));
@@ -280,7 +280,9 @@ test('the console host: its web app is served there and nowhere else, sign-in ro
   // The three sign-in routes answer with nobody signed in; everything else needs a platform session and the role.
   for (const id of ['platform.signInStart', 'platform.signInVerify', 'platform.signInTotp']) {
     const res = await hit(app, platformRoutes[id].path, { host: CONSOLE_HOST, method: 'POST', body: {} });
-    assert.deepEqual([res.status, res.json().code], [501, 'not_implemented'], id);
+    // Public and built: nobody is signed in, and an empty body is a 400 from the route's own input rules (it was 501 before they were built).
+    assert.equal(res.status, 400, id);
+    assert.match(res.json().error, /expected string/, id);
     assert.equal((await hit(app, platformRoutes[id].path, { host: shop.host, method: 'POST', body: {} })).status, 404, `${id} does not exist on a business address`);
   }
   for (const id of Object.values(OPS_PLATFORM_OWNERS).flat().filter((x) => !platformRoutes[x].public)) {
@@ -292,10 +294,10 @@ test('the console host: its web app is served there and nowhere else, sign-in ro
   assert.equal((await onConsole(app, worker, '/me')).json().user.role, 'service_operator');
   assert.equal((await onConsole(app, worker, '/tenant-health')).status, 403, 'a service operator has no health console');
   assert.equal((await onConsole(app, worker, '/tenants', { method: 'POST', body: {} })).status, 403, 'nor may one create a business');
-  assert.equal((await onConsole(app, worker, '/services')).status, 501);
-  assert.equal((await onConsole(app, admin, '/tenant-health')).status, 501);
-  assert.equal((await onConsole(app, admin, '/impersonations')).status, 501);
-  assert.equal((await onConsole(app, admin, `/tenants/${shop.tenant.id}/onboarding`)).status, 501);
+  assert.equal((await onConsole(app, worker, '/services')).status, 200, 'the services are built');
+  assert.equal((await onConsole(app, admin, '/tenant-health')).status, 200);
+  assert.equal((await onConsole(app, admin, '/impersonations')).status, 200);
+  assert.equal((await onConsole(app, admin, `/tenants/${shop.tenant.id}/onboarding`)).status, 200);
   // F-25 both ways: a platform session means nothing on a business's address, and an owner's credentials nothing on the console.
   assert.equal((await hit(app, '/api/v1/auth/me', { host: shop.host, cookie: admin.cookie })).status, 401);
   assert.equal((await hit(app, '/login', { host: CONSOLE_HOST, method: 'POST', body: { email: shop.owner.phone, password: shop.owner.password } })).status, 401);

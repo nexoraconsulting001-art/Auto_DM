@@ -500,7 +500,12 @@ const ONE_TAP_MESSAGE = /One tap needs a paid plan/;
 test('A-36: a Free-plan owner picking one tap is not allowed: two taps stay on, with the reason', async () => {
   const shop = await addShop(world, { plan: 'free' });
   const res = await save(shop, { linkMode: 'one_tap' });
-  if (res.status === 400) {
+  if (res.status === 403) {
+    // Since Phase 7 the plan's answer: 403 plan.feature_off, naming the feature and the plan that has it.
+    assert.equal(res.json().code, 'plan.feature_off');
+    assert.equal(res.json().feature, 'links.one_tap');
+    assert.match(res.json().error, ONE_TAP_MESSAGE);
+  } else if (res.status === 400) {
     assert.match(res.json().error, ONE_TAP_MESSAGE);
   } else {
     assert.equal(res.status, 201);

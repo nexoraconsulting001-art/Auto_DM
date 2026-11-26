@@ -222,10 +222,10 @@ test('a running app: the router answers for the plan before the handler, from th
     assert.deepEqual([features.json.features.catalog, features.json.features['dms.monthly'], features.json.features.loyalty, features.json.features['staff.seats']], [{ on: true, limit: null }, { on: true, limit: 15000 }, { on: true, limit: null }, { on: false, limit: null }]);
     assert.equal(features.json.features['store.checkout'], undefined, 'what the plan does not have is not listed');
 
-    // Each Phase 7 module answers its routes with 501 until its track builds them.
+    // Each Phase 7 module's read routes are built (the stub era answered 501 for them): they answer 200 on the owner's own plan.
     for (const [method, pathname, owner] of [['GET', '/billing', 'billing'], ['GET', '/billing/catalog', 'billing'], ['GET', '/billing/usage', 'usage'], ['GET', '/referrals', 'referrals'], ['GET', '/signup', 'signup']]) {
       const res = await call(method, pathname);
-      assert.deepEqual([res.status, res.json.code], [501, 'not_implemented'], `${owner}: ${pathname}`);
+      assert.equal(res.status, 200, `${owner}: ${pathname} (${res.json?.code ?? ''})`);
     }
     assert.equal((await call('GET', '/billing', null, staff)).json.code, 'forbidden', 'billing is the owner’s');
     assert.equal((await call('GET', '/billing/invoices/abc/file')).status, 404, ':id is a number');

@@ -84,12 +84,18 @@ function checkSchedule({ startsAt, endsAt, dailyStart, dailyEnd }) {
   if (dailyStart && dailyStart === dailyEnd) throw refuse('The daily start and end can’t be the same.', 'schedule.dailyEnd', undefined);
 }
 
+/** A feature this plan does not have: 403 plan.feature_off naming the feature and the plan that has it, as the router answers a gated route. */
+async function featureOff(repos, feature, message) {
+  const plan = await repos.entitlements.lowestPlan([feature]);
+  return new ApiError('plan.feature_off', message, { reason: 'plan', feature, plan: plan?.code });
+}
+
 async function checkPlan(input, { repos }) {
   if (PAID_TRIGGERS.has(input.triggerType) && !(await repos.entitlements.can('triggers.story_dm'))) {
-    throw refuse('Story and DM automations need a higher plan.', 'triggerType', undefined);
+    throw await featureOff(repos, 'triggers.story_dm', 'Story and DM automations need a higher plan.');
   }
-  if (input.triggerType === 'comment' && !(await repos.entitlements.can('triggers.comment'))) throw refuse('Comment automations aren’t on your plan.', 'triggerType', undefined);
-  if (input.linkMode === 'one_tap' && !(await repos.entitlements.can('links.one_tap'))) throw refuse('One tap needs a paid plan', 'linkMode', undefined);
+  if (input.triggerType === 'comment' && !(await repos.entitlements.can('triggers.comment'))) throw await featureOff(repos, 'triggers.comment', 'Comment automations aren’t on your plan.');
+  if (input.linkMode === 'one_tap' && !(await repos.entitlements.can('links.one_tap'))) throw await featureOff(repos, 'links.one_tap', 'One tap needs a paid plan');
 }
 
 /** Every text a buyer gets from this automation, by the field it is saved in. */

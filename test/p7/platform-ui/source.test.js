@@ -78,7 +78,9 @@ test('F-39: a screen is offered to exactly the roles its main route allows, and 
     businesses: 'platform.businesses', onboarding: 'platform.onboardingList', health: 'platform.health', switches: 'platform.switches', impersonation: 'platform.impersonations',
     services: 'platform.services', billing: 'platform.billing', flags: 'platform.flags', signup: 'platform.signup', apps: 'platform.appSubmissions', exports: 'platform.rawExport', audit: 'platform.auditLog',
   };
-  const all = features();
+  // Screens a later phase adds are that phase's to check (Phase 8: feedback, test/p8; Phase 9: golive and observability, test/p9).
+  const LATER = ['feedback', 'golive', 'observability'];
+  const all = features().filter((f) => !LATER.includes(f.name));
   assert.deepEqual(all.map((f) => f.name).sort(), Object.keys(main).sort());
   for (const feature of all) {
     assert.deepEqual([...feature.roles].sort(), [...PLATFORM_ROUTES[main[feature.name]].platformRoles].sort(), `${feature.name}: roles`);
@@ -100,7 +102,8 @@ test('F-36 F-52 F-129: every call that needs a reason sends one, and the sheet t
     if (method === 'createCreditNote' || method === 'confirmImpersonationWrite') continue; // checked below, with their own fields
     const calls = all.filter((call) => call.method === method && !call.handed);
     if (!calls.length) continue;
-    for (const call of calls) assert.match(call.args, /\b(reason|resolution|note)\b/, `api.${method} in ${call.rel} sends no reason`);
+    // The reason is in the call's own object, or in the `body` it passes that the same file builds with a reason in it.
+    for (const call of calls) assert.ok(/\b(reason|resolution|note)\b/.test(call.args) || (/^\s*{\s*body\s*}\s*$/.test(call.args) && /\bconst body = {[^;]*\breason\b/.test(call.text)), `api.${method} in ${call.rel} sends no reason`);
     for (const call of calls) assert.ok(/ActionSheet|reasonProblem/.test(call.text), `${call.rel}: api.${method} is not behind a reason sheet`);
   }
   for (const method of ['createCreditNote', 'confirmImpersonationWrite']) {

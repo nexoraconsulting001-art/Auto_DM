@@ -50,7 +50,14 @@ export function automationsApi(ctx) {
     async 'automations.create'({ body, user }) {
       await checkSave(stored(body, body.triggerType), deps);
       const limit = await repos.entitlements.limit('automations');
-      return present(await repos.automations.create(stored(body, body.triggerType), { createdBy: user.id, limit, actor: actorOf(user) }));
+      try {
+        return present(await repos.automations.create(stored(body, body.triggerType), { createdBy: user.id, limit, actor: actorOf(user) }));
+      } catch (err) {
+        // The save is refused under the create lock; the answer also names the plan that has more, as the router's own limit answer does.
+        if (err?.code !== 'plan.limit_reached') throw err;
+        const plan = await repos.entitlements.lowestPlan(['automations'], { moreThan: limit });
+        throw new ApiError('plan.limit_reached', plan ? `You have reached your plan’s limit of ${limit} automations. The ${plan.name} plan has more.` : err.message, { reason: err.reason, feature: err.feature, limit: err.limit, used: err.used, plan: plan?.code });
+      }
     },
 
     async 'automations.get'({ params }) {

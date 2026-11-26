@@ -289,8 +289,8 @@ function filesUnder(dir) {
 
 test('the Platform Console is a second entry of the console project, with its own registry, and never part of the seller bundle', () => {
   const FEATURES = ['apps', 'audit', 'billing', 'businesses', 'exports', 'flags', 'health', 'impersonation', 'onboarding', 'services', 'signup', 'switches'];
-  // Folders a later phase adds are that phase's to check (Phase 8: feedback, test/p8).
-  const LATER = ['feedback'];
+  // Folders a later phase adds are that phase's to check (Phase 8: feedback, test/p8; Phase 9: golive and observability, test/p9).
+  const LATER = ['feedback', 'golive', 'observability'];
   assert.deepEqual(fs.readdirSync(path.join(repoRoot, 'console/src/platform/features'), { withFileTypes: true }).filter((e) => e.isDirectory() && !LATER.includes(e.name)).map((e) => e.name).sort(), FEATURES);
   for (const name of FEATURES) {
     const source = read(`console/src/platform/features/${name}/index.jsx`);
@@ -321,7 +321,8 @@ test('the Platform Console is a second entry of the console project, with its ow
   // And the other way: the Platform Console shares design and lib, never a seller screen or the seller's session.
   for (const file of filesUnder('console/src/platform').filter((f) => /\.jsx?$/.test(f))) {
     const source = read(file);
-    assert.equal(/from\s+['"](\.\.\/)+(features|shell|components)\//.test(source) || /from\s+['"](\.\.\/)+lib\/(api|session)/.test(source), false, `${file} uses no seller screen`);
+    // components/feedback.jsx is the shared "Saved" and "Are you sure?" provider, not a screen: the console's own screens use it (5d7f484).
+    assert.equal(/from\s+['"](\.\.\/)+(features|shell|components(?!\/feedback\.jsx))\//.test(source) || /from\s+['"](\.\.\/)+lib\/(api|session)/.test(source), false, `${file} uses no seller screen`);
     assert.equal(source.includes("'@bhava/api-client'"), false, `${file} does not use the seller client`);
   }
 

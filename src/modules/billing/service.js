@@ -7,6 +7,7 @@ import { tenantId, withTenant } from '../../tenancy.js';
 import { alertsRepo } from '../alerts/index.js';
 import { writeAudit } from '../audit/index.js';
 import { opsAlert } from '../payments/util.js';
+import { notePaymentMethod } from '../referrals/service.js';
 import { creditLines, discountFor, taxedLine, totalsOf } from './money.js';
 
 /**
@@ -799,6 +800,8 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
         }
         if (passing.length) await t.query('UPDATE pass_through_charges SET invoice_id = $3 WHERE tenant_id = $1 AND id = ANY($2::bigint[])', [business, passing.flatMap((c) => c.ids.map(Number)), invoice.id]);
       }
+      // The payment method is noted before any plan change of this charge, so a method shared with the referrer blocks the referral before it is credited (F-129).
+      await notePaymentMethod(t, { tenantId: business, fingerprint: ev.payment.methodMark });
       await recordPayment(t, { s, payment: ev.payment, status: 'captured', invoiceId: invoice?.id ?? null });
 
       let resumed = false;

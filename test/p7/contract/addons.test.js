@@ -663,7 +663,7 @@ test('routes: the two groups, who may call them, the plan, the client, and two m
   for (const phrase of ['registerChannel', 'onUnmatched', 'sendingPaused', 'two paths', 'AI_DRIVER', 'tools/sim/ai']) assert.ok(handoff.includes(phrase), `HANDOFF.md explains ${phrase}`);
 });
 
-test('a running app: the add-on routes answer for the plan, then 501; the channel is registered and ctx.inbound and ctx.providers.ai exist', async () => {
+test('a running app: the add-on routes answer for the plan, then their own contract (built; the stub era answered 501); the channel is registered and ctx.inbound and ctx.providers.ai exist', async () => {
   const app = await startApp();
   try {
     assert.deepEqual(app.ctx.compliance.channels(), ['whatsapp']);
@@ -678,14 +678,15 @@ test('a running app: the add-on routes answer for the plan, then 501; the channe
     const off = await call('POST', '/faq', { question: 'Delivery?', answer: 'In 3 to 5 days' });
     assert.deepEqual([off.status, off.json.code, off.json.feature], [403, 'plan.feature_off', 'ai_replies']);
     assert.deepEqual((({ status, json }) => [status, json.code, json.feature])(await call('PUT', '/whatsapp/keywords', { items: [] })), [403, 'plan.feature_off', 'whatsapp_automation']);
-    assert.deepEqual((({ status, json }) => [status, json.code])(await call('GET', '/faq')), [501, 'not_implemented'], 'reading is never gated');
+    const read = await call('GET', '/faq');
+    assert.deepEqual([read.status, read.json.items], [200, []], 'reading is never gated');
     await app.db.platform.query(`INSERT INTO tenant_features (tenant_id, feature, enabled) VALUES ($1, 'ai_replies', true), ($1, 'whatsapp_automation', true)`, [app.tenant.id]);
     for (const [method, pathname, body] of [
       ['POST', '/faq', { question: 'Delivery?', answer: 'In 3 to 5 days' }], ['GET', '/ai-replies'], ['PATCH', '/ai-replies', { enabled: true }], ['POST', '/ai-replies/test', { question: 'Delivery?' }],
       ['GET', '/ai-replies/log'], ['GET', '/whatsapp'], ['GET', '/whatsapp/keywords'], ['PUT', '/whatsapp/keywords', { items: [] }], ['GET', '/whatsapp/optins'],
     ]) {
       const res = await call(method, pathname, body);
-      assert.deepEqual([res.status, res.json.code], [501, 'not_implemented'], `${method} ${pathname}`);
+      assert.equal(res.status, method === 'POST' && pathname === '/faq' ? 201 : 200, `${method} ${pathname}: built, no longer 501 (${res.json?.code ?? ''})`);
     }
     assert.equal((await call('POST', '/ai-replies/test', { question: '' })).json.code, 'validation_failed');
     assert.equal((await call('DELETE', '/faq/abc')).status, 404);
