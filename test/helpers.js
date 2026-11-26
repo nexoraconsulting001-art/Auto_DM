@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { after } from 'node:test';
 import { APP_ROLE, openDb } from '../src/db/index.js';
 import { bindTenant, createRepos } from '../src/repos/index.js';
 import { createApp } from '../src/server.js';
@@ -39,6 +40,28 @@ export function fakeIg({ failButton = false } = {}) {
   };
 }
 
+// Every test opens its own database on the shared server, and most never close it. Left alone they pile up for the whole run (each
+// with its pool of connections and its tables in Postgres' shared statistics), until the server's shared memory is full and it
+// restarts. So each test file drops the databases it made when it finishes; DROP ... WITH (FORCE) also ends the connections.
+const createdDatabases = new Set();
+
+async function dropCreatedDatabases() {
+  const names = [...createdDatabases];
+  if (!names.length) return;
+  const admin = await openDb({ url: process.env.TEST_DATABASE_URL, migrate: false, poolSize: 1 });
+  try {
+    for (const name of names) {
+      await admin.exec(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      createdDatabases.delete(name);
+    }
+  } finally {
+    await admin.close();
+  }
+}
+
+// Registered while the file loads, so it belongs to the file and not to whichever test happens to open the first database.
+if (process.env.TEST_DATABASE_URL) after(dropCreatedDatabases);
+
 const DEFAULT_LOGINS = process.env.TEST_DB_LOGINS === '2' ? 2 : 1;
 
 /** The app login's connection for an owner connection: the same database as the role bhava_app, with one password for the whole test server. */
@@ -63,6 +86,7 @@ export async function openTestDb({ migrate = true, logins = DEFAULT_LOGINS } = {
   const admin = await openDb({ url, migrate: false, poolSize: 1 });
   const name = `t_${crypto.randomUUID().replace(/-/g, '')}`;
   await admin.exec(`CREATE DATABASE ${name}`);
+  createdDatabases.add(name);
   await admin.close();
   const target = new URL(url);
   target.pathname = `/${name}`;
