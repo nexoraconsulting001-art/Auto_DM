@@ -590,6 +590,10 @@ export async function addP2Shop(world, { timeZone = 'UTC', followers = 5000, sco
         }
       }
       if (sim && world.meta) await world.meta.post('/insights/daily', { igUserId: shop.igUserId, metric, points: Object.entries(points).map(([back, value]) => ({ day: dayAgo(Number(back)), value })) });
+      // A figure is "not collected" for a day before the account began collecting, and the worker enrols the account on the day the shop is set up:
+      // seeded days were collected, so it began collecting by the oldest of them.
+      const oldest = Object.keys(points).map(Number).sort((a, b) => b - a)[0];
+      if (oldest !== undefined) await sql(`UPDATE analytics_accounts SET collecting_since = $3 WHERE tenant_id = $1 AND ig_user_id = $2 AND collecting_since > $3`, [id, shop.igUserId, dayAgo(oldest)]);
       await sql(`UPDATE analytics_accounts SET last_refresh_at = now() WHERE tenant_id = $1 AND ig_user_id = $2`, [id, shop.igUserId]);
     },
 
