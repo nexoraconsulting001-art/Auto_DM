@@ -555,12 +555,37 @@ export function createInbound({ db, repos, log, meta, now, limits, config, platf
     return undefined;
   }
 
+  /**
+   * The person's username for the owner's inbox (PRD 6.7, 4.10): a messages webhook carries none, so once the message is dealt
+   * with (nothing waits on it) it is read from Meta, for a thread that has none yet, and put on the thread and on its
+   * "Needs a human" item. A read, never a send. Meta not saying leaves it blank; the next message tries again, and the
+   * inbox shows "Instagram user" meanwhile.
+   */
+  async function learnUsername(ev) {
+    try {
+      const subject = await log.subjectHash(ev.channel, ev.personId);
+      const [thread] = await db.query('SELECT id, username FROM inbox_threads WHERE tenant_id = $1 AND channel = $2 AND subject_hash = $3', [tenantId(), ev.channel, subject]);
+      if (!thread || thread.username) return;
+      const account = await gate.findAccount({ channel: ev.channel, accountId: ev.accountId });
+      if (!account?.token || !meta?.client) return;
+      const username = String((await meta.client.forAccount(account).getPerson(ev.personId))?.username ?? '').slice(0, 100);
+      if (!username) return;
+      await db.query(`UPDATE inbox_threads SET username = $3 WHERE tenant_id = $1 AND id = $2 AND username = ''`, [tenantId(), thread.id, username]);
+      await db.query(`UPDATE needs_human_items SET username = $3 WHERE tenant_id = $1 AND thread_id = $2 AND username = ''`, [tenantId(), thread.id, username]);
+    } catch (err) {
+      swallow('compliance.person_lookup_failed')(err);
+    }
+  }
+
   async function handle(ev, row) {
     if (ev.type === 'comment') await onComment(ev);
     else if (ev.type === 'echo') return onEcho(ev, row);
     else if (ev.type === 'post_mention') await runConsumers(ev);
     else if (ev.type === 'seen') await runConsumers({ ...ev, subject: await log.subjectHash(ev.channel, ev.personId) });
-    else await onPersonMessage(ev);
+    else {
+      await onPersonMessage(ev);
+      await learnUsername(ev);
+    }
     return 'done';
   }
 

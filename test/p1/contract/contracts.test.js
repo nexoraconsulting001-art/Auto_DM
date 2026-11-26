@@ -71,7 +71,9 @@ test('the Platform Console\'s routes are the same kind of thing, and none reache
   for (const route of platformRouteList) {
     assert.match(route.id, /^platform\.[a-zA-Z]+$/);
     assert.ok(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(route.method), route.id);
-    assert.ok(route.platformRoles?.length, route.id);
+    // The three sign-in routes are public (no one is signed in yet) and carry no roles by design (platform-ops.js).
+    if (route.public) assert.equal(route.platformRoles.length, 0, route.id);
+    else assert.ok(route.platformRoles?.length, route.id);
     assert.ok(route.response === null || typeof route.response?.safeParse === 'function', route.id);
     if (route.path.includes(':')) assert.ok(route.params, route.id);
     assert.ok(!sellers.has(route.id), route.id);

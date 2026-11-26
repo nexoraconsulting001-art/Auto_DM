@@ -1,5 +1,5 @@
 import { withTenant } from '../../tenancy.js';
-import { RELEASED_BY_OWNER, isLiveAccountClash } from '../../repos/connections.js';
+import { RELEASED_BY_OWNER, isFreeClaimTaken, isLiveAccountClash } from '../../repos/connections.js';
 import { writeAudit } from '../audit/index.js';
 
 /**
@@ -52,6 +52,8 @@ export async function claimConnection(platformDb, channel, { tenantId, accountId
   } catch (err) {
     // Another business connected it at the same moment: the one-live-row index decides, and this one lost.
     if (isLiveAccountClash(err)) return null;
+    // A Free business may not take an account another Free business has claimed, even after it let go (one Free plan per Instagram account).
+    if (isFreeClaimTaken(err)) return null;
     throw err;
   }
 }

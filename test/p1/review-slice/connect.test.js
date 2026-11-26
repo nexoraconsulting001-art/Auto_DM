@@ -193,12 +193,18 @@ test('an account on another business stays there, and its token is not touched',
   assert.equal(refused.target, `instagram:${IG_A}`);
 });
 
-test('after a seller disconnects, the same account can go to another business', async (t) => {
+test('after a seller disconnects, the same account can go to another business that is not on Free', async (t) => {
   const slice = await startSlice(t);
   const first = await connected(slice, IG_A);
   assert.equal((await first.business.api('DELETE', '/instagram/connection')).status, 204);
 
   const second = await addBusiness(slice.app);
+  // Both businesses are on Free, and one Free plan per Instagram account holds even after the first lets go (migration 741, PRD 10.x,
+  // tests in p7 signup-plans): the second is told the account is taken, not given a 500.
+  assert.equal((await consent(slice, second, { igUserId: IG_A })).outcome, 'taken');
+  assert.equal(await slice.q('SELECT 1 FROM ig_accounts WHERE ig_user_id = $1 AND tenant_id = $2', [IG_A, second.tenant.id]).then((r) => r.length), 0);
+  // A paid business may take it.
+  await slice.q("INSERT INTO plan_changes (tenant_id, from_plan, to_plan, from_cycle, to_cycle, actor, source) VALUES ($1, 'free', 't1', 'monthly', 'monthly', 'billing', 'billing')", [second.tenant.id]);
   const { outcome } = await consent(slice, second, { igUserId: IG_A });
   assert.equal(outcome, 'connected');
   assert.equal((await slice.app.platform.tenants.getByIgAccount(IG_A)).id, second.tenant.id);

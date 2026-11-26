@@ -401,7 +401,14 @@ export async function addShop(world, { plan = 't3', slug, igUserId = numericId(1
       need(await world.webhook(commentPayload(shop, { id: comment.id, mediaId, text, from })), 200, 'The comment webhook');
       return { ...comment, from, text, mediaId };
     },
-    dm: (from, text, rest = {}) => world.meta.post('/messages', { igUserId, from, text, ...rest }),
+    /** What Instagram knows of someone who messages: their profile is readable by the business (a messages webhook carries no username, PRD 4.10). */
+    async knowPerson(from) {
+      if (from?.username) await world.meta.post('/people', { igUserId, id: from.id, username: from.username });
+    },
+    async dm(from, text, rest = {}) {
+      await shop.knowPerson(from);
+      return world.meta.post('/messages', { igUserId, from, text, ...rest });
+    },
     tap: (from, payload, rest = {}) => world.meta.post('/postbacks', { igUserId, from, payload, ...rest }),
     storyReply: (from, text, storyId, rest = {}) => world.meta.post('/story-replies', { igUserId, from, text, storyId, ...rest }),
     mention: (from, rest = {}) => world.meta.post('/mentions', { igUserId, from, ...rest }),

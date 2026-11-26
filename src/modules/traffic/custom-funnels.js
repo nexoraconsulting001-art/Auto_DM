@@ -1,7 +1,6 @@
 import { FIGURE_TEXT, STEPS_NEEDING_TIER_3 } from '../../contracts/analytics.js';
 import { isRowId, pageOfFetched, readCursor } from '../admin-api/paging.js';
 import { tenantId } from '../../tenancy.js';
-import { DIMS_LIKE } from './sessions.js';
 import { addDays, dayStart, previousOf, rangeOf, timeZoneOf } from './time.js';
 
 const toFunnel = (row) => ({ id: row.id, name: row.name, steps: row.steps, countBy: row.count_by, windowMinutes: row.window_minutes, updatedAt: row.updated_at });
@@ -63,7 +62,8 @@ export function createFunnelResults(ctx, rollupService) {
   const { db, repos } = ctx;
 
   function buildQuery(steps, { countBy, windowMinutes, breakdown }, bounds) {
-    const params = [tenantId(), bounds.from, bounds.to, windowMinutes, DIMS_LIKE];
+    // The window is a parameter only when a later step uses it: Postgres cannot type a parameter the statement never mentions (a funnel left with one usable step on a lower tier).
+    const params = [tenantId(), bounds.from, bounds.to];
     const param = (value) => {
       params.push(value);
       return `$${params.length}`;
@@ -78,24 +78,24 @@ export function createFunnelResults(ctx, rollupService) {
 
     let dim = `''`;
     if (breakdown === 'product' || breakdown === 'category') dim = `CASE WHEN e.page_kind = ${param(breakdown)} THEN e.page_ref ELSE '' END`;
-    else if (breakdown) dim = `COALESCE(d.dims ->> ${param(SESSION_BREAKDOWN[breakdown])}, '')`;
+    else if (breakdown) dim = `COALESCE(to_jsonb(d) ->> ${param(SESSION_BREAKDOWN[breakdown])}, '')`;
 
     const first = `s1 AS (
       SELECT DISTINCT ON (actor) actor, at AS t0, at AS t, id AS i, session_id, visitor_id, dim FROM (
         SELECT ${actor} AS actor, e.at, e.id, e.session_id, e.visitor_id, ${dim} AS dim
-        FROM traffic_events e LEFT JOIN dims d ON d.session_id = e.session_id
+        FROM traffic_events e LEFT JOIN traffic_sessions d ON d.tenant_id = e.tenant_id AND d.session_id = e.session_id
         WHERE e.tenant_id = $1 AND e.session_id IS NOT NULL AND e.at >= $2::timestamptz AND e.at < $3::timestamptz AND ${match(steps[0])}
       ) x ORDER BY actor, at, id
     )`;
+    const window = steps.length > 1 ? param(windowMinutes) : null;
     const later = steps.slice(1).map((step, index) => `s${index + 2} AS (
       SELECT DISTINCT ON (p.actor) p.actor, p.t0, e.at AS t, e.id AS i, p.session_id, p.visitor_id, p.dim
-      FROM s${index + 1} p JOIN traffic_events e ON e.tenant_id = $1 AND ${sameActor} AND (e.at, e.id) > (p.t, p.i) AND e.at <= p.t0 + make_interval(mins => $4)
+      FROM s${index + 1} p JOIN traffic_events e ON e.tenant_id = $1 AND ${sameActor} AND (e.at, e.id) > (p.t, p.i) AND e.at <= p.t0 + make_interval(mins => ${window}::int)
       WHERE ${match(step)}
       ORDER BY p.actor, e.at, e.id
     )`);
     const counts = steps.map((_step, index) => `SELECT ${index + 1} AS step, dim, count(*)::int AS n FROM s${index + 1} GROUP BY dim`).join(' UNION ALL ');
-    const sql = `WITH dims AS (SELECT session_id, outbound_host::jsonb AS dims FROM traffic_events WHERE tenant_id = $1 AND at >= $2::timestamptz AND at < $3::timestamptz AND outbound_host LIKE $5),
-      ${[first, ...later].join(',\n')}
+    const sql = `WITH ${[first, ...later].join(',\n')}
       ${counts}`;
     return { sql, params };
   }
