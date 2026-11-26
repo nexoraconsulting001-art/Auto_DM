@@ -32,8 +32,8 @@ test('F-51: the same charge delivered twice, in parallel and again later, makes 
   await world.quiet(600);
   assert.equal((await paymentsOf(world, shop)).length, 1, 'one payment');
   assert.equal((await invoicesOf(world, shop)).length, 1, 'one invoice');
-  const events = await sql(world, `SELECT provider_event_id FROM provider_webhook_events WHERE scope = 'billing'`);
-  assert.equal(new Set(events.map((e) => e.provider_event_id)).size, events.length, 'each event id is stored once');
+  const events = await sql(world, `SELECT event_id FROM provider_webhook_events WHERE scope = 'billing'`);
+  assert.equal(new Set(events.map((e) => e.event_id)).size, events.length, 'each event id is stored once');
 });
 
 test('F-52: a bad signature gets 400 and changes nothing; so does none, the store secret, and a body changed after signing', async () => {
