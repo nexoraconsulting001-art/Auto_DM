@@ -57,7 +57,8 @@ test('A-01: an event for one business with another business\'s automation id in 
   const autoA = await a.automate();
   await b.comment(await b.reel());
   await b.settle();
-  assert.equal((await a.events()).length, 0);
+  // Not counted: a's own hourly release-gate check (kind 'gate', PRD 4.15), which no event of b's caused.
+  assert.equal((await a.events(`kind <> 'gate'`)).length, 0);
   assert.ok(autoA.id);
 });
 

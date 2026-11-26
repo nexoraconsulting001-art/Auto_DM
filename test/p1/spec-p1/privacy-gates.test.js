@@ -1,7 +1,7 @@
 // PRD 4.14, 4.15 and 4.16: logs, release gates and the compliance log. C-51 to C-56.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DAY, HOUR, SCOPES, addShop, asAppRole, assertNoDm, assertRefused, captureLogs, commentPayload, connectInstagramFlow, fakeSite, findAppRole, need, unique, useWorld, REASON_CODES } from './support.js';
+import { DAY, HOUR, SCOPES, addShop, asAppRole, assertRefused, captureLogs, commentPayload, connectInstagramFlow, fakeSite, findAppRole, need, unique, useWorld, REASON_CODES } from './support.js';
 
 const world = useWorld();
 
@@ -100,14 +100,17 @@ test('C-51: retention: compliance events stay 13 months and then go', async () =
   const reel = await shop.automate();
   await shop.comment(reel.mediaId);
   await shop.settle();
-  const count = (await shop.events()).length;
-  assert.ok(count > 0);
+  // The rows this delivery wrote. The hourly release-gate check (PRD 4.15) logs its own gate.passed rows each time the worker runs, so new rows
+  // appear after each jump; it is these rows whose life is measured.
+  const ids = (await shop.events()).map((e) => e.id);
+  assert.ok(ids.length > 0);
+  const left = async () => (await shop.events('id = ANY($2)', [ids])).length;
   await world.travel(390 * DAY);
   await shop.settle();
-  assert.equal((await shop.events()).length, count, 'Still inside 13 months');
+  assert.equal(await left(), ids.length, 'Still inside 13 months');
   await world.travel(10 * DAY);
   await shop.settle();
-  assert.equal((await shop.events()).length, 0, 'Past 13 months');
+  assert.equal(await left(), 0, 'Past 13 months');
 });
 
 const goLive = (shop, id) => shop.api(`/automations/${id}/state`, { method: 'POST', body: { state: 'live' } });
@@ -262,7 +265,10 @@ test('C-55: a comment skipped for opt-out is 1 row with a hashed subject and no 
   assert.match(rows[0].subject, /^[0-9a-f]{64}$/);
   assert.equal(rows[0].channel, 'instagram');
   assert.doesNotMatch(JSON.stringify(rows[0]), new RegExp(`hiddenname|hiddentext|${person.id}`));
-  await assertNoDm(shop);
+  // PRD 4.6: the STOP itself gets exactly one confirmation inside the open window; the comment after it gets nothing.
+  assert.deepEqual((await shop.jobs()).map((j) => j.purpose), ['optout_confirm'], 'Only the opt-out confirmation was ever queued');
+  assert.equal((await shop.dms()).length, 1, 'The one confirmation, and no DM for the comment');
+  assert.deepEqual(await shop.dms({ commentId: comment.id }), [], 'No DM answers the comment');
 });
 
 test('C-55: every reason the engine has logged is on the one list', async () => {
