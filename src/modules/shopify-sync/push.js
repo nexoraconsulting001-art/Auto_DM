@@ -265,12 +265,15 @@ export function createPushes(ctx, { connection, products }) {
   }
 
   /** Two-way mode: prices the owner changed here since the last sync go to Shopify. */
+  // local_updated_at is the product's updated_at as this code carried it (a JavaScript Date: milliseconds), while Postgres
+  // keeps microseconds, so the change test compares at milliseconds; comparing the raw column found every product changed
+  // again on the next run and pushed it for ever (R4-MONEY-6). applyPrices compares the same way, in JavaScript.
   async function pushPrices(conn) {
     if (conn.mode !== 'two_way') return 0;
     const changed = await db.query(
       `SELECT l.local_id AS product_id, l.shopify_id, p.updated_at, p.price_paise, p.mrp_paise FROM shopify_links l
        JOIN products p ON p.tenant_id = l.tenant_id AND p.id = l.local_id
-       WHERE l.tenant_id = $1 AND l.kind = 'product' AND (l.local_updated_at IS NULL OR p.updated_at > l.local_updated_at) LIMIT 50`,
+       WHERE l.tenant_id = $1 AND l.kind = 'product' AND (l.local_updated_at IS NULL OR date_trunc('milliseconds', p.updated_at) > l.local_updated_at) LIMIT 50`,
       [tenantId()],
     );
     let sent = 0;

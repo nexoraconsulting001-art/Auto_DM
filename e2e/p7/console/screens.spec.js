@@ -294,6 +294,8 @@ test('A-57: the confidence level is checked before it is saved, and the AI switc
   await expect(page.getByRole('button', { name: 'Save confidence' })).toBeDisabled();
   await page.getByLabel('Confidence needed to send').fill('0.9');
   await page.getByRole('button', { name: 'Save confidence' }).click();
+  // The click only starts the save: wait for the request to be made before reading it (R4-MONEY-8).
+  await expect.poll(() => writesTo(calls, 'PATCH /ai-replies').length).toBe(1);
   expect(writesTo(calls, 'PATCH /ai-replies')[0].body).toEqual({ threshold: 0.9 });
 });
 

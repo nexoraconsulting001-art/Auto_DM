@@ -25,12 +25,17 @@ async function mailedCode(email) {
   assert.ok(last, 'no code was emailed');
   return /(?<!\d)(\d{6})(?!\d)/.exec(`${last.text}${last.html}`)?.[1];
 }
-/** Waits until `n` statements touching `table` wait on a lock, asking on the connection `t` that holds it. */
+/**
+ * Waits until `n` statements touching `table` wait on a lock, asking on the connection `t` that holds it. Postgres keeps
+ * one pg_stat_activity snapshot for the rest of a transaction once it is read, so each look first drops it (R4-MONEY-4):
+ * without that every look after the first saw the first moment's count, before any guess had arrived.
+ */
 async function waiters(t, table, n) {
   const end = Date.now() + 20_000;
   for (;;) {
+    await t.query('SELECT pg_stat_clear_snapshot()');
     const [row] = await t.query(
-      `SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE $1`, [`%${table}%`],
+      `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE $1`, [`%${table}%`],
     );
     if (row.n >= n) return;
     assert.ok(Date.now() < end, `only ${row.n} of ${n} tries reached the database`);

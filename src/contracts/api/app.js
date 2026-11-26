@@ -29,11 +29,13 @@ export const AppRequirements = z.object({
    * be there (each such miss is a 404 the browser reports as an error):
    *   signInHost     this is the sign-in host (PLATFORM_APP_HOST), the only address where Google's browser sign-in
    *                  (AUTH_PATHS.googleStart) exists, and where no password could name a business.
-   *   passwordLogin  the phone-and-password route exists (PASSWORD_LOGIN: tests and local runs only; production refuses
-   *                  to start with it). It says nothing about any account, and the route answers the same either way.
+   *   passwordLogin  true, and present only, where the phone-and-password form can be drawn: a business's own address
+   *                  with PASSWORD_LOGIN on (tests and local runs only; production refuses to start with it). It says
+   *                  nothing about any account, and the route answers the same either way. Elsewhere, the sign-in host
+   *                  the apps ask included, the answer names no password at all (P-11; R4-MONEY-5).
    * The apps ignore it: they start Google through their own redirect, and never show a password field.
    */
-  web: z.object({ signInHost: z.boolean(), passwordLogin: z.boolean() }),
+  web: z.object({ signInHost: z.boolean(), passwordLogin: z.literal(true).optional() }),
 });
 
 export const appRoutes = {

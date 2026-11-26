@@ -5,6 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { billingFor } from '../../../src/modules/billing/index.js';
 import { taxedLine } from '../../../src/modules/billing/money.js';
+import { cleanBillingEvent, createBillingWebhooks } from '../../../src/modules/billing/webhooks.js';
+import { BILLING_WEBHOOK } from '../../../src/contracts/billing.js';
 import { openBilling } from './support.js';
 
 test('invoice numbers: concurrent charges take 1..n with no gap and no repeat; 1 April starts the year again at 1 (F-55)', async (t) => {
@@ -102,4 +104,38 @@ test('two plan changes at once leave one plan: the subscription’s and the busi
   await w.settle();
   assert.equal((await shop.tenantRow()).plan, 't1');
   assert.equal((await shop.sub()).next_plan, null);
+});
+
+test('two drainers at once (the web app and the worker) apply each billing event once and in order: a failure older than the charge before it stays stale (F-51)', async (t) => {
+  const w = await openBilling(t);
+  const shop = await w.business();
+  assert.equal((await shop.change('t1')).status, 200);
+  const s = await shop.sub();
+  await w.rzp.post('/subscriptions/authorize', { id: s.provider_subscription_id });
+  await w.settle();
+  // Two events stored and not yet worked through, as a busy minute leaves them: a charge, then a failure from an hour earlier.
+  const nowSecs = Math.floor(Date.now() / 1000);
+  const store = (event, createdAt, entities) => w.sql(
+    `INSERT INTO provider_webhook_events (provider, scope, event_id, event_type, payload) VALUES ('razorpay', $1, $2, $3, $4::jsonb) RETURNING id`,
+    [BILLING_WEBHOOK.scope, `evt_race_${event}_${createdAt}`, event, JSON.stringify(cleanBillingEvent({ event, created_at: createdAt, payload: entities }))],
+  );
+  await store('subscription.charged', nowSecs, {
+    subscription: { entity: { id: s.provider_subscription_id, status: 'active', current_start: nowSecs, current_end: nowSecs + 30 * 86_400 } },
+    payment: { entity: { id: 'pay_race_charge', amount: 59_882, currency: 'INR', status: 'captured', method: 'card', created_at: nowSecs } },
+  });
+  await store('subscription.pending', nowSecs - 3600, {
+    subscription: { entity: { id: s.provider_subscription_id, status: 'pending' } },
+    payment: { entity: { id: 'pay_race_failed', amount: 1, status: 'failed', method: 'card', created_at: nowSecs - 3600 } },
+  });
+  const app = billingFor(w.app.ctx);
+  const worker = createBillingWebhooks(w.app.ctx, app);
+  await Promise.all([app.webhooks.drain(), worker.drain(), app.webhooks.drain(), worker.drain()]);
+  await w.settle();
+
+  const events = (await w.events()).filter((e) => String(e.event_id).startsWith('evt_race_')).map((e) => [e.event_type, e.status, e.outcome]);
+  assert.deepEqual(events, [['subscription.charged', 'processed', 'processed'], ['subscription.pending', 'ignored', 'stale']], 'each event worked through once, the charge first');
+  const payments = (await shop.payments()).map((p) => [p.provider_payment_id, p.status]);
+  assert.deepEqual(payments.filter(([id]) => id.startsWith('pay_race_')), [['pay_race_charge', 'captured'], ['pay_race_failed', 'failed']]);
+  const after = await shop.sub();
+  assert.deepEqual([after.status, after.grace_until], ['active', null], 'the older failure leaves the charged subscription active');
 });

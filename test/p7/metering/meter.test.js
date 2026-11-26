@@ -202,7 +202,14 @@ test('F-86: the 80% and 100% alerts go once per business and month, with the cou
   assert.equal(sent.length, 1, 'one alert at 80%');
   assert.equal(sent[0].kind, 'dm.usage_80');
   assert.equal(sent[0].event_key, 'dm.usage_80:2026-11-01');
-  assert.deepEqual([sent[0].data.used, sent[0].data.allowance, sent[0].data.included, sent[0].data.packSize, sent[0].data.packPricePaise], [9, 10, 10, 10000, 29900]);
+  // Decided (R3-MONEY-P1): the alert carries the count at the moment it crossed the line. With two workers counting the
+  // eighth and ninth at once, the caller that claims the alert may have seen 8 or 9; either is that moment's count, and
+  // the alert's percent is worked out from the same count. Nothing below 80% and nothing above what was counted.
+  const crossedAt = sent[0].data.used;
+  assert.ok(crossedAt === 8 || crossedAt === 9, `the count when 80% was crossed: 8 or 9 of 10, got ${crossedAt}`);
+  assert.equal(sent[0].data.percent, crossedAt * 10, 'the percent is the same moment as the count');
+  assert.equal(await dmsUsed(w), 9, 'both sends counted');
+  assert.deepEqual([sent[0].data.allowance, sent[0].data.included, sent[0].data.packSize, sent[0].data.packPricePaise], [10, 10, 10000, 29900]);
   assert.doesNotMatch(JSON.stringify(sent[0].data), /asha|person|token/i);
 
   // A bigger allowance puts the meter back under 80%; reaching 80% of it again in the same month tells nobody again.

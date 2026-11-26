@@ -441,7 +441,8 @@ test('F-85: a WhatsApp add-on and reel management bought mid-month each appear a
   const sub = await subscriptionOf(world, shop);
   const ended = await one(world, `SELECT ends_at FROM subscription_items WHERE tenant_id = $1 AND addon_code = 'whatsapp'`, [shop.tenantId]);
   assert.equal(+new Date(ended.ends_at), +new Date(sub.current_period_end), 'it ends with the paid period');
-  await sql(world, `UPDATE subscription_items SET ends_at = now() - interval '1 second' WHERE tenant_id = $1 AND addon_code = 'whatsapp'`, [shop.tenantId]);
+  // The paid period is over: its end moves into the past, but never before the line began (bought under a second ago on a fast machine).
+  await sql(world, `UPDATE subscription_items SET ends_at = GREATEST(starts_at, now() - interval '1 second') WHERE tenant_id = $1 AND addon_code = 'whatsapp'`, [shop.tenantId]);
   assert.ok(await world.until(async () => (await featureOn()) === 0), 'once the paid period ends the feature is off');
 });
 
