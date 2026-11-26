@@ -50,6 +50,9 @@ test('the pending check waits between asks, and a payment that arrives after the
   await world.rzp.post('/pay', { orderId: placed.gateway.gatewayOrderId, webhook: false });
   await world.age(2 * MINUTE);
   assert.deepEqual((await world.ctx.payments.reconcile.pendingCheck()).map((c) => c.outcome), ['processed']);
+  assert.equal((await shop.order(order.id)).payment_status, 'paid');
+  // The payment moves the money only; the order.paid listener brings the order back once its stock is taken again (S-41).
+  await world.settle();
   const now = await shop.order(order.id);
   assert.equal(now.payment_status, 'paid');
   assert.equal(now.fulfilment_status, 'new', 'reinstated: the money arrived after the hold');
