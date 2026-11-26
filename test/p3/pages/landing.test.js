@@ -441,8 +441,11 @@ test('K-40 (the part a server can show): 20 products come gzipped in well under 
 
   // The only script is the shop's own counter. The pixel waits for consent, which nobody has given.
   const scripts = [...res.text.matchAll(/<script\b[^>]*>/g)].map((m) => m[0]);
-  assert.equal(scripts.length, 1);
+  // The one other script is the consent banner's own inline handler (buyer pages carry the banner since the consent module); it has no src and loads nothing.
+  assert.equal(scripts.length, 2);
   assert.match(scripts[0], new RegExp(`^<script src="${TRAFFIC_PATHS.script}" defer `));
+  assert.equal(scripts[1], '<script>', 'the consent banner handler is inline');
+  assert.match(res.text, /id="cookie-banner"/);
   assert.doesNotMatch(res.text, /fbevents|fbq\(|googletagmanager|gtag\(/);
   assert.doesNotMatch(res.text, /bhava/i);
 
