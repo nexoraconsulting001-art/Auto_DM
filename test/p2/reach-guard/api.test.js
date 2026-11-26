@@ -154,7 +154,8 @@ test('thresholds: owner only, within limits, audited, and the clear level stays 
     assert.equal((await patch({ clearPercent: 96 })).status, 400);
     assert.equal((await patch({ reachDropPercent: 60.5 })).status, 400);
 
-    const crossed = await patch({ reachDropPercent: 80, clearPercent: 70 });
+    // D2 decision: clear is "% of usual reached again", drop is "% fall"; a 40% drop trips at 60% of usual, so a clear of 60 is not above it.
+    const crossed = await patch({ reachDropPercent: 40, clearPercent: 60 });
     assert.equal(crossed.status, 400);
     assert.ok((await crossed.json()).fields.clearPercent);
 

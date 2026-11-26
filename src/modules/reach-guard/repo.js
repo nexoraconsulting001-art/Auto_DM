@@ -201,15 +201,16 @@ export function reachGuardRepo(db) {
       }
     },
 
-    /** Applies the owner's change to every account of this business, with its audit row. The clear level must stay above the trip level, or a day could be both. */
+    /** Applies the owner's change to every account of this business, with its audit row. The drop is a % fall and the clear is a % of usual reached again, so the clear must stay above 100 minus the drop (the level the trip fired at), or a day could be both. */
     async setThresholds(change, actor) {
       return db.tx(async (t) => {
         const rows = await t.query('SELECT account_ref, reach_drop_percent, media_drop_percent, clear_percent FROM reach_guard_state WHERE tenant_id = $1 ORDER BY account_ref FOR UPDATE', [tenantId()]);
         if (!rows.length) return false;
         const before = { reachDropPercent: rows[0].reach_drop_percent, mediaDropPercent: rows[0].media_drop_percent, clearPercent: rows[0].clear_percent };
         const after = { ...before, ...change };
-        if (after.clearPercent <= after.reachDropPercent) {
-          throw new ApiError('validation_failed', 'The recovery level must be above the drop level.', { fields: { clearPercent: `Use more than ${after.reachDropPercent}` } });
+        const tripLevel = 100 - after.reachDropPercent;
+        if (after.clearPercent <= tripLevel) {
+          throw new ApiError('validation_failed', `A drop of ${after.reachDropPercent}% trips the guard when reach falls to ${tripLevel}% of usual, so recovery must be above ${tripLevel}% of usual.`, { fields: { clearPercent: `Use more than ${tripLevel}` } });
         }
         await t.query(
           `UPDATE reach_guard_state SET reach_drop_percent = $2, media_drop_percent = $3, clear_percent = $4, evaluated_at = NULL WHERE tenant_id = $1`,
