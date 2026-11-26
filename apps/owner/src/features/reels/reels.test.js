@@ -55,7 +55,7 @@ test('no posts and no stores says how to start', async () => {
   expect(await screen.findByTestId('reels-empty')).toBeTruthy();
 });
 
-test('setting up a post’s store: products from the catalog, a keyword, and one save with the post’s details', async () => {
+test('setting up a post’s store: products from the catalog and one save with the post’s details, no keyword DM (D-11)', async () => {
   const { server } = await open('/reels/1790002');
   expect(await screen.findByTestId('reel-headline')).toBeTruthy();
   await fireEvent.press(screen.getByTestId('reel-save'));
@@ -66,20 +66,36 @@ test('setting up a post’s store: products from the catalog, a keyword, and one
   await fireEvent.press(screen.getByTestId('reel-catalog-2-add'));
   expect(screen.getByText('₹1,299.50, archived')).toBeTruthy();
   await fireEvent.press(screen.getByTestId('reel-product-2-up'));
-  await fireEvent.changeText(screen.getByTestId('reel-keywords-draft'), 'diya,');
+  expect(screen.queryByTestId('reel-keywords-draft')).toBeNull();
+  expect(screen.queryByTestId('reel-preview')).toBeNull();
+  expect(screen.getByTestId('reel-comment-dms-text').props.children).toBe('The DM someone gets when they comment is set up in Automations. Add this reel’s store link to it there.');
   await fireEvent.press(screen.getByTestId('reel-save'));
   await waitFor(() => expect(callsTo(server, 'PUT', '/reels/1790002')).toHaveLength(1));
-  expect(callsTo(server, 'PUT', '/reels/1790002')[0].body).toMatchObject({ headline: 'Brass diya set for the festival', keywords: ['LINK', 'diya'], productIds: [2, 1], permalink: 'https://www.instagram.com/p/b', active: true, publicReply: '' });
+  const body = callsTo(server, 'PUT', '/reels/1790002')[0].body;
+  expect(body).toMatchObject({ headline: 'Brass diya set for the festival', productIds: [2, 1], permalink: 'https://www.instagram.com/p/b', active: true });
+  for (const refused of ['keywords', 'dmMessage', 'buttonText', 'publicReply']) expect(body).not.toHaveProperty(refused);
   expect(await screen.findByTestId('reel-saved')).toBeTruthy();
 });
 
-test('the DM preview is the seller’s, with a stand-in name and no platform name', async () => {
+test('a Phase 0 reel’s own keyword DM shows read-only, the seller’s, with a stand-in name and no platform name', async () => {
   await open('/reels/1790001');
   expect(await screen.findByTestId('reel-preview')).toBeTruthy();
   expect(screen.getByTestId('reel-preview-text').props.children).toBe('Hey @asha! Here you go');
   expect(screen.getByTestId('reel-preview-name').props.children).toBe('Alpha Traders');
   expect(within(screen.getByTestId('reel-preview')).queryByText(/Bhava/i)).toBeNull();
-  expect(NEW_REEL.dmMessage).not.toMatch(/Bhava/i);
+  expect(screen.getByTestId('reel-comment-dms-text').props.children).toMatch(/^Comments with SPICE still get this reel’s earlier DM/);
+  expect(screen.queryByTestId('reel-dm')).toBeNull();
+  expect(Object.keys(NEW_REEL).sort()).toEqual(['active', 'headline', 'products', 'slug']);
+});
+
+test('saving a Phase 0 reel sends none of the keyword DM fields the API refuses (D-11)', async () => {
+  const { server } = await open('/reels/1790001');
+  await fireEvent.press(await screen.findByTestId('reel-save'));
+  await waitFor(() => expect(callsTo(server, 'PUT', '/reels/1790001')).toHaveLength(1));
+  const body = callsTo(server, 'PUT', '/reels/1790001')[0].body;
+  expect(body).toMatchObject({ headline: 'Spice Box Diwali', productIds: [1] });
+  for (const refused of ['keywords', 'dmMessage', 'buttonText', 'publicReply']) expect(body).not.toHaveProperty(refused);
+  expect(await screen.findByTestId('reel-saved')).toBeTruthy();
 });
 
 test('a refusal from the server is shown in its words beside the field it names', async () => {
@@ -124,8 +140,8 @@ test('the reel form’s rules', () => {
   expect(addKeywords(['LINK'], 'link, Shop ,shop')).toEqual(['LINK', 'Shop']);
   expect(moveItem([1, 2, 3], 0, -1)).toEqual([1, 2, 3]);
   expect(moveItem([1, 2, 3], 2, -1)).toEqual([1, 3, 2]);
-  const form = { ...NEW_REEL, headline: ' X ', buttonText: 'A very long button text here', products: [] };
-  expect(Object.keys(formToReel(form).errors).sort()).toEqual(['buttonText', 'products']);
+  expect(Object.keys(formToReel({ ...NEW_REEL, headline: ' ', products: [] }).errors).sort()).toEqual(['headline', 'products']);
+  expect(Object.keys(formToReel({ ...NEW_REEL, headline: 'X', products: Array.from({ length: 21 }, (_, id) => ({ id })) }).errors)).toEqual(['products']);
   const cards = mergeReelCards(POSTS, [SUMMARY, { ...SUMMARY, id: '1780000', headline: 'Old reel' }]);
   expect(cards.map((c) => [c.id, Boolean(c.reel)])).toEqual([['1790001', true], ['1790002', false], ['1780000', true]]);
 });

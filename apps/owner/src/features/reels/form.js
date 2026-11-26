@@ -4,22 +4,14 @@
  */
 
 export const MAX_REEL_PRODUCTS = 20;
-export const MAX_BUTTON_TEXT = 20;
-export const MAX_KEYWORDS = 50;
 
 /**
- * A new reel store starts live, with public replies off (PRD 4.9). The words are the shopper's DM, so they name the
- * seller's own store and never the platform; the seller changes them before saving.
+ * A reel is its landing page (PRD 8.10): headline, link name, products. The DM a comment gets is an automation's, set up
+ * in Automations (PRD 6.1, final review D-11); the API refuses the old keyword DM fields here, so the form has none.
  */
 export const NEW_REEL = Object.freeze({
   headline: '',
   slug: '',
-  keywords: ['LINK'],
-  keywordDraft: '',
-  dmMessage: 'Hey @{username}! Here’s everything from the reel 👇',
-  buttonText: 'Shop now',
-  publicReplyOn: false,
-  publicReply: '',
   active: true,
   products: [],
 });
@@ -43,15 +35,18 @@ export function reelToForm(reel) {
   return {
     headline: reel.headline,
     slug: reel.slug,
-    keywords: reel.keywords,
-    keywordDraft: '',
-    dmMessage: reel.dmMessage,
-    buttonText: reel.buttonText,
-    publicReplyOn: reel.publicReply !== '',
-    publicReply: reel.publicReply,
     active: reel.active,
     products: reel.products,
   };
+}
+
+/**
+ * The keyword DM a Phase 0 reel still sends itself, shown read-only until it is set up as an automation, or null for a
+ * reel that is only a store. These are the shopper's words, so they name the seller's own store and never the platform.
+ */
+export function legacyDm(reel) {
+  if (!reel?.keywords?.length) return null;
+  return { keywords: reel.keywords, dmMessage: reel.dmMessage, buttonText: reel.buttonText, publicReply: reel.publicReply };
 }
 
 /** One item moved up (-1) or down (+1), the rest in order. Out of range changes nothing. */
@@ -64,8 +59,6 @@ export function moveItem(list, index, by) {
   return next;
 }
 
-const chars = (text) => [...String(text ?? '')].length;
-
 /**
  * The form as the API wants it, or `errors` by field as string keys ({ key, values }). Everything found is reported at
  * once. `media` is what Instagram said about the post, kept with the reel.
@@ -74,12 +67,6 @@ export function formToReel(form, media = {}) {
   const errors = {};
   const headline = form.headline.trim();
   if (!headline) errors.headline = { key: 'reels.error.headline' };
-  const keywords = addKeywords(form.keywords, form.keywordDraft);
-  if (!keywords.length) errors.keywords = { key: 'reels.error.keywords' };
-  else if (keywords.length > MAX_KEYWORDS) errors.keywords = { key: 'reels.error.tooManyKeywords', values: { max: MAX_KEYWORDS } };
-  const buttonText = form.buttonText.trim();
-  if (chars(buttonText) > MAX_BUTTON_TEXT) errors.buttonText = { key: 'reels.error.buttonText', values: { max: MAX_BUTTON_TEXT } };
-  if (form.publicReplyOn && !form.publicReply.trim()) errors.publicReply = { key: 'reels.error.publicReply' };
   if (form.products.length < 1) errors.products = { key: 'reels.error.noProducts' };
   if (form.products.length > MAX_REEL_PRODUCTS) errors.products = { key: 'reels.error.tooManyProducts', values: { max: MAX_REEL_PRODUCTS } };
   if (Object.keys(errors).length) return { errors };
@@ -87,10 +74,6 @@ export function formToReel(form, media = {}) {
     body: {
       headline,
       slug: form.slug.trim() || undefined,
-      keywords,
-      dmMessage: form.dmMessage.trim(),
-      buttonText,
-      publicReply: form.publicReplyOn ? form.publicReply.trim() : '',
       active: form.active,
       productIds: form.products.map((product) => product.id),
       permalink: media.permalink ?? '',

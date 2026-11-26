@@ -30,7 +30,7 @@ export function useReelSources() {
 
 /**
  * Reels (the console's /reels): one card for each Instagram post, with its store if it has one. Each store shows 1 to 20
- * products and sends its link when someone comments its keyword. Read from the offline cache when there is no connection.
+ * products; its link goes out in a comment DM set up in Automations. Read from the offline cache when there is no connection.
  */
 export default function ReelsScreen({ navigation }) {
   const { t } = useStrings();

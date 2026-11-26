@@ -155,7 +155,7 @@ test('categories are added with a picture, put in order, linked to a product and
   expect(problems).toEqual([]);
 });
 
-test('a reel gets a store: products in order, a keyword, a DM preview in the seller\'s name, then removed', async ({ page }) => {
+test('a reel gets a store: products in order, comment DMs pointed to Automations (D-11), then removed', async ({ page }) => {
   const problems = watch(page, app);
   const pot = await app.repos.products.create({ name: 'Brass pot', price: '100', active: 'on' });
   const lamp = await app.repos.products.create({ name: 'Brass lamp', price: '200', active: 'on' });
@@ -164,20 +164,16 @@ test('a reel gets a store: products in order, a keyword, a DM preview in the sel
 
   await page.getByRole('link', { name: 'Set up store', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Set up reel store' })).toBeVisible();
-  await expect(page.getByText('Off by default.')).toBeVisible();
-  await expect(page.locator('.dm-name')).toHaveText('Test store');
-  await expect(page.locator('.dm')).toContainText('Hey @asha!');
-  await expect(page.locator('.dm')).not.toContainText(/bhava/i);
+  await expect(page.getByText('The DM someone gets when they comment is set up in Automations.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Set up comment DMs in Automations' })).toHaveAttribute('href', '/admin/automations');
+  await expect(page.getByLabel('Add a keyword')).toHaveCount(0);
+  await expect(page.locator('.dm')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Create reel store' }).click();
   await expect(page.getByText('Add a headline')).toBeVisible();
   await expect(page.getByText('Pick at least 1 product for this reel')).toBeVisible();
 
   await page.getByLabel('Headline').fill('The brass edit');
-  await page.getByLabel('Add a keyword').fill('BRASS');
-  await page.getByLabel('Add a keyword').press('Enter');
-  await expect(page.locator('.keyword')).toHaveText(['LINK', 'BRASS']);
-  await page.getByRole('button', { name: 'Remove keyword LINK' }).click();
 
   await page.getByRole('button', { name: 'Add from catalog' }).click();
   await page.getByRole('button', { name: 'Add Brass pot' }).click();
@@ -192,7 +188,8 @@ test('a reel gets a store: products in order, a keyword, a DM preview in the sel
 
   const saved = await app.repos.reels.get(REEL_ID);
   expect(saved.products.map((p) => p.id)).toEqual([lamp.id, pot.id]);
-  expect(saved.keywords).toEqual(['BRASS']);
+  expect(saved.keywords).toEqual([]);
+  expect(saved.dm_message).toBe('');
   expect(saved.public_reply).toBe('');
   expect(saved.caption).toBe('Brunch look');
 

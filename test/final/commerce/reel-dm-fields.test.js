@@ -6,18 +6,20 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { IG_ACCOUNT, REEL_ID, seedReel } from '../../helpers.js';
 import { ok, refused, withApp } from '../../p0/admin-api/support.js';
+import { waitFor } from '../../p0/spec-p0/support.js';
 
 const NEW_REEL = '18475694065119999';
 
-function comment(app, mediaId, text = 'LINK') {
-  const body = JSON.stringify({ entry: [{ id: IG_ACCOUNT.igUserId, changes: [{ field: 'comments', value: { id: `c-${crypto.randomUUID()}`, text, media: { id: mediaId }, from: { id: 'u1', username: 'bob' } } }] }] });
+async function comment(app, mediaId, text = 'LINK') {
+  const commentId = `c-${crypto.randomUUID()}`;
+  const body = JSON.stringify({ entry: [{ id: IG_ACCOUNT.igUserId, changes: [{ field: 'comments', value: { id: commentId, text, media: { id: mediaId }, from: { id: 'u1', username: 'bob' } } }] }] });
   const sig = `sha256=${crypto.createHmac('sha256', 'secret').update(body).digest('hex')}`;
-  return fetch(`${app.base}/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, body });
+  const res = await fetch(`${app.base}/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, body });
+  assert.equal(res.status, 200, 'the webhook takes the comment');
+  return commentId;
 }
-const settle = async (app, want, ms = 1500) => {
-  for (let waited = 0; waited < ms && app.ig.calls.length < want; waited += 25) await new Promise((r) => setTimeout(r, 25));
-  await new Promise((r) => setTimeout(r, 150));
-};
+/** The compliance log's decisions about one comment: every comment ends in one, sent or not, so this is when it is settled. */
+const decisionsOn = (app, commentId) => app.db.platform.query('SELECT decision, reason FROM compliance_events WHERE comment_id = $1 ORDER BY id', [commentId]);
 
 test('D-11: reels.save refuses keyword DM fields; a new reel has none and its comments get no DM of its own', withApp(async (app) => {
   const { api } = app;
@@ -30,8 +32,9 @@ test('D-11: reels.save refuses keyword DM fields; a new reel has none and its co
   assert.deepEqual(reel.keywords, []);
   assert.match(reel.storeUrl, /\/r\/lamp-edit/);
 
-  await comment(app, NEW_REEL);
-  await settle(app, 1);
+  const commentId = await comment(app, NEW_REEL);
+  const decided = await waitFor(async () => ((await decisionsOn(app, commentId)).length ? decisionsOn(app, commentId) : null));
+  assert.deepEqual(decided, [{ decision: 'skipped', reason: 'unmapped' }], 'the engine, not the reel, decides: no automation, no DM');
   assert.equal(app.ig.calls.length, 0, 'a reel without an automation sends nothing');
 }));
 
@@ -42,6 +45,6 @@ test('D-11: a Phase 0 reel keeps its keyword DM when its store is saved again th
   assert.equal(saved.headline, 'Brunch edit, new');
   assert.deepEqual(saved.keywords, ['LINK']);
   await comment(app, REEL_ID);
-  await settle(app, 1);
+  await waitFor(() => app.ig.calls.length > 0);
   assert.equal(app.ig.calls.length, 1, 'the existing reel still answers until it is moved to an automation');
 }));

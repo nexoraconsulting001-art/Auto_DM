@@ -1,53 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { X } from 'lucide-react';
 import { CopyButton } from '../../components/copy.jsx';
 import { useFeedback } from '../../components/feedback.jsx';
-import { Avatar, Badge, BackLink, Banner, Button, FieldGroup, Loadable, NotFoundState, PageHeader, Panel, Spinner, TextAreaField, TextField, Thumb, Toggle } from '../../design/index.jsx';
+import { Avatar, Badge, BackLink, Banner, Button, FieldGroup, Loadable, NotFoundState, PageHeader, Panel, Spinner, TextField, Thumb, Toggle } from '../../design/index.jsx';
 import { api } from '../../lib/api/index.js';
 import { useForm } from '../../lib/forms.js';
 import { isWebLink } from '../../lib/images.js';
 import { fetchAll, useRefresh } from '../../lib/query.js';
 import { useSession } from '../../lib/session.jsx';
-import { MAX_BUTTON_TEXT, MAX_REEL_PRODUCTS, NEW_REEL, RENAME, addKeywords, formToReel, previewMessage, reelToForm } from './form.js';
+import { MAX_REEL_PRODUCTS, NEW_REEL, RENAME, formToReel, legacyDm, previewMessage, reelToForm } from './form.js';
 import { ProductPicker } from './ProductPicker.jsx';
-
-function KeywordInput({ form }) {
-  const { keywords, keywordDraft } = form.values;
-  const commit = () => {
-    form.set('keywords', addKeywords(keywords, keywordDraft));
-    form.set('keywordDraft', '');
-  };
-  return (
-    <div className="stack">
-      <div className="keyword-list">
-        {keywords.map((word) => (
-          <span key={word} className="keyword">
-            {word}
-            <button type="button" className="keyword-remove" aria-label={`Remove keyword ${word}`} onClick={() => form.set('keywords', keywords.filter((other) => other !== word))}><X size={14} aria-hidden="true" /></button>
-          </span>
-        ))}
-      </div>
-      <FieldGroup>
-        <TextField
-          label="Add a keyword"
-          placeholder="LINK, SHOP"
-          hint="A comment containing any of these gets the DM."
-          value={keywordDraft}
-          error={form.errors.keywords}
-          onChange={(event) => form.set('keywordDraft', event.target.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ',') {
-              event.preventDefault();
-              commit();
-            }
-          }}
-        />
-      </FieldGroup>
-    </div>
-  );
-}
 
 /** What the commenter gets. Only the seller's name appears here. */
 function DmPreview({ message, button }) {
@@ -68,11 +30,32 @@ function DmPreview({ message, button }) {
   );
 }
 
+/**
+ * Where a comment's DM is set up: Automations (D-11), where the plan's limits and the message and link checks apply. A
+ * Phase 0 reel that still sends its own keyword DM shows it here, read-only, until it is set up as an automation.
+ */
+function CommentDms({ dm }) {
+  return (
+    <Panel title="When someone comments">
+      {dm ? (
+        <>
+          <p>Comments with {dm.keywords.join(', ')} still get this reel’s earlier DM. To change it, set it up as an automation; reel stores don’t edit DMs any more.</p>
+          {dm.publicReply && <p className="field-hint">It also replies publicly: {dm.publicReply}</p>}
+        </>
+      ) : (
+        <p>The DM someone gets when they comment is set up in Automations. Add this reel’s store link to it there.</p>
+      )}
+      <Button as={Link} variant="outline" to="/automations">Set up comment DMs in Automations</Button>
+    </Panel>
+  );
+}
+
 function ReelEditor({ id, reel, post, catalog }) {
   const navigate = useNavigate();
   const { toast, confirm } = useFeedback();
   const refresh = useRefresh();
   const form = useForm(reel ? reelToForm(reel) : { ...NEW_REEL }, { rename: RENAME });
+  const dm = legacyDm(reel);
   const media = {
     permalink: post?.permalink || reel?.permalink || '',
     thumbnailUrl: post?.thumbnailUrl || reel?.thumbnailUrl || '',
@@ -84,17 +67,15 @@ function ReelEditor({ id, reel, post, catalog }) {
     event.preventDefault();
     const { body, errors } = formToReel(form.values, media);
     if (errors) return form.reject(errors);
-    form.set('keywords', body.keywords);
-    form.set('keywordDraft', '');
     return form.run(async () => {
       await api.reels.save(id, body);
-      toast('Reel store saved. Comments with its keyword now get a DM with the store link.');
+      toast('Reel store saved.');
       await refresh();
     });
   }
 
   async function remove() {
-    const yes = await confirm({ title: 'Remove this reel’s store?', text: 'Comments on it will stop getting DMs. Products stay in your catalog.', confirm: 'Remove reel store' });
+    const yes = await confirm({ title: 'Remove this reel’s store?', text: 'Its store page goes away. Products stay in your catalog.', confirm: 'Remove reel store' });
     if (!yes) return;
     await form.run(async () => {
       await api.reels.remove(id);
@@ -125,7 +106,7 @@ function ReelEditor({ id, reel, post, catalog }) {
             <TextField label="Headline" maxLength={200} placeholder="The Sunday brunch edit" hint="Big title on the store page" required {...form.field('headline')} />
             <TextField label="Store link name" maxLength={60} placeholder="sunday-brunch" hint="Made from the headline if empty" {...form.field('slug')} />
           </FieldGroup>
-          <Toggle label="Live: sends DMs and shows the store" {...form.toggle('active')} />
+          <Toggle label="Live: shows the store" {...form.toggle('active')} />
         </Panel>
 
         <Panel title="Products" action={<Badge tone={form.values.products.length >= MAX_REEL_PRODUCTS ? 'warn' : 'neutral'}>{form.values.products.length} / {MAX_REEL_PRODUCTS}</Badge>}>
@@ -133,25 +114,8 @@ function ReelEditor({ id, reel, post, catalog }) {
           <ProductPicker catalog={catalog} picked={form.values.products} onChange={(next) => form.set('products', next)} error={form.errors.products} />
         </Panel>
 
-        <Panel title="When someone comments">
-          <KeywordInput form={form} />
-        </Panel>
-
-        <Panel title="Reply with">
-          <FieldGroup>
-            <TextAreaField label="DM message" maxLength={1000} hint="{username} becomes the commenter’s name" {...form.field('dmMessage')} />
-            <TextField label="Button text" maxLength={MAX_BUTTON_TEXT} hint={`Up to ${MAX_BUTTON_TEXT} characters`} {...form.field('buttonText')} />
-          </FieldGroup>
-          <Toggle label="Reply publicly too" {...form.toggle('publicReplyOn')} />
-          <p className="field-hint">Off by default. Public replies are the most common reason accounts get flagged.</p>
-          {form.values.publicReplyOn && (
-            <FieldGroup>
-              <TextField label="Public reply" maxLength={1000} placeholder="Sent you a DM" {...form.field('publicReply')} />
-            </FieldGroup>
-          )}
-        </Panel>
-
-        <DmPreview message={form.values.dmMessage} button={form.values.buttonText} />
+        <CommentDms dm={dm} />
+        {dm && <DmPreview message={dm.dmMessage} button={dm.buttonText} />}
 
         {form.message && <Banner tone="bad">{form.message}</Banner>}
         <div className="form-actions">

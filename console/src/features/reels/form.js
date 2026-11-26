@@ -1,19 +1,13 @@
-import { splitList } from '../../lib/lists.js';
-
 export const MAX_REEL_PRODUCTS = 20;
-export const MAX_BUTTON_TEXT = 20;
 export const RENAME = { productIds: 'products' };
 
-/** A new reel store starts live, with public replies off (PRD 4.9). No Bhava text: this is what the shopper receives. */
+/**
+ * A reel is its landing page (PRD 8.10): headline, link name, products. The DM a comment gets is an automation's, set up
+ * in Automations (PRD 6.1, final review D-11); the API refuses the old keyword DM fields here, so the form has none.
+ */
 export const NEW_REEL = Object.freeze({
   headline: '',
   slug: '',
-  keywords: ['LINK'],
-  keywordDraft: '',
-  dmMessage: 'Hey @{username}! Here’s everything from the reel 👇',
-  buttonText: 'Shop now',
-  publicReplyOn: false,
-  publicReply: '',
   active: true,
   products: [],
 });
@@ -24,24 +18,18 @@ export function reelToForm(reel) {
   return {
     headline: reel.headline,
     slug: reel.slug,
-    keywords: reel.keywords,
-    keywordDraft: '',
-    dmMessage: reel.dmMessage,
-    buttonText: reel.buttonText,
-    publicReplyOn: reel.publicReply !== '',
-    publicReply: reel.publicReply,
     active: reel.active,
     products: reel.products,
   };
 }
 
-/** Keywords as chips: adds what was typed, ignoring case when checking for one already there. */
-export function addKeywords(keywords, typed) {
-  const next = [...keywords];
-  for (const word of splitList(typed)) {
-    if (!next.some((existing) => existing.toLowerCase() === word.toLowerCase())) next.push(word);
-  }
-  return next;
+/**
+ * The keyword DM a Phase 0 reel still sends itself, shown read-only until it is set up as an automation, or null for a
+ * reel that is only a store. No Bhava text: this is what the shopper receives.
+ */
+export function legacyDm(reel) {
+  if (!reel?.keywords?.length) return null;
+  return { keywords: reel.keywords, dmMessage: reel.dmMessage, buttonText: reel.buttonText, publicReply: reel.publicReply };
 }
 
 /** The form as the API wants it, or `errors` by field. `media` is what Instagram told us about the post, kept with the reel. */
@@ -49,11 +37,6 @@ export function formToReel(form, media = {}) {
   const errors = {};
   const headline = form.headline.trim();
   if (!headline) errors.headline = 'Add a headline';
-  const keywords = addKeywords(form.keywords, form.keywordDraft);
-  if (!keywords.length) errors.keywords = 'Add at least one keyword people can comment';
-  const buttonText = form.buttonText.trim();
-  if (buttonText.length > MAX_BUTTON_TEXT) errors.buttonText = `Button text must be ${MAX_BUTTON_TEXT} characters or fewer`;
-  if (form.publicReplyOn && !form.publicReply.trim()) errors.publicReply = 'Write the reply, or turn public replies off';
   if (form.products.length < 1) errors.products = 'Pick at least 1 product for this reel';
   if (form.products.length > MAX_REEL_PRODUCTS) errors.products = `A reel can show at most ${MAX_REEL_PRODUCTS} products`;
   if (Object.keys(errors).length) return { errors };
@@ -61,10 +44,6 @@ export function formToReel(form, media = {}) {
     body: {
       headline,
       slug: form.slug.trim() || undefined,
-      keywords,
-      dmMessage: form.dmMessage.trim(),
-      buttonText,
-      publicReply: form.publicReplyOn ? form.publicReply.trim() : '',
       active: form.active,
       productIds: form.products.map((product) => product.id),
       permalink: media.permalink ?? '',
