@@ -45,7 +45,7 @@ test('the price list is data, with the current values of PRD 3 and 5.12 as its d
   for (const plan of PLANS) assert.equal(prices[`${plan}.yearly`], prices[`${plan}.monthly`] * settings.yearly_months, `F-115: ${plan} yearly is 10 months' fee`);
   assert.deepEqual(
     [settings.yearly_months, settings.tax_rate_bp, settings.statement_day, settings.grace_days, settings.after_grace, settings.proration, settings.free_can_buy_packs, settings.dm_alert_percents, Number(settings.referral_reward_paise)],
-    [10, 1800, 5, 7, 'suspend', 'none', false, [80, 100], 0],
+    [10, 1800, 5, 2, 'suspend', 'none', false, [80, 100], 0], // grace_days 2: user decision 2026-11-26 (migration 975)
   );
   assert.deepEqual([settings.legal_name, settings.sac, settings.state_code], ['', '', ''], 'the legal entity and the SAC are set in the console, not guessed');
 

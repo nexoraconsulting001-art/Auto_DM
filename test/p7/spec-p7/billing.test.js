@@ -101,26 +101,36 @@ test('F-51: a failure delivered after a later charge does not undo it, and a lat
   assert.equal((await planOf(world, shop)).plan, 't1');
 });
 
-test('F-53: a failed renewal starts 7 days of grace; at 7 days less a second the business runs, a second past it is suspended with its data', async () => {
+// User decision 2026-11-26 (B-MONEY-7): grace is billing_settings.grace_days (default 2 in production); this test sets a short
+// grace of 1 day and moves grace_until itself, while the periodic grace job runs on every world tick.
+test('F-53: a failed renewal starts the set days of grace; a second before the end the business runs, a second past it is suspended with its data', async () => {
   const shop = await freeShop();
   await subscribe(world, shop, 't1');
+  assert.equal(Number((await one(world, 'SELECT grace_days FROM billing_settings')).grace_days), 2, 'production grace is 2 days unless Bhava sets it');
+  await setSetting(world, 'grace_days', 1);
   const product = await shop.product();
-  await charge(world, shop, { outcome: 'failed' });
-  const grace = await world.until(async () => {
-    const s = await subscriptionOf(world, shop);
-    return ['grace', 'past_due'].includes(s.status) ? s : null;
-  });
-  assert.ok(grace, 'a failed charge makes the subscription past due or in grace');
-  const failedAt = Date.now();
-  const sub = await world.until(async () => (await subscriptionOf(world, shop)).grace_until && (await subscriptionOf(world, shop)));
+  let sub;
+  let failedAt;
+  try {
+    await charge(world, shop, { outcome: 'failed' });
+    const grace = await world.until(async () => {
+      const s = await subscriptionOf(world, shop);
+      return ['grace', 'past_due'].includes(s.status) ? s : null;
+    });
+    assert.ok(grace, 'a failed charge makes the subscription past due or in grace');
+    failedAt = Date.now();
+    sub = await world.until(async () => (await subscriptionOf(world, shop)).grace_until && (await subscriptionOf(world, shop)));
+  } finally {
+    await setSetting(world, 'grace_days', 2);
+  }
   const days = (new Date(sub.grace_until).getTime() - failedAt) / DAY;
-  assert.ok(days > 6.99 && days < 7.01, `grace runs 7 days, not ${days}`);
-  // Day 7, one second before the end.
+  assert.ok(days > 0.99 && days < 1.01, `grace runs the 1 day set, not ${days}`);
+  // One second before the end.
   await sql(world, `UPDATE subscriptions SET grace_until = now() + interval '1500 milliseconds' WHERE tenant_id = $1`, [shop.tenantId]);
   await world.tick();
-  assert.notEqual(await tenantStatus(world, shop), 'suspended', 'not yet at day 7');
+  assert.notEqual(await tenantStatus(world, shop), 'suspended', 'not yet at the end of grace');
   assert.equal((await shop.send('GET', '/billing')).status, 200);
-  // Day 8: a second past the end.
+  // A second past the end.
   await sql(world, `UPDATE subscriptions SET grace_until = now() - interval '1 second' WHERE tenant_id = $1`, [shop.tenantId]);
   const suspended = await world.until(async () => (await tenantStatus(world, shop)) === 'suspended');
   assert.ok(suspended, 'the tenant is suspended once grace has passed');
@@ -168,20 +178,28 @@ test('F-54: a business in the seller state gets CGST and SGST, equal; one in ano
   }
 });
 
-test('F-54: no invoice is issued while Bhava has no legal name, state or SAC, and the charge is not lost', async () => {
+// User decision 2026-11-26 (B-MONEY-7): while Bhava's own billing details are missing, a paid plan is refused (nothing is
+// charged); a renewal the provider takes meanwhile is kept and invoiced, once, as soon as the details are set.
+test('F-54: no paid plan is sold and no invoice is issued while Bhava has no legal name, state or SAC, and a renewal charge is not lost', async () => {
   const shop = await freeShop();
+  const waiting = await freeShop();
+  await subscribe(world, shop, 't1');
   await sql(world, `UPDATE billing_settings SET sac = ''`);
   try {
-    need(await change(shop, 't1', 'monthly'), 200, 'Choosing tier 1');
-    await authorize(world, shop);
+    const refused = refusal(await change(waiting, 't1', 'monthly'), 'A paid plan while Bhava has no SAC', 409);
+    assert.equal(json(refused)?.reason, 'billing_not_ready');
+    assert.equal((await subscriptionOf(world, waiting))?.provider_subscription_id ?? null, null, 'nothing is set up to charge');
+    assert.equal((await planOf(world, waiting)).plan, 'free');
     await charge(world, shop);
     await world.quiet(1200);
-    assert.equal((await invoicesOf(world, shop)).length, 0, 'no invoice without a SAC');
-    assert.equal((await paymentsOf(world, shop)).length, 1, 'the payment is recorded all the same');
+    assert.equal((await invoicesOf(world, shop)).length, 1, 'no new invoice without a SAC');
   } finally {
     await sql(world, `UPDATE billing_settings SET sac = '998439'`);
   }
-  await world.until(async () => (await invoicesOf(world, shop)).length === 1, 6000);
+  assert.ok(await world.until(async () => (await invoicesOf(world, shop)).length === 2, 6000), 'the kept charge is invoiced once the SAC is set');
+  assert.equal((await paymentsOf(world, shop)).length, 2, 'both charges are recorded');
+  await world.quiet(600);
+  assert.equal((await invoicesOf(world, shop)).length, 2, 'and only once');
 });
 
 test('F-55: an invoice a second before midnight on 31 March is the last of one year, and one at 1 April starts the next at 1', async () => {
@@ -411,7 +429,14 @@ test('F-85: a WhatsApp add-on and reel management bought mid-month each appear a
   assert.equal(Number((await one(world, `SELECT count(*) AS n FROM tenant_features WHERE tenant_id = $1 AND feature = 'whatsapp_automation' AND enabled`, [shop.tenantId])).n), 1, 'the add-on switched its feature on');
   const gone = await shop.send('DELETE', `/billing/items/${json(need(await shop.send('GET', '/billing'), 200, 'Plan')).items.find((i) => i.code === 'whatsapp').id}`);
   assert.equal(gone.status, 204);
-  assert.equal(Number((await one(world, `SELECT count(*) AS n FROM tenant_features WHERE tenant_id = $1 AND feature = 'whatsapp_automation' AND enabled`, [shop.tenantId])).n), 0, 'removing it switches the feature off');
+  // User decision 2026-11-26 (B-MONEY-7): a removed add-on that is paid for stays on until the end of the paid period, then goes off.
+  const featureOn = async () => Number((await one(world, `SELECT count(*) AS n FROM tenant_features WHERE tenant_id = $1 AND feature = 'whatsapp_automation' AND enabled`, [shop.tenantId])).n);
+  assert.equal(await featureOn(), 1, 'a removed add-on stays on for the period already paid for');
+  const sub = await subscriptionOf(world, shop);
+  const ended = await one(world, `SELECT ends_at FROM subscription_items WHERE tenant_id = $1 AND addon_code = 'whatsapp'`, [shop.tenantId]);
+  assert.equal(+new Date(ended.ends_at), +new Date(sub.current_period_end), 'it ends with the paid period');
+  await sql(world, `UPDATE subscription_items SET ends_at = now() - interval '1 second' WHERE tenant_id = $1 AND addon_code = 'whatsapp'`, [shop.tenantId]);
+  assert.ok(await world.until(async () => (await featureOn()) === 0), 'once the paid period ends the feature is off');
 });
 
 test('F-116: done-for-you setup is its own line on the next invoice', async () => {
@@ -448,11 +473,18 @@ test('F-114: WhatsApp messages and AI usage are billed at cost with counts on se
   const shop = await freeShop();
   await subscribe(world, shop, 't1');
   need(await shop.send('POST', '/billing/items', { code: 'whatsapp', requestKey: key() }), 201, 'WhatsApp');
-  const month = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 7) + '-01';
+  // User decision 2026-11-26 (B-MONEY-7): only closed months are billed, so the usage is last month's (India time).
+  const ist = new Date(Date.now() + 330 * 60_000);
+  const month = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() - 1, 1)).toISOString().slice(0, 10);
   const put = (kind, amount, quantity, ref) => sql(world, `INSERT INTO pass_through_charges (tenant_id, kind, amount_paise, quantity, period, collected_by, source_ref) VALUES ($1, $2, $3, $4, $5, 'invoice', $6) ON CONFLICT DO NOTHING`, [shop.tenantId, kind, amount, quantity, month, ref]);
   await put('whatsapp', 85_000, 2000, 'spec:wa');
   await put('whatsapp', 85_000, 2000, 'spec:wa');
   await put('ai', 12_345, 321, 'spec:ai');
+  // The renewal comes due (its period ends within the day), and the renewals job queues the month's costs with the provider
+  // before the charge, so the invoice carries exactly what the provider takes.
+  await sql(world, `UPDATE subscriptions SET current_period_end = now() + interval '1 hour' WHERE tenant_id = $1`, [shop.tenantId]);
+  const queued = await world.until(async () => (await sql(world, 'SELECT queued_at FROM pass_through_charges WHERE tenant_id = $1', [shop.tenantId])).every((c) => c.queued_at));
+  assert.ok(queued, 'the closed month is queued with the provider before the renewal');
   await charge(world, shop);
   const invoice = await world.until(async () => (await invoicesOf(world, shop)).at(-1));
   const lines = (await linesOf(world, invoice.id)).filter((l) => l.kind === 'pass_through');

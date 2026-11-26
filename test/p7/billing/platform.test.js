@@ -19,7 +19,7 @@ test('settings, overrides, credit notes and holds from the console, each with it
 
   // Bhava's own details: anyone reads, only a super admin saves.
   const got = await call(w, support, 'GET', '/billing-settings');
-  assert.deepEqual([got.status, got.json.stateCode, got.json.graceDays, got.json.yearlyMonths], [200, '29', 7, 10]);
+  assert.deepEqual([got.status, got.json.stateCode, got.json.graceDays, got.json.yearlyMonths], [200, '29', 2, 10]); // grace 2 days by default: user decision 2026-11-26
   assert.equal((await call(w, support, 'PUT', '/billing-settings', { sac: '998315', reason: 'CA confirmed' })).status, 403);
   const saved = await call(w, admin, 'PUT', '/billing-settings', { sac: '998315', graceDays: 7, reason: 'CA confirmed' });
   assert.equal(saved.status, 200, saved.text);
