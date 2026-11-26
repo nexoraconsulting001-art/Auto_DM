@@ -17,7 +17,10 @@ const SECRET_SHAPES = [
   [/\b(EAA|IGQ|IGAA)[\w-]{12,}/g, '[token]'],
   [/\b(rzp_(?:live|test)_|sk_(?:live|test)_|shpat_|whsec_)[\w-]+/gi, '[key]'],
   [/\b((?:access_|refresh_)?token|api_?key|key|secret|password|signature)=[^&\s"']+/gi, '$1=[redacted]'],
-  [/\+?\d(?:[ -]?\d){9,}/g, '[number]'],
+  // Ten or more digits, spaced or not, read as a phone. One unbroken run of 15 or more digits is an id (Instagram and Meta
+  // ids are 15 to 19 digits; a phone is at most 15 with its country code and is written with + or spaces when that long)
+  // and stays, so a refusal is logged with the id it was for (PRD 11, R-01).
+  [/(?<![\d+])\d{15,}(?!\d)|\+?\d(?:[ -]?\d){9,}/g, (found) => (/^\d{15,}$/.test(found) ? found : '[number]')],
 ];
 /** Takes secret-shaped and phone-shaped text out of a string: an error's message can quote what a person wrote or a request carried. */
 export function scrub(text) {
