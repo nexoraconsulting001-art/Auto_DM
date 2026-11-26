@@ -30,7 +30,7 @@ const account = (db, tenant, ig) => withTenant(tenant, async () => (await db.que
 test('every Phase 2 business table has row-level security and its policy', async () => {
   const { db } = await setup();
   for (const table of BUSINESS_TABLES) {
-    const [row] = await db.query(
+    const [row] = await db.platform.query(
       `SELECT c.relrowsecurity AS secured, (SELECT count(*)::int FROM pg_policies p WHERE p.tablename = $1 AND p.policyname = 'tenant_fence') AS policies,
               (SELECT count(*)::int FROM information_schema.columns i WHERE i.table_name = $1 AND i.column_name = 'tenant_id') AS tenant_column
        FROM pg_class c WHERE c.oid = format('public.%I', $1::text)::regclass`,
@@ -42,10 +42,10 @@ test('every Phase 2 business table has row-level security and its policy', async
 
 test('every foreign key on a Phase 2 table has an index its lookups and cascades can use', async () => {
   const { db } = await setup();
-  const foreign = await db.query(
+  const foreign = await db.platform.query(
     `SELECT conrelid::regclass::text AS tbl, conname, conkey FROM pg_constraint WHERE contype = 'f' AND conrelid = ANY($1::regclass[])`, [BUSINESS_TABLES],
   );
-  const indexes = await db.query(`SELECT indrelid::regclass::text AS tbl, string_to_array(indkey::text, ' ')::int[] AS columns FROM pg_index WHERE indrelid = ANY($1::regclass[]) AND indpred IS NULL`, [BUSINESS_TABLES]);
+  const indexes = await db.platform.query(`SELECT indrelid::regclass::text AS tbl, string_to_array(indkey::text, ' ')::int[] AS columns FROM pg_index WHERE indrelid = ANY($1::regclass[]) AND indpred IS NULL`, [BUSINESS_TABLES]);
   assert.ok(foreign.length >= 25, `found ${foreign.length}`);
   for (const fk of foreign) {
     const key = fk.conkey.map(Number);
@@ -103,7 +103,7 @@ test('impressions can\'t be stored as a metric (for N-05)', async () => {
 
 test('no traffic table has a column for an IP, a user agent or a username (for N-50)', async () => {
   const { db } = await setup();
-  const rows = await db.query(
+  const rows = await db.platform.query(
     `SELECT table_name, column_name FROM information_schema.columns
      WHERE table_name = ANY($1::text[]) AND column_name ~ '(^ip$|ip_address|user_agent|^ua$|username|phone)'`,
     [['traffic_visitors', 'traffic_sessions', 'traffic_events', 'traffic_previews', 'traffic_daily', 'traffic_items_daily', 'funnel_events', 'funnel_daily']],
@@ -114,7 +114,7 @@ test('no traffic table has a column for an IP, a user agent or a username (for N
 test('the rollup tables are exactly what ROLLUP_STORES says', async () => {
   const { db } = await setup();
   for (const [name, store] of Object.entries(ROLLUP_STORES)) {
-    const rows = await db.query(`SELECT column_name FROM information_schema.columns WHERE table_name = $1`, [name]);
+    const rows = await db.platform.query(`SELECT column_name FROM information_schema.columns WHERE table_name = $1`, [name]);
     const columns = new Set(rows.map((r) => r.column_name));
     for (const column of [...store.key, ...store.dimensions, ...store.columns, ...store.extras]) assert.ok(columns.has(column), `${name}.${column}`);
     assert.deepEqual([...columns].filter((c) => !['tenant_id', ...store.key, ...store.dimensions, ...store.columns, ...store.extras].includes(c)), [], name);

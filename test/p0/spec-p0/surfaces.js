@@ -66,11 +66,11 @@ export const buyerPaths = {
 
 /** Puts an order in the state its page shows: success (paid), pending (waiting for payment), failure (the payment failed). */
 export const orderStates = {
-  success: (app, order) => app.db.query(`UPDATE orders SET fulfilment_status = 'new', payment_status = 'paid', paid_paise = total_paise WHERE tenant_id = $1 AND id = $2`, [order.tenant_id, order.id]),
-  pending: (app, order) => app.db.query(`UPDATE orders SET fulfilment_status = 'pending', payment_status = 'unpaid' WHERE tenant_id = $1 AND id = $2`, [order.tenant_id, order.id]),
+  success: (app, order) => app.db.platform.query(`UPDATE orders SET fulfilment_status = 'new', payment_status = 'paid', paid_paise = total_paise WHERE tenant_id = $1 AND id = $2`, [order.tenant_id, order.id]),
+  pending: (app, order) => app.db.platform.query(`UPDATE orders SET fulfilment_status = 'pending', payment_status = 'unpaid' WHERE tenant_id = $1 AND id = $2`, [order.tenant_id, order.id]),
   failure: async (app, order) => {
     await orderStates.pending(app, order);
-    await app.db.query(`UPDATE payments SET status = 'failed' WHERE tenant_id = $1 AND order_id = $2`, [order.tenant_id, order.id]);
+    await app.db.platform.query(`UPDATE payments SET status = 'failed' WHERE tenant_id = $1 AND order_id = $2`, [order.tenant_id, order.id]);
   },
 };
 

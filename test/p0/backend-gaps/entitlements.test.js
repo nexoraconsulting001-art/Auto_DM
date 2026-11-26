@@ -101,7 +101,7 @@ test('a plan change takes effect on the next call', async () => {
   const tenant = await platform.tenants.getBySlug('biz-t1');
   const e = bindTenant(platform, tenant).entitlements;
   assert.equal(await e.can('store.checkout'), false);
-  await db.query(`UPDATE tenants SET plan = 't3' WHERE id = $1`, [tenant.id]);
+  await db.platform.query(`UPDATE tenants SET plan = 't3' WHERE id = $1`, [tenant.id]);
   assert.equal(await e.can('store.checkout'), true);
   assert.equal(await e.limit('dms.monthly'), 50000);
 });

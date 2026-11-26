@@ -27,22 +27,22 @@ test('housekeeping removes only what is past its retention', async () => {
   const queue = createQueue({ queueDriver: 'pg' }, { db });
   const user = await repos.users.create({ name: 'Asha', phone: '9876543210', password: 'secret1' });
   const live = await repos.sessions.create(user.id, 30);
-  await db.query(
+  await db.platform.query(
     `INSERT INTO sessions (id, tenant_id, user_id, expires_at) VALUES ('expired', $1, $2, now() - interval '1 hour')`,
     [tenant.id, user.id],
   );
-  await db.query(
+  await db.platform.query(
     `INSERT INTO compliance_events (tenant_id, kind, decision, created_at) VALUES ($1, 'dm', 'allow', now() - interval '400 days'), ($1, 'dm', 'allow', now())`,
     [tenant.id],
   );
-  await db.query(`INSERT INTO jobs (queue, status, finished_at) VALUES ('x', 'done', now() - interval '30 days'), ('x', 'done', now()), ('x', 'failed', now() - interval '30 days')`);
+  await db.platform.query(`INSERT INTO jobs (queue, status, finished_at) VALUES ('x', 'done', now() - interval '30 days'), ('x', 'done', now()), ('x', 'failed', now() - interval '30 days')`);
 
   await housekeeping({ db, queue });
 
   assert.equal(await repos.sessions.userIdFor(live), user.id);
-  assert.equal((await db.query(`SELECT 1 FROM sessions WHERE id = 'expired'`)).length, 0);
-  assert.equal((await db.query('SELECT 1 FROM compliance_events')).length, 1);
-  assert.deepEqual((await db.query('SELECT status FROM jobs ORDER BY status')).map((r) => r.status), ['done', 'failed']);
+  assert.equal((await db.platform.query(`SELECT 1 FROM sessions WHERE id = 'expired'`)).length, 0);
+  assert.equal((await db.platform.query('SELECT 1 FROM compliance_events')).length, 1);
+  assert.deepEqual((await db.platform.query('SELECT status FROM jobs ORDER BY status')).map((r) => r.status), ['done', 'failed']);
 });
 
 test('the worker schedules housekeeping once per hour however many workers run', async () => {
@@ -52,7 +52,7 @@ test('the worker schedules housekeeping once per hour however many workers run',
   const schedule = registerJobs({ db, platform: { ...platform, queue: { ...platform.queue, work() {}, every: platform.queue.every.bind(platform.queue), enqueue: platform.queue.enqueue } }, config });
   await Promise.all([schedule(), schedule(), schedule()]);
   // The modules schedule their own jobs here too (order events, abandoned carts, ...); this test is about housekeeping.
-  const queues = (await db.query('SELECT queue FROM jobs')).map((r) => r.queue);
+  const queues = (await db.platform.query('SELECT queue FROM jobs')).map((r) => r.queue);
   assert.deepEqual(queues.filter((q) => q === HOUSEKEEPING), [HOUSEKEEPING], 'one housekeeping job for three workers');
   assert.equal(queues.includes(BACKUP), false, 'no backup without backup storage');
 });
@@ -64,7 +64,7 @@ test('backups are scheduled only when backup storage is set', async () => {
   const config = { backupStorageDriver: 'local', backupStorageDir: dir, databaseUrl: '' };
   const schedule = registerJobs({ db, platform: { ...platform, queue: { ...platform.queue, work() {}, every: platform.queue.every.bind(platform.queue), enqueue: platform.queue.enqueue } }, config });
   await schedule();
-  const queues = (await db.query('SELECT queue FROM jobs ORDER BY queue')).map((r) => r.queue);
+  const queues = (await db.platform.query('SELECT queue FROM jobs ORDER BY queue')).map((r) => r.queue);
   assert.deepEqual(queues.filter((q) => q === BACKUP || q === HOUSEKEEPING), [BACKUP, HOUSEKEEPING]);
 });
 
@@ -75,7 +75,7 @@ test('pg tools get the connection from the environment, with the password decode
 
 test('migrations are safe when several processes start at once', { skip: !process.env.TEST_DATABASE_URL && 'needs real Postgres' }, async () => {
   const db = await openTestDb();
-  await db.exec('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
+  await db.platform.exec('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
   const results = await Promise.all([runMigrations(db), runMigrations(db), runMigrations(db)]);
   const files = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'));
   assert.equal(results.flat().length, files.length, 'each migration applied exactly once');

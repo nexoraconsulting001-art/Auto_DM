@@ -126,7 +126,7 @@ test('F-03: the module\'s lists refuse to run with no business selected', async 
   await assert.rejects(() => lists.orders({ limit: 5 }), NoTenantError);
   await assert.rejects(() => lists.customers({ limit: 5 }), NoTenantError);
   await assert.rejects(() => lists.activity({ limit: 5 }), NoTenantError);
-  const [tenant] = await db.query(`INSERT INTO tenants (slug, name) VALUES ('t', 'T') RETURNING id, slug`);
+  const [tenant] = await db.platform.query(`INSERT INTO tenants (slug, name) VALUES ('t', 'T') RETURNING id, slug`);
   assert.deepEqual(await withTenant(tenant, () => lists.orders({ limit: 5 })), { items: [], nextCursor: null });
   await db.close();
 });

@@ -110,7 +110,7 @@ test('expired, revoked and logged-out tokens stop working', async () => {
     assert.equal((await me(out)).status, 401);
 
     const expiring = (await token(app)).token;
-    await app.db.query(`UPDATE sessions SET expires_at = now() - interval '1 minute' WHERE kind = 'bearer' AND revoked_at IS NULL`);
+    await app.db.platform.query(`UPDATE sessions SET expires_at = now() - interval '1 minute' WHERE kind = 'bearer' AND revoked_at IS NULL`);
     assert.equal((await me(expiring)).status, 401);
 
     await app.repos.users.create({ name: 'Asha K', phone: customer.phone, password: 'secret1' });
@@ -128,7 +128,7 @@ test('a deleted user\'s token stops working', async () => {
   try {
     await app.repos.users.create({ name: 'Asha K', phone: customer.phone, password: 'secret1' });
     const t = (await token(app, { phone: customer.phone, password: 'secret1' })).token;
-    await app.db.query('DELETE FROM users WHERE phone = $1', [customer.phone]);
+    await app.db.platform.query('DELETE FROM users WHERE phone = $1', [customer.phone]);
     assert.equal((await fetch(`${app.base}/api/v1/auth/me`, { headers: bearer(t) })).status, 401);
   } finally {
     app.close();

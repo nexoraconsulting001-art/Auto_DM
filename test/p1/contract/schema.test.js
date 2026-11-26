@@ -34,7 +34,7 @@ const job = (db, tenant, account, key) => withTenant(tenant, () => db.query(
 test('every Phase 1 business table has row-level security, its policy and a tenant_id', async () => {
   const { db } = await setup();
   for (const table of BUSINESS_TABLES) {
-    const [row] = await db.query(
+    const [row] = await db.platform.query(
       `SELECT c.relrowsecurity AS secured, (SELECT count(*)::int FROM pg_policies p WHERE p.tablename = $1 AND p.policyname = 'tenant_fence') AS policies,
               (SELECT count(*)::int FROM information_schema.columns i WHERE i.table_name = $1 AND i.column_name = 'tenant_id') AS tenant_column
        FROM pg_class c WHERE c.oid = format('public.%I', $1::text)::regclass`,
@@ -158,7 +158,7 @@ test('a business cannot delete its deletion requests or write them', async () =>
 
 test('every foreign key on a Phase 1 table has an index its lookups and cascades can use', async () => {
   const { db } = await setup();
-  const keys = await db.query(
+  const keys = await db.platform.query(
     `SELECT c.conrelid::regclass::text AS tbl, c.conname, c.conkey,
             (SELECT array_agg(i.indkey::text) FROM pg_index i WHERE i.indrelid = c.conrelid AND i.indpred IS NULL) AS indexes
      FROM pg_constraint c WHERE c.contype = 'f' AND c.conrelid::regclass::text = ANY($1)`,
@@ -177,6 +177,6 @@ test('every foreign key on a Phase 1 table has an index its lookups and cascades
 
 test('the app role owns none of the new tables', async () => {
   const { db } = await setup();
-  const owned = await db.query(`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tableowner = $1`, [APP_ROLE]);
+  const owned = await db.platform.query(`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tableowner = $1`, [APP_ROLE]);
   assert.deepEqual(owned, []);
 });

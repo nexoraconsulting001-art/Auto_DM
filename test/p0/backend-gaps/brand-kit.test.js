@@ -185,11 +185,11 @@ test('the console still sets the logo and accent, now in the kit', async () => {
 
 test('the migration moves an existing logo and accent into the kit', async () => {
   const { db, finish } = await dbAtMigration('002');
-  const [t] = await db.query(`INSERT INTO tenants (slug, name) VALUES ('old', 'Old') RETURNING id`);
-  await db.query(`INSERT INTO settings (tenant_id, key, value) VALUES ($1, 'logo_url', 'https://cdn.example/o.png'), ($1, 'accent_color', '#123456'), ($1, 'tagline', 'Keep me')`, [t.id]);
+  const [t] = await db.platform.query(`INSERT INTO tenants (slug, name) VALUES ('old', 'Old') RETURNING id`);
+  await db.platform.query(`INSERT INTO settings (tenant_id, key, value) VALUES ($1, 'logo_url', 'https://cdn.example/o.png'), ($1, 'accent_color', '#123456'), ($1, 'tagline', 'Keep me')`, [t.id]);
   await finish();
-  const [kit] = await db.query('SELECT * FROM brand_kits WHERE tenant_id = $1', [t.id]);
+  const [kit] = await db.platform.query('SELECT * FROM brand_kits WHERE tenant_id = $1', [t.id]);
   assert.equal(kit.logo_url, 'https://cdn.example/o.png');
   assert.deepEqual(kit.colors, { accent: '#123456' });
-  assert.deepEqual((await db.query('SELECT key FROM settings WHERE tenant_id = $1', [t.id])).map((r) => r.key), ['tagline']);
+  assert.deepEqual((await db.platform.query('SELECT key FROM settings WHERE tenant_id = $1', [t.id])).map((r) => r.key), ['tagline']);
 });

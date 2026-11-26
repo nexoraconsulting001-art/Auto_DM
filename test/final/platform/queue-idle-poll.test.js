@@ -69,15 +69,15 @@ test('a job left running by a dead worker is still swept by a busy or idle loop 
   const db = await openTestDb();
   const queue = createQueue({ queueDriver: 'pg', queuePollMs: 5, queueLeaseMs: 200 }, { db });
   try {
-    await db.query(`INSERT INTO jobs (queue, payload, status, attempts, lease_until, retry_in_flight) VALUES ('dm', '{}', 'running', 1, now() - interval '1 second', false), ('refresh', '{}', 'running', 1, now() - interval '1 second', true)`);
+    await db.platform.query(`INSERT INTO jobs (queue, payload, status, attempts, lease_until, retry_in_flight) VALUES ('dm', '{}', 'running', 1, now() - interval '1 second', false), ('refresh', '{}', 'running', 1, now() - interval '1 second', true)`);
     const ran = [];
     queue.work('dm', async () => { ran.push('dm'); });
     queue.work('refresh', async () => { ran.push('refresh'); });
     // Wait for the outcome, not for the handler: 'done' is written after the handler returns (queue.js finish()), so
     // reading the rows as soon as it ran raced that write on a slower database.
-    const settled = async () => (await db.query(`SELECT count(*)::int AS n FROM jobs WHERE status IN ('queued', 'running')`))[0].n === 0;
+    const settled = async () => (await db.platform.query(`SELECT count(*)::int AS n FROM jobs WHERE status IN ('queued', 'running')`))[0].n === 0;
     for (let i = 0; i < 100 && !(ran.length >= 1 && (await settled())); i++) await pause(10);
-    const rows = await db.query('SELECT queue, status FROM jobs ORDER BY queue');
+    const rows = await db.platform.query('SELECT queue, status FROM jobs ORDER BY queue');
     assert.deepEqual(rows.map((r) => [r.queue, r.status]), [['dm', 'unknown'], ['refresh', 'done']]);
     assert.deepEqual(ran, ['refresh'], 'The DM that may have gone is never run again; the safe job reruns');
   } finally {

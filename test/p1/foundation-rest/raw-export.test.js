@@ -12,7 +12,7 @@ async function world(t) {
   const app = await startWorld(t);
   const a = await addBusiness(app, { slug: 'alpha-store', name: 'Alpha Store' });
   const b = await addBusiness(app, { slug: 'beta-store', name: 'Beta Store' });
-  await app.db.query(
+  await app.db.platform.query(
     `INSERT INTO compliance_events (tenant_id, kind, decision, reason, created_at) VALUES ($1, 'dm', 'allow', 'in', '2026-03-01'), ($1, 'dm', 'deny', 'too-old', '2025-03-01'), ($1, 'dm', 'allow', 'last-day', '2026-12-31 23:00'), ($2, 'dm', 'allow', 'other', '2026-03-01')`,
     [a.tenant.id, b.tenant.id],
   );
@@ -35,14 +35,14 @@ test('the file holds only the businesses and dates asked for, the end date inclu
 
 test('several tables and businesses go in one export with one audit row', async (t) => {
   const { app, a, b, deps } = await world(t);
-  await app.db.query(`INSERT INTO events (tenant_id, name, at) VALUES ($1, 'view', '2026-05-05')`, [b.tenant.id]);
-  const before = (await app.db.query(`SELECT count(*)::int AS n FROM audit_log`))[0].n;
+  await app.db.platform.query(`INSERT INTO events (tenant_id, name, at) VALUES ($1, 'view', '2026-05-05')`, [b.tenant.id]);
+  const before = (await app.db.platform.query(`SELECT count(*)::int AS n FROM audit_log`))[0].n;
   const { rowCount } = await createRawExport(deps, body(a.tenant.id, { tables: ['compliance_events', 'events'], tenantIds: [a.tenant.id, b.tenant.id] }), 'platform:x@team.example');
   assert.equal(rowCount, 4);
-  const rows = await app.db.query(`SELECT tenant_id, details FROM audit_log WHERE action = 'raw_export.create'`);
+  const rows = await app.db.platform.query(`SELECT tenant_id, details FROM audit_log WHERE action = 'raw_export.create'`);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].tenant_id, null, 'about several businesses, so about no single one');
-  assert.equal((await app.db.query(`SELECT count(*)::int AS n FROM audit_log`))[0].n, before + 1);
+  assert.equal((await app.db.platform.query(`SELECT count(*)::int AS n FROM audit_log`))[0].n, before + 1);
 });
 
 test('dates the wrong way round, an unknown table and a bad date are refused through the console', async (t) => {
@@ -54,7 +54,7 @@ test('dates the wrong way round, an unknown table and a bad date are refused thr
   assert.equal((await post(body(a.tenant.id, { tables: ['compliance_events; DROP TABLE users'] }))).status, 400);
   assert.equal((await post(body(a.tenant.id, { from: 'yesterday' }))).status, 400);
   assert.equal((await post(body(a.tenant.id, { tenantIds: [] }))).status, 400);
-  assert.deepEqual(await app.db.query(`SELECT 1 FROM audit_log WHERE action LIKE 'raw_export%'`), []);
+  assert.deepEqual(await app.db.platform.query(`SELECT 1 FROM audit_log WHERE action LIKE 'raw_export%'`), []);
   need(await post(body(a.tenant.id)), 201, 'Positive control');
 });
 
@@ -77,7 +77,7 @@ test('the sweep deletes expired files only, and the records and audit rows stay'
   const rows = await app.db.platform.query('SELECT storage_key, deleted_at FROM raw_exports ORDER BY id');
   assert.ok(rows[0].deleted_at);
   assert.equal(rows[1].deleted_at, null);
-  assert.equal((await app.db.query(`SELECT 1 FROM audit_log WHERE action = 'raw_export.create'`)).length, 2);
+  assert.equal((await app.db.platform.query(`SELECT 1 FROM audit_log WHERE action = 'raw_export.create'`)).length, 2);
   assert.equal(await sweepRawExports(deps), 0, 'nothing left to do the second time');
 });
 

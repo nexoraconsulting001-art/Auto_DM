@@ -39,7 +39,7 @@ test('a token is stored encrypted and read back only by its own business', async
   await platform.tenants.linkIgAccount(tenant.id, 'IG-1', 'kesar');
   await repos.igAccounts.setToken('IG-1', 'IGQVJ-very-secret-token');
 
-  const [row] = await db.query(`SELECT * FROM ig_accounts WHERE ig_user_id = 'IG-1'`);
+  const [row] = await db.platform.query(`SELECT * FROM ig_accounts WHERE ig_user_id = 'IG-1'`);
   assert.doesNotMatch(JSON.stringify(row), /very-secret-token/);
   assert.match(row.access_token_enc, /^v1\./);
 

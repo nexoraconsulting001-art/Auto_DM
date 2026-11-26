@@ -57,7 +57,7 @@ test('R-02: a crash with 500 DMs queued sends nothing twice, and everything not 
   assert.equal(failed, 0);
   assert.equal(new Set(sends).size, sends.length, 'no job was sent twice');
   assert.ok(unknown >= 1 && unknown <= 5, `jobs in flight at the crash are unknown: ${unknown}`);
-  const statusOf = new Map((await db.query('SELECT payload, status FROM jobs WHERE queue = $1', [QUEUE])).map((r) => [r.payload.n, r.status]));
+  const statusOf = new Map((await db.platform.query('SELECT payload, status FROM jobs WHERE queue = $1', [QUEUE])).map((r) => [r.payload.n, r.status]));
   for (const n of hung) assert.equal(statusOf.get(n), 'unknown', `job ${n}, mid-send at the crash`);
   const done = [...statusOf].filter(([, status]) => status === 'done').map(([n]) => n);
   assert.equal(done.length + unknown, 500, 'every job is accounted for');

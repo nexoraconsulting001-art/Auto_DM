@@ -26,7 +26,7 @@ test('business data cannot be used without a current business', async () => {
 test('migrations run once and are safe to run again', async () => {
   const db = await openTestDb();
   assert.deepEqual(await runMigrations(db), []);
-  const rows = await db.query('SELECT version FROM schema_migrations');
+  const rows = await db.platform.query('SELECT version FROM schema_migrations');
   const expected = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).map((f) => f.slice(0, 3)).sort();
   assert.deepEqual(rows.map((r) => r.version).sort(), expected);
   assert.ok(expected.includes('001') && expected.includes('002'));
@@ -74,9 +74,9 @@ test('a reel cannot use another business’s products or Instagram post', async 
 test('the database refuses links between two businesses even if code forgot to check', async () => {
   const { db, a, tenantB } = await twoBusinesses();
   const p = await a.products.create({ name: 'Brass lamp', price: '499', active: 'on' });
-  const [cat] = await db.query(`INSERT INTO categories (tenant_id, name, slug) VALUES ($1, 'X', 'x') RETURNING id`, [tenantB.id]);
+  const [cat] = await db.platform.query(`INSERT INTO categories (tenant_id, name, slug) VALUES ($1, 'X', 'x') RETURNING id`, [tenantB.id]);
   await assert.rejects(
-    () => db.query('INSERT INTO product_categories (tenant_id, product_id, category_id) VALUES ($1, $2, $3)', [tenantB.id, p.id, cat.id]),
+    () => db.platform.query('INSERT INTO product_categories (tenant_id, product_id, category_id) VALUES ($1, $2, $3)', [tenantB.id, p.id, cat.id]),
     /foreign key/,
   );
 });
@@ -202,12 +202,12 @@ test('logging out or changing the password ends sessions', async () => {
 
 test('compliance and audit logs cannot be edited', async () => {
   const { db, tenant } = await setup();
-  await db.query(`INSERT INTO compliance_events (tenant_id, kind, decision) VALUES ($1, 'dm', 'allow')`, [tenant.id]);
-  await db.query(`INSERT INTO audit_log (tenant_id, actor, action) VALUES ($1, 'test', 'login')`, [tenant.id]);
-  await assert.rejects(() => db.query(`UPDATE compliance_events SET decision = 'deny'`), /insert-only/);
-  await assert.rejects(() => db.query(`UPDATE audit_log SET action = 'x'`), /insert-only/);
-  await assert.rejects(() => db.query('DELETE FROM compliance_events'), /retention/);
-  await assert.rejects(() => db.query('DELETE FROM audit_log'), /retention/);
+  await db.platform.query(`INSERT INTO compliance_events (tenant_id, kind, decision) VALUES ($1, 'dm', 'allow')`, [tenant.id]);
+  await db.platform.query(`INSERT INTO audit_log (tenant_id, actor, action) VALUES ($1, 'test', 'login')`, [tenant.id]);
+  await assert.rejects(() => db.platform.query(`UPDATE compliance_events SET decision = 'deny'`), /insert-only/);
+  await assert.rejects(() => db.platform.query(`UPDATE audit_log SET action = 'x'`), /insert-only/);
+  await assert.rejects(() => db.platform.query('DELETE FROM compliance_events'), /retention/);
+  await assert.rejects(() => db.platform.query('DELETE FROM audit_log'), /retention/);
 });
 
 test('bindTenant keeps repos on their own business', async () => {

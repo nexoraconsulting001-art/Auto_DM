@@ -30,7 +30,7 @@ test('customers list what they have ordered and spent, owners first, and search'
 }));
 
 test('paging reaches every customer, past the 500 the core repo stops at, and keeps owners first', withApp(async ({ api, db, tenant }) => {
-  await db.query(
+  await db.platform.query(
     `INSERT INTO users (tenant_id, name, phone, password_hash, role) SELECT $1, 'Buyer ' || n, (8000000000 + n)::text, 'x', 'customer' FROM generate_series(1, 505) n`,
     [tenant.id],
   );
@@ -84,7 +84,7 @@ test('activity shows each comment with its reel, newest first', withApp(async ({
 }));
 
 test('activity pages through rows made in the same instant, and a retried comment moves to the top', withApp(async ({ api, db, tenant, repos }) => {
-  await db.query(
+  await db.platform.query(
     `INSERT INTO activity (tenant_id, comment_id, username, text, result, created_at) SELECT $1, 'c' || n, 'u', 't', 'sent', '2026-11-01T10:00:00Z' FROM generate_series(1, 7) n`,
     [tenant.id],
   );
@@ -92,7 +92,7 @@ test('activity pages through rows made in the same instant, and a retried commen
   assert.deepEqual(sizes, [3, 3, 1]);
   assert.equal(new Set(items.map((a) => a.id)).size, 7);
 
-  await db.query(`UPDATE activity SET result = 'failed' WHERE tenant_id = $1 AND comment_id = 'c2'`, [tenant.id]);
+  await db.platform.query(`UPDATE activity SET result = 'failed' WHERE tenant_id = $1 AND comment_id = 'c2'`, [tenant.id]);
   await repos.activity.claim({ commentId: 'c2', reelId: null, userId: 'u', username: 'u', text: 't' });
   assert.equal((await ok(await api('GET', '/activity?limit=1'))).items[0].commentId, 'c2');
   for (const cursor of ['WzBd', 'WyJ4IiwxXQ', 'WzEuNSwxXQ', 'WzEsMF0']) await refused(await api('GET', `/activity?cursor=${cursor}`), 400, 'validation_failed');

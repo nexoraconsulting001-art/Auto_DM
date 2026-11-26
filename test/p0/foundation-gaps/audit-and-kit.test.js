@@ -18,9 +18,9 @@ async function shop(t) {
 test('a business can be in every status the requirements name, and in no other', async () => {
   const { db, tenant } = await setup();
   for (const status of ['onboarding', 'active', 'paused', 'suspended', 'closed', 'killed']) {
-    await db.query('UPDATE tenants SET status = $2 WHERE id = $1', [tenant.id, status]);
+    await db.platform.query('UPDATE tenants SET status = $2 WHERE id = $1', [tenant.id, status]);
   }
-  await assert.rejects(() => db.query(`UPDATE tenants SET status = 'gone' WHERE id = $1`, [tenant.id]), /check constraint/);
+  await assert.rejects(() => db.platform.query(`UPDATE tenants SET status = 'gone' WHERE id = $1`, [tenant.id]), /check constraint/);
 });
 
 test('only the masked key id reaches the audit log, and the secret is encrypted at rest', async (t) => {
@@ -30,14 +30,14 @@ test('only the masked key id reaches the audit log, and the secret is encrypted 
   assert.doesNotMatch(first.text, /madeUpGateway|AbCdEf/, 'the answer holds no key');
   need(await save(OTHER_KEY_ID), 200, 'second save');
 
-  const rows = await app.db.query(`SELECT * FROM audit_log WHERE tenant_id = $1 AND action = 'payment_keys.change' ORDER BY id`, [a.tenant.id]);
+  const rows = await app.db.platform.query(`SELECT * FROM audit_log WHERE tenant_id = $1 AND action = 'payment_keys.change' ORDER BY id`, [a.tenant.id]);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].target, 'razorpay');
   assert.deepEqual(rows[1].details, { from: 'rzp_...1234', to: 'rzp_...5678', secretChanged: true });
   assert.match(rows[0].actor, /^user:\d+$/, 'an id, no name or phone');
   assert.doesNotMatch(JSON.stringify(rows), /AbCdEf|ZyXwVu|madeUpGateway/);
 
-  const [stored] = await app.db.query('SELECT * FROM gateway_keys WHERE tenant_id = $1', [a.tenant.id]);
+  const [stored] = await app.db.platform.query('SELECT * FROM gateway_keys WHERE tenant_id = $1', [a.tenant.id]);
   assert.doesNotMatch(JSON.stringify(stored), /madeUpGateway/);
   assert.deepEqual(await a.repos.gatewayKeys.get('razorpay'), { keyId: OTHER_KEY_ID, keySecret: KEY_SECRET });
 });
@@ -48,9 +48,9 @@ test('the key id and secret must come together, and a malformed key id is refuse
   assert.equal((await patch({ razorpayKeyId: KEY_ID })).status, 400);
   assert.equal((await patch({ razorpayKeySecret: KEY_SECRET })).status, 400);
   assert.equal((await patch({ razorpayKeyId: 'not-a-key', razorpayKeySecret: KEY_SECRET })).status, 400);
-  assert.deepEqual(await app.db.query('SELECT 1 FROM audit_log WHERE tenant_id = $1', [a.tenant.id]), [], 'a refused change writes no row');
+  assert.deepEqual(await app.db.platform.query('SELECT 1 FROM audit_log WHERE tenant_id = $1', [a.tenant.id]), [], 'a refused change writes no row');
   need(await patch({ upiId: 'shop@upi' }), 200, 'UPI alone still works, with no key audit');
-  assert.deepEqual(await app.db.query('SELECT 1 FROM gateway_keys'), []);
+  assert.deepEqual(await app.db.platform.query('SELECT 1 FROM gateway_keys'), []);
 });
 
 test('a masked key id keeps only the rzp_ prefix and the last four characters', () => {

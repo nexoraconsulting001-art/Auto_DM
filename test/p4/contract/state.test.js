@@ -354,7 +354,7 @@ test('S-47, S-16: the limits that must hold under simultaneous checkouts are the
 
 test('every Phase 4 table of a business is fenced, and one business cannot see or link to another’s rows', async () => {
   const w = await world();
-  const tables = await w.db.query(
+  const tables = await w.db.platform.query(
     `SELECT c.relname AS name, c.relrowsecurity AS fenced, EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped) AS has_tenant,
             has_table_privilege('bhava_app', c.oid, 'SELECT') AS app_reads
      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname`,

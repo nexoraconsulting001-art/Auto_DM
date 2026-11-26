@@ -219,10 +219,10 @@ export async function placeOrder(app, business, product, { customer = CUSTOMER, 
     ...(email ? { email } : {}),
   };
   const res = need(await hit(app, '/api/store/checkout', { host: business.host, method: 'POST', body }), 201, 'Place an order at checkout');
-  const [order] = await app.db.query('SELECT * FROM orders WHERE tenant_id = $1 AND order_number = $2', [business.tenant.id, res.json().orderNumber]);
+  const [order] = await app.db.platform.query('SELECT * FROM orders WHERE tenant_id = $1 AND order_number = $2', [business.tenant.id, res.json().orderNumber]);
   await app.ctx.orderEvents.settle();
   if (paid) await markPaid(app, order.id, { tenant: business.tenant });
-  const [placed] = await app.db.query('SELECT * FROM orders WHERE tenant_id = $1 AND id = $2', [business.tenant.id, order.id]);
+  const [placed] = await app.db.platform.query('SELECT * FROM orders WHERE tenant_id = $1 AND id = $2', [business.tenant.id, order.id]);
   return Object.defineProperty(placed, 'answer', { value: res.json(), enumerable: false });
 }
 
@@ -296,17 +296,17 @@ export async function uploadFile(app, business, token, { filename = 'photo.png',
 }
 
 /** Sets the plan the way a billing change finally lands on the tenant row. */
-export const setPlan = (app, business, plan) => app.db.query('UPDATE tenants SET plan = $2 WHERE id = $1', [business.tenant.id, plan]);
+export const setPlan = (app, business, plan) => app.db.platform.query('UPDATE tenants SET plan = $2 WHERE id = $1', [business.tenant.id, plan]);
 
 // ---- Staff ----
 
 /** Records staff permissions wherever the build keeps them. The contract says they exist, not where they live. */
 async function grantPermissions(app, business, userId, permissions) {
   if (typeof business.repos.users.setPermissions === 'function') return business.repos.users.setPermissions(userId, permissions);
-  const [column] = await app.db.query(`SELECT data_type FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'permissions'`);
+  const [column] = await app.db.platform.query(`SELECT data_type FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'permissions'`);
   assert.ok(column, 'Staff permissions are not stored anywhere yet: no users.setPermissions() and no users.permissions column');
   const value = column.data_type === 'ARRAY' ? permissions : JSON.stringify(permissions);
-  return app.db.query('UPDATE users SET permissions = $2 WHERE id = $1 AND tenant_id = $3', [userId, value, business.tenant.id]);
+  return app.db.platform.query('UPDATE users SET permissions = $2 WHERE id = $1 AND tenant_id = $3', [userId, value, business.tenant.id]);
 }
 
 /** A staff member holding exactly `permissions`, confirmed through what the API reports about them. */

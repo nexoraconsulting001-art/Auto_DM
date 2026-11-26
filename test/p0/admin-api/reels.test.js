@@ -114,7 +114,7 @@ test('with no Instagram connected, or Instagram failing, the seller gets a messa
   await withApp({ ig }, async ({ api, db, tenant }) => {
     const failing = await refused(await api('GET', '/instagram/posts'), 409, 'conflict');
     assert.doesNotMatch(JSON.stringify(failing), /EAAB|secret|API GET/);
-    await db.query(`UPDATE ig_accounts SET access_token_enc = '' WHERE tenant_id = $1`, [tenant.id]);
+    await db.platform.query(`UPDATE ig_accounts SET access_token_enc = '' WHERE tenant_id = $1`, [tenant.id]);
     const none = await refused(await api('GET', '/instagram/posts'), 409, 'conflict');
     assert.match(none.error, /Connect your Instagram/);
   })();

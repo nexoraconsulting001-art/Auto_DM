@@ -32,7 +32,7 @@ async function signIn(app, { email, password }) {
 test('business roles are owner, staff and customer', async () => {
   const { db, repos, tenant } = await setup();
   await assert.rejects(
-    () => db.query(`INSERT INTO users (tenant_id, name, phone, password_hash, role) VALUES ($1, 'x', '9000000099', 'h', 'admin')`, [tenant.id]),
+    () => db.platform.query(`INSERT INTO users (tenant_id, name, phone, password_hash, role) VALUES ($1, 'x', '9000000099', 'h', 'admin')`, [tenant.id]),
     /check constraint/,
   );
   const owner = await repos.users.create({ name: 'Owner', phone: '9000000002', password: 'secret1', role: 'owner' });
@@ -46,13 +46,13 @@ test('business roles are owner, staff and customer', async () => {
 
 test('the migration turns old admins into owners and keeps customers', async () => {
   const { db, finish } = await dbAtMigration('004');
-  const [t] = await db.query(`INSERT INTO tenants (slug, name) VALUES ('old', 'Old') RETURNING id`);
-  await db.query(
+  const [t] = await db.platform.query(`INSERT INTO tenants (slug, name) VALUES ('old', 'Old') RETURNING id`);
+  await db.platform.query(
     `INSERT INTO users (tenant_id, name, phone, password_hash, role) VALUES ($1, 'A', '9000000001', 'h', 'admin'), ($1, 'C', '9000000002', 'h', 'customer')`,
     [t.id],
   );
   await finish();
-  assert.deepEqual((await db.query('SELECT role FROM users ORDER BY phone')).map((r) => r.role), ['owner', 'customer']);
+  assert.deepEqual((await db.platform.query('SELECT role FROM users ORDER BY phone')).map((r) => r.role), ['owner', 'customer']);
 });
 
 test('staff are kept out of the admin panel until permissions exist, and cannot be reset from it', async () => {
@@ -79,11 +79,11 @@ test('platform users have their own table and no business', async () => {
   assert.equal(user.email, 'asha@bhava.example');
   assert.equal(user.role, 'support');
   assert.equal('password_hash' in user, false);
-  assert.equal((await db.query(`SELECT 1 FROM information_schema.columns WHERE table_name = 'platform_users' AND column_name = 'tenant_id'`)).length, 0);
+  assert.equal((await db.platform.query(`SELECT 1 FROM information_schema.columns WHERE table_name = 'platform_users' AND column_name = 'tenant_id'`)).length, 0);
   // The Phase 7 ops contract (cc58897) added onboarding and service_operator; a business role is still refused.
   await assert.rejects(() => platform.platformUsers.create({ ...STAFF, role: 'owner' }), new RegExp(`Role must be one of ${PLATFORM_ROLES.join(', ')}`));
   await assert.rejects(() => platform.platformUsers.create(STAFF), /already exists/);
-  await assert.rejects(() => db.query(`INSERT INTO platform_users (email, password_hash, role) VALUES ('a@b.c', 'h', 'owner')`), /check constraint/);
+  await assert.rejects(() => db.platform.query(`INSERT INTO platform_users (email, password_hash, role) VALUES ('a@b.c', 'h', 'owner')`), /check constraint/);
   assert.ok(await platform.platformUsers.verify('ASHA@bhava.example', STAFF.password));
   assert.equal(await platform.platformUsers.verify('asha@bhava.example', 'wrong'), null);
 });
