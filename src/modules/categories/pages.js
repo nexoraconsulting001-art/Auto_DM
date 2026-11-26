@@ -53,7 +53,7 @@ export function registerCategoryPages(app, ctx) {
       const base = pageBase(req);
       const image = category.image_url || (reels[0] ? tileImage(reels[0], now) : '');
       const main = html`${tileStyles()}
-${section({ theme, id: 'category-h', kicker: 'Category', title: category.name, body: html`${category.description ? html`<p>${category.description}</p>` : ''}
+${section({ theme, level: 1, id: 'category-h', kicker: 'Category', title: category.name, body: html`${category.description ? html`<p>${category.description}</p>` : ''}
 ${reels.length ? reelGrid(reels, { now, eagerFirst: true }) : products.length ? '' : html`<p class="empty">Nothing here yet. Check back soon.</p>`}` })}
 ${products.length ? section({ theme, id: 'category-products-h', kicker: 'Shop', title: 'Products', body: productList(products) }) : ''}`;
       const view = buyerPage({
@@ -92,7 +92,7 @@ ${products.length ? section({ theme, id: 'category-products-h', kicker: 'Shop', 
       const first = rows[0];
       const main = html`${tileStyles()}
 ${chipRow(chips, current, 'Reel categories')}
-${section({ theme, id: 'reels-h', kicker: picked ? 'Reels' : 'Shop by reels', title: picked ? picked.category.name : 'All reels', body: rows.length ? reelGrid(rows, { now, eagerFirst: true }) : html`<p class="empty">No reels yet. Check back soon.</p>` })}`;
+${section({ theme, level: 1, id: 'reels-h', kicker: picked ? 'Reels' : 'Shop by reels', title: picked ? picked.category.name : 'All reels', body: rows.length ? reelGrid(rows, { now, eagerFirst: true }) : html`<p class="empty">No reels yet. Check back soon.</p>` })}`;
       const view = buyerPage({
         theme,
         business,

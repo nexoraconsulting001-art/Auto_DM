@@ -142,11 +142,12 @@ export function ticker(theme, items = theme.slots.tickerItems) {
 }
 
 /** A section with its kicker, heading and the theme's heading flourish. `body` is the section's content. */
-export function section({ theme, id, kicker = '', title, body = '' }) {
+export function section({ theme, id, kicker = '', title, body = '', level = 2 }) {
+  // A page's own first section is its one main heading (level 1); the sections under it, and blocks on a page, stay h2.
   const flourish = Object.hasOwn(FLOURISH_PATHS, theme.slots.flourish) ? FLOURISH_PATHS[theme.slots.flourish] : FLOURISH_PATHS.line;
   return html`<section class="section" aria-labelledby="${id}">
 <div>${kicker ? html`<span class="kicker">${kicker}</span>` : ''}
-<h2 id="${id}">${title}</h2>
+${level === 1 ? html`<h1 id="${id}">${title}</h1>` : html`<h2 id="${id}">${title}</h2>`}
 <svg width="140" height="14" viewBox="0 0 140 14" aria-hidden="true"><path class="flourish" d="${flourish}"></path></svg></div>
 ${body}
 </section>`;

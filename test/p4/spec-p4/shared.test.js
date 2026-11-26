@@ -104,6 +104,9 @@ test('S-99: B’s owner finds nothing of A’s orders in any screen, download, r
   const atB = buyer(world, b);
   await atB.signIn(phone);
   await atB.buy({ lines: [line(await b.item({ pricePaise: 20000 }))] });
+  // Loyalty answers 403 to every route while the add-on is off (S-91), before it looks at the id; with it on at B, the ledger
+  // probe below reaches the handler, so its 404 is about A's shopper, not B's plan.
+  await b.loyaltyOn();
   const id = row.id;
   const probes = [
     ['GET', `/orders/${id}`], ['GET', `/orders/${id}/timeline`], ['GET', `/orders/${id}/payments`], ['GET', `/orders/${id}/refunds`], ['GET', `/orders/${id}/shipments`],
@@ -183,13 +186,22 @@ test('S-101: the platform’s name appears only on the shared consent screen, ac
   await shop.track(shipment.awb, 'PICKED UP');
   await shop.orderWhen(row.order_number, (o) => o.fulfilment_status === 'shipped');
   const track = new URL(shipment.trackingUrl).pathname;
-  const pages = ['/', '/shop', `/p/${product.slug}`, '/search?q=monstera', '/reels', '/about', '/cart', '/checkout', '/login', '/account', '/account/orders', `/account/orders/${encodeURIComponent(row.order_number)}`, `/order/${row.placed.token}`, track, '/wishlist', '/offline', '/policies/privacy', '/policies/terms', '/policies/refund', '/policies/shipping'];
+  const pages = ['/', '/shop', `/p/${product.slug}`, '/search?q=monstera', '/reels', '/about', '/cart', '/checkout', '/account', '/account/orders', `/account/orders/${encodeURIComponent(row.order_number)}`, `/order/${row.placed.token}`, track, '/wishlist', '/offline', '/policies/privacy', '/policies/terms', '/policies/refund', '/policies/shipping'];
   for (const path of pages) {
     const res = await b.open(path);
     assert.equal(res.status, 200, `${path} answered ${res.status}`);
     assertSellerBrandOnly(res, path);
     await assertBuyerPageClean(world, shop, path, { headers: { cookie: b.cookie } });
   }
+  // /login sends a signed-in shopper on to the account (shoppers/routes.js, since 895ddb6), so the page itself is read signed out;
+  // the redirect is checked too.
+  const again = await b.open('/login');
+  assert.equal(again.status, 302, `/login signed in answered ${again.status}`);
+  assertSellerBrandOnly(again, '/login signed in');
+  const signIn = await buyer(world, shop).open('/login');
+  assert.equal(signIn.status, 200, `/login answered ${signIn.status}`);
+  assertSellerBrandOnly(signIn, '/login');
+  await assertBuyerPageClean(world, shop, '/login');
   for (const path of ['/manifest.webmanifest', '/sw.js', '/no-such-page']) assertSellerBrandOnly(await b.open(path), path);
   for (const call of [await b.getCart(), await b.consent(), await b.addresses(), await b.quote({ lines: [line(product)] })]) assertSellerBrandOnly(call, 'A buyer JSON call');
   await world.quiet(2000);
@@ -200,6 +212,8 @@ test('S-101: the platform’s name appears only on the shared consent screen, ac
 });
 
 test('S-102: withdrawing shared consent removes the shared profile; B asks for sign-in again; each keeps its own orders', async () => {
+  // The file's world keeps the profiles the earlier tests made; this test's profile is the one made from here on.
+  const earlier = new Set((await sharedRows('shared_profiles')).map((p) => p.id));
   const { a, b, sub, atA } = await sharedAtA();
   const productA = await a.item({ pricePaise: 30000 });
   const productB = await b.item({ pricePaise: 20000 });
@@ -207,7 +221,7 @@ test('S-102: withdrawing shared consent removes the shared profile; B asks for s
   const atB = buyer(world, b);
   await atB.googleSignIn({ sub });
   const rowB = await atB.buy({ lines: [line(productB)], address: address() });
-  const profiles = await sharedRows('shared_profiles');
+  const profiles = (await sharedRows('shared_profiles')).filter((p) => !earlier.has(p.id));
   assert.ok(profiles.length >= 1, 'No shared profile was made');
   ok(await atB.revokeShared(), 'Withdrawing from B’s account page');
   await world.quiet(1500);

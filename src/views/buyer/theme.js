@@ -220,7 +220,7 @@ const BASE_CSS = [
   '.ticker span{display:flex;align-items:center;gap:14px}.ticker i{width:6px;height:6px;flex:none}',
   '.section{padding:8px 20px 0;display:flex;flex-direction:column;gap:14px}.section+.section{padding-top:36px}',
   '.kicker{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}',
-  '.section h2{font-family:var(--display);font-weight:var(--display-weight);font-size:28px;letter-spacing:-.01em}',
+  '.section h1,.section h2{font-family:var(--display);font-weight:var(--display-weight);font-size:28px;letter-spacing:-.01em}',
   '.flourish{fill:none;stroke:var(--primary);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}',
   '.card{display:flex;gap:14px;padding:14px;background:var(--card);color:var(--ink)}',
   '.photo{flex:none;position:relative;width:96px;height:116px;overflow:hidden;background:var(--chip)}',

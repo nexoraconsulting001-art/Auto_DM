@@ -122,7 +122,7 @@ export const wishlist = {
         return await sendStorePage(ctx, req, res, {
           kind: 'other', ref: 'wishlist', title: 'Your wishlist',
           main: ({ theme }) => html`${raw(wishBits({ signedIn: Boolean(shopper), saved: items.map((i) => i.productId) }))}
-${section({ theme, id: 'wish-h', kicker: 'Saved', title: 'Your wishlist', body: wishlistPage(items, { signedIn: Boolean(shopper) }) })}`,
+${section({ theme, level: 1, id: 'wish-h', kicker: 'Saved', title: 'Your wishlist', body: wishlistPage(items, { signedIn: Boolean(shopper) }) })}`,
         });
       } catch (err) {
         return next(err);

@@ -62,7 +62,7 @@ export const cart = {
       res.set('Cache-Control', 'no-store');
       return sendStorePage(ctx, req, res, {
         kind: 'checkout', ref: 'cart', title: 'Your bag',
-        main: ({ theme }) => section({ theme, id: 'bag-h', kicker: 'Bag', title: 'Your bag', body: html`<div class="stack" data-cart-page>
+        main: ({ theme }) => section({ theme, level: 1, id: 'bag-h', kicker: 'Bag', title: 'Your bag', body: html`<div class="stack" data-cart-page>
 <p class="notice-box" data-empty hidden>Your bag is empty. <a href="/shop">Start shopping</a></p>
 <p class="notice-box" data-notices hidden role="status"></p>
 <ul class="lines" data-lines></ul>

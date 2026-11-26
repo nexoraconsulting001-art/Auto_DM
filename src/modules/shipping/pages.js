@@ -54,7 +54,7 @@ function trackingMain({ order, shipment, events, items }) {
     .map((e) => ({ label: STEP_WORDS[e.status] ?? shown(titleCase(e.provider_status)), place: shown(e.location), at: e.occurred_at }))
     .filter((e) => e.label);
   return ({ theme }) => html`<div data-tracking-page>
-${section({ theme, id: 'track-h', kicker: `Order ${order.order_number}`, title: state.title, body: html`<p>${state.body}</p>
+${section({ theme, level: 1, id: 'track-h', kicker: `Order ${order.order_number}`, title: state.title, body: html`<p>${state.body}</p>
 ${shipment?.awb ? html`<p class="muted small">${courier ? html`${courier} · ` : ''}Tracking number ${shipment.awb}</p>` : ''}
 ${steps.length ? html`<div class="panel"><h2>Updates</h2><ol class="lines">${steps.map((e) => html`<li><b>${e.label}</b><div class="muted small">${[e.place, when(e.at)].filter(Boolean).join(' · ')}</div></li>`)}</ol></div>` : ''}
 ${items.length ? html`<div class="panel"><h2>In this parcel</h2><ul class="lines">${items.map((i) => html`<li>${i.name}<span class="muted small"> · Qty ${i.qty}</span></li>`)}</ul></div>` : ''}

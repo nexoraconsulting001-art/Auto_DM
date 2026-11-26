@@ -122,7 +122,9 @@ export function shopperRoutes(ctx, { service, shared, google }) {
     const problem = req.query.shared === 'none' ? 'shared_none' : String(req.query.problem ?? '');
     const error = Object.hasOwn(SIGN_IN_PROBLEMS, problem) ? SIGN_IN_PROBLEMS[problem] : '';
     const offerShared = await sharedOn(req);
-    return page(res, (layout) => signInPage(layout, { next, notice: n, googleOn: google.configured, inApp: IN_APP.test(req.get('user-agent') ?? ''), sharedOn: offerShared, error, sellerCsrf: req.csrf ?? '' }));
+    return page(res, (layout) => signInPage(layout, { next, notice: n, googleOn: google.configured, inApp: IN_APP.test(req.get('user-agent') ?? ''), sharedOn: offerShared, error, sellerCsrf: req.csrf ?? '',
+      // The Phase 0 team form posts to /login, which is there only while PASSWORD_LOGIN is on (src/server.js); sellers have no passwords.
+      passwordLogin: Boolean(config.passwordLogin) }));
   }));
 
   r.post('/api/store/otp/send', sameSiteOnly, route(async (req, res) => {

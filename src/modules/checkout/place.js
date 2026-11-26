@@ -8,6 +8,7 @@ import { tenantId } from '../../tenancy.js';
 import { CouponUsedUpError, redeem } from '../coupons/rules.js';
 import { OutOfStockError, commit, raiseLowStock, reserve } from '../inventory/stock.js';
 import { changeOrder } from '../orders/state.js';
+import { shopperServices } from '../shoppers/index.js';
 import { addressSnapshot, buildQuote, stateName, toE164 } from './quote.js';
 
 /**
@@ -61,6 +62,16 @@ async function addressFor(q, body, shopper) {
   if (!phone) throw new ApiError('validation_failed', 'Enter a 10-digit mobile number.', { fields: { 'address.phone': 'Enter a 10-digit mobile number' } });
   if (!stateName(body.address.stateCode)) throw new ApiError('validation_failed', 'Pick your state.', { fields: { 'address.stateCode': 'Pick your state' } });
   return { ...body.address, phone };
+}
+
+/**
+ * The cash-on-delivery refusal risk a signed-in shopper's shared profile carries (9.22, S-103): a label only, never where it
+ * came from. Null for a guest, a prepaid order, or a platform without shared profiles.
+ */
+async function codRiskFor(ctx, { paymentMode, shopper }) {
+  if (paymentMode !== 'cod' || !shopper) return null;
+  const { shared } = shopperServices(ctx);
+  return shared.available ? shared.codRisk(tenantId(), shopper.id) : null;
 }
 
 /** Has this phone been proved for this checkout? A shopper signed in with this verified number has; otherwise the cash-on-delivery code (9.3). */
@@ -131,6 +142,11 @@ export async function placeOrder(ctx, req, body) {
   const quoteIn = {
     lines: body.lines, address, phone, paymentMode: body.paymentMode, couponCode: body.couponCode, redeemPoints: body.redeemPoints, shopperId: shopper?.id ?? null, referral,
   };
+  // The consent choices name the notice that was on screen; one this business never published is refused before anything is
+  // made (as POST /api/store/consent does), not thrown from inside the order's transaction.
+  if (platform.consent?.built && body.consent.noticeVersion > ((await platform.consent.notice())?.version ?? 1)) {
+    throw new ApiError('conflict', 'This page is out of date. Refresh it and try again.');
+  }
   if (body.paymentMode === 'cod' && !(await phoneProved(ctx, { phone, checkoutKey: body.idempotencyKey, shopper }))) {
     // Refused now, with the reason, rather than after the code: cash on delivery this order can't have is never offered a code.
     refuseUnplaceable(await buildQuote(db, ctx, quoteIn), body);
@@ -139,6 +155,7 @@ export async function placeOrder(ctx, req, body) {
 
   const source = await sourceOf(db, body);
   const visitorId = visitorIdFrom(req);
+  const codRisk = await codRiskFor(ctx, { paymentMode: body.paymentMode, shopper });
   const settings = await ctx.repos.settings.getAll();
   let low = [];
   let order;
@@ -158,15 +175,15 @@ export async function placeOrder(ctx, req, body) {
         `INSERT INTO orders (tenant_id, order_number, public_token, flow, payment_mode, reel_id, page_id, source, utm, user_id, shopper_id, visitor_id,
            customer_name, phone, email, address, city, state, pincode, shipping_address,
            subtotal_paise, discount_paise, loyalty_paise, shipping_paise, cod_fee_paise, tax_paise, total_paise, advance_paise, balance_paise,
-           coupon_id, coupon_code, loyalty_points, idempotency_key, terms_accepted_at, consent_notice_version, hold_expires_at, channel)
+           coupon_id, coupon_code, loyalty_points, idempotency_key, terms_accepted_at, consent_notice_version, hold_expires_at, channel, cod_risk)
          VALUES ($1, $2, $3, 'checkout', $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb,
-           $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, now(), $33, $34, $35) RETURNING *`,
+           $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, now(), $33, $34, $35, $36) RETURNING *`,
         [tenantId(), `${ORDER_NUMBER(settings.store_name)}-${n}`, crypto.randomBytes(16).toString('base64url'), body.paymentMode,
           source.reelId, source.pageId, source.source, JSON.stringify(source.utm), req.user?.role === 'customer' ? req.user.id : null, shopper?.id ?? null, visitorId,
           address.name, phone, body.email ?? '', [address.line1, address.line2, address.landmark].filter(Boolean).join(', ').slice(0, 300), address.city, stateName(address.stateCode), address.pincode,
           JSON.stringify(snapshot), quote.subtotalPaise, quote.discountPaise, quote.loyaltyPaise, quote.shippingPaise, quote.codFeePaise, quote.taxPaise, quote.totalPaise,
           quote.advancePaise, quote.balancePaise, priced.coupon?.coupon.id ?? null, priced.coupon?.code ?? '', quote.pointsUsed, body.idempotencyKey,
-          body.consent.noticeVersion, holdUntil, currentChannel()],  // the session's channel (Phase 6), never the body's
+          body.consent.noticeVersion, holdUntil, currentChannel(), codRisk],  // the session's channel (Phase 6), never the body's
       );
 
       const items = [];
