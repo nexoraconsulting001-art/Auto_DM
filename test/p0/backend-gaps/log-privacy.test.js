@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { log, setLogSink } from '../../../src/platform/log.js';
+import { MetaApiError } from '../../../src/adapters/meta/errors.js';
 import { REEL_ID, fakeIg, login, seedReel, startApp } from '../../helpers.js';
 import { filesIn, repoRoot } from './support.js';
 
@@ -20,18 +21,22 @@ test('nothing in src calls console', () => {
 test('a comment through the webhook leaves no username or message text in the logs', async () => {
   const lines = [];
   setLogSink((line) => lines.push(line));
-  const app = await startApp({ ig: fakeIg({ failButton: true }) });
+  // Since Phase 1 the DM goes through the compliance send queue: plain text follows only when Meta refuses the button message as
+  // invalid content (a validation error, PRD 4.4). So the button is refused that way, and the plain text is what goes out.
+  const ig = fakeIg();
+  ig.sendPrivateReplyButton = async () => { throw new MetaApiError({ method: 'POST', pathname: 'messages', status: 400, code: 100, kind: 'validation', delivery: 'none' }); };
+  const app = await startApp({ ig });
   try {
     await seedReel(app.repos, { n: 1 });
     await app.repos.reels.save(REEL_ID, { headline: 'Brunch', keywords: 'LINK', productIds: (await app.repos.products.list()).map((p) => p.id), active: 'on', public_reply: 'Sent!' });
     const value = { id: 'c1', text: 'LINK please PRIVATE-TEXT', media: { id: REEL_ID }, from: { id: 'u1', username: 'private_username' } };
     const body = JSON.stringify({ entry: [{ id: 'ME', changes: [{ field: 'comments', value }] }] });
     await fetch(`${app.base}/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(body) }, body });
-    for (const end = Date.now() + 5000; !lines.some((l) => l.includes('webhook.comment')) && Date.now() < end;) await new Promise((r) => setTimeout(r, 20));
+    for (const end = Date.now() + 5000; !lines.some((l) => l.includes('dm.sent')) && Date.now() < end;) await new Promise((r) => setTimeout(r, 20));
 
     const all = lines.join('\n');
     assert.match(all, /dm\.sent/);
-    assert.match(all, /dm\.button_rejected/);
+    assert.ok(ig.calls.some(([kind]) => kind === 'text'), 'the plain-text fallback went out after the button was refused');
     assert.match(all, /webhook\.comment/);
     for (const secret of ['private_username', 'PRIVATE-TEXT', 'Brunch', 'test-ig-token']) assert.ok(!all.includes(secret), secret);
   } finally {

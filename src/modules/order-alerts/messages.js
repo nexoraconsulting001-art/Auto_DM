@@ -61,11 +61,11 @@ export function orderMessage({ channel, event, order, items = [], business, unsu
     business.name,
     ...(unsubscribeUrl ? ['', `Stop order emails: ${unsubscribeUrl}`] : []),
   ].join('\n');
-  const body = html`<!doctype html><html><body style="margin:0;padding:0;background:#f6f6f4;font-family:Arial,Helvetica,sans-serif;color:#1d1d1f">
+  const body = html`<!doctype html><html><body style="margin:0;padding:0;background:#f6f6f4;font-family:${raw(business.bodyFont)};color:#1d1d1f">
 <div style="max-width:560px;margin:0 auto;padding:24px 16px">
 <div style="background:#ffffff;border-radius:12px;padding:24px;border-top:6px solid ${raw(business.color)}">
 ${business.logo ? html`<p style="margin:0 0 12px"><img src="${business.logo}" alt="${business.name}" height="40" style="max-height:40px;max-width:160px"></p>` : ''}
-<h1 style="margin:0 0 16px;font-size:20px">${business.name}</h1>
+<h1 style="margin:0 0 16px;font-size:20px;font-family:${raw(business.headingFont)}">${business.name}</h1>
 <p style="margin:0 0 12px">Hi ${firstName(order.customer_name)},</p>
 <p style="margin:0 0 16px">${words.lead}</p>
 <p style="margin:0 0 8px;font-weight:bold">Order ${order.order_number}</p>

@@ -6,7 +6,9 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import { setLogSink } from '../../../src/platform/log.js';
 import { bindTenant } from '../../../src/repos/index.js';
+import { createRazorpay } from '../../../tools/sim/razorpay/index.mjs';
 import { startApp } from '../../helpers.js';
+import { markPaid, payments } from '../../p4/checkout/support.js';
 
 /** Stands in for the neutral buyer domain. The real one is not chosen yet, and must not contain the platform name. */
 export const NEUTRAL = 'shops.example';
@@ -114,11 +116,43 @@ export async function assertBuyerPageClean(app, business, path, options = {}) {
   return res;
 }
 
-/** An app with no default business and no platform name in its addresses, closed when the test ends. */
+/**
+ * An app with no default business and no platform name in its addresses, closed when the test ends. Every store provider the
+ * app talks to is a simulator in the wire format of the real one: Razorpay always; the HTTP mail API and WhatsApp when the
+ * test passes fakeMail() / fakeWhatsapp() as overrides.mailTransport / overrides.whatsappTransport (see surfaces.js hooks).
+ */
 export async function startWorld(t, options = {}) {
-  const app = await startApp({ ...options, overrides: { platformDomain: NEUTRAL, publicBaseUrl: '', defaultTenant: '', ...options.overrides } });
-  t.after(() => app.close());
-  return app;
+  const { mailTransport: mail, whatsappTransport: whatsapp, ...overrides } = options.overrides ?? {};
+  const rzp = createRazorpay();
+  await rzp.start();
+  const providers = {
+    providerTimeoutMs: 1500,
+    paymentMode: 'managed',
+    razorpayBaseUrl: rzp.url,
+    razorpayAuthBaseUrl: rzp.url,
+    razorpayKeyId: rzp.keyId,
+    razorpayKeySecret: rzp.keySecret,
+    razorpayWebhookSecret: rzp.webhookSecret,
+    razorpayPartnerClientId: rzp.partner.clientId,
+    razorpayPartnerClientSecret: rzp.partner.clientSecret,
+    // Bhava's own sender, for email to sellers: in the platform's name, on the platform's own domain.
+    platformEmailFrom: 'alerts@mail.bhava.example',
+  };
+  if (mail) {
+    await mail.start();
+    Object.assign(providers, { emailDriver: 'http', emailBaseUrl: mail.sim.url, emailHosts: mail.sim.url, emailApiKey: 'sim-email-key', emailNeutralDomain: NEUTRAL });
+    await mail.sim.post('/dkim', { domain: NEUTRAL, pass: true });
+  }
+  if (whatsapp) {
+    await whatsapp.start();
+    Object.assign(providers, { whatsappBaseUrl: whatsapp.sim.url, whatsappAppSecret: whatsapp.sim.appSecret, whatsappVerifyToken: 'spec-wa-verify', platformWhatsappPhoneId: '100200300400', platformWhatsappToken: 'sim-whatsapp-token' });
+  }
+  const app = await startApp({ ...options, overrides: { platformDomain: NEUTRAL, publicBaseUrl: '', defaultTenant: '', ...providers, ...(mail ? { mailTransport: mail } : {}), ...overrides } });
+  t.after(async () => {
+    app.close();
+    await Promise.all([rzp.close(), mail?.close(), whatsapp?.close()]);
+  });
+  return Object.assign(app, { rzp });
 }
 
 /** A business with its own owner. `host` is the address its pages and API answer on. */
@@ -165,6 +199,44 @@ export async function addReel(business, igMediaId, { n = 2, headline = 'Brunch e
 
 export async function addOrder(business, product, customer = CUSTOMER) {
   return business.repos.orders.create({ items: [{ productId: product.id, qty: 1 }], customer }, await business.repos.settings.getAll());
+}
+
+/**
+ * A guest's order, placed through the store's own checkout (POST /api/store/checkout), as a shopper's browser would.
+ * `email` and `consent` go in the body (order updates by email and WhatsApp are ticked unless said otherwise). Online
+ * payment is set up for the business first. `paid` marks it paid the way the payments module does. Returns the order row
+ * (with public_token; `answer` is what checkout said) after its events have been handled.
+ */
+export async function placeOrder(app, business, product, { customer = CUSTOMER, email = '', paid = false, paymentMode = 'prepaid', consent = { orderUpdates: { whatsapp: true, email: true } } } = {}) {
+  await payments(app, { tenant: business.tenant });
+  const body = {
+    lines: [{ productId: product.id, variantId: null, qty: 1 }],
+    address: { name: customer.name, phone: customer.phone, line1: customer.address, city: customer.city, stateCode: '27', pincode: customer.pincode },
+    paymentMode,
+    idempotencyKey: crypto.randomUUID(),
+    acceptTerms: true,
+    consent: { noticeVersion: 1, ...consent },
+    ...(email ? { email } : {}),
+  };
+  const res = need(await hit(app, '/api/store/checkout', { host: business.host, method: 'POST', body }), 201, 'Place an order at checkout');
+  const [order] = await app.db.query('SELECT * FROM orders WHERE tenant_id = $1 AND order_number = $2', [business.tenant.id, res.json().orderNumber]);
+  await app.ctx.orderEvents.settle();
+  if (paid) await markPaid(app, order.id, { tenant: business.tenant });
+  const [placed] = await app.db.query('SELECT * FROM orders WHERE tenant_id = $1 AND id = $2', [business.tenant.id, order.id]);
+  return Object.defineProperty(placed, 'answer', { value: res.json(), enumerable: false });
+}
+
+/** Runs the seller-notification worker once, as the worker process does on its poll (a test app has no worker of its own). */
+export const drainNotifications = (app) => app.ctx.notify.drain();
+
+/** Connects a business's WhatsApp number through the console API and gets every template approved, as Meta's review would. */
+export async function connectWhatsapp(app, business, whatsapp) {
+  const token = await signIn(app, business);
+  const phoneNumberId = `ph${crypto.randomInt(1e6, 9e6)}`;
+  need(await api(app, business, token, '/whatsapp-account', { method: 'PUT', body: { wabaId: `waba${crypto.randomInt(1e6, 9e6)}`, phoneNumberId, accessToken: 'sim-whatsapp-token', displayNumber: '+919000000000' } }), 200, `Connect WhatsApp at ${business.name}`);
+  const first = need(await api(app, business, token, '/whatsapp-templates/sync', { method: 'POST' }), [200, 201], 'Sync WhatsApp templates').json();
+  for (const template of first.items) await whatsapp.sim.post('/templates', { name: template.name, language: template.language, category: template.category, status: 'APPROVED' });
+  need(await api(app, business, token, '/whatsapp-templates/sync', { method: 'POST' }), [200, 201], 'Sync WhatsApp templates again');
 }
 
 /** Connects an Instagram account, so comments on its reels reach this business. */

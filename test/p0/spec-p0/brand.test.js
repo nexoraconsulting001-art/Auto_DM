@@ -2,8 +2,8 @@
 // The Razorpay Checkout display itself is rendered by Razorpay, so these tests read the options the server hands it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CUSTOMER, TINY_PNG, addBusiness, addOrder, addProduct, addReel, api, assertBuyerPageClean, hit, need, noPlatformName, pageSource, pause, signIn, signInCookie, startWorld, uploadFile } from './support.js';
-import { buyerPaths, fakeMail, hooks, kitFields } from './surfaces.js';
+import { CUSTOMER, TINY_PNG, addBusiness, addProduct, addReel, api, assertBuyerPageClean, hit, need, noPlatformName, pageSource, pause, placeOrder, signIn, signInCookie, startWorld, uploadFile } from './support.js';
+import { alertPaths, buyerPaths, fakeMail, hooks, kitFields, orderStates } from './surfaces.js';
 
 const GREEN = '#234D33';
 const FONT = 'Playfair Display';
@@ -53,8 +53,8 @@ test('F-11: the shopper email uses the saved colour and font', async (t) => {
   const mail = fakeMail();
   const { app, shop, token } = await storeWithKit(t, { overrides: { [hooks.mail]: mail } });
   need(await api(app, shop, token, '/brand-kit', { method: 'PATCH', body: { colors: { primary: GREEN }, headingFont: FONT } }), 200, 'Save the brand kit');
-  await addOrder(shop, await addProduct(shop, 'Lamp'), { ...CUSTOMER, email: 'asha@buyer.example' });
-  const message = await within60s(async () => mail.sent.find((m) => String(m.to).includes('asha@buyer.example')));
+  await placeOrder(app, shop, await addProduct(shop, 'Lamp'), { customer: CUSTOMER, email: 'asha@buyer.example', paid: true });
+  const message = await within60s(async () => (await mail.messages()).find((m) => String(m.to).includes('asha@buyer.example')));
   assert.ok(message, 'No email reached the shopper');
   assert.ok(usesKit(message.html), 'The email did not use the saved colour and font');
 });
@@ -117,9 +117,14 @@ test('F-13: an SVG disguised as a PNG is not served as active content', async (t
 test('F-14: a sender set before DKIM is verified sends from the neutral domain under the business name', async (t) => {
   const mail = fakeMail();
   const { app, shop, token } = await storeWithKit(t, { overrides: { [hooks.mail]: mail } });
-  need(await api(app, shop, token, '/brand-kit', { method: 'PATCH', body: { [kitFields.buyerEmailSender]: 'orders@mehtamart.example' } }), 200, 'Save the sender');
-  await addOrder(shop, await addProduct(shop, 'Lamp'), { ...CUSTOMER, email: 'asha@buyer.example' });
-  const message = await within60s(async () => mail.sent.find((m) => String(m.to).includes('asha@buyer.example')));
+  // The seller's own domain is added but not verified yet, and the sender on it is chosen (orders@mehtamart.example): the
+  // save is refused by name, so mail stays on the neutral domain.
+  await app.db.query(`INSERT INTO tenant_domains (domain, tenant_id, status) VALUES ('mehtamart.example', $1, 'pending')`, [shop.tenant.id]);
+  const refusal = await api(app, shop, token, alertPaths.settings, { method: 'PATCH', body: { emailFrom: 'own', emailFromLocal: 'orders' } });
+  assert.equal(refusal.status, 400, 'the unverified domain is refused as a sender');
+  assert.ok(refusal.json().fields?.emailFrom, 'the refusal names the sender field');
+  await placeOrder(app, shop, await addProduct(shop, 'Lamp'), { customer: CUSTOMER, email: 'asha@buyer.example', paid: true });
+  const message = await within60s(async () => (await mail.messages()).find((m) => String(m.to).includes('asha@buyer.example')));
   assert.ok(message, 'No email reached the shopper');
   const from = String(message.from);
   assert.match(from, /Mehta Mart/, 'shows the business name');
@@ -148,18 +153,25 @@ test('F-15: fewer than 5 or more than 10 variants, or one with a link, are refus
 async function paidOrder(t) {
   const { app, shop, token } = await storeWithKit(t);
   need(await api(app, shop, token, '/brand-kit', { method: 'PATCH', body: { colors: { primary: GREEN }, headingFont: FONT, logoUrl: 'https://cdn.mehtamart.example/logo.png' } }), 200, 'Save the brand kit');
-  const order = await addOrder(shop, await addProduct(shop, 'Lamp'));
+  const order = await placeOrder(app, shop, await addProduct(shop, 'Lamp'));
   return { app, shop, token, order };
 }
 
 test('F-74: the default-gateway checkout hands Razorpay the seller\'s name, logo and colour', async (t) => {
   const { app, shop, order } = await paidOrder(t);
   const res = need(await hit(app, `/order/${order.public_token}`, { host: shop.host }), 200, 'Order page');
-  assert.match(res.text, /checkout\.razorpay\.com/, 'Razorpay Checkout is not on the page');
-  assert.match(res.text, /["']?name["']?\s*:\s*["']Mehta Mart["']/, 'name option');
-  assert.match(res.text, /["']?image["']?\s*:\s*["']https:\/\/cdn\.mehtamart\.example\/logo\.png["']/, 'logo option');
-  assert.match(res.text, /["']?color["']?\s*:\s*["']#234D33["']/i, 'theme colour option');
-  noPlatformName('Checkout options', res.text);
+  // The page loads the payment script, which loads Razorpay's checkout only when the shopper taps Pay: the page allows it.
+  assert.match(res.headers['content-security-policy'], /checkout\.razorpay\.com/, 'Razorpay Checkout is not allowed on the page');
+  assert.match(res.text, /\/store\/pay\.js/, 'the payment script is not on the page');
+  // What the payment script hands Razorpay Checkout is what the server answers when the shopper taps Pay.
+  const pay = need(await hit(app, `/api/store/orders/${order.public_token}/retry`, { host: shop.host, method: 'POST', headers: { origin: `https://${shop.host}` }, body: {} }), 200, 'Tap Pay');
+  const { display } = pay.json().gateway;
+  assert.equal(display.name, 'Mehta Mart', 'name option');
+  assert.equal(display.image, 'https://cdn.mehtamart.example/logo.png', 'logo option');
+  assert.match(display.color, /^#234D33$/i, 'theme colour option');
+  noPlatformName('Checkout options', pay.text);
+  noPlatformName('The order page', res.text);
+  noPlatformName('The payment script', (await hit(app, '/store/pay.js', { host: shop.host })).text);
 });
 
 test('F-76: the order page in every status is on the seller\'s domain in the seller\'s kit', async (t) => {
@@ -174,12 +186,13 @@ test('F-76: the order page in every status is on the seller\'s domain in the sel
 
 test('F-76: the payment success, failure and pending pages and the tracking page are seller-branded', async (t) => {
   const { app, shop, order } = await paidOrder(t);
-  for (const [name, pathname] of Object.entries({
-    success: buyerPaths.paymentSuccess(order.public_token),
-    failure: buyerPaths.paymentFailure(order.public_token),
-    pending: buyerPaths.paymentPending(order.public_token),
-    tracking: buyerPaths.tracking(order.public_token),
-  })) {
+  for (const [name, pathname, state] of [
+    ['pending', buyerPaths.paymentPending(order.public_token), orderStates.pending],
+    ['failure', buyerPaths.paymentFailure(order.public_token), orderStates.failure],
+    ['success', buyerPaths.paymentSuccess(order.public_token), orderStates.success],
+    ['tracking', buyerPaths.tracking(order), orderStates.success],
+  ]) {
+    await state(app, order);
     const res = await assertBuyerPageClean(app, shop, pathname);
     assert.match(res.text, /Mehta Mart/, `${name} page names the seller`);
     const { source } = await pageSource(app, shop.host, pathname);

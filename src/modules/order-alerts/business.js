@@ -1,9 +1,10 @@
 import { buyerBaseUrl } from '../admin-api/urls.js';
 import { tenantId } from '../../tenancy.js';
+import { family } from '../brand/theme.js';
 
 /**
  * What a message to a shopper says about the business it comes from: its own store name, its own buyer address (the
- * verified primary domain when it has one) and its brand colour. Never the platform's name or address. Read inside the
+ * verified primary domain when it has one) and its brand colour and fonts. Never the platform's name or address. Read inside the
  * business.
  */
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -16,7 +17,8 @@ export async function businessOf({ repos, config }) {
   const name = storeName && storeName !== 'My store' ? storeName : String(tenant?.name ?? '').trim();
   const base = tenant ? String(buyerBaseUrl(tenant, config) ?? '').replace(/\/+$/, '') : '';
   const primary = kit?.colors?.primary;
-  return { name, base, color: HEX.test(String(primary ?? '')) ? primary : '#16152B', logo: logoOf(kit?.logoUrl, base) };
+  // The fonts are the kit's allow-listed ones (family() answers a fixed stack for any other name), so they are safe in a style attribute.
+  return { name, base, color: HEX.test(String(primary ?? '')) ? primary : '#16152B', logo: logoOf(kit?.logoUrl, base), headingFont: family(kit?.headingFont), bodyFont: family(kit?.bodyFont) };
 }
 
 /** The business's logo as an address an email can show: https, or its own uploaded file on its own buyer address. */

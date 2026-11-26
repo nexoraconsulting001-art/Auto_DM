@@ -300,7 +300,7 @@ test('health, readiness, request ids and protected /metrics', async () => {
   try {
     assert.equal(await (await fetch(`${app.base}/healthz`)).text(), 'ok');
     const ready = await (await fetch(`${app.base}/readyz`)).json();
-    assert.equal(ready.ok, true);
+    assert.equal(ready.ok, true, `readiness checks: ${JSON.stringify(ready.checks)}`);
     assert.equal(ready.modules.queue, drivers.queueDriver);
     const home = await fetch(`${app.base}/`, { headers: { 'x-request-id': 'abcdef123456' } });
     assert.equal(home.headers.get('x-request-id'), 'abcdef123456');

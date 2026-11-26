@@ -57,7 +57,7 @@ function mix(a, b, amountOfA) {
   return `#${hex}`;
 }
 
-const family = (name) => {
+export const family = (name) => {
   const font = Object.hasOwn(FONTS, name) ? FONTS[name] : null;
   return font ? `'${name}', ${font.fallback}` : SANS;
 };

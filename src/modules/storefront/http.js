@@ -120,7 +120,7 @@ export const storeCall = (ctx, handler) => async (req, res) => {
       if (!fromThisStore(req)) throw new ApiError('forbidden', 'This request didn’t come from the store’s own page.');
     }
     // Not on this business's plan: the plan refusal (403), never a 404 (user decision 2026-11-26, F-32/F-34). A buyer reads
-    // this answer, so it carries no link into the seller's console.
+    // this answer, so it carries no link into the seller's own admin pages.
     if (!(await storeOn(ctx.repos))) throw new ApiError('plan.feature_off', undefined, { reason: 'plan', feature: STORE_FEATURE, upgradeUrl: null });
     await shopperFrom(req, ctx.db);
     const out = await handler(req, res);
