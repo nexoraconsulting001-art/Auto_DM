@@ -8,7 +8,7 @@ function operatorOf(req, config) {
   const operator = req.session?.operator;
   if (!operator) return {};
   const host = platformHostOf(config ?? {});
-  return { operator: { kind: operator.kind, operatorName: operator.operatorName ?? '', mode: operator.mode, service: operator.service ?? null, taskRef: operator.taskRef ?? null, expiresAt: operator.expiresAt, consoleUrl: host ? `https://${host}/console/` : '' } };
+  return { operator: { id: Number(operator.id) || undefined, kind: operator.kind, operatorName: operator.operatorName ?? '', mode: operator.mode, service: operator.service ?? null, taskRef: operator.taskRef ?? null, expiresAt: operator.expiresAt, consoleUrl: host ? `https://${host}/console/` : '' } };
 }
 
 const SESSION_DAYS = 30;
