@@ -57,20 +57,22 @@ export const orderAlerts = {
   },
 
   api: (ctx) => {
-    const { settings, alerts } = orderAlertsFor(ctx);
+    // The services are made on first use, so listing the routes needs nothing of ctx (as loyalty and billing do).
+    const settings = () => orderAlertsFor(ctx).settings;
+    const alerts = () => orderAlertsFor(ctx).alerts;
     return {
-      'alertSettings.get': () => settings.view(),
-      'alertSettings.update': ({ body, user }) => settings.update(body, actorOf(user)),
-      'whatsappAccount.get': () => settings.account(),
-      'whatsappAccount.connect': ({ body, user }) => settings.connect(body, actorOf(user)),
+      'alertSettings.get': () => settings().view(),
+      'alertSettings.update': ({ body, user }) => settings().update(body, actorOf(user)),
+      'whatsappAccount.get': () => settings().account(),
+      'whatsappAccount.connect': ({ body, user }) => settings().connect(body, actorOf(user)),
       'whatsappAccount.disconnect': async ({ user }) => {
-        await settings.disconnect(actorOf(user));
+        await settings().disconnect(actorOf(user));
         return null;
       },
-      'whatsappTemplates.all': () => settings.templates(),
-      'whatsappTemplates.sync': () => settings.syncTemplates(),
-      'orderAlerts.list': ({ query }) => alerts.list(query),
-      'orderAlerts.retry': ({ params, user }) => alerts.retry(params.id, actorOf(user)),
+      'whatsappTemplates.all': () => settings().templates(),
+      'whatsappTemplates.sync': () => settings().syncTemplates(),
+      'orderAlerts.list': ({ query }) => alerts().list(query),
+      'orderAlerts.retry': ({ params, user }) => alerts().retry(params.id, actorOf(user)),
     };
   },
 

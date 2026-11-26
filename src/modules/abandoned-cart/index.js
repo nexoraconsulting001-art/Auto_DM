@@ -38,11 +38,12 @@ export const abandonedCart = {
   },
 
   api: (ctx) => {
-    const reminders = cartRemindersFor(ctx);
+    // Made on first use, so listing the routes needs nothing of ctx (as loyalty and billing do).
+    const reminders = () => cartRemindersFor(ctx);
     return {
-      'cartReminders.get': () => reminders.view(),
-      'cartReminders.update': ({ body, user }) => reminders.setEnabled(body.enabled, `user:${user.id}`),
-      'cartReminders.stats': ({ query }) => reminders.stats(query.days),
+      'cartReminders.get': () => reminders().view(),
+      'cartReminders.update': ({ body, user }) => reminders().setEnabled(body.enabled, `user:${user.id}`),
+      'cartReminders.stats': ({ query }) => reminders().stats(query.days),
     };
   },
 
