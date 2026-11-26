@@ -52,7 +52,6 @@ export function reviewRoutes(app, { repos, auth, config, services, review }) {
   const needSignIn = (req, res, next) => (signedIn(req) ? next() : res.redirect(303, '/review'));
 
   async function refuse(req, res, reason) {
-    await auth.recordFailure(req);
     await repos.audit.record({ actor: 'reviewer', action: 'review.login_refused', details: { reason } });
     log.warn('review.login_refused', { reason });
     send(res, reviewSignInPage({ error: 'That number and code don’t match.' }), 401);
@@ -72,7 +71,8 @@ export function reviewRoutes(app, { repos, auth, config, services, review }) {
   });
 
   app.post('/review/login', onlyHere, sameOriginOnly, async (req, res) => {
-    if (await auth.tooManyAttempts(req)) return send(res, reviewSignInPage({ error: 'Too many tries. Wait 15 minutes and try again.' }), 429);
+    // The try is counted before the number and code are looked at, and given back only when both were right (B-AUTH-2).
+    if (!(await auth.takeTry(req))) return send(res, reviewSignInPage({ error: 'Too many tries. Wait 15 minutes and try again.' }), 429);
     // Both are always checked, so the answer takes the same time for a wrong number as for a wrong code.
     const rightNumber = normalizePhone(String(req.body?.phone ?? '').slice(0, 20)) === review.phone;
     const rightCode = sameSecret(String(req.body?.code ?? '').slice(0, 200), review.code);
@@ -80,6 +80,7 @@ export function reviewRoutes(app, { repos, auth, config, services, review }) {
     if (!rightCode) return refuse(req, res, 'wrong_code');
     const user = await repos.users.findByPhone(review.phone);
     if (!user || user.role !== 'owner') return refuse(req, res, 'no_review_account');
+    await auth.giveBack(req);
     await auth.login(req, res, user);
     await repos.audit.record({ actor: `user:${user.id}`, action: 'review.login' });
     log.info('review.login', { userId: user.id });

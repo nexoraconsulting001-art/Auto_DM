@@ -78,6 +78,11 @@ export function registerSignIn(router, ctx, auth) {
   const tooMany = async (req) => {
     if (await auth.tooManyAttempts(req)) throw new Refusal(429, 'Too many tries. Wait 15 minutes and try again.', 'rate_limited');
   };
+  // A code or authenticator try is counted against the address before it is looked at, in one statement, and given back
+  // only once it proved right (B-AUTH-2): a burst from one address cannot all pass a count none of them has added to yet.
+  const takeTry = async (req) => {
+    if (!(await auth.takeTry(req))) throw new Refusal(429, 'Too many tries. Wait 15 minutes and try again.', 'rate_limited');
+  };
   const userByEmail = async (email) => (await pdb.query('SELECT id, email, name, role, totp_secret_enc, totp_enrolled_at FROM platform_users WHERE email = $1 AND disabled_at IS NULL', [email]))[0] ?? null;
 
   mountRoute(router, 'platform.signInStart', async ({ body, req }) => {
@@ -109,10 +114,9 @@ export function registerSignIn(router, ctx, auth) {
   });
 
   mountRoute(router, 'platform.signInVerify', async ({ body, req }) => {
-    await tooMany(req);
+    await takeTry(req);
     const user = await userByEmail(body.email);
     const fail = async (codeId = null) => {
-      await auth.recordFailure(req);
       if (user) await audit(user.id, 'platform.sign_in_code_wrong', { codeId });
       throw new Refusal(400, WRONG_CODE, 'bad_code');
     };
@@ -133,6 +137,7 @@ export function registerSignIn(router, ctx, auth) {
     // Spent here, in one statement, so two requests with the same code cannot both get a ticket.
     const spent = await pdb.query('UPDATE platform_login_codes SET used_at = now() WHERE id = $1 AND used_at IS NULL RETURNING id', [row.id]);
     if (!spent.length) return fail(Number(row.id));
+    await auth.giveBack(req);
 
     let enrol = null;
     if (!user.totp_enrolled_at) {
@@ -149,11 +154,10 @@ export function registerSignIn(router, ctx, auth) {
   });
 
   mountRoute(router, 'platform.signInTotp', async ({ body, req, res }) => {
-    await tooMany(req);
+    await takeTry(req);
     const key = ticketKey(body.ticket);
     const held = await cache.get(key);
     if (!held || !(held.until > Date.now())) {
-      await auth.recordFailure(req);
       throw new Refusal(400, TICKET_GONE, 'ticket_expired');
     }
     // Each try is counted first, atomically, whatever happens to it next: a burst cannot get more than TICKET_TRIES
@@ -161,13 +165,16 @@ export function registerSignIn(router, ctx, auth) {
     const ticketId = sha(body.ticket);
     const attempt = await platform.rateLimit.hit('platform_totp_tries', ticketId, { limit: TICKET_TRIES, windowMs: PLATFORM_LOGIN.ticketMinutes * 60_000 });
     if (!attempt.allowed) {
-      await auth.recordFailure(req);
       await cache.del(key);
       throw new Refusal(400, TICKET_GONE, 'ticket_expired');
     }
     // One try at a time per ticket, taken in one statement so two requests at the same moment cannot both hold it.
     const busy = await platform.rateLimit.hit('platform_totp_busy', ticketId, { limit: 1, windowMs: 10_000 });
-    if (!busy.allowed) throw new Refusal(429, 'Wait a moment and try again.', 'rate_limited');
+    if (!busy.allowed) {
+      // Turned away unseen while another try is in progress: it used up a try of the ticket, but it was no guess at a code.
+      await auth.giveBack(req);
+      throw new Refusal(429, 'Wait a moment and try again.', 'rate_limited');
+    }
     try {
       const [user] = await pdb.query('SELECT id, email, name, role, totp_secret_enc, totp_enrolled_at FROM platform_users WHERE id = $1 AND disabled_at IS NULL', [held.userId]);
       if (!user) {
@@ -177,12 +184,12 @@ export function registerSignIn(router, ctx, auth) {
       const enrolling = !user.totp_enrolled_at;
       const accepted = await acceptCode(user, body.code, enrolling);
       if (!accepted) {
-        await auth.recordFailure(req);
         const tries = attempt.hits;
         if (tries >= TICKET_TRIES) await cache.del(key);
         await audit(user.id, 'platform.sign_in_totp_wrong', { tries });
         throw new Refusal(400, tries >= TICKET_TRIES ? TICKET_GONE : 'That code isn’t right. Check your authenticator and try again.', 'bad_code');
       }
+      await auth.giveBack(req);
       await cache.del(key);
       let recoveryCodes;
       if (enrolling) {

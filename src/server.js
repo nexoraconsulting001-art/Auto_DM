@@ -62,7 +62,7 @@ function mediaRoutes({ repos }) {
  */
 export function createApp({ db, config = defaultConfig, modules = MODULES, metaCalls = createMetaCallObserver(modules), ig = createInstagram(config, { onCall: metaCalls.onCall }), platform = createPlatform(config, { db }) }) {
   const repos = createRepos(db, { storage: platform.storage, secrets: platform.secrets, modules });
-  const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions, tenants: repos.tenants, cache: platform.cache, passwordLogin: Boolean(config.passwordLogin) });
+  const auth = createAuth({ secret: config.sessionSecret, users: repos.users, sessions: repos.sessions, tenants: repos.tenants, cache: platform.cache, rateLimit: platform.rateLimit, passwordLogin: Boolean(config.passwordLogin) });
   // Where sellers sign in (PLATFORM_APP_HOST): an address that belongs to no business.
   const appHost = platformAppHostOf(config);
   const tenants = createTenantResolver({ tenants: repos.tenants, platformDomain: config.platformDomain, defaultTenant: config.defaultTenant });
