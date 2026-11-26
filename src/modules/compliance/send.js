@@ -269,6 +269,8 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
 
   const duplicateReason = (action) => {
     if (action.kind === 'private_reply') return 'cap.per_comment';
+    // The welcome's key is the person (welcome:<subject>), so its duplicate is the once-per-person cap, not a repeated webhook.
+    if (action.purpose === 'welcome' && /^welcome:/.test(action.idempotencyKey)) return 'cap.welcome_once';
     return /^(dm_keyword|dm_reply):/.test(action.idempotencyKey) ? 'cap.reply_per_message' : 'webhook.duplicate';
   };
 
