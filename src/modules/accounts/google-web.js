@@ -4,7 +4,7 @@ import { newToken } from '../../contracts/accounts.js';
 import { AUTH_PATHS, GoogleStartQuery, OAuthCallbackQuery, OWNER_APP_CALLBACK } from '../../contracts/api/index.js';
 import { platformAppHostOf } from '../../config.js';
 import { log } from '../../platform/log.js';
-import { normalizeHost } from '../../tenancy.js';
+import { isSignInHost } from '../../tenancy.js';
 import { signInPage } from './web.js';
 
 const STATE_COOKIE = 'bhava_gstate';
@@ -47,7 +47,7 @@ export function googleWebRoutes(app, ctx, { people, handoffs, opener }) {
   const nonceFor = (id) => mac(secret(), `google-nonce:${id}`);
   // The one redirect address registered with Google: the sign-in host's own callback.
   const callbackUrl = (req) => `${req.protocol}://${req.get('x-forwarded-host') || req.get('host')}${AUTH_PATHS.googleCallback}`;
-  const onAppHost = (req) => Boolean(appHost) && normalizeHost(req.hostname) === appHost;
+  const onAppHost = (req) => isSignInHost(req.hostname, appHost);
 
   // Google hands the state back in the address, and the callback takes at most 200 characters of it: the state is an id
   // and a MAC, and what it stands for rides in this browser's httpOnly cookie, covered by the same MAC.

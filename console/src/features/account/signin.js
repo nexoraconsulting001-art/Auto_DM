@@ -16,7 +16,7 @@ export const PKCE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/;
 export const PKCE_CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
 /** A page on this site to open after a Google sign-in (GoogleStartQuery.next). */
 export const NEXT_PATH = /^\/(?!\/)[\w\-./?=&%#]*$/;
-/** The browser half of Google sign-in (AUTH_PATHS.googleStart). It exists only on the sign-in host. */
+/** The browser half of Google sign-in (AUTH_PATHS.googleStart). It exists only on the sign-in host: a link, never asked. */
 export const GOOGLE_START = '/auth/google/start';
 const E164 = /^\+[1-9]\d{7,14}$/;
 
@@ -102,51 +102,33 @@ export function googleStartUrl({ next = '/admin', purpose = 'signin', challenge 
 }
 
 /**
- * Whether this server still has the phone-and-password sign-in (PASSWORD_LOGIN, tests and local runs only). The API
- * has no field that says so, so the route is asked: with the setting off the server answers 404 for it before anything
- * else looks at the request; with it on, a token that cannot be anyone's is refused with 401 by the bearer check, which
- * records no failed sign-in, counts against no limit and opens nothing. Anything else (offline, a fault) is no.
- */
-export async function passwordLoginOn(send = (...args) => globalThis.fetch(...args)) {
-  try {
-    const response = await send('/api/v1/auth/login', { method: 'POST', headers: { authorization: 'Bearer -', accept: 'application/json' }, credentials: 'omit' });
-    return response.status === 401;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Whether this is the sign-in host (PLATFORM_APP_HOST), where Google sign-in starts. Only there does the start answer
- * with a redirect (to Google, or back to the sign-in page when Google is not set up), which is not followed here.
- * Anywhere else that path is one of the store's own pages.
- */
-export async function googleStartsHere(send = (...args) => globalThis.fetch(...args)) {
-  try {
-    const response = await send(`${GOOGLE_START}?target=web`, { redirect: 'manual', credentials: 'same-origin' });
-    return response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * What the sign-in page offers, from what the server said (P-11, F-117, F-118):
+ * What the sign-in page offers, from what the server said in app.requirements (P-11, F-117, F-118):
  *
- *   whatsapp  a 6-digit code on WhatsApp, unless app.requirements says no. When it could not be read, still yes.
- *   google    Continue with Google: set up on the server (app.requirements) and on the sign-in host, where it starts.
- *   password  phone and password, only while the route exists (PASSWORD_LOGIN) and never on the sign-in host: a password
- *             names its business by the address, and that host belongs to none, so the form could only fail there.
+ *   whatsapp  a 6-digit code on WhatsApp, unless the server says no. When it could not be read, still yes.
+ *   google    Continue with Google: set up on the server (signIn.google) and this is the sign-in host (web.signInHost),
+ *             the only address where its browser start (GOOGLE_START) exists.
+ *   password  phone and password, only while the server has the route (web.passwordLogin, PASSWORD_LOGIN) and never on
+ *             the sign-in host: a password names its business by the address, and that host belongs to none.
  *
- * There is never an SMS option.
+ * Only the server's answer is read: no route is tried to see whether it is there (a missing one is a 404 the browser
+ * reports as an error on every sign-in page). There is never an SMS option.
  */
-export function waysIn({ passwordRoute = false, requirements = null, signInHost = false } = {}) {
+export function waysIn(requirements = null) {
+  const signInHost = Boolean(requirements?.web?.signInHost);
   return {
     whatsapp: requirements?.signIn?.whatsapp ?? true,
-    google: Boolean(requirements?.signIn?.google) && Boolean(signInHost),
-    password: Boolean(passwordRoute) && !signInHost,
-    signInHost: Boolean(signInHost),
+    google: Boolean(requirements?.signIn?.google) && signInHost,
+    password: Boolean(requirements?.web?.passwordLogin) && !signInHost,
+    signInHost,
   };
+}
+
+/**
+ * The ways in, from one question to the server: `requirements` is app.requirements as the console asks it (read as the
+ * Android app would, since it asks for a platform). Never throws: what cannot be learned is not offered, except WhatsApp.
+ */
+export async function askWaysIn(requirements) {
+  return waysIn(await Promise.resolve().then(requirements).catch(() => null));
 }
 
 /** True when the session's last sign-in or re-auth still counts, with a margin for the clocks; null when the session never said. */

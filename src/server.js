@@ -29,7 +29,7 @@ import { ApiError, isApiV1Url } from './contracts/api/index.js';
 import { PROVIDER_PATHS } from './contracts/api/provider.js';
 import { STORE_PROVIDER_PATHS } from './contracts/store-routes.js';
 import { sendApiError } from './modules/api-v1/respond.js';
-import { createTenantResolver, currentTenant, normalizeHost, withTenant } from './tenancy.js';
+import { createTenantResolver, currentTenant, isSignInHost, withTenant } from './tenancy.js';
 import { createPlatform, describePlatform } from './platform/index.js';
 import { createErrorSink } from './platform/error-sink.js';
 import { HEALTH_PATHS, createHealth, drainOnSignals } from './platform/health.js';
@@ -202,7 +202,7 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
       return next();
     }
     // The sign-in host belongs to no business, not even the default one: a session there names its own (auth.load).
-    if (appHost && normalizeHost(req.hostname) === appHost) {
+    if (isSignInHost(req.hostname, appHost)) {
       req.appHost = true;
       return next();
     }

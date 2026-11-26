@@ -23,7 +23,7 @@ import { readBusinessOps } from './read.js';
  *
  * What one business sees, as analytics events in its own name (BUSINESS_OPS_EVENTS), never as labels:
  *   ops.error, ops.meta_call, ops.meta_usage    when a business is current where the thing happens
- *   ops.queue_depth                             sampled every 5 minutes for a business with jobs waiting, and once more when it clears
+ *   ops.queue_depth                             sampled every 5 minutes from the queue's waitingByTenant() for a business with jobs waiting, and once more when it clears
  *
  *   platform.businessOps   GET /tenants/:id/ops?hours=24    for the Platform Console (console/src/platform/features/observability)
  *
@@ -146,17 +146,17 @@ export function createOpsMetrics(ctx, { now = () => Date.now() } = {}) {
 
     /**
      * Writes the depth and age of each business's waiting jobs, for every business that has some and for one that had some
-     * the last time (so a queue that cleared shows as cleared). Finding them needs the unfenced connection; each write is that business's own.
+     * the last time (so a queue that cleared shows as cleared). They come from the queue in use (waitingByTenant(), in
+     * either driver: the Postgres jobs table holds nothing on the Redis queue); each write is that business's own.
      */
     async sampleQueues() {
-      const rows = await ctx.db.platform.query(
-        `SELECT tenant_id, count(*)::int AS depth, greatest(0, extract(epoch FROM now() - min(run_at)))::float AS oldest
-           FROM jobs WHERE status = 'queued' AND run_at <= now() AND tenant_id IS NOT NULL GROUP BY tenant_id`,
-      );
+      const queue = ctx.platform?.queue;
+      if (typeof queue?.waitingByTenant !== 'function') return 0;
+      const rows = await queue.waitingByTenant();
       const waiting = new Set();
       for (const row of rows) {
-        waiting.add(row.tenant_id);
-        await withTenant(row.tenant_id, () => analytics.track(BUSINESS_OPS_EVENTS.queueDepth.name, { queue: 'all', depth: Number(row.depth), oldest_seconds: Math.round(Number(row.oldest)) }));
+        waiting.add(row.tenantId);
+        await withTenant(row.tenantId, () => analytics.track(BUSINESS_OPS_EVENTS.queueDepth.name, { queue: 'all', depth: row.depth, oldest_seconds: Math.round(row.oldestSeconds) }));
       }
       for (const id of state.queued) {
         if (!waiting.has(id)) await withTenant(id, () => analytics.track(BUSINESS_OPS_EVENTS.queueDepth.name, { queue: 'all', depth: 0, oldest_seconds: 0 })).catch(() => {});

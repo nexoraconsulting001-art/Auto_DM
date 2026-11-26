@@ -38,6 +38,13 @@ export const normalizeHost = (host) =>
     .replace(/\.$/, '');
 
 /**
+ * Whether a request's host is the sign-in host (PLATFORM_APP_HOST, see platformAppHostOf), which belongs to no business.
+ * The one test for it: the server serves that host's pages there, Google's browser sign-in starts only there, and
+ * app.requirements tells a sign-in page whether it is on it. `appHost` is already lower case; empty is never.
+ */
+export const isSignInHost = (hostname, appHost) => Boolean(appHost) && normalizeHost(hostname) === appHost;
+
+/**
  * Finds the business for a hostname, in this order:
  *   1. an exact match in tenant_domains (custom domains, extra hostnames)
  *   2. <slug>.<platformDomain>

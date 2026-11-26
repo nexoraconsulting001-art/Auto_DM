@@ -132,3 +132,60 @@ test('platform-5: the worker autoscaler reads a queue_jobs state the queue repor
   assert.ok(['queued', 'delayed', 'running', 'failed', 'unknown'].includes(status), `HPA selects status=${status}`);
   assert.equal(status, 'queued', 'the worker scales on jobs ready to run');
 });
+
+test('R3-OP2-2: Redis waitingByTenant() reads every registered queue a page at a time, per business, oldest ready first', async () => {
+  const now = Date.now();
+  const job = (id, tenantId, ageMs, opts = {}) => ({ id, data: { payload: {}, tenantId, retryInFlight: false }, timestamp: now - ageMs, opts });
+  // The fake lists `waiting` newest first, as BullMQ keeps its wait list; getWaiting answers oldest first.
+  const state = {
+    queues: {
+      'dm.send': { waiting: [job('5', 7, 1_000), job('4', null, 2_000), job('3', 9, 3_000), job('2', 7, 4_000), job('1', 7, 300_000)], delayed: 2, active: 0, failed: [] },
+      notify: { waiting: [job('6', 9, 50_000, { delay: 10_000 })], delayed: 0, active: 0, failed: [] },
+      empty: { waiting: [], delayed: 1, active: 0, failed: [] },
+    },
+    processors: {},
+  };
+  const bullmq = fakeBullmq(state);
+  const asked = [];
+  const getWaiting = bullmq.Queue.prototype.getWaiting;
+  bullmq.Queue.prototype.getWaiting = function (start, end) {
+    asked.push([this.name, start, end]);
+    return getWaiting.call(this, start, end);
+  };
+  const queue = createQueue(REDIS, { bullmq, redis: fakeRedis(['dm.send', 'notify', 'empty']) });
+  const rows = await queue.waitingByTenant({ page: 2 });
+  assert.deepEqual(rows.map((r) => [r.tenantId, r.depth]), [[7, 3], [9, 2]], 'the platform job (no business) is in none; delayed jobs are not waiting');
+  assert.ok(Math.abs(rows[0].oldestSeconds - 300) < 5, String(rows[0].oldestSeconds));
+  assert.ok(Math.abs(rows[1].oldestSeconds - 40) < 5, `ready since its delay ended: ${rows[1].oldestSeconds}`);
+  assert.deepEqual(asked.filter(([name]) => name === 'dm.send').map(([, s, e]) => [s, e]), [[0, 1], [2, 3], [4, 5]], 'a page at a time, stopping at the short page');
+  assert.deepEqual(asked.filter(([name]) => name === 'empty'), [['empty', 0, 1]]);
+  asked.length = 0;
+  const capped = await queue.waitingByTenant({ page: 2, limit: 3 });
+  assert.deepEqual(asked.filter(([name]) => name === 'dm.send').map(([, s, e]) => [s, e]), [[0, 1], [2, 2]], 'never past the limit');
+  assert.deepEqual(capped.map((r) => [r.tenantId, r.depth]), [[7, 2], [9, 2]]);
+  await queue.close();
+});
+
+test('R3-OP2-2: on the Redis queue each business\'s queue depth is sampled from the queue, never the Postgres jobs table', async () => {
+  const now = Date.now();
+  const state = {
+    queues: { 'dm.send': { waiting: [{ id: '2', data: { tenantId: 4 }, timestamp: now - 1_000, opts: {} }, { id: '1', data: { tenantId: 4 }, timestamp: now - 90_000, opts: {} }], delayed: 0, active: 0, failed: [] } },
+    processors: {},
+  };
+  const queue = createQueue(REDIS, { bullmq: fakeBullmq(state), redis: fakeRedis(['dm.send']) });
+  const tracked = [];
+  const { currentTenant } = await import('../../../src/tenancy.js');
+  const analytics = { track: async (name, props) => tracked.push({ name, tenant: currentTenant()?.id, props }) };
+  const db = { platform: { query: async (sql) => { throw new Error(`the jobs table was read: ${sql.slice(0, 40)}`); } } };
+  const ops = createOpsMetrics({ service: 'worker', platform: { metrics: createMetrics({ strict: true }), queue, analytics }, db });
+  assert.equal(await ops.sampleQueues(), 1);
+  assert.equal(tracked.length, 1);
+  assert.equal(tracked[0].name, 'ops.queue_depth');
+  assert.equal(tracked[0].tenant, 4, 'written as the business');
+  assert.equal(tracked[0].props.depth, 2);
+  assert.ok(Math.abs(tracked[0].props.oldest_seconds - 90) <= 2, String(tracked[0].props.oldest_seconds));
+  state.queues['dm.send'].waiting = [];
+  assert.equal(await ops.sampleQueues(), 0);
+  assert.deepEqual([tracked.length, tracked[1].tenant, tracked[1].props.depth], [2, 4, 0], 'a cleared queue shows as cleared');
+  await queue.close();
+});
