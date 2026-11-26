@@ -1,3 +1,4 @@
+import { ApiError } from '../../contracts/api/index.js';
 import { reportError } from '../../platform/log.js';
 import { currentTenant } from '../../tenancy.js';
 import { complianceApi } from './api.js';
@@ -49,6 +50,16 @@ export const compliance = {
   },
 
   api: (ctx) => complianceApi(ctx),
+
+  /**
+   * Called by automations.setState before Test or Live. Three breakers in an hour freeze new activations across every business (PRD 4.12, C-48)
+   * until a super admin unfreezes them: nothing that isn't already live goes to Test or Live. What is live keeps sending.
+   */
+  async beforeAutomationLaunch(automation, ctx) {
+    if (automation.state === 'live' || !ctx.compliance || !(await ctx.compliance.activationsFrozen())) return;
+    const message = 'New automations can’t go live right now: our team has paused new launches while they check a problem. What is already live keeps running.';
+    throw new ApiError('conflict', message, { fields: { state: message }, reason: 'activations.frozen' });
+  },
 
   /**
    * Every call to Meta, whoever made it, reports its usage header and an 80002 to the account's rate state (PRD 4.3), so a media
