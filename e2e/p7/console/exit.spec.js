@@ -9,7 +9,7 @@ import { expect, test } from '@playwright/test';
 const require = createRequire(import.meta.url);
 require('semver');
 require('sharp');
-const { APP, appSignIn, authorize, charge, invoicesOf, newPhone, one, openBillingWorld, setSignup, sql, unique } = await import('../../../test/p7/spec-p7/support.js');
+const { APP, appSignIn, authorize, charge, finishConnect, hit, invoicesOf, newPhone, one, openBillingWorld, setSignup, sql, unique } = await import('../../../test/p7/spec-p7/support.js');
 
 test.use({
   viewport: { width: 360, height: 740 },
@@ -65,7 +65,9 @@ test('sign up, hit a Free-plan limit, upgrade, and see the invoice', async ({ pa
   expect(connect.status).toBe(200);
   const consent = await fetch(connect.data.authorizeUrl, { redirect: 'manual' });
   const back = new URL(consent.headers.get('location'));
-  await fetch(`http://127.0.0.1:${port}${back.pathname}${back.search}`, { headers: { 'x-forwarded-host': host }, redirect: 'manual' });
+  // Meta's return ends in a finish step (the account is taken only when the starter finishes it), as the sign-up's own tests do it.
+  const done = await hit(world, `${back.pathname}${back.search}`, { host });
+  expect(await finishConnect(world, done, { send: owner.call, cookie: owner.cookie, host })).toBe('connected');
   const reel = numericId();
   await world.meta.post('/media', { igUserId, productType: 'REELS', caption: 'First reel', id: reel });
 
