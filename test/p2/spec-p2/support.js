@@ -533,9 +533,12 @@ export async function addP2Shop(world, { timeZone = 'UTC', followers = 5000, sco
     async poll({ jobs, rounds = 4 } = {}) {
       await shop.settle({ ms: 3000, roundMs: 300 });
       // One worker run covers every business that is due, so earlier tests' backfills wait, and this poll is about this business.
-      await world.rawDb.platform.query(`UPDATE insight_polls SET next_due_at = now() + interval '1 hour' WHERE tenant_id <> $1 AND stopped_at IS NULL AND next_due_at <= now() + interval '1 minute'`, [id]);
+      // Other businesses' polls come due again as they retry or enrol (the 50 businesses of N-37 leave many), so this is done before every round.
+      const parkOthers = () => world.rawDb.platform.query(`UPDATE insight_polls SET next_due_at = now() + interval '1 hour' WHERE tenant_id <> $1 AND stopped_at IS NULL AND next_due_at <= now() + interval '1 minute'`, [id]);
+      await parkOthers();
       let known = (await shop.polls()).length;
       for (let i = 0; i < rounds; i++) {
+        await parkOthers();
         const due = await sql(
           `UPDATE insight_polls SET next_due_at = now() - interval '1 second', lease_until = NULL, locked_by = NULL WHERE tenant_id = $1 AND stopped_at IS NULL ${jobs ? 'AND job = ANY($2)' : ''} RETURNING id, now() AS at`,
           jobs ? [id, jobs] : [id],
@@ -546,6 +549,7 @@ export async function addP2Shop(world, { timeZone = 'UTC', followers = 5000, sco
         while (RealDate.now() < stopAt && due.length) {
           const [{ n }] = await sql(`SELECT count(*)::int AS n FROM insight_polls WHERE id = ANY($1) AND stopped_at IS NULL AND coalesce(last_finished_at, '-infinity') < $2 AND (next_due_at <= now() OR lease_until > now())`, [due.map((p) => p.id), due[0].at]);
           if (!n) break;
+          await parkOthers();
           await world.tick();
           await pause(100);
         }
