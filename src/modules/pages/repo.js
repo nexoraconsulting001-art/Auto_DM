@@ -5,6 +5,7 @@ import { CATALOG_LIMITS as L, displayPrice, paiseFromDb } from '../../contracts/
 import { BUYER_BLOCKS, DEFAULT_BLOCKS } from '../../contracts/buyer-pages.js';
 import { writeAudit } from '../audit/index.js';
 import { removeVariants } from './variants.js';
+import { recordPageOpen } from './opened.js';
 
 /**
  * Landing pages (PRD 8.10): one row of `reels` per automated reel, post or story, with its products in the owner's order in
@@ -297,6 +298,11 @@ export function landingPagesRepo(db) {
 
     async touchMediaCheck(id) {
       await db.query('UPDATE reels SET media_checked_at = now() WHERE tenant_id = $1 AND id = $2', [tenantId(), Number(id)]);
+    },
+
+    /** This browser opened this page: kept on the server for the order's source (S-17). */
+    async recordOpen(req, res, pageId) {
+      await recordPageOpen(db, req, res, pageId);
     },
 
     /** A visit in the Phase 0 count, which the seller's lists and dashboard still read. */
