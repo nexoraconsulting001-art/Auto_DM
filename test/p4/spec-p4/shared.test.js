@@ -186,13 +186,22 @@ test('S-101: the platform’s name appears only on the shared consent screen, ac
   await shop.track(shipment.awb, 'PICKED UP');
   await shop.orderWhen(row.order_number, (o) => o.fulfilment_status === 'shipped');
   const track = new URL(shipment.trackingUrl).pathname;
-  const pages = ['/', '/shop', `/p/${product.slug}`, '/search?q=monstera', '/reels', '/about', '/cart', '/checkout', '/login', '/account', '/account/orders', `/account/orders/${encodeURIComponent(row.order_number)}`, `/order/${row.placed.token}`, track, '/wishlist', '/offline', '/policies/privacy', '/policies/terms', '/policies/refund', '/policies/shipping'];
+  const pages = ['/', '/shop', `/p/${product.slug}`, '/search?q=monstera', '/reels', '/about', '/cart', '/checkout', '/account', '/account/orders', `/account/orders/${encodeURIComponent(row.order_number)}`, `/order/${row.placed.token}`, track, '/wishlist', '/offline', '/policies/privacy', '/policies/terms', '/policies/refund', '/policies/shipping'];
   for (const path of pages) {
     const res = await b.open(path);
     assert.equal(res.status, 200, `${path} answered ${res.status}`);
     assertSellerBrandOnly(res, path);
     await assertBuyerPageClean(world, shop, path, { headers: { cookie: b.cookie } });
   }
+  // /login sends a signed-in shopper on to the account (shoppers/routes.js, since 895ddb6), so the page itself is read signed out;
+  // the redirect is checked too.
+  const again = await b.open('/login');
+  assert.equal(again.status, 302, `/login signed in answered ${again.status}`);
+  assertSellerBrandOnly(again, '/login signed in');
+  const signIn = await buyer(world, shop).open('/login');
+  assert.equal(signIn.status, 200, `/login answered ${signIn.status}`);
+  assertSellerBrandOnly(signIn, '/login');
+  await assertBuyerPageClean(world, shop, '/login');
   for (const path of ['/manifest.webmanifest', '/sw.js', '/no-such-page']) assertSellerBrandOnly(await b.open(path), path);
   for (const call of [await b.getCart(), await b.consent(), await b.addresses(), await b.quote({ lines: [line(product)] })]) assertSellerBrandOnly(call, 'A buyer JSON call');
   await world.quiet(2000);
