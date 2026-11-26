@@ -73,6 +73,10 @@ export function reviewLoginService(ctx, { people }) {
     const tenantId = login.tenant_id;
     const phone = accountPhone(login.phone, personId);
     return db().tx(async (t) => {
+      // First review sign-ins at once (App Review taps twice, or two reviewers) would each find no account and each insert
+      // one, and users' UNIQUE (tenant_id, phone) fails the later one with a 500 on Postgres (R3-MONEY-2). The login's row
+      // is the lock: the later one waits, then finds the account the first made.
+      await t.query('SELECT id FROM review_logins WHERE id = $1 FOR UPDATE', [login.id]);
       const [mine] = await t.query('SELECT id FROM users WHERE tenant_id = $1 AND person_id = $2 AND removed_at IS NULL LIMIT 1', [tenantId, personId]);
       if (mine) return { personId, account: { tenant_id: tenantId, user_id: mine.id } };
       const [byPhone] = await t.query(
