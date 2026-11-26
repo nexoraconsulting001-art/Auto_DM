@@ -40,7 +40,14 @@ export const apiAuth = {
         return { token, expiresInDays: SESSION_DAYS, ...(await describe(user)) };
       },
 
-      'auth.me': async ({ user, req }) => ({ ...(await describe(user)), ...(req.csrf ? { csrf: req.csrf } : {}), freshUntil: req.session?.freshUntil ?? null, ...operatorOf(req, ctx.config) }),
+      'auth.me': async ({ user, req }) => {
+        const session = await describe(user);
+        // A managed-service operator works inside the business as its owner's session, but is not the owner: auth.me
+        // answers with the operator's own identity and never the owner's phone or email (user decision 2026-11-26, F-91).
+        const operator = req.session?.operator;
+        if (operator?.kind === 'service') session.user = { id: Number(operator.operatorId), name: operator.operatorName || 'Bhava team', phone: '', role: session.user.role, permissions: [] };
+        return { ...session, ...(req.csrf ? { csrf: req.csrf } : {}), freshUntil: req.session?.freshUntil ?? null, ...operatorOf(req, ctx.config) };
+      },
 
       'auth.logout': async ({ user, req, res }) => {
         if (req.bearer) await ctx.repos.sessions.revoke(req.sessionToken);
