@@ -259,15 +259,17 @@ export async function openWorld({ overrides = {}, worker = true, proxy = false, 
 
   /**
    * Runs the worker until nothing more happens: every queue idle, and nothing has changed over the last rounds.
-   * `only: 'compliance'` runs the send engine's turn each round instead of every periodic job (see tick).
+   * `only: 'compliance'` runs the send engine's turn every round, including the first, instead of every periodic job (see tick).
    */
   async function settle({ tenantId, ms = 8000, roundMs = 1200, only = null } = {}) {
     if (!gate.open) return;
     const end = Date.now() + ms;
     let last = null;
     let same = 0;
-    while (Date.now() < end) {
-      await tick({ only });
+    for (let round = 0; Date.now() < end; round++) {
+      // Every periodic job runs once per settle(), in its first round. Later rounds only wait for what that started, so they take
+      // the send engine's turn alone: running ~45 periodic jobs again each round tripled the cost of every settle() for nothing.
+      await tick({ only: only ?? (round > 0 ? 'compliance' : null) });
       const idleBy = Math.min(end, Date.now() + roundMs);
       while (Date.now() < idleBy && await pendingCount(tenantId)) await pause(15);
       await pause(10);
