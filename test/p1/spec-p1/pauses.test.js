@@ -443,7 +443,7 @@ test('C-44: public replies stop in slow mode while DMs go on', async () => {
   const shop = await addShop(world);
   await savePublicReplies(shop);
   const auto = await shop.automate({ publicReplyEnabled: true });
-  await shop.sql(`INSERT INTO account_rate_state (tenant_id, channel, account_id, slow_mode_started_at, slow_mode_until, slow_mode_trigger) VALUES ($1, 'instagram', $2, now(), now() + interval '2 hours', 'reach_drop')`, [shop.tenantId, shop.igUserId]);
+  await shop.sql(`INSERT INTO account_rate_state (tenant_id, channel, account_id, slow_mode_started_at, slow_mode_until, slow_mode_trigger) VALUES ($1, 'instagram', $2, now(), now() + interval '2 hours', 'reach_drop') ON CONFLICT (tenant_id, channel, account_id) DO UPDATE SET slow_mode_started_at = EXCLUDED.slow_mode_started_at, slow_mode_until = EXCLUDED.slow_mode_until, slow_mode_trigger = EXCLUDED.slow_mode_trigger`, [shop.tenantId, shop.igUserId]);
   await pause(SWITCH_LAG_MS);
   await shop.comment(auto.mediaId);
   await shop.settle();
@@ -456,7 +456,7 @@ test('C-44: public replies stop in slow mode while DMs go on', async () => {
 
 test('C-44: only a reach-drop slow mode can be overridden, and only with the words typed out', async () => {
   const shop = await addShop(world);
-  await shop.sql(`INSERT INTO account_rate_state (tenant_id, channel, account_id, slow_mode_started_at, slow_mode_until, slow_mode_trigger) VALUES ($1, 'instagram', $2, now(), now() + interval '2 hours', 'buc_80002')`, [shop.tenantId, shop.igUserId]);
+  await shop.sql(`INSERT INTO account_rate_state (tenant_id, channel, account_id, slow_mode_started_at, slow_mode_until, slow_mode_trigger) VALUES ($1, 'instagram', $2, now(), now() + interval '2 hours', 'buc_80002') ON CONFLICT (tenant_id, channel, account_id) DO UPDATE SET slow_mode_started_at = EXCLUDED.slow_mode_started_at, slow_mode_until = EXCLUDED.slow_mode_until, slow_mode_trigger = EXCLUDED.slow_mode_trigger`, [shop.tenantId, shop.igUserId]);
   assert.equal((await shop.call('/compliance/status', 200)).slowMode.canOverride, false);
   assert.ok((await shop.api('/compliance/slow-mode/override', { method: 'POST', body: { confirmation: 'I understand' } })).status >= 400);
   await shop.sql(`UPDATE account_rate_state SET slow_mode_trigger = 'reach_drop' WHERE tenant_id = $1`, [shop.tenantId]);

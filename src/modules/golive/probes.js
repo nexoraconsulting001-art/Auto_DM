@@ -121,7 +121,7 @@ async function prometheusAny(p, query) {
 }
 
 export const PROBES = Object.freeze({
-  // Meta: one app-level read each, with the app's own token (id|secret), at graph.facebook.com.
+  // Meta: one app-level read each, with the app's own token (id|secret), at Meta's Facebook Graph host.
   'meta.app_mode': {
     settings: ['IG_APP_ID', 'APP_SECRET'], simulators: META_SIMS,
     // To confirm: GET /{app-id}?fields=id,app_mode answers { app_mode: 'live' | 'development' }.

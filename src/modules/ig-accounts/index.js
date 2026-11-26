@@ -8,8 +8,12 @@ import { writeAudit } from '../audit/index.js';
 export const DISCONNECTED_BY_OWNER = RELEASED_BY_OWNER;
 const DELETION_REQUESTED = 'deletion.requested';
 
-/** One row of the compliance log (PRD 4.16) on `runner`, so a change and its row land together. Ids only. */
-export async function logDecision(runner, { decision, reason = '', kind = 'token', details = {} }) {
+/**
+ * One row of the compliance log (PRD 4.16) on `runner`, so a change and its row land together. Ids only. A token or data row's
+ * decision is itself a reason code (token.refreshed, token.rejected, deletion.completed...), and the reason column carries it, as
+ * every other row's does: "Why no DM?" and the log filters read reasons.
+ */
+export async function logDecision(runner, { decision, reason = decision, kind = 'token', details = {} }) {
   await runner.query(
     `INSERT INTO compliance_events (tenant_id, channel, kind, decision, reason, details) VALUES ($1, 'instagram', $2, $3, $4, $5)`,
     [tenantId(), kind, decision, reason, JSON.stringify(details)],

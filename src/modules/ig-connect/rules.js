@@ -24,8 +24,9 @@ export const WEBHOOK_FIELDS = Object.freeze(Object.keys(WEBHOOK_FIELD_SCOPES));
 /** Read receipts, for the funnel's Seen step (PRD 7.15, to confirm). Not required to count as subscribed, and asked for only with READ_RECEIPTS=1. */
 export const READ_RECEIPTS_FIELD = 'messaging_seen';
 
-const REFRESH_MIN_AGE_MS = DAY;
-const REFRESH_WITHIN_MS = 30 * DAY;
+/** PRD 4.2: a token is refreshed once it is 24 hours old and has 30 days or less to live. */
+export const REFRESH_MIN_AGE_MS = DAY;
+export const REFRESH_WITHIN_MS = 30 * DAY;
 
 /** A token can be refreshed from 24 hours old, and is, once it has 30 days or less to live (PRD 4.2). Null when Meta gave no expiry. */
 export function nextRefreshAt(issuedAtMs, expiresAt) {

@@ -12,7 +12,7 @@ const listen = (app) => new Promise((resolve) => {
   const server = app.listen(0, () => resolve({ server, port: server.address().port }));
 });
 const get = (port, path, { method = 'GET', headers = {} } = {}) => new Promise((resolve, reject) => {
-  const req = http.request({ host: '127.0.0.1', port, path, method, headers }, (res) => {
+  const req = http.request({ agent: false, host: '127.0.0.1', port, path, method, headers }, (res) => {
     let text = '';
     res.on('data', (c) => (text += c));
     res.on('end', () => resolve({ status: res.statusCode, text, headers: res.headers }));

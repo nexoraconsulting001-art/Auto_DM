@@ -5,8 +5,13 @@ import { APP_SECRET, DAY, HOUR, addShop, assertNoDm, commentPayload, failingDb, 
 
 const world = useWorld();
 
+// The comment's own row. Our private reply comes back from Meta as a message echo, a separate event that is stored too (PRD 4.1).
+const THE_COMMENT = "field = 'comments'";
+// The hourly release-gate check logs its own decisions (PRD 4.15, 4.16): not something a delivery stored or decided.
+const NOT_GATE = "kind <> 'gate'";
+
 const countAll = async (tenantId) => {
-  const [{ inbound, events }] = await world.rawDb.platform.query('SELECT (SELECT count(*)::int FROM inbound_events WHERE tenant_id = $1) AS inbound, (SELECT count(*)::int FROM compliance_events WHERE tenant_id = $1) AS events', [tenantId]);
+  const [{ inbound, events }] = await world.rawDb.platform.query("SELECT (SELECT count(*)::int FROM inbound_events WHERE tenant_id = $1) AS inbound, (SELECT count(*)::int FROM compliance_events WHERE tenant_id = $1 AND kind <> 'gate') AS events", [tenantId]);
   return { inbound, events };
 };
 
@@ -172,7 +177,7 @@ test('C-03: the same event three times in a row is 1 row and 1 DM', async () => 
   const { delivery } = await world.meta.post('/comments', { igUserId: shop.igUserId, mediaId: reel.mediaId, from: world.fan(), text: 'price', duplicates: 3 });
   assert.equal(delivery.status, 200);
   await shop.settle();
-  assert.equal((await shop.inbound()).length, 1);
+  assert.equal((await shop.inbound(THE_COMMENT)).length, 1);
   assert.equal((await shop.dms()).length, 1);
 });
 
@@ -185,7 +190,7 @@ test('C-03: the same event three times at the same moment is 1 row and 1 DM', as
   const answers = await Promise.all([world.webhook(payload), world.webhook(payload), world.webhook(payload)]);
   assert.deepEqual(answers.map((r) => r.status), [200, 200, 200]);
   await shop.settle();
-  assert.equal((await shop.inbound()).length, 1);
+  assert.equal((await shop.inbound(THE_COMMENT)).length, 1);
   assert.equal((await shop.dms()).length, 1);
 });
 
@@ -197,7 +202,7 @@ test('C-03: the same comment twice inside one batch is 1 row and 1 DM', async ()
   const one = commentPayload(shop, { id: comment.id, mediaId: reel.mediaId, from });
   need(await world.webhook({ object: 'instagram', entry: [one.entry[0], one.entry[0]] }), 200, 'The batch');
   await shop.settle();
-  assert.equal((await shop.inbound()).length, 1);
+  assert.equal((await shop.inbound(THE_COMMENT)).length, 1);
   assert.equal((await shop.dms()).length, 1);
 });
 
@@ -229,7 +234,7 @@ test('C-03: Meta redelivering 30 hours later, inside its 36 hour retry, adds not
   await world.travel(30 * HOUR);
   need(await world.webhook(payload), 200, 'Late redelivery');
   await shop.settle();
-  assert.equal((await shop.inbound()).length, 1);
+  assert.equal((await shop.inbound(THE_COMMENT)).length, 1);
   assert.equal((await shop.dms()).length, 1);
 });
 
@@ -292,7 +297,7 @@ test('C-03: an id sent as a number routes the same as an id sent as text', async
   payload.entry[0].id = 1784140000123;
   need(await world.webhook(payload), 200, 'Numeric entry id');
   await shop.settle();
-  assert.equal((await shop.inbound()).length, 1);
+  assert.equal((await shop.inbound(THE_COMMENT)).length, 1);
   assert.equal((await shop.dms()).length, 1);
 });
 
@@ -306,7 +311,7 @@ test('C-46: a comment on one business\'s account is routed only to that business
   const [dm] = await plant.dms();
   assert.equal(dm.commentId, comment.id);
   assert.equal((await mehta.inbound()).length, 0);
-  assert.equal((await mehta.events()).length, 0);
+  assert.equal((await mehta.events(NOT_GATE)).length, 0);
   await assertNoDm(mehta);
   assert.ok(mehtaReel.id);
 });
@@ -328,8 +333,8 @@ test('C-46: one batch with entries for two businesses goes to each of them, and 
   await b.settle();
   assert.deepEqual((await a.dms()).map((m) => m.commentId), [made[0].comment.id]);
   assert.deepEqual((await b.dms()).map((m) => m.commentId), [made[1].comment.id]);
-  assert.equal((await a.inbound()).length, 1);
-  assert.equal((await b.inbound()).length, 1);
+  assert.equal((await a.inbound(THE_COMMENT)).length, 1);
+  assert.equal((await b.inbound(THE_COMMENT)).length, 1);
 });
 
 test('C-46: a media id one business automates means nothing when it arrives on another business\'s account', async () => {
@@ -342,7 +347,7 @@ test('C-46: a media id one business automates means nothing when it arrives on a
   await a.settle();
   await assertNoDm(a);
   await assertNoDm(b);
-  assert.deepEqual((await b.events()).map((e) => e.reason), ['unmapped']);
+  assert.deepEqual((await b.events(NOT_GATE)).map((e) => e.reason), ['unmapped']);
   assert.equal((await a.inbound()).length, 0);
 });
 
@@ -403,7 +408,7 @@ test('C-51: retention: raw webhooks older than 7 days are gone, and a younger on
   await shop.settle();
   await world.travel(7 * DAY - 60_000);
   await shop.settle();
-  assert.equal((await shop.inbound()).length, 1, 'Not yet 7 days old');
+  assert.equal((await shop.inbound(THE_COMMENT)).length, 1, 'Not yet 7 days old');
   await world.travel(120_000);
   await shop.settle();
   assert.equal((await shop.inbound()).length, 0, 'Past 7 days');

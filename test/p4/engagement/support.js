@@ -133,7 +133,7 @@ export function multipart(fields, files = []) {
 export function sendBytes(app, path, { method = 'POST', headers = {}, body, cookie, host } = {}) {
   return new Promise((resolve, reject) => {
     const sent = { ...headers, 'content-length': body.length, ...(cookie ? { cookie } : {}), ...(host ? { host } : {}) };
-    const req = http.request({ host: '127.0.0.1', port: app.port, path, method, headers: sent }, (res) => {
+    const req = http.request({ agent: false, host: '127.0.0.1', port: app.port, path, method, headers: sent }, (res) => {
       const parts = [];
       res.on('data', (c) => parts.push(c));
       res.on('end', () => {

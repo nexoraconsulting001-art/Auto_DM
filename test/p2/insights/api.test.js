@@ -369,7 +369,7 @@ test('N-36: a second tap within 15 minutes says how old the figures are and move
 }));
 
 test('refresh respects a 4.3 pause, and doesn\'t use up the tap', withInsights(async ({ app, clock }) => {
-  await app.db.platform.query(`INSERT INTO account_rate_state (tenant_id, channel, account_id, other_paused_until) VALUES ($1, 'instagram', $2, $3)`, [app.tenant.id, IG_ACCOUNT.igUserId, new Date(clock.t + 30 * MINUTE).toISOString()]);
+  await app.db.platform.query(`INSERT INTO account_rate_state (tenant_id, channel, account_id, other_paused_until) VALUES ($1, 'instagram', $2, $3) ON CONFLICT (tenant_id, channel, account_id) DO UPDATE SET other_paused_until = EXCLUDED.other_paused_until`, [app.tenant.id, IG_ACCOUNT.igUserId, new Date(clock.t + 30 * MINUTE).toISOString()]);
   const paused = await ok(await app.api('POST', '/insights/refresh'));
   assert.equal(paused.refreshed, false);
   assert.equal(+new Date(paused.nextRefreshAt), clock.t + 30 * MINUTE);

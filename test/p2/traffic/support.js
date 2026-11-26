@@ -51,7 +51,7 @@ export async function secondBusiness(world, { slug = 'leaf-and-clay', plan = 't3
 export function raw(port, path, { method = 'GET', host = '127.0.0.1', headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? null : typeof body === 'string' ? body : JSON.stringify(body);
-    const req = http.request({ host: '127.0.0.1', port, path, method, headers: { host, ...(payload ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } : {}), ...headers } }, (res) => {
+    const req = http.request({ agent: false, host: '127.0.0.1', port, path, method, headers: { host, ...(payload ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } : {}), ...headers } }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: Buffer.concat(chunks).toString() }));

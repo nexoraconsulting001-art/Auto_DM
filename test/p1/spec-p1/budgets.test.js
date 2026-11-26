@@ -1,7 +1,7 @@
 // PRD 4.3: budgets and throttling. C-09 to C-13. C-47 from 4.13.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COMPLIANCE_LIMITS, HOUR, MINUTE, SECOND, addShop, assertReason, commentPayload, need, pause, savePublicReplies, secondsBetween, useWorld } from './support.js';
+import { COMPLIANCE_LIMITS, HOUR, MINUTE, SECOND, addShop, assertReason, commentPayload, need, pause, savePublicReplies, secondsBetween, openWorld, useWorld } from './support.js';
 
 const world = useWorld();
 const HALF = COMPLIANCE_LIMITS.reducedBudgetMultiplier;
@@ -12,7 +12,7 @@ const readMedia = (shop) => shop.api('/instagram/media');
 const clearFaults = () => world.meta.delete('/faults');
 
 /** One batch of `n` keyword comments on one reel. The comments exist at Meta, so private replies are real. */
-async function commentBurst(shop, mediaId, n) {
+async function commentBurst(world, shop, mediaId, n) {
   const entries = [];
   for (let i = 0; i < n; i++) {
     const from = world.fan();
@@ -22,28 +22,34 @@ async function commentBurst(shop, mediaId, n) {
   for (let i = 0; i < entries.length; i += 1000) need(await world.webhook({ object: 'instagram', entry: entries.slice(i, i + 1000) }), 200, 'A batch of comments');
 }
 
-test('C-09: 3,000 keyword comments in an hour never exceed 600 sends per rolling hour, and all drain in about 5 hours', { timeout: 280_000 }, async () => {
-  const shop = await addShop(world);
-  const reel = await shop.automate();
-  await commentBurst(shop, reel.mediaId, 3000);
-  await shop.settle({ ms: 60_000, roundMs: 2000 });
-  const perMinute = [];
-  let seen = 0;
-  for (let minute = 0; minute < 330 && seen < 3000; minute++) {
-    await shop.settle({ ms: 1500, roundMs: 500 });
-    const now = (await shop.dms()).length;
-    perMinute.push(now - seen);
-    seen = now;
-    await world.travel(MINUTE);
+// Its own world, stopped when its time limit passes: a timed-out test keeps running, and its 3,000 jobs must not load the tests after it.
+test('C-09: 3,000 keyword comments in an hour never exceed 600 sends per rolling hour, and all drain in about 5 hours', { timeout: 280_000 }, async (t) => {
+  const world = await openWorld();
+  try {
+    const shop = await addShop(world);
+    const reel = await shop.automate();
+    await commentBurst(world, shop, reel.mediaId, 3000);
+    await shop.settle({ ms: 60_000, roundMs: 2000 });
+    const perMinute = [];
+    let seen = 0;
+    for (let minute = 0; minute < 330 && seen < 3000 && !t.signal.aborted; minute++) {
+      await shop.settle({ ms: 1500, roundMs: 500 });
+      const now = (await shop.dms()).length;
+      perMinute.push(now - seen);
+      seen = now;
+      await world.travel(MINUTE);
+    }
+    for (let start = 0; start < perMinute.length; start++) {
+      const hour = perMinute.slice(start, start + 60).reduce((a, b) => a + b, 0);
+      assert.ok(hour <= COMPLIANCE_LIMITS.privateRepliesPerHour, `Minutes ${start} to ${start + 60} sent ${hour}`);
+    }
+    assert.equal(seen, 3000, 'Everyone is served');
+    const dms = await shop.dms();
+    assert.equal(new Set(dms.map((m) => m.commentId)).size, 3000, 'Nobody twice');
+    assert.ok(perMinute.length >= 240, `Took ${perMinute.length} simulated minutes`);
+  } finally {
+    await world.close();
   }
-  for (let start = 0; start < perMinute.length; start++) {
-    const hour = perMinute.slice(start, start + 60).reduce((a, b) => a + b, 0);
-    assert.ok(hour <= COMPLIANCE_LIMITS.privateRepliesPerHour, `Minutes ${start} to ${start + 60} sent ${hour}`);
-  }
-  assert.equal(seen, 3000, 'Everyone is served');
-  const dms = await shop.dms();
-  assert.equal(new Set(dms.map((m) => m.commentId)).size, 3000, 'Nobody twice');
-  assert.ok(perMinute.length >= 240, `Took ${perMinute.length} simulated minutes`);
 });
 
 test('C-09: every job carries a unique idempotency key and an expiry', async () => {
@@ -267,35 +273,41 @@ test('C-11: public replies pause under 80002, even for a DM that went out', asyn
   assert.equal((await shop.publicReplies()).length, 0);
 });
 
-test('C-11: slow mode halves the private-reply budget to 300 an hour, and a second reduction doesn\'t halve it again', { timeout: 280_000 }, async () => {
+// Its own world, stopped when its time limit passes, like the 3,000-comment test above.
+test('C-11: slow mode halves the private-reply budget to 300 an hour, and a second reduction doesn\'t halve it again', { timeout: 280_000 }, async (t) => {
   assert.equal(HALF, 0.5);
-  const shop = await addShop(world);
-  await shop.settingsRow({ score_review_needed: true });
-  const media = [];
-  for (let n = 0; n < 7; n++) {
-    const ids = [];
-    for (let i = 0; i < 50; i++) ids.push(await shop.reel());
-    await shop.automate({ triggers: ids.map((mediaId) => ({ channel: 'instagram', targetType: 'reel', mediaId })) });
-    media.push(...ids);
+  const world = await openWorld();
+  try {
+    const shop = await addShop(world);
+    await shop.settingsRow({ score_review_needed: true });
+    const media = [];
+    for (let n = 0; n < 7; n++) {
+      const ids = [];
+      for (let i = 0; i < 50; i++) ids.push(await shop.reel());
+      await shop.automate({ triggers: ids.map((mediaId) => ({ channel: 'instagram', targetType: 'reel', mediaId })) });
+      media.push(...ids);
+    }
+    await trip80002(shop);
+    await shop.sql(`UPDATE account_rate_state SET slow_mode_until = now() + interval '10 hours' WHERE tenant_id = $1`, [shop.tenantId]);
+    await world.switchLag();
+    const entries = [];
+    for (const mediaId of media) {
+      const from = world.fan();
+      const { comment } = await world.meta.post('/comments', { igUserId: shop.igUserId, mediaId, from, text: 'price', deliver: false });
+      entries.push(commentPayload(shop, { id: comment.id, mediaId, from }).entry[0]);
+    }
+    need(await world.webhook({ object: 'instagram', entry: entries }), 200, 'One comment on each of 350 reels');
+    await shop.settle({ ms: 40_000, roundMs: 2000 });
+    for (let minute = 0; minute < 59 && !t.signal.aborted; minute++) {
+      await world.travel(MINUTE);
+      await shop.settle({ ms: 1500, roundMs: 500 });
+    }
+    const sent = (await shop.dms()).length;
+    assert.ok(sent <= COMPLIANCE_LIMITS.privateRepliesPerHour * HALF, `Sent ${sent} in the hour at x0.5`);
+    assert.ok(sent >= 200, `The multipliers don't stack, but it sent only ${sent}`);
+  } finally {
+    await world.close();
   }
-  await trip80002(shop);
-  await shop.sql(`UPDATE account_rate_state SET slow_mode_until = now() + interval '10 hours' WHERE tenant_id = $1`, [shop.tenantId]);
-  await world.switchLag();
-  const entries = [];
-  for (const mediaId of media) {
-    const from = world.fan();
-    const { comment } = await world.meta.post('/comments', { igUserId: shop.igUserId, mediaId, from, text: 'price', deliver: false });
-    entries.push(commentPayload(shop, { id: comment.id, mediaId, from }).entry[0]);
-  }
-  need(await world.webhook({ object: 'instagram', entry: entries }), 200, 'One comment on each of 350 reels');
-  await shop.settle({ ms: 40_000, roundMs: 2000 });
-  for (let minute = 0; minute < 59; minute++) {
-    await world.travel(MINUTE);
-    await shop.settle({ ms: 1500, roundMs: 500 });
-  }
-  const sent = (await shop.dms()).length;
-  assert.ok(sent <= COMPLIANCE_LIMITS.privateRepliesPerHour * HALF, `Sent ${sent} in the hour at x0.5`);
-  assert.ok(sent >= 200, `The multipliers don't stack, but it sent only ${sent}`);
 });
 
 test('C-11: a business with an 80002 does not slow another down', async () => {

@@ -35,8 +35,8 @@ export function facebookApi(ctx, connect) {
 
   /** A call to Meta that isn't a message: it waits its turn behind the Page's messages (PRD 4.3), and failing never costs more than the answer. */
   async function read(channel, accountId, label, fetchIt) {
-    const { allow } = await compliance.callAllowed(channel, accountId, MEDIA_CALL);
-    if (!allow) throw new ApiError('conflict', `${label} is busy right now. Try again in a few minutes.`, { reason: 'rate.usage_header' });
+    const { allow, reason } = await compliance.readAllowed(channel, accountId, MEDIA_CALL);
+    if (!allow) throw new ApiError('conflict', `${label} is busy right now. Try again in a few minutes.`, { reason });
     return fetchIt();
   }
 
