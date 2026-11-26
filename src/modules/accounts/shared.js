@@ -10,10 +10,10 @@ export const refused = () => new ApiError('unauthorized', SIGN_IN_REFUSED);
 
 /**
  * Counts one hit against a limit from AUTH_LIMITS (platform.rateLimit, in Postgres, so it holds across every process)
- * and refuses with 429 when it is over. The subject is stored only as a hash.
+ * and refuses with 429 when it is over. The subject is stored only as a hash. `via`: an open platform transaction to count in.
  */
-export async function limit(platform, spec, subject) {
-  const hit = await platform.rateLimit.hit(spec.scope, String(subject ?? ''), spec);
+export async function limit(platform, spec, subject, via = null) {
+  const hit = await platform.rateLimit.hit(spec.scope, String(subject ?? ''), spec, { via });
   if (!hit.allowed) throw new ApiError('rate_limited');
 }
 

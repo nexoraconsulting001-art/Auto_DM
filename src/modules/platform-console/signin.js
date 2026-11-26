@@ -117,19 +117,21 @@ export function registerSignIn(router, ctx, auth) {
       throw new Refusal(400, WRONG_CODE, 'bad_code');
     };
     if (!user) return fail();
+    // The try is counted before the code is compared, in the statement that reads it, and only while tries are left: a
+    // burst of guesses at once cannot get more than codeAttempts looks at one code (the seller codes do the same).
     const [row] = await pdb.query(
-      `SELECT id, code_hash, attempts FROM platform_login_codes WHERE platform_user_id = $1 AND used_at IS NULL AND expires_at > now() ORDER BY id DESC LIMIT 1`,
-      [user.id],
+      `UPDATE platform_login_codes SET attempts = attempts + 1
+       WHERE id = (SELECT id FROM platform_login_codes WHERE platform_user_id = $1 AND used_at IS NULL AND expires_at > now() ORDER BY id DESC LIMIT 1)
+         AND used_at IS NULL AND expires_at > now() AND attempts < $2
+       RETURNING id, code_hash`,
+      [user.id, PLATFORM_LOGIN.codeAttempts],
     );
-    if (!row || row.attempts >= PLATFORM_LOGIN.codeAttempts) return fail(row ? Number(row.id) : null);
+    if (!row) return fail();
     const expected = Buffer.from(row.code_hash);
     const given = Buffer.from(hashLoginCode(config.sessionSecret, user.id, body.code));
-    if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) {
-      await pdb.query('UPDATE platform_login_codes SET attempts = attempts + 1 WHERE id = $1', [row.id]);
-      return fail(Number(row.id));
-    }
+    if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return fail(Number(row.id));
     // Spent here, in one statement, so two requests with the same code cannot both get a ticket.
-    const spent = await pdb.query(`UPDATE platform_login_codes SET used_at = now() WHERE id = $1 AND used_at IS NULL AND attempts < $2 RETURNING id`, [row.id, PLATFORM_LOGIN.codeAttempts]);
+    const spent = await pdb.query('UPDATE platform_login_codes SET used_at = now() WHERE id = $1 AND used_at IS NULL RETURNING id', [row.id]);
     if (!spent.length) return fail(Number(row.id));
 
     let enrol = null;
@@ -154,20 +156,21 @@ export function registerSignIn(router, ctx, auth) {
       await auth.recordFailure(req);
       throw new Refusal(400, TICKET_GONE, 'ticket_expired');
     }
-    // One try at a time per ticket, taken in one statement so two requests at the same moment cannot both hold it.
+    // Each try is counted first, atomically, whatever happens to it next: a burst cannot get more than TICKET_TRIES
+    // looks, and a try turned away below because another is in progress still uses one up, so a burst spends the ticket.
     const ticketId = sha(body.ticket);
+    const attempt = await platform.rateLimit.hit('platform_totp_tries', ticketId, { limit: TICKET_TRIES, windowMs: PLATFORM_LOGIN.ticketMinutes * 60_000 });
+    if (!attempt.allowed) {
+      await auth.recordFailure(req);
+      await cache.del(key);
+      throw new Refusal(400, TICKET_GONE, 'ticket_expired');
+    }
+    // One try at a time per ticket, taken in one statement so two requests at the same moment cannot both hold it.
     const busy = await platform.rateLimit.hit('platform_totp_busy', ticketId, { limit: 1, windowMs: 10_000 });
     if (!busy.allowed) throw new Refusal(429, 'Wait a moment and try again.', 'rate_limited');
     try {
       const [user] = await pdb.query('SELECT id, email, name, role, totp_secret_enc, totp_enrolled_at FROM platform_users WHERE id = $1 AND disabled_at IS NULL', [held.userId]);
       if (!user) {
-        await cache.del(key);
-        throw new Refusal(400, TICKET_GONE, 'ticket_expired');
-      }
-      // Each try is counted before the code is checked, atomically: a burst cannot get more than TICKET_TRIES looks.
-      const attempt = await platform.rateLimit.hit('platform_totp_tries', ticketId, { limit: TICKET_TRIES, windowMs: PLATFORM_LOGIN.ticketMinutes * 60_000 });
-      if (!attempt.allowed) {
-        await auth.recordFailure(req);
         await cache.del(key);
         throw new Refusal(400, TICKET_GONE, 'ticket_expired');
       }

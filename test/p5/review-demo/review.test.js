@@ -13,9 +13,12 @@ let app;
 let demo;
 before(async () => {
   app = await reviewApp();
-  // The login row is written when the first try comes in; the demo business made after it still claims it.
-  assert.equal((await verify(app, REVIEW_LOCAL, REVIEW_CODE)).status, 401, 'no demo business yet: the login opens nothing');
+  // No demo business yet: the first review sign-in makes it (P-24), and the ops command then keeps that one.
+  const first = await verify(app, REVIEW_LOCAL, REVIEW_CODE);
+  assert.equal(first.status, 201, 'no demo business yet: the first review sign-in makes it and opens it');
   demo = await app.demo.ensure();
+  assert.equal(demo.action, 'kept', 'ensure made a second demo business');
+  assert.equal(first.json.business.id, demo.tenantId, 'the first review sign-in opened another business');
 });
 after(() => app?.close());
 
