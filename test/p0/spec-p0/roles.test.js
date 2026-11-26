@@ -90,7 +90,7 @@ test('U-04: a platform admin opening a business is logged with who, when and why
   // D2 decision: the row keeps the operator's id; the audit views show the email beside it when they are read.
   assert.match(row.actor, /^platform:[0-9]+$/, 'who');
   assert.ok(!JSON.stringify(row).includes(operator.email), 'no email is stored in the log');
-  const shown = need(await onConsole(app, operator, `${consolePaths.auditLog}?tenantId=${shop.tenant.id}`), 200, 'The console audit view').json().items.find((i) => /impersonat/i.test(i.action));
+  const shown = need(await onConsole(app, operator, `/audit-log?tenantId=${shop.tenant.id}`), 200, 'The console audit view').json().items.find((i) => /impersonat/i.test(i.action));
   assert.equal(shown?.actorEmail, operator.email, 'who, shown as the operator email');
   assert.ok(new Date(row.created_at) >= started, 'when');
   assert.match(JSON.stringify(row.details), /ticket 123/, 'why');

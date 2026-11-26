@@ -270,6 +270,8 @@ test('S-63: a deletion request erases the shopper’s personal data and keeps ta
   await world.until(async () => (await shop.invoices(row.id)).length, 9000);
   const invoice = (await shop.invoices(row.id))[0];
   const me = await b.me();
+  // An open return keeps the address for its pickup, so an erasure waits for it (erasure.js, OPEN_RETURNS); the seller closes it first.
+  await shop.sql(`UPDATE returns SET status = 'rejected' WHERE tenant_id = $1`, [shop.tenantId]);
   // D2 decision (S-63): buyers have no self-serve "delete my data"; the seller's own path erases. The buyer route refuses it and the page has no button.
   assert.equal((await b.dataRequest('erasure')).status, 400, 'A buyer asked for deletion on their own');
   assert.doesNotMatch((await b.open('/account')).text, /data-erase|Delete my data/, 'The account page still offers deletion');

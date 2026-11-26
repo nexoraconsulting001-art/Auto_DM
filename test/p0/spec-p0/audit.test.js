@@ -74,7 +74,7 @@ test('F-62: a kill switch across 40 businesses writes 1 audit row and 40 complia
   // D2 decision: the log keeps the operator's id; the console's audit view shows the email beside it, looked up when it is read.
   assert.match(audits[0].actor, /^platform:[0-9]+$/);
   assert.ok(!JSON.stringify(audits[0]).includes(operator.email), 'no email is stored in the log');
-  const shown = need(await onConsole(app, operator, consolePaths.auditLog), 200, 'The console audit view').json().items.find((i) => /kill/i.test(i.action));
+  const shown = need(await onConsole(app, operator, '/audit-log'), 200, 'The console audit view').json().items.find((i) => /kill/i.test(i.action));
   assert.equal(shown.actor, audits[0].actor);
   assert.equal(shown.actorEmail, operator.email, 'the operator email is shown beside the id');
   const compliance = await app.db.query(`SELECT tenant_id FROM compliance_events WHERE kind ILIKE '%kill%' OR reason = 'paused.global'`);
