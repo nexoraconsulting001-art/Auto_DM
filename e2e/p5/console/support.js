@@ -31,9 +31,9 @@ export const unique = () => crypto.randomBytes(3).toString('hex');
 
 /**
  * The app with its simulators. `passwordLogin` is the PASSWORD_LOGIN setting: off by default here, as everywhere but
- * tests and local runs.
+ * tests and local runs. `overrides` are more app settings (a spec that needs businesses on their own addresses sets platformDomain).
  */
-export async function openWorld({ passwordLogin = false } = {}) {
+export async function openWorld({ passwordLogin = false, overrides = {} } = {}) {
   const google = createGoogle({ sellerClientId: SELLER_GOOGLE });
   await google.start();
   let app;
@@ -46,6 +46,7 @@ export async function openWorld({ passwordLogin = false } = {}) {
         sellerGoogleClientSecret: 'sim-seller-google-secret',
         googleKeysBaseUrl: google.url,
         idTokenKeyRefetchMs: 0,
+        ...overrides,
       },
     });
   } catch (err) {
