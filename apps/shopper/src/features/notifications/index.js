@@ -1,3 +1,4 @@
+import { createSecureStore } from '@bhava/app-core/storage';
 import NotificationsScreen from './NotificationsScreen.js';
 import { createNotifier } from './flow.js';
 
@@ -6,25 +7,20 @@ import { createNotifier } from './flow.js';
  * notifier (`services.notifications`); the system prompt is asked only after the first order, through the explainer.
  */
 function deviceFlag(services) {
-  const prefix = `shopper.t${services.config.brand.tenantId}`;
-  const options = () => {
-    try {
-      return { keychainAccessible: require('expo-secure-store').WHEN_UNLOCKED_THIS_DEVICE_ONLY };
-    } catch {
-      return undefined;
-    }
-  };
+  // The same store, and so the same keys, as the sign-in (features/sign-in): @bhava/app-core's storage is the one place
+  // that touches SecureStore.
+  const store = services.secureStore ?? createSecureStore({ prefix: `shopper.t${services.config.brand.tenantId}` });
   return {
     get: async (name) => {
       try {
-        return await require('expo-secure-store').getItemAsync(`${prefix}.${name}`, options());
+        return await store.getDeviceFlag(name);
       } catch {
         return null;
       }
     },
     set: async (name, value) => {
       try {
-        await require('expo-secure-store').setItemAsync(`${prefix}.${name}`, String(value), options());
+        await store.setDeviceFlag(name, value);
       } catch {
         // A flag that cannot be kept only means the explainer may be offered once more.
       }

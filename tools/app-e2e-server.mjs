@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SIM_SELLER_CLIENT } from './sim/google/index.mjs';
 import { startAll } from './sim/index.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,6 +44,10 @@ export function serverEnv({ urls, env = process.env, random = () => crypto.rando
     SHOPIFY_BASE_URL: urls.shopify,
     GA4_BASE_URL: urls.google,
     GOOGLE_KEYS_BASE_URL: urls.google,
+    // Sign in with Google against the Google simulator's seller client, so the sign-in screen offers it (P-11), as the
+    // server does wherever Google sign-in is set up. Nothing reaches Google: the keys, the consent page and the token are the simulator's.
+    SELLER_GOOGLE_CLIENT_ID: SIM_SELLER_CLIENT.id,
+    SELLER_GOOGLE_CLIENT_SECRET: SIM_SELLER_CLIENT.secret,
     PLATFORM_WHATSAPP_PHONE_ID: 'sim-platform-number',
     PLATFORM_WHATSAPP_TOKEN: whatsappToken,
     PUSH_DRIVER: 'none',

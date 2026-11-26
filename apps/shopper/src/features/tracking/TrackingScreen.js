@@ -7,6 +7,7 @@ import { safeUrl } from '@bhava/store-client';
 import { Banner, Button, Card, ListRow, LoadingRows, Screen, Section, Text, useTheme } from '@bhava/ui';
 import { useServices } from '../../services.js';
 import { Problem, useBuy, useSessionState, useStoreQuery } from '../cart/ui.js';
+import { openTab } from '../../shell/menu.js';
 
 /** The steps a parcel goes through, in order. Statuses the server uses before a step map to the first. */
 export const STEPS = Object.freeze(['placed', 'packed', 'shipped', 'out_for_delivery', 'delivered']);
@@ -61,7 +62,7 @@ export default function TrackingScreen() {
             </Section>
           ))}
           {!signedIn ? <Text variant="small" testID="tracking-signin-hint">{t('tracking.signInHint')}</Text> : null}
-          <Button testID="tracking-back" kind="quiet" label={t('tracking.back')} onPress={() => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('catalog.index'))} />
+          <Button testID="tracking-back" kind="quiet" label={t('tracking.back')} onPress={() => (navigation.canGoBack() ? navigation.goBack() : openTab(navigation, 'catalog.index'))} />
         </>
       ) : null}
     </Screen>

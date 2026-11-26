@@ -16,6 +16,7 @@ import { AddressForm } from '../addresses/AddressForm.js';
 import { EMPTY_ADDRESS, addressProblems } from '../addresses/states.js';
 import { Problem, Totals, useBag, useBuy, useSessionState, useStoreQuery } from '../cart/ui.js';
 import { consentBody, placeExtra } from './placing.js';
+import { openTab } from '../../shell/menu.js';
 
 const MODES = ['prepaid', 'cod', 'part_advance'];
 const digits = (phone) => String(phone ?? '').replace(/\D/g, '').slice(-10);
@@ -162,7 +163,7 @@ export default function CheckoutScreen() {
     return (
       <Screen testID="screen-checkout" title={t('checkout.title')}>
         <Banner testID="checkout-empty" tone="info">{t('checkout.empty')}</Banner>
-        <Button testID="go-cart" label={t('checkout.backToCart')} onPress={() => navigation.navigate('cart.index')} />
+        <Button testID="go-cart" label={t('checkout.backToCart')} onPress={() => openTab(navigation, 'cart.index')} />
       </Screen>
     );
   }

@@ -20,7 +20,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const pkg = require('./package.json');
 // Permissions libraries add that no app of ours uses: blocked in every app, from one list.
-const { LAUNCHER_BADGE_PERMISSIONS } = require('../../packages/app-core/android-permissions.cjs');
+const { BLOCKED_LIBRARY_PERMISSIONS } = require('../../packages/app-core/android-permissions.cjs');
 const { payDriverOf, readBrand } = require('./brand.cjs');
 const { KEEP_RULES } = require('./plugins/with-native-pay.cjs');
 
@@ -75,7 +75,7 @@ module.exports = () => {
         // Verified links (10.12): the same direct https link a message carries opens the app, with no redirect in between.
         intentFilters: [{ action: 'VIEW', autoVerify: true, data: linkData(brand.linkHosts, brand.linkPaths.open), category: ['BROWSABLE', 'DEFAULT'] }],
         permissions: ['android.permission.CAMERA', 'android.permission.POST_NOTIFICATIONS'],
-        blockedPermissions: ['android.permission.RECORD_AUDIO', 'android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE', 'android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.USE_BIOMETRIC', 'android.permission.USE_FINGERPRINT', ...LAUNCHER_BADGE_PERMISSIONS],
+        blockedPermissions: ['android.permission.RECORD_AUDIO', 'android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE', 'android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.USE_BIOMETRIC', 'android.permission.USE_FINGERPRINT', ...BLOCKED_LIBRARY_PERMISSIONS],
         allowBackup: false,
       },
     } : {}),

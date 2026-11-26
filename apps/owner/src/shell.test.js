@@ -193,7 +193,8 @@ describe('the whole app', () => {
     await fireEvent.press(screen.getByTestId('tab-more'));
     expect(await screen.findByTestId('more-payments')).toBeTruthy();
     expect(screen.getByTestId('more-team')).toBeTruthy();
-    expect(screen.queryByTestId('more-billing')).toBeNull();
+    // Plan and billing is built (Phase 7) and is the owner's alone (PRD 10.4 parity list): the owner is offered it.
+    expect(screen.getByTestId('more-billing')).toBeTruthy();
   });
 
   test('staff with only the orders permission see no screen they may not use', async () => {

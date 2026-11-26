@@ -10,6 +10,7 @@ import { Photo } from '../../shell/parts.js';
 import { useServices } from '../../services.js';
 import { keyOf } from './cart.js';
 import { Amount, Problem, Totals, useBag, useBuy, useStoreQuery } from './ui.js';
+import { openTab } from '../../shell/menu.js';
 
 const STATE_WORDS = { sold_out: 'cart.soldOut', inactive: 'cart.gone', capped: 'cart.capped' };
 
@@ -58,7 +59,7 @@ export default function CartScreen() {
   if (!lines.length) {
     return (
       <Screen testID="screen-cart" title={t('cart.title')}>
-        <EmptyState testID="cart-empty" title={t('cart.emptyTitle')} action={<Button testID="go-shop" label={t('cart.startShopping')} onPress={() => navigation.navigate('catalog.index')} />}>{t('cart.emptyBody')}</EmptyState>
+        <EmptyState testID="cart-empty" title={t('cart.emptyTitle')} action={<Button testID="go-shop" label={t('cart.startShopping')} onPress={() => openTab(navigation, 'catalog.index')} />}>{t('cart.emptyBody')}</EmptyState>
       </Screen>
     );
   }
