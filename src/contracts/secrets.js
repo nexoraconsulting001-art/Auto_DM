@@ -12,10 +12,19 @@ import { z } from 'zod';
  * means "no value" and is skipped, as NULL is.
  *
  * `kind` groups them for the checklist and the runbook, and for nothing else.
+ *
+ * `bind` is the row's identity a value is sealed to (R2-SEC-1): its columns' values, with the table and the column, make
+ * the record binding (secretBinding()) every caller passes to platform.secrets.encrypt() and decrypt(), and the re-wrap job
+ * reads them with each row. By default it is the primary key, with tenant_id first for a business's table; a row whose id
+ * is not known when its value is written is bound to a natural key that is (push_devices, store_access). A value copied
+ * to another business's row, another row or another column does not open there.
  */
 export const SECRET_KINDS = Object.freeze(['token', 'gateway', 'courier', 'shopify', 'push', 'totp', 'store_key', 'tag', 'shopper']);
 
-const column = (table, name, key, kind, tenant = true) => Object.freeze({ table, column: name, key: Object.freeze(key), kind, tenant });
+const column = (table, name, key, kind, tenant = true, bind = null) => {
+  const sealedTo = bind ?? (tenant && !key.includes('tenant_id') ? ['tenant_id', ...key] : key);
+  return Object.freeze({ table, column: name, key: Object.freeze(key), kind, tenant, bind: Object.freeze([...sealedTo]) });
+};
 
 export const SECRET_COLUMNS = Object.freeze([
   column('ig_accounts', 'access_token_enc', ['tenant_id', 'ig_user_id'], 'token'),
@@ -29,18 +38,40 @@ export const SECRET_COLUMNS = Object.freeze([
   column('shipping_settings', 'own_password_enc', ['tenant_id'], 'courier'),
   column('shopify_connections', 'access_token_enc', ['tenant_id'], 'shopify'),
   column('shopify_connections', 'webhook_secret_enc', ['tenant_id'], 'shopify'),
-  column('push_devices', 'token_enc', ['id'], 'push', false),
+  column('push_devices', 'token_enc', ['id'], 'push', false, ['person_id', 'device_id']),
   column('shopper_push_devices', 'token_enc', ['id'], 'push'),
   column('app_push_credentials', 'fcm_service_account_enc', ['tenant_id'], 'push'),
   column('app_push_credentials', 'apns_key_enc', ['tenant_id'], 'push'),
   column('platform_users', 'totp_secret_enc', ['id'], 'totp', false),
-  column('store_access', 'key_enc', ['id'], 'store_key'),
+  column('store_access', 'key_enc', ['id'], 'store_key', true, ['tenant_id', 'platform']),
   column('tag_settings', 'meta_capi_token_enc', ['tenant_id'], 'tag'),
   column('tag_settings', 'ga4_api_secret_enc', ['tenant_id'], 'tag'),
   column('shared_profiles', 'phone_enc', ['id'], 'shopper', false),
   column('shared_profiles', 'name_enc', ['id'], 'shopper', false),
-  column('shared_addresses', 'address_enc', ['id'], 'shopper', false),
+  column('shared_addresses', 'address_enc', ['id'], 'shopper', false, ['id', 'profile_id']),
 ]);
+
+/** The SECRET_COLUMNS entry of a table's column, or an error: a value is sealed only to a listed column. */
+export function secretColumn(table, columnName) {
+  const found = SECRET_COLUMNS.find((c) => c.table === table && c.column === columnName);
+  if (!found) throw new Error(`${table}.${columnName} is not in SECRET_COLUMNS`);
+  return found;
+}
+
+/**
+ * The record binding of a value in `table`.`column` of `row` (R2-SEC-1): a text naming the table, the column and the
+ * values of the column's `bind` columns, read from `row` (an object with those columns as keys; a number and its text
+ * are the same). Throws when one of them is missing, so a value is never sealed to half a record. It names ids only.
+ */
+export function secretBinding(table, columnName, row) {
+  const def = secretColumn(table, columnName);
+  const values = def.bind.map((name) => {
+    const value = row?.[name];
+    if (value === undefined || value === null || value === '') throw new Error(`${table}.${columnName} is sealed to ${name}, which is missing`);
+    return [name, String(value)];
+  });
+  return JSON.stringify(['bhava.secret', def.table, def.column, values]);
+}
 
 /** secret_rewraps.status (migration 900). One row per column and target key: `done` once every row is under that key. */
 export const REWRAP_STATUSES = Object.freeze(['pending', 'running', 'done', 'failed']);
