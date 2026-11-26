@@ -60,7 +60,7 @@ export const buyerPaths = {
   paymentFailure: (token) => `/order/${token}`,
   paymentPending: (token) => `/order/${token}`,
   tracking: (order) => trackingPath(order.tenant_id, order.id, order.public_token),
-  invoice: (token, number) => `/order/${token}/invoice/${number}`,
+  invoice: (token, number) => `/order/${token}/invoice/${encodeURIComponent(number)}`,
   guestCheckout: '/api/store/checkout',
 };
 
@@ -100,18 +100,21 @@ export const hooks = {
  */
 export function fakeMail() {
   const sim = createEmail();
+  const direct = [];
   const mail = {
     sim,
     sent: [],
     start: () => sim.start(),
     close: () => sim.close(),
+    /** Everything sent through the provider's API, then everything handed to send() directly. */
     async messages() {
-      mail.sent = (await sim.get('/sent')).sent;
+      mail.sent = [...(await sim.get('/sent')).sent, ...direct];
       return mail.sent;
     },
     async send(message) {
+      direct.push(message);
       mail.sent.push(message);
-      return { id: `mail-${mail.sent.length}` };
+      return { id: `mail-${direct.length}` };
     },
   };
   return mail;
@@ -130,7 +133,7 @@ export function fakeWhatsapp() {
     async lastCode(phone) {
       const { sent } = await sim.get('/sent');
       const to = String(phone).replace(/\D/g, '');
-      for (const message of sent.filter((m) => m.to === to).reverse()) {
+      for (const message of sent.filter((m) => String(m.to).endsWith(to.slice(-10))).reverse()) {
         const code = /(?<![0-9])[0-9]{6}(?![0-9])/.exec(JSON.stringify(message.body.template ?? message.body.text ?? {}))?.[0];
         if (code) return code;
       }

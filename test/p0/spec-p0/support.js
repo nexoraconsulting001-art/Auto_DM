@@ -147,7 +147,7 @@ export async function startWorld(t, options = {}) {
     await whatsapp.start();
     Object.assign(providers, { whatsappBaseUrl: whatsapp.sim.url, whatsappAppSecret: whatsapp.sim.appSecret, whatsappVerifyToken: 'spec-wa-verify', platformWhatsappPhoneId: '100200300400', platformWhatsappToken: 'sim-whatsapp-token' });
   }
-  const app = await startApp({ ...options, overrides: { platformDomain: NEUTRAL, publicBaseUrl: '', defaultTenant: '', ...providers, ...overrides } });
+  const app = await startApp({ ...options, overrides: { platformDomain: NEUTRAL, publicBaseUrl: '', defaultTenant: '', ...providers, ...(mail ? { mailTransport: mail } : {}), ...overrides } });
   t.after(async () => {
     app.close();
     await Promise.all([rzp.close(), mail?.close(), whatsapp?.close()]);
@@ -205,7 +205,7 @@ export async function addOrder(business, product, customer = CUSTOMER) {
  * A guest's order, placed through the store's own checkout (POST /api/store/checkout), as a shopper's browser would.
  * `email` and `consent` go in the body (order updates by email and WhatsApp are ticked unless said otherwise). Online
  * payment is set up for the business first. `paid` marks it paid the way the payments module does. Returns the order row
- * (with public_token) after its events have been handled.
+ * (with public_token; `answer` is what checkout said) after its events have been handled.
  */
 export async function placeOrder(app, business, product, { customer = CUSTOMER, email = '', paid = false, paymentMode = 'prepaid', consent = { orderUpdates: { whatsapp: true, email: true } } } = {}) {
   await payments(app, { tenant: business.tenant });
@@ -222,7 +222,21 @@ export async function placeOrder(app, business, product, { customer = CUSTOMER, 
   const [order] = await app.db.query('SELECT * FROM orders WHERE tenant_id = $1 AND order_number = $2', [business.tenant.id, res.json().orderNumber]);
   await app.ctx.orderEvents.settle();
   if (paid) await markPaid(app, order.id, { tenant: business.tenant });
-  return (await app.db.query('SELECT * FROM orders WHERE tenant_id = $1 AND id = $2', [business.tenant.id, order.id]))[0];
+  const [placed] = await app.db.query('SELECT * FROM orders WHERE tenant_id = $1 AND id = $2', [business.tenant.id, order.id]);
+  return Object.defineProperty(placed, 'answer', { value: res.json(), enumerable: false });
+}
+
+/** Runs the seller-notification worker once, as the worker process does on its poll (a test app has no worker of its own). */
+export const drainNotifications = (app) => app.ctx.notify.drain();
+
+/** Connects a business's WhatsApp number through the console API and gets every template approved, as Meta's review would. */
+export async function connectWhatsapp(app, business, whatsapp) {
+  const token = await signIn(app, business);
+  const phoneNumberId = `ph${crypto.randomInt(1e6, 9e6)}`;
+  need(await api(app, business, token, '/whatsapp-account', { method: 'PUT', body: { wabaId: `waba${crypto.randomInt(1e6, 9e6)}`, phoneNumberId, accessToken: 'sim-whatsapp-token', displayNumber: '+919000000000' } }), 200, `Connect WhatsApp at ${business.name}`);
+  const first = need(await api(app, business, token, '/whatsapp-templates/sync', { method: 'POST' }), [200, 201], 'Sync WhatsApp templates').json();
+  for (const template of first.items) await whatsapp.sim.post('/templates', { name: template.name, language: template.language, category: template.category, status: 'APPROVED' });
+  need(await api(app, business, token, '/whatsapp-templates/sync', { method: 'POST' }), [200, 201], 'Sync WhatsApp templates again');
 }
 
 /** Connects an Instagram account, so comments on its reels reach this business. */
