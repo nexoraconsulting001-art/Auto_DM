@@ -291,7 +291,8 @@ test('K-60: searching "steel bottle" on the creator page shows the matching prod
   const mine = await searchable(shop);
   const second = await shop.page({ productIds: [mine.item.id], headline: 'Another reel with the bottle' });
   const unrelated = await searchable(shop, { product: 'Cotton Towel', tags: ['bath'], caption: 'Soft and quick to dry' });
-  const theirs = await searchable(other, { product: 'Steel Bottle Deluxe' });
+  // Slugs come from the caption and are per business, so the other business's reel needs its own caption or its slug is rightly ours too.
+  const theirs = await searchable(other, { product: 'Steel Bottle Deluxe', caption: 'Hot all day, theirs' });
   const creator = await creatorPage(shop);
   await creatorPage(other, { slug: creator.slug });
 
