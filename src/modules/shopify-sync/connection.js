@@ -48,7 +48,8 @@ export function pacedClient({ providers, platform }, { shopDomain, accessToken }
 
 export function createConnection(ctx) {
   const { db, platform, providers, config, repos } = ctx;
-  const platformDb = db.platform ?? db;
+  // Read when used, not when the module is built: a module's api(ctx) is also built with no database, to list its routes.
+  const platformDb = () => db.platform ?? db;
 
   async function row() {
     const [found] = await db.query('SELECT * FROM shopify_connections WHERE tenant_id = $1', [tenantId()]);
@@ -94,7 +95,7 @@ export function createConnection(ctx) {
 
   async function connect({ shopDomain, accessToken, webhookSecret, mode }, actor) {
     const domain = shopDomain.toLowerCase();
-    const [taken] = await platformDb.query('SELECT tenant_id FROM shopify_connections WHERE shop_domain = $1', [domain]);
+    const [taken] = await platformDb().query('SELECT tenant_id FROM shopify_connections WHERE shop_domain = $1', [domain]);
     if (taken && taken.tenant_id !== tenantId()) throw new ApiError('conflict', 'This Shopify store is already connected to another business.');
     const client = pacedClient(ctx, { shopDomain: domain, accessToken });
     try {

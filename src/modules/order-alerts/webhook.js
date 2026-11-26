@@ -57,7 +57,8 @@ export async function stopWhatsappMarketing({ db, platform }, phone) {
 
 export function createWhatsappWebhook(ctx) {
   const { db, config, providers, platform } = ctx;
-  const platformDb = db.platform ?? db;
+  // Read when used, not when the module is built: a module's api(ctx) is also built with no database, to list its routes.
+  const platformDb = () => db.platform ?? db;
 
   /** What is kept of a delivery. Never a reply's text; a STOP's number only encrypted. */
   function clean(body) {
@@ -98,7 +99,7 @@ export function createWhatsappWebhook(ctx) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return res.status(400).json({ error: 'That event could not be read.' });
     const payload = clean(body);
     if (!payload.statuses.length && !payload.stops.length) return res.status(200).json({ ok: true });
-    const [row] = await platformDb.query(
+    const [row] = await platformDb().query(
       `INSERT INTO provider_webhook_events (provider, scope, event_id, event_type, payload) VALUES ('whatsapp', 'managed', $1, $2, $3::jsonb)
        ON CONFLICT (provider, scope, event_id) DO NOTHING RETURNING id`,
       [`sha256:${sha256(raw)}`, payload.stops.length ? 'messages' : 'statuses', JSON.stringify(payload)],
@@ -108,7 +109,7 @@ export function createWhatsappWebhook(ctx) {
     if (row) kick();
   }
 
-  const tenantOf = async (phoneNumberId) => (await platformDb.query('SELECT tenant_id FROM whatsapp_accounts WHERE phone_number_id = $1', [phoneNumberId]))[0]?.tenant_id ?? null;
+  const tenantOf = async (phoneNumberId) => (await platformDb().query('SELECT tenant_id FROM whatsapp_accounts WHERE phone_number_id = $1', [phoneNumberId]))[0]?.tenant_id ?? null;
 
   /** One delivery report, inside its business. */
   async function applyStatus(s) {
@@ -173,7 +174,7 @@ export function createWhatsappWebhook(ctx) {
       // A STOP that could not be recorded is never dropped: the whole delivery is tried again (the rest repeat harmlessly).
       if (stopFailed) throw stopFailed;
       // Stopping marks the reply as handled; its encrypted number is dropped from the stored payload.
-      await platformDb.query(
+      await platformDb().query(
         `UPDATE provider_webhook_events SET status = $2, outcome = $3, tenant_id = $4, attempts = attempts + 1, processed_at = now(), last_error = '',
            payload = jsonb_set(payload, '{stops}', '[]'::jsonb)
          WHERE id = $1 AND status = 'received'`,
@@ -182,7 +183,7 @@ export function createWhatsappWebhook(ctx) {
       countWebhookProcessed(platform?.metrics, 'whatsapp', known ? 'processed' : 'ignored');
     } catch (err) {
       reportError(err, { msg: 'whatsapp.webhook_failed', event: Number(row.id) });
-      const [after] = await platformDb.query(
+      const [after] = await platformDb().query(
         `UPDATE provider_webhook_events SET attempts = attempts + 1, last_error = $2, status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE status END WHERE id = $1 AND status = 'received' RETURNING status`,
         [row.id, String(err?.code ?? err?.name ?? 'error').slice(0, 300), MAX_ATTEMPTS],
       );
@@ -193,7 +194,7 @@ export function createWhatsappWebhook(ctx) {
   async function drain() {
     let total = 0;
     for (let pass = 0; pass < 100; pass++) {
-      const rows = await platformDb.query(
+      const rows = await platformDb().query(
         `SELECT * FROM provider_webhook_events WHERE provider = 'whatsapp' AND status = 'received'
            AND (attempts = 0 OR received_at < now() - make_interval(secs => least(3600, 5 * power(4, attempts - 1))))
          ORDER BY id LIMIT $1`,
