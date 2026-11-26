@@ -218,9 +218,14 @@ export const grantService = (shop, service, enabled = true) => sql(shop.world, `
 
 // ---- self-serve sign-up --------------------------------------------------------------------------------------------------------
 
+/** Each person signs in from a device of their own, so the file's one loopback address is not shared by every person it makes. */
+let personsMade = 0;
+export const newAddress = () => `203.0.${113 + Math.floor(personsMade / 250)}.${1 + (personsMade++ % 250)}`;
+
 /** Signs a person in on the sign-in host with a WhatsApp code. No business yet. Returns a caller for the host. */
 export async function appSignIn(world, phone, host = APP) {
-  const headers = { 'x-forwarded-host': host, 'content-type': 'application/json' };
+  const from = newAddress();
+  const headers ={ 'x-forwarded-host': host, 'x-forwarded-for': from, 'content-type': 'application/json' };
   const start = await hit(world, '/api/v1/auth/start', { host, method: 'POST', headers, body: { phone } });
   assert.equal(start.status, 202, `auth.start answered ${start.status}: ${start.text.slice(0, 200)}`);
   const otp = await world.codeFor(phone);
@@ -228,7 +233,7 @@ export async function appSignIn(world, phone, host = APP) {
   const cookie = String(verify.headers['set-cookie']).split(';')[0];
   const csrf = json(verify).csrf;
   const call = async (method, path, body, extra = {}) => {
-    const res = await hit(world, `/api/v1${path}`, { host, cookie, method, ...(body === undefined ? {} : { body }), headers: { 'x-csrf-token': csrf, ...extra } });
+    const res = await hit(world, `/api/v1${path}`, { host, cookie, method, ...(body === undefined ? {} : { body }), headers: { 'x-csrf-token': csrf, 'x-forwarded-for': from, ...extra } });
     return Object.assign(res, { data: json(res) });
   };
   return { phone, cookie, csrf, call };

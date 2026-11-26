@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { SIGNUP_STEPS } from '../../../src/contracts/billing.js';
 import {
-  APP, appSignIn, assertSellerBrand, billingHook, cardCharge, charge, change, authorize, consoleUser, json, key, linksIn, need, newInvite, newPhone, one, opCall, setSetting, setSignup, shopOn, sql,
+  APP, appSignIn, assertSellerBrand, billingHook, cardCharge, charge, change, authorize, consoleUser, json, key, linksIn, need, newAddress, newInvite, newPhone, one, opCall, setSetting, setSignup, shopOn, sql,
   subscribe, unique, useBillingWorld, hit, pause, finishConnect,
 } from './support.js';
 
@@ -46,7 +46,14 @@ test('F-122: a wrong, replayed and expired code does not sign anybody in, and a 
   const again = await hit(world, '/api/v1/auth/verify', { host: APP, method: 'POST', headers, body: { phone, code: real, transport: 'cookie' } });
   assert.ok([400, 401, 429].includes(again.status), 'a code works once');
   let limited = 0;
-  for (let i = 0; i < 12; i++) if ((await hit(world, '/api/v1/auth/start', { host: APP, method: 'POST', headers, body: { phone } })).status === 429) limited++;
+  // A request while a code is still waiting makes no new code (and sends nothing), so it is not counted. The limit is on
+  // codes made: each round uses the last code up, then asks again.
+  for (let i = 0; i < 12; i++) {
+    const asked = await hit(world, '/api/v1/auth/start', { host: APP, method: 'POST', headers, body: { phone } });
+    if (asked.status === 429) { limited++; continue; }
+    need(asked, 202, 'A code');
+    need(await hit(world, '/api/v1/auth/verify', { host: APP, method: 'POST', headers, body: { phone, code: await world.codeFor(phone), transport: 'cookie' } }), 201, 'The right code');
+  }
   assert.ok(limited > 0, 'code requests for one number are limited');
 });
 
