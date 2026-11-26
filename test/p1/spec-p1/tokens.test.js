@@ -7,10 +7,19 @@ import { APP_SECRET, DAY, HOUR, MINUTE, addShop, assertNoDm, assertReason, conne
 const world = useWorld({ proxy: true });
 
 const refreshCalls = (shop) => world.meta.calls({ path: '*/refresh_access_token' }).then((calls) => calls.filter((c) => tokenOfCall(c) === shop.igToken));
-const setTokenAge = (shop, { issuedDaysAgo, expiresInDays, nextRefresh = '-1 hour' }) => shop.sql(
-  `UPDATE ig_accounts SET token_issued_at = now() - make_interval(secs => $3::float * 86400), token_expires_at = now() + make_interval(secs => $4::float * 86400), next_refresh_at = now() + $5::interval WHERE tenant_id = $1 AND ig_user_id = $2`,
-  [shop.tenantId, shop.igUserId, issuedDaysAgo, expiresInDays, nextRefresh],
-);
+// The token's age is Meta's to say too: it refuses to refresh one under 24 hours old. So the account gets a token issued that long ago, as well as the stored dates.
+async function setTokenAge(shop, { issuedDaysAgo, expiresInDays, nextRefresh = '-1 hour' }) {
+  // Only for a token that is due to be refreshed and still valid: the others are about what the stored dates say.
+  if (expiresInDays > 0 && nextRefresh === '-1 hour') {
+    const { token } = await world.meta.post('/tokens', { igUserId: shop.igUserId, issuedAt: Date.now() - issuedDaysAgo * DAY, ttlMs: Math.round((issuedDaysAgo + expiresInDays) * DAY) });
+    await swapToken(shop, token);
+    shop.igToken = token;
+  }
+  await shop.sql(
+    `UPDATE ig_accounts SET token_issued_at = now() - make_interval(secs => $3::float * 86400), token_expires_at = now() + make_interval(secs => $4::float * 86400), next_refresh_at = now() + $5::interval WHERE tenant_id = $1 AND ig_user_id = $2`,
+    [shop.tenantId, shop.igUserId, issuedDaysAgo, expiresInDays, nextRefresh],
+  );
+}
 const refuseAllRefreshes = (kind = 'server_error') => world.meta.fault({ kind, match: { path: '*/refresh_access_token' }, times: 'forever' });
 const clearFaults = () => world.meta.delete('/faults');
 
