@@ -147,19 +147,18 @@ function open(key, [iv, tag, ct], aad) {
   }
 }
 
-/**
- * { version, keyId, bound } of a stored value, or null when it is not one. `bound`: sealed to a record (R2-SEC-1). Reads
- * the text only: no key is needed.
- */
+/** { version, keyId } of a stored value, or null when it is not one. Reads the text only: no key is needed. */
 export function describeStored(stored) {
   const parts = String(stored ?? '').split('.');
   const head = HEAD.exec(parts[0]);
   if (!head) return null;
-  const bound = Boolean(head[2]);
-  if (head[1] === 'v1' && parts.length === 5 && parts[4]) return { version: 'v1', keyId: parts[1], bound };
-  if (head[1] === 'v2' && parts.length === 8 && parts[7]) return { version: 'v2', keyId: parts[1], bound };
+  if (head[1] === 'v1' && parts.length === 5 && parts[4]) return { version: 'v1', keyId: parts[1] };
+  if (head[1] === 'v2' && parts.length === 8 && parts[7]) return { version: 'v2', keyId: parts[1] };
   return null;
 }
+
+/** True when a stored value is sealed to a record (R2-SEC-1). Reads the text only; whose record it is takes decrypt(). */
+export const isBound = (stored) => describeStored(stored) !== null && Boolean(HEAD.exec(String(stored).split('.')[0])?.[2]);
 
 const REDACTED = '[redacted]';
 const NAMED_SECRET = /("?\b(?:access_?token|refresh_?token|id_?token|token|client_?secret|secret|password|passwd|api_?key|apikey|key_?secret|private_?key|authorization)"?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s&,;"'}]+)/gi;

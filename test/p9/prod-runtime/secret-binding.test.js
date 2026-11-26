@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { SECRET_COLUMNS, secretBinding } from '../../../src/contracts/secrets.js';
 import { createSecretRotation } from '../../../src/modules/secret-rotation/index.js';
-import { createSecrets, describeStored } from '../../../src/platform/secrets.js';
+import { createSecrets, describeStored, isBound } from '../../../src/platform/secrets.js';
 import { bindTenant, createRepos } from '../../../src/repos/index.js';
 import { openTestDb } from '../../helpers.js';
 
@@ -30,7 +30,8 @@ test('R2-SEC-1: every secret column writes and reads with its binding, and never
       const here = secretBinding(col.table, col.column, rowFor(col, 7));
       const stored = secrets.encrypt(`value-of-${col.table}.${col.column}`, here);
       const where = `${format} ${col.table}.${col.column}`;
-      assert.deepEqual(describeStored(stored), { version: format, keyId: secrets.currentKeyId, bound: true }, where);
+      assert.deepEqual(describeStored(stored), { version: format, keyId: secrets.currentKeyId }, where);
+      assert.equal(isBound(stored), true, where);
       assert.equal(secrets.decrypt(stored, here), `value-of-${col.table}.${col.column}`, `${where} reads back`);
       assert.equal(stored.includes('value-of'), false);
       if (col.bind.includes('tenant_id')) assert.equal(codeOf(() => secrets.decrypt(stored, secretBinding(col.table, col.column, rowFor(col, 8)))), 'wrong_record', `${where}: another business`);
@@ -90,7 +91,7 @@ test('R2-SEC-1: a value written before the binding reads until binding is requir
   assert.equal(after.needsRotation(bound, here), false);
   assert.equal(after.rewrap(bound, here), bound, 'nothing more to do');
   const boundV1 = after.rewrap(legacyV1, here);
-  assert.deepEqual([describeStored(boundV1).version, describeStored(boundV1).bound], ['v2', true]);
+  assert.deepEqual([describeStored(boundV1).version, isBound(boundV1)], ['v2', true]);
   assert.equal(after.decrypt(boundV1, here), 'legacy-v1');
   // A value already bound to another record is never re-bound to this one.
   const elsewhere = secretBinding('whatsapp_accounts', 'access_token_enc', { tenant_id: 4 });
@@ -171,11 +172,11 @@ test('R2-SEC-1: the re-wrap job binds rows written before the binding, leaves a 
   }
   const rows = await w.q(`SELECT ig_user_id, tenant_id, access_token_enc AS v FROM ig_accounts WHERE ig_user_id LIKE 'ig-legacy-%'`);
   for (const row of rows) {
-    assert.equal(describeStored(row.v).bound, true, `${row.ig_user_id} is bound`);
+    assert.equal(isBound(row.v), true, `${row.ig_user_id} is bound`);
     assert.equal(w.secrets.decrypt(row.v, secretBinding('ig_accounts', 'access_token_enc', row)).startsWith(row.ig_user_id === 'ig-legacy-c' ? 'placeholder' : 'legacy-token'), true);
   }
   const [gw] = await w.q(`SELECT tenant_id, provider, key_secret_enc AS v FROM gateway_keys WHERE tenant_id = $1`, [a.tenant.id]);
-  assert.equal(describeStored(gw.v).bound, true);
+  assert.equal(isBound(gw.v), true);
   const [page] = await w.q(`SELECT access_token_enc AS v FROM fb_pages WHERE page_id = 'page-copied'`);
   assert.equal(page.v, copied, 'a value bound to another record is left as it is');
   const [{ status }] = await w.q(`SELECT status FROM secret_rewraps WHERE table_name = 'fb_pages' AND column_name = 'access_token_enc'`);
