@@ -27,15 +27,27 @@ function parseJson(text) {
 
 const isObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+/**
+ * Meta's own words for what went wrong, with the access token taken out. A provider (or anything in front of one) can echo the
+ * request in its message: the Authorization header, the address with ?access_token=, the token itself. The message becomes the
+ * error's message and so reaches the log, the alerts and the job record, none of which may hold a token.
+ */
+export function withoutToken(text, token) {
+  if (typeof text !== 'string') return text;
+  let out = text.replace(/Bearers+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [removed]').replace(/(access_token|client_secret|appsecret_proof)=[^&s"']+/gi, '$1=[removed]');
+  if (token && String(token).length >= 6) out = out.split(String(token)).join('[removed]');
+  return out;
+}
+
 /** The failure of an answer Meta did give. Without a Graph or OAuth error body, nothing is proved about delivery. */
-function failure(base, status, parsed, usage) {
+function failure(base, status, parsed, usage, token) {
   const graph = isObject(parsed?.error) ? parsed.error : null;
   const oauth = !graph && typeof parsed?.error_message === 'string' ? parsed : null;
   const code = graph?.code ?? oauth?.code;
   const subcode = graph?.error_subcode;
   const kind = oauth ? 'oauth' : classifyGraphError({ status, code, subcode, message: graph?.message });
   const delivery = status === 429 || ((graph || oauth) && status < 500) ? 'none' : 'unknown';
-  return new MetaApiError({ ...base, status, code, subcode, kind, delivery, usage, detail: graph?.message ?? oauth?.error_message, fbtraceId: graph?.fbtrace_id });
+  return new MetaApiError({ ...base, status, code, subcode, kind, delivery, usage, detail: withoutToken(graph?.message ?? oauth?.error_message, token), fbtraceId: graph?.fbtrace_id });
 }
 
 /**
@@ -85,7 +97,7 @@ export function createMetaHttp({ timeoutMs = DEFAULT_TIMEOUT_MS, onCall } = {}) 
     const usage = parseUsage(res.headers.get('x-business-use-case-usage'));
     const parsed = parseJson(text);
     if (!res.ok || isObject(parsed?.error)) {
-      const err = failure(base, res.status, parsed, usage);
+      const err = failure(base, res.status, parsed, usage, token);
       report(started, base, { status: res.status, code: err.code, subcode: err.subcode, usage, kind: err.kind });
       throw err;
     }
