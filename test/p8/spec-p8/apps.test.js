@@ -146,8 +146,9 @@ test('Q-14: the owner of each seeded business signs in from the owner app with a
     const session = await appSession(app.base, { phone: b.seed.business.owner.phone, whatsapp: app.whatsapp, tenantId: result.tenantId, app: { name: 'owner', version: '1.0.0' } });
     assert.ok(session.accessToken && session.refreshToken, `${b.key}: tokens`);
     const me = await get(app, session, '/auth/me');
-    assert.equal(me.status, 200, await me.text());
-    const who = await me.json();
+    const meText = await me.text(); // read once: a body can be read once, and an assertion's message is evaluated even when it passes
+    assert.equal(me.status, 200, meText);
+    const who = JSON.parse(meText);
     assert.equal(who.business?.id ?? who.tenantId, result.tenantId, `${b.key}: it is its own business`);
     const products = await get(app, session, '/products?limit=100');
     assert.equal(products.status, 200);
@@ -176,7 +177,8 @@ test('Q-14: the owner of one seeded business cannot open the other, by asking fo
   const theirs = new Set(b.catalogue.products.map((p) => p.name));
   const mine = new Set(a.catalogue.products.map((p) => p.name));
   assert.ok(names.every((n) => mine.has(n) || !theirs.has(n)), 'a header does not switch business');
-  const owners_ = await sql(app, `SELECT tenant_id, count(*)::int AS n FROM users WHERE phone LIKE $1 GROUP BY 1`, [`%${a.seed.business.owner.phone.slice(-10)}`]);
+  const owners_ = await sql(app, `SELECT tenant_id, count(*)::int AS n FROM users WHERE phone LIKE $1 AND tenant_id = $2 GROUP BY 1`, [`%${a.seed.business.owner.phone.slice(-10)}`, ra.tenantId]);
+  // Its own business only: the test server's first business has an owner with the same invented phone, and that is a different business.
   assert.deepEqual(owners_.map((r) => r.n), [1], 'the owner exists once, even after the seed ran');
 });
 
