@@ -37,7 +37,7 @@ export function analyticsApi(ctx) {
     'savedViews.remove': async ({ params, user }) => (await repos.savedViews.remove(params.id, user)) || notFound(),
     'savedViews.pin': ({ params, user }) => repos.savedViews.pin(params.id, user),
     'savedViews.unpin': async ({ params, user }) => {
-      await repos.savedViews.unpin(params.id, user);
+      if (!await repos.savedViews.unpin(params.id, user)) notFound();
     },
     'dashboard.cards': async ({ user }) => {
       const views = await repos.savedViews.pinned(user);

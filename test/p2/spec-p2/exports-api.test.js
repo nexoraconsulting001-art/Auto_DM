@@ -300,7 +300,7 @@ test('N-64: the same metrics, dimensions and filters as Explore, with cursor pag
 test('N-64: hostile reporting queries are refused, and the catalogue is the plan\'s own', async () => {
   const shop = await addP2Shop(world);
   const { key } = await createKey(shop);
-  for (const query of ['metrics=', 'metrics=nope', 'metrics=sessions&dimensions=visitor_id', 'metrics=sessions&dimensions=source,device,city', 'metrics=sessions&range=evil', 'metrics=sessions&limit=0', 'metrics=sessions&limit=101', "metrics=sessions&cursor='", 'metrics=sessions;DROP TABLE tenants']) {
+  for (const query of ['metrics=', 'metrics=nope', 'metrics=sessions&dimensions=visitor_id', 'metrics=sessions&dimensions=source,device,city', 'metrics=sessions&range=evil', 'metrics=sessions&limit=0', 'metrics=sessions&limit=101', "metrics=sessions&cursor='", 'metrics=sessions;DROP%20TABLE%20tenants']) {
     assert.equal((await reporting(shop, key, `/metrics?${query}`)).status, 400, query);
   }
   for (const id of ['abc', '0', '-1', "1'--"]) assert.ok([400, 404].includes((await reporting(shop, key, '/metrics?metrics=sessions', { business: id })).status), id);

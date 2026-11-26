@@ -429,7 +429,14 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     const plain = { ...action, message: fallbackMessage(action.message, options.fallbackText) };
     const again = await gate.load(plain, { subject: state.subject ?? job?.subject_hash ?? '', account: state.account });
     const verdict = evaluate(plain, again, { at: +now(), limits, trigger: options.trigger ?? '' });
-    if (!verdict.allow) return mapError(err, action, state.account);
+    if (!verdict.allow) {
+      const refused = await mapError(err, action, state.account);
+      // The plain text itself breaks a content or link rule: there is nothing left to send, so the send failed (send.error, Needs a human).
+      if (verdict.outcome === 'failed') return refused;
+      // A rule about the person or the account stopped it (an opt-out landing between the two tries, a pause, a closed window): that rule is
+      // the job's outcome and the logged reason, as for any send the gate refuses. Meta's refusal of the first message stays in the facts.
+      return { ...refused, outcome: verdict.outcome, reason: verdict.reason, retryAt: verdict.retryAt ?? null };
+    }
     try {
       return delivered(await dispatch({ ...plain, message: finalMessage(plain, again) }, state.account, options), 'sent_fallback', 'fallback.validation');
     } catch (second) {

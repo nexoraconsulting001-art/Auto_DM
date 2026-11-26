@@ -1,13 +1,12 @@
 // Shared by the reports tests: the whole app on a fresh database, businesses with their own owners and addresses, a clock the test sets for
 // reports, and the module's own job handlers, drained by the test so a run is deterministic.
 import crypto from 'node:crypto';
-import { config as baseConfig } from '../../../src/config.js';
 import { MODULES } from '../../../src/modules/index.js';
 import { QUEUE_TICK, jobHandlers } from '../../../src/modules/reports/jobs.js';
 import { createPlatform } from '../../../src/platform/index.js';
 import { bindTenant, createRepos } from '../../../src/repos/index.js';
 import { withTenant } from '../../../src/tenancy.js';
-import { TEST_DATA_KEY, startApp } from '../../helpers.js';
+import { startApp } from '../../helpers.js';
 import { NEUTRAL, addBusiness, api, hit, need, nextPhone, signIn } from '../../p0/spec-p0/support.js';
 
 export { NEUTRAL, api, captureLogs, hit, need, requestId } from '../../p0/spec-p0/support.js';
@@ -27,8 +26,9 @@ export async function openWorld(t, { at = Date.now() } = {}) {
   const overrides = { platformDomain: NEUTRAL, publicBaseUrl: '', defaultTenant: '', reportsNow: () => clock.t };
   const app = await startApp({ overrides });
   t.after(() => app.close());
-  // The worker's side: the same database, its own drivers, as src/worker.js builds them.
-  const config = { ...baseConfig, storageDriver: 'memory', queueDriver: 'pg', analyticsDriver: 'pg', cacheDriver: 'memory', sessionSecret: 'test-secret', dataKey: TEST_DATA_KEY, ...overrides };
+  // The worker's side: the same database, its own drivers, as src/worker.js builds them, from the app's own config, so on the CI production profile
+  // (STORAGE_DRIVER, QUEUE_DRIVER, ... from the environment) the worker writes files to the store and jobs to the queue the web app reads.
+  const config = { ...app.config };
   const drivers = createPlatform(config, { db: app.db });
   const repos = createRepos(app.db, { storage: drivers.storage, secrets: drivers.secrets, modules: MODULES });
   const jobCtx = { db: app.db, repos, platform: drivers, config, ig: app.ig, modules: MODULES };

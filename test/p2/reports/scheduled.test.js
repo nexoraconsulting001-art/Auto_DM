@@ -82,7 +82,9 @@ test('N-62: hostile schedules are refused, another business\'s is not found, and
   const tier1 = await w.addShop({ plan: 't1' });
   const refused = await tier1.call('/scheduled-reports', { method: 'POST', body: { viewId: (await newView(tier1)).id } });
   assert.equal(refused.status, 403);
-  assert.match(refused.json().error, /tier 2/);
+  // Phase 7: the router answers for the plan from the route table (plan.feature_off naming the lowest plan, tier 2), not this module's own wording.
+  assert.equal(refused.json().code, 'plan.feature_off');
+  assert.equal(refused.json().plan, 't2');
   const privateView = await newView(a, undefined, 'private');
   const manager = await a.addUser('manager');
   assert.equal((await a.call('/scheduled-reports', { method: 'POST', body: { viewId: privateView.id } }, manager.token)).status, 404, 'Someone else\'s private view');

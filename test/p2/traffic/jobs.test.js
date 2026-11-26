@@ -58,7 +58,8 @@ test('this module answers only its own routes until an app adopts the stubs, and
   assert.equal((await api(world, '/funnels')).status, 200);
   assert.equal((await api(world, '/insights/funnels')).status, 200);
   assert.equal((await api(world, '/insights/status')).status, 200, 'a route the insights module really built stays answered by it');
-  // Stub era: /downloads answered 501 here until the reports module was built; it is built now, so the module that owns it answers.
-  assert.equal((await api(world, '/downloads')).status, 200, 'a route another module built is answered by that module');
+  // Stub era: /downloads was a 501 stub when this track was built; the reports module has since built it (src/modules/reports/api.js downloads.list).
+  assert.equal((await api(world, '/downloads')).status, 200, 'a route this track does not build is answered by the module that did, untouched by this one');
+  assert.equal(Object.hasOwn(traffic.api(bare), 'downloads.list'), false, 'this track does not answer it');
   assert.ok(MODULES.find((m) => m.name === 'reports').api(bare)['explore.query'], 'the shared module objects are not changed');
 });
