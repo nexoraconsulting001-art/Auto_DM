@@ -56,7 +56,8 @@ test('money stays exact to the paisa at every size, through create and update', 
   for (const pricePaise of [0, 1, 5, 10, 99, 100, 101, 1999, 12345, 1999999, 2147483647]) {
     const saved = await ok(await api('PATCH', `/products/${id}`, { pricePaise, mrpPaise: pricePaise }));
     assert.equal(saved.pricePaise, pricePaise);
-    assert.equal(saved.mrpPaise, pricePaise);
+    // An MRP is kept only above the price (PRD 8.1, R2-CAT-4): one equal to the price is stored as none.
+    assert.equal(saved.mrpPaise, null);
   }
 }));
 
@@ -167,8 +168,9 @@ test('F-01: two businesses can each have the same product slug and see only thei
 test('another business\'s category cannot be attached to a product', withApp(async (app) => {
   const leaf = await secondBusiness(app);
   const theirs = await ok(await leaf.api('POST', '/categories', { name: 'Theirs' }), 201);
-  const product = await ok(await app.api('POST', '/products', { ...pot, categoryIds: [theirs.id] }), 201);
-  assert.deepEqual(product.categoryIds, []);
+  // K-01 (R2-CAT-4): the save is refused by name, and nothing is linked.
+  await refused(await app.api('POST', '/products', { ...pot, categoryIds: [theirs.id] }), 400, 'validation_failed');
+  assert.deepEqual((await ok(await app.api('GET', '/products'))).items, []);
   assert.equal((await ok(await leaf.api('GET', `/categories/${theirs.id}`))).productCount, 0);
 }));
 
