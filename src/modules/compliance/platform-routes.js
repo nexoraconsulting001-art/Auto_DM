@@ -124,6 +124,25 @@ export function registerPlatformRoutes(router, ctx) {
     return businessDetail(tenant.id);
   });
 
+  // PRD 4.15 (C-52): the app's Meta access level for this business, and whether its account holds an app role. Only a super admin (the route
+  // table's platformRoles). The release gates read these; the next gate check (hourly, or a launch) applies the change.
+  route('platform.setMetaAccess', async ({ params, body, actor, res }) => {
+    const tenant = await repos.tenants.get(params.id);
+    if (!tenant) return res.status(404).json({ error: 'Not found.' });
+    await withTenant(tenant, async () => {
+      await repos.compliance.settings();
+      await db.tx(async (t) => {
+        await t.query(
+          'UPDATE compliance_settings SET access_level = $2, app_role_ok = COALESCE($3, app_role_ok), updated_at = now() WHERE tenant_id = $1',
+          [tenant.id, body.accessLevel, body.appRoleOk ?? null],
+        );
+        await writeAudit(t, { actor, action: 'compliance.meta_access', target: String(tenant.id), details: { accessLevel: body.accessLevel, ...(body.appRoleOk === undefined ? {} : { appRoleOk: body.appRoleOk }) } });
+      });
+    });
+    compliance.invalidateSwitches();
+    return businessDetail(tenant.id);
+  });
+
   route('platform.resumeBusiness', async ({ params, body, actor, res }) => {
     const tenant = await repos.tenants.get(params.id);
     if (!tenant) return res.status(404).json({ error: 'Not found.' });
