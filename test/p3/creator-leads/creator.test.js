@@ -169,7 +169,8 @@ test('K-61, K-62, K-53: a shelf link opens on that shelf, indexable, with its ow
   assert.equal(shelfPage.status, 200);
   assert.match(shelfPage.text, /<title>Kitchen · Priya<\/title>/);
   assert.match(shelfPage.text, /<meta property="og:description" content="Pots and pans">/);
-  assert.match(shelfPage.text, /<meta property="og:image" content="https:\/\/cdn\.example\/kadai\.jpg">/);
+  // The share image is the 1200 x 630 card the app draws (PRD 8.12, K-62), at its own address on this host, with its size in the tags.
+  assert.match(shelfPage.text, /<meta property="og:image" content="https?:\/\/[^"\/]+\/media\/[0-9a-f-]{36}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">/);
   assert.match(shelfPage.text, /<link rel="canonical" href="http:\/\/127\.0\.0\.1(:\d+)?\/priya\/kitchen">/);
   assert.match(shelfPage.text, /<meta name="robots" content="index,follow">/);
   assert.match(shelfPage.text, /<a class="chip" href="\/priya\/kitchen" aria-current="page">Kitchen<\/a>/, 'the page opens on that shelf');

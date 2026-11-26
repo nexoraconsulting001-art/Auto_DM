@@ -2,8 +2,7 @@ import { displayPrice } from '../../contracts/catalog.js';
 import { BIO_UTM } from '../../contracts/buyer-pages.js';
 import { priceText, productCard, safeHref } from '../../views/buyer/index.js';
 import { html, raw } from '../../views/html.js';
-import { tenantId } from '../../tenancy.js';
-import { storeBaseUrl } from '../admin-api/urls.js';
+import { currentTenant, tenantId } from '../../tenancy.js';
 import { sized } from '../pages/variants.js';
 import { LIVE_PRODUCT_SQL, tileImage, tileTitle } from './repo.js';
 
@@ -21,8 +20,13 @@ export const nowOf = (config) => new Date((config?.pagesNow ?? Date.now)());
  * else the address the shopper used. Never the platform's own domain unless the shopper is already on it.
  */
 export function pageBase(req, config) {
-  // The address buyers are sent to, the same one the landing pages use: https on the business's own address, not whatever the proxy hop said (K-53).
-  return storeBaseUrl(req, config);
+  const primary = currentTenant()?.primary_domain ?? null;
+  if (primary) return `https://${primary}`;
+  // A business's own public address (its name on the platform domain) is https only, so its share tags and canonical address say so
+  // whatever hop the request came over (K-53); any other host, such as a local run, keeps the request's own scheme.
+  const host = req.get('host');
+  const own = currentTenant()?.slug && config?.platformDomain && String(host).toLowerCase().split(':')[0] === `${currentTenant().slug}.${config.platformDomain}`.toLowerCase();
+  return `${own ? 'https' : req.protocol}://${host}`;
 }
 
 /** A path on this host made absolute for a share tag; a web link stays as it is. */
