@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { ApiError } from '../../contracts/api/index.js';
 import { COMPLIANCE_LIMITS as L } from '../../contracts/compliance.js';
 import { checkContent } from '../compliance/content.js';
+import { META_ACCESS_HELD } from '../compliance/gate.js';
 import { directLink } from '../links/rules.js';
 import { engineFor } from './engine.js';
 import { windowOpen } from './inbox.js';
@@ -9,6 +10,7 @@ import { faqPayload, render } from './message.js';
 import { checkLaunch, checkSave, checkWrittenLinks, contentProblems, normalizeTriggers, warningsFor } from './rules.js';
 
 const SAMPLE_NAME = 'Asha';
+const META_ACCESS_REFUSAL = 'Meta is not accepting your business’s connection right now, so replies can’t be sent. Fix the connection on the Connect page, then try again.';
 const actorOf = (user) => `user:${user.id}`;
 
 /** Answers the automations, testers, ice breaker and inbox routes of the seller API (PRD 6.1 to 6.9). */
@@ -153,6 +155,8 @@ export function automationsApi(ctx) {
         kind: 'dm', purpose: 'manual', channel: thread.channel, accountId, recipientId: thread.recipient_id, personId: thread.recipient_id, idempotencyKey: `manual:${thread.id}:${crypto.randomUUID()}`,
         expiresAt: new Date(new Date(thread.last_user_message_at).getTime() + L.messagingWindowMs), message: { text: body.text },
       });
+      // B-MSG-6: while Meta access is lost nothing goes out, and a reply the seller typed is refused, never held to go later.
+      if (result.reason === META_ACCESS_HELD) throw new ApiError('conflict', META_ACCESS_REFUSAL, { reason: META_ACCESS_HELD });
       if (!['sent', 'sent_fallback'].includes(result.outcome)) return { outcome: result.outcome, reason: result.reason, automationPausedUntil: repos.inbox.toThread(thread, clock()).automationPausedUntil };
       await repos.inbox.addOwnerReply({ threadId: thread.id, text: body.text, mid: result.messageId, at: clock() });
       const automationPausedUntil = await repos.inbox.pauseForOwner(thread.id, new Date(clock().getTime() + L.threadOwnerRepliedMs));

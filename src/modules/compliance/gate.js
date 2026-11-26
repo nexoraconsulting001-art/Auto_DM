@@ -20,6 +20,15 @@ const SLOW_MODE_MEDIA_GAP_MS = 2 * MINUTE;
 /** Usage headers are only as good as the last call that carried one: with every call paused, nothing would ever refresh them. */
 export const USAGE_STALE_MS = 5 * MINUTE;
 
+/**
+ * B-MSG-6: a business that passed Meta's release gates (PRD 4.15) and then stopped passing them with an account still connected
+ * (ig-connect recordGates sets compliance_settings.gate_lost_at) has lost Meta access. Its automated sends are held with this
+ * reason on every channel, released when the gates pass again, and dropped with META_ACCESS_DROPPED once held this long.
+ */
+export const META_ACCESS_HELD = 'paused.meta_access';
+export const META_ACCESS_DROPPED = 'expired.meta_access';
+export const META_ACCESS_HOLD_MS = 24 * HOUR;
+
 const OK = Object.freeze({ allow: true, outcome: 'queued', reason: '' });
 const deny = (outcome, reason, retryAt) => ({ allow: false, outcome, reason, ...(retryAt ? { retryAt } : {}) });
 
@@ -75,7 +84,7 @@ const threadPause = (action, s, at) => (action.kind !== 'public_reply' && s.thre
 
 /**
  * Every rule, at the moment of sending. Broadest stop first, so the log names the switch that actually stopped it.
- * s: { globalKill, tenantPaused, breakerBlocks, account, automation, optedOut, thread, rate, disclosureEnabled, lastAutomationDmAt, lastMediaDmAt, ... }
+ * s: { globalKill, tenantPaused, breakerBlocks, metaAccessLost, account, automation, optedOut, thread, rate, disclosureEnabled, lastAutomationDmAt, lastMediaDmAt, ... }
  */
 export function evaluate(action, s, { at, limits, trigger = '' }) {
   const automated = action.purpose !== 'manual';
@@ -87,6 +96,8 @@ export function evaluate(action, s, { at, limits, trigger = '' }) {
   if (s.tenantPaused) return deny('held', 'paused.tenant');
   if (!s.account?.token || s.account.status !== 'active') return deny('held', 'paused.reconnect');
   if (s.breakerBlocks) return deny('held', 'paused.breaker');
+  // Meta access lost after go-live (B-MSG-6): an automated send waits for it to come back, a seller's own reply is refused.
+  if (s.metaAccessLost) return automated ? deny('held', META_ACCESS_HELD) : deny('skipped', META_ACCESS_HELD);
   if (automated && s.automation?.state === 'paused') return deny('held', 'paused.automation');
   if (automated && s.automation?.state === 'archived') return deny('cancelled', 'cancelled.owner');
 
@@ -165,6 +176,7 @@ export function evaluateCreation(action, s, { at, limits }) {
   if (s.tenantPaused) return { status: 'held', reason: 'paused.tenant' };
   if (s.account && s.account.status !== 'active') return { status: 'held', reason: 'paused.reconnect' };
   if (s.breakerBlocks) return { status: 'held', reason: 'paused.breaker' };
+  if (s.metaAccessLost) return automated ? { status: 'held', reason: META_ACCESS_HELD } : { terminal: deny('skipped', META_ACCESS_HELD) };
   if (automated && s.automation?.state === 'paused') return { status: 'held', reason: 'paused.automation' };
   if (action.kind === 'public_reply' && slowModeActive(s.rate, at)) return { status: 'held', reason: 'rate.slow_mode' };
   // PRD 4.3 keeps live automations sending in slow mode; it is an automation made since slow mode began that waits for review.
@@ -184,7 +196,7 @@ export function createGate({ db, repos, config, now, limits, channels }) {
     if (hit && at - hit.at < limits.switchCacheMs) return hit.value;
     const [row] = await db.query(
       `SELECT (SELECT engaged FROM platform_switches WHERE key = 'global_kill') AS global_kill, t.status AS tenant_status,
-              s.paused, s.paused_by, s.pause_store, s.dry_run, s.disclosure_enabled, s.utm_enabled, s.cap_overrides, s.score_review_needed,
+              s.paused, s.paused_by, s.pause_store, s.gate_passed_at, s.gate_lost_at, s.dry_run, s.disclosure_enabled, s.utm_enabled, s.cap_overrides, s.score_review_needed,
               b.state AS breaker_state, b.open_until, b.reduced_until, b.opened_at, b.updated_at AS breaker_updated_at, b.trip_reason
        FROM tenants t
        LEFT JOIN compliance_settings s ON s.tenant_id = t.id
@@ -201,6 +213,7 @@ export function createGate({ db, repos, config, now, limits, channels }) {
       disclosureEnabled: Boolean(row?.disclosure_enabled),
       capOverrides: row?.cap_overrides ?? {},
       scoreReviewNeeded: Boolean(row?.score_review_needed),
+      metaAccessLost: !row?.gate_passed_at && Boolean(row?.gate_lost_at),
       breaker: { state: row?.breaker_state ?? 'closed', openUntil: row?.open_until ?? null, reducedUntil: row?.reduced_until ?? null, openedAt: row?.opened_at ?? null, updatedAt: row?.breaker_updated_at ?? null, tripReason: row?.trip_reason ?? '' },
     };
     switchCache.set(key, { at, value });

@@ -35,6 +35,8 @@ const EXPLANATIONS = Object.freeze({
   'thread.owner_replied': 'You replied yourself, so automation is paused in this chat.',
   'send.unknown_outcome': 'Instagram didn’t confirm this. We won’t resend it, in case it arrived.',
   'send.error': 'Instagram refused this message.',
+  'paused.meta_access': 'Meta stopped accepting your business’s connection, so this is waiting. It goes if the connection is fixed within 24 hours.',
+  'expired.meta_access': 'Meta didn’t accept your business’s connection for more than 24 hours, so this was dropped.',
 });
 const pausedText = 'Automation was paused when this came in. It’s waiting for you, if it hasn’t expired.';
 
