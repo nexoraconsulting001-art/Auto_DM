@@ -111,7 +111,8 @@ test('C-32: 600 DMs in one hour, replies on: 20 or fewer on that media, no back-
   }
   need(await world.webhook({ object: 'instagram', entry: entries }), 200, 'The batch');
   await shop.settle({ ms: 60_000, roundMs: 2000 });
-  for (let step = 0; step < 40; step++) {
+  // 30 steps of 91 s are 45 minutes, which with the time the run itself takes stays inside the one hour the cap counts over (40 of them, 61 minutes, did not).
+  for (let step = 0; step < 30; step++) {
     await world.travel(MAX_DELAY + SECOND);
     await shop.settle({ ms: 1500, roundMs: 500 });
   }
