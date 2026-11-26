@@ -1,6 +1,12 @@
 import { platformAppHostOf } from '../../config.js';
 import { isSignInHost } from '../../tenancy.js';
 
+/** The browser sign-in page's facts (AppRequirements.web): the password form is named only where it can be drawn (P-11). */
+function webSignIn(ctx, req) {
+  const signInHost = isSignInHost(req?.hostname, platformAppHostOf(ctx.config ?? {}));
+  return ctx.config?.passwordLogin && !signInHost ? { signInHost, passwordLogin: true } : { signInHost };
+}
+
 /**
  * app.requirements (PRD 10.2, 10.3): what an app must know before anyone signs in. The oldest version the API still
  * answers and where to get a newer one (repos.appVersions; the router answers 426 from the same rows), and which ways
@@ -20,10 +26,7 @@ export function appRequirements(ctx) {
         google: Boolean(ctx.google?.signIn?.configured),
         apple: query.platform === 'ios' && Boolean(ctx.apple?.signIn?.configured),
       },
-      web: {
-        signInHost: isSignInHost(req?.hostname, platformAppHostOf(ctx.config ?? {})),
-        passwordLogin: Boolean(ctx.config?.passwordLogin),
-      },
+      web: webSignIn(ctx, req),
     };
   };
 }

@@ -49,7 +49,8 @@ describe('with PASSWORD_LOGIN on (tests and local runs)', () => {
   test('the server says it is the sign-in host there and nowhere else, even where Google is not set up', async () => {
     const there = await call(app, '/api/v1/app/requirements?platform=android');
     assert.equal(there.status, 200, there.text);
-    assert.deepEqual(there.json.web, { signInHost: true, passwordLogin: true });
+    // The sign-in host has no password form (no password could name a business there), so its answer names none (P-11).
+    assert.deepEqual(there.json.web, { signInHost: true });
     const here = await call(app, '/api/v1/app/requirements?platform=android', { host: null });
     assert.deepEqual(here.json.web, { signInHost: false, passwordLogin: true });
     // What the flag stands for: on the sign-in host Google's start answers with a redirect; anywhere else it is not there.
@@ -100,7 +101,7 @@ describe('with PASSWORD_LOGIN off (everywhere else)', () => {
   test('Google is offered where it starts: set up on the server, and on the sign-in host', async () => {
     const res = await call(app, '/api/v1/app/requirements?platform=android');
     assert.equal(res.json.signIn.google, true);
-    assert.deepEqual(res.json.web, { signInHost: true, passwordLogin: false });
+    assert.deepEqual(res.json.web, { signInHost: true });
     assert.equal((await signInPage(app, APP_HOST)).ways.google, true);
     const elsewhere = await signInPage(app, null);
     assert.equal(elsewhere.ways.google, false);
