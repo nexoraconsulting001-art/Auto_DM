@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { SIGNATURE_HEADERS } from '../../contracts/store-routes.js';
 import { log, reportError } from '../../platform/log.js';
 import { isOptOut } from '../compliance/words.js';
+import { toE164 } from '../shoppers/keys.js';
 import { tenantId, withTenant } from '../../tenancy.js';
 import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
 
@@ -47,11 +48,15 @@ export const isStop = (text) => {
 
 /** The shopper's yes to WhatsApp marketing at this business is taken back, and their scheduled WhatsApp cart reminders stop. */
 export async function stopWhatsappMarketing({ db, platform }, phone) {
-  await platform.consent.revoke({ subject: { phone }, purpose: 'marketing', channel: 'whatsapp', source: 'reply' });
+  // The STOP came from this number itself, so the ledger row also names the shopper whose number it is at this business
+  // (the account page and the consent ledger read it by account); the phone key alone already stops the sends.
+  const e164 = toE164(phone);
+  const [shopper] = e164 ? await db.query('SELECT id FROM shoppers WHERE tenant_id = $1 AND phone = $2 AND erased_at IS NULL', [tenantId(), e164]) : [];
+  await platform.consent.revoke({ subject: { phone, ...(shopper ? { shopperId: shopper.id } : {}) }, purpose: 'marketing', channel: 'whatsapp', source: 'reply' });
   await db.query(
     `UPDATE cart_reminders r SET status = 'cancelled', stop_reason = 'opted_out'
      FROM shoppers s WHERE r.tenant_id = $1 AND s.tenant_id = r.tenant_id AND s.id = r.shopper_id AND s.phone = $2 AND r.status = 'scheduled' AND r.channel = 'whatsapp'`,
-    [tenantId(), phone],
+    [tenantId(), e164 ?? phone],
   );
 }
 
