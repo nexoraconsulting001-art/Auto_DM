@@ -10,13 +10,13 @@ import { housekeeping } from '../../../src/worker.js';
 import { CONSOLE_HOST, addBusiness, api, asAppRole, consoleUser, findAppRole, hit, need, onConsole, signIn, startWorld } from './support.js';
 import { consolePaths, rawExportsTable, razorpayKeys, sellerPaths } from './surfaces.js';
 
-const auditRows = (app, tenantId) => app.db.query('SELECT * FROM audit_log WHERE tenant_id = $1 ORDER BY id', [tenantId]);
+const auditRows = (app, tenantId) => app.db.platform.query('SELECT * FROM audit_log WHERE tenant_id = $1 ORDER BY id', [tenantId]);
 
 async function storeWithEvents(t, options) {
   const app = await startWorld(t, options);
   const a = await addBusiness(app, { slug: 'alpha-store', name: 'Alpha Store' });
   const b = await addBusiness(app, { slug: 'beta-store', name: 'Beta Store' });
-  await app.db.query(`INSERT INTO compliance_events (tenant_id, kind, decision, reason) VALUES ($1, 'dm', 'allow', ''), ($1, 'dm', 'deny', 'cap.user'), ($2, 'dm', 'allow', '')`, [a.tenant.id, b.tenant.id]);
+  await app.db.platform.query(`INSERT INTO compliance_events (tenant_id, kind, decision, reason) VALUES ($1, 'dm', 'allow', ''), ($1, 'dm', 'deny', 'cap.user'), ($2, 'dm', 'allow', '')`, [a.tenant.id, b.tenant.id]);
   return { app, a, b };
 }
 
@@ -40,7 +40,7 @@ test('F-60: a changed Razorpay key appears in the audit row only as rzp_...1234'
 test('F-61: DELETE FROM audit_log is denied, for the app\'s own connection and the app role', async (t) => {
   const app = await startWorld(t);
   const shop = await addBusiness(app, { slug: 'kesar-home', name: 'Kesar Home' });
-  await app.db.query(`INSERT INTO audit_log (tenant_id, actor, action) VALUES ($1, 'spec', 'login')`, [shop.tenant.id]);
+  await app.db.platform.query(`INSERT INTO audit_log (tenant_id, actor, action) VALUES ($1, 'spec', 'login')`, [shop.tenant.id]);
 
   await assert.rejects(() => app.db.query('DELETE FROM audit_log'), /denied|retention|insert-only/i);
   const role = await findAppRole(app.db);
@@ -55,20 +55,20 @@ test('F-61: DELETE FROM audit_log is denied, for the app\'s own connection and t
 test('F-61: audit rows cannot be edited', async (t) => {
   const app = await startWorld(t);
   const shop = await addBusiness(app, { slug: 'kesar-home', name: 'Kesar Home' });
-  await app.db.query(`INSERT INTO audit_log (tenant_id, actor, action) VALUES ($1, 'spec', 'login')`, [shop.tenant.id]);
+  await app.db.platform.query(`INSERT INTO audit_log (tenant_id, actor, action) VALUES ($1, 'spec', 'login')`, [shop.tenant.id]);
   await assert.rejects(() => app.db.query(`UPDATE audit_log SET actor = 'someone else'`), /insert-only|denied/i);
 });
 
 test('F-62: a kill switch across 40 businesses writes 1 audit row and 40 compliance rows', async (t) => {
   const app = await startWorld(t);
   for (let i = 1; i <= 39; i++) await app.platform.tenants.create({ slug: `shop-${i}`, name: `Shop ${i}` });
-  const [{ n }] = await app.db.query(`SELECT count(*)::int AS n FROM tenants WHERE status = 'active'`);
+  const [{ n }] = await app.db.platform.query(`SELECT count(*)::int AS n FROM tenants WHERE status = 'active'`);
   assert.equal(n, 40, 'the default business plus 39');
   const operator = await consoleUser(app);
   const reason = 'Meta policy notice, ticket 77';
 
   need(await onConsole(app, operator, consolePaths.killSwitch, { method: 'POST', body: { scope: 'global', reason } }), [200, 201], 'Engage the kill switch');
-  const audits = await app.db.query(`SELECT * FROM audit_log WHERE action ILIKE '%kill%'`);
+  const audits = await app.db.platform.query(`SELECT * FROM audit_log WHERE action ILIKE '%kill%'`);
   assert.equal(audits.length, 1);
   assert.match(JSON.stringify(audits[0]), new RegExp(reason));
   // D2 decision: the log keeps the operator's id; the console's audit view shows the email beside it, looked up when it is read.
@@ -77,14 +77,14 @@ test('F-62: a kill switch across 40 businesses writes 1 audit row and 40 complia
   const shown = need(await onConsole(app, operator, '/audit-log'), 200, 'The console audit view').json().items.find((i) => /kill/i.test(i.action));
   assert.equal(shown.actor, audits[0].actor);
   assert.equal(shown.actorEmail, operator.email, 'the operator email is shown beside the id');
-  const compliance = await app.db.query(`SELECT tenant_id FROM compliance_events WHERE kind ILIKE '%kill%' OR reason = 'paused.global'`);
+  const compliance = await app.db.platform.query(`SELECT tenant_id FROM compliance_events WHERE kind ILIKE '%kill%' OR reason = 'paused.global'`);
   assert.equal(compliance.length, 40);
   assert.equal(new Set(compliance.map((r) => r.tenant_id)).size, 40, 'one per business');
 });
 
 test('F-63: the owner of A opening the log sees only A\'s rows', async (t) => {
   const { app, a, b } = await storeWithEvents(t);
-  await app.db.query(
+  await app.db.platform.query(
     `INSERT INTO audit_log (tenant_id, actor, action, target) VALUES ($1, 'owner-a', 'brand.update', 'alpha-row'), ($2, 'owner-b', 'brand.update', 'beta-row'), (NULL, 'operator', 'plan.change', 'platform-row')`,
     [a.tenant.id, b.tenant.id],
   );
@@ -98,12 +98,12 @@ test('F-63: the owner of A opening the log sees only A\'s rows', async (t) => {
 test('D2: the seller\'s activity view shows the operator email beside a platform actor, and the stored row keeps only the id', async (t) => {
   const { app, a } = await storeWithEvents(t);
   const operator = await consoleUser(app);
-  const [{ id }] = await app.db.query('SELECT id FROM platform_users WHERE email = $1', [operator.email]);
-  await app.db.query(`INSERT INTO audit_log (tenant_id, actor, action, target) VALUES ($1, $2, 'impersonation.start', 'help'), ($1, 'owner-a', 'brand.update', 'own-row')`, [a.tenant.id, `platform:${id}`]);
+  const [{ id }] = await app.db.platform.query('SELECT id FROM platform_users WHERE email = $1', [operator.email]);
+  await app.db.platform.query(`INSERT INTO audit_log (tenant_id, actor, action, target) VALUES ($1, $2, 'impersonation.start', 'help'), ($1, 'owner-a', 'brand.update', 'own-row')`, [a.tenant.id, `platform:${id}`]);
   const items = need(await api(app, a, await signIn(app, a), sellerPaths.auditLog), 200, 'The owner opens the audit log').json().items;
   assert.equal(items.find((i) => i.action === 'impersonation.start').actorEmail, operator.email);
   assert.equal(items.find((i) => i.action === 'brand.update').actorEmail, null, 'only a platform actor has an operator email');
-  const [stored] = await app.db.query(`SELECT actor FROM audit_log WHERE action = 'impersonation.start'`);
+  const [stored] = await app.db.platform.query(`SELECT actor FROM audit_log WHERE action = 'impersonation.start'`);
   assert.equal(stored.actor, `platform:${id}`);
 });
 
@@ -173,11 +173,11 @@ test('U-11: a super admin\'s raw export needs a reason and logs who, when, why a
 
   const noReason = await onConsole(app, operator, consolePaths.rawExport, { method: 'POST', body: exportBody(a.tenant.id) });
   assert.equal(noReason.status, 400);
-  assert.deepEqual(await app.db.query(`SELECT 1 FROM audit_log WHERE action ILIKE '%export%'`), [], 'a refused export writes no row');
+  assert.deepEqual(await app.db.platform.query(`SELECT 1 FROM audit_log WHERE action ILIKE '%export%'`), [], 'a refused export writes no row');
 
   const why = 'DPDP request 4411';
   need(await onConsole(app, operator, consolePaths.rawExport, { method: 'POST', body: exportBody(a.tenant.id, { reason: why }) }), [200, 201], 'Raw export with a reason');
-  const [row] = await app.db.query(`SELECT * FROM audit_log WHERE action ILIKE '%export%'`);
+  const [row] = await app.db.platform.query(`SELECT * FROM audit_log WHERE action ILIKE '%export%'`);
   assert.ok(row, 'The export wrote no audit row');
   assert.match(row.actor, new RegExp(operator.email), 'who');
   assert.ok(new Date(row.created_at) >= started, 'when');
@@ -208,7 +208,7 @@ test('F-120: a raw export for one business is audited and holds only that busine
   const operator = await consoleUser(app);
   const res = need(await onConsole(app, operator, consolePaths.rawExport, { method: 'POST', body: exportBody(a.tenant.id, { reason: 'Audit 12' }) }), [200, 201], 'Raw export').json();
   assert.equal(res.rowCount, 2, 'only A has two compliance rows');
-  assert.equal((await app.db.query(`SELECT * FROM audit_log WHERE action ILIKE '%export%'`)).length, 1);
+  assert.equal((await app.db.platform.query(`SELECT * FROM audit_log WHERE action ILIKE '%export%'`)).length, 1);
   assert.ok(b.tenant.id);
 });
 
@@ -225,9 +225,9 @@ test('F-120: the export file expires after 7 days and the audit row stays', asyn
   const files = () => fs.readdirSync(storageDir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name);
   assert.ok(files().length > 0, 'the export file exists');
 
-  await app.db.query(`UPDATE ${rawExportsTable} SET expires_at = now() - interval '1 hour'`);
+  await app.db.platform.query(`UPDATE ${rawExportsTable} SET expires_at = now() - interval '1 hour'`);
   const drivers = createPlatform({ storageDriver: 'local', storageDir, queueDriver: 'pg', analyticsDriver: 'pg', cacheDriver: 'memory' }, { db: app.db });
   await housekeeping({ db: app.db, queue: drivers.queue, storage: drivers.storage });
   assert.deepEqual(files(), [], 'the file is gone');
-  assert.equal((await app.db.query(`SELECT 1 FROM audit_log WHERE action ILIKE '%export%'`)).length, 1, 'the audit row stays');
+  assert.equal((await app.db.platform.query(`SELECT 1 FROM audit_log WHERE action ILIKE '%export%'`)).length, 1, 'the audit row stays');
 });

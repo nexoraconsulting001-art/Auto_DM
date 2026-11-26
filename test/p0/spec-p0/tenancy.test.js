@@ -107,13 +107,13 @@ test('F-04: the app role with no context sees no orders, and cannot switch row s
 
 test('F-04: row-level security is on for every table that holds business rows', async () => {
   const { db } = await setup();
-  const tables = await db.query(
+  const tables = await db.platform.query(
     `SELECT c.table_name FROM information_schema.columns c
      JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
      WHERE c.table_schema = 'public' AND c.column_name = 'tenant_id' AND c.is_nullable = 'NO' AND t.table_type = 'BASE TABLE'`,
   );
   assert.ok(tables.length > 5, 'business tables were found');
-  const secured = await db.query(`SELECT relname FROM pg_class WHERE relkind IN ('r', 'p') AND relrowsecurity`);
+  const secured = await db.platform.query(`SELECT relname FROM pg_class WHERE relkind IN ('r', 'p') AND relrowsecurity`);
   const on = new Set(secured.map((r) => r.relname));
   assert.deepEqual(tables.map((r) => r.table_name).filter((name) => !on.has(name)).sort(), [], 'tables without RLS');
 });
@@ -134,12 +134,12 @@ test('F-05: the first order on a new business is 1001, per business, in the API'
 test('F-05: a migrated business whose highest number is 4210 continues at 4211', async (t) => {
   const { app, a } = await twoBusinesses(t);
   const product = await addProduct(a, 'Lamp');
-  await app.db.query(
+  await app.db.platform.query(
     `INSERT INTO orders (tenant_id, order_number, public_token, customer_name, phone, address, city, state, pincode, subtotal_paise, shipping_paise, total_paise)
      VALUES ($1, '4210', 'migrated-token', $2, $3, $4, $5, $6, $7, 100, 0, 100)`,
     [a.tenant.id, CUSTOMER.name, CUSTOMER.phone, CUSTOMER.address, CUSTOMER.city, CUSTOMER.state, CUSTOMER.pincode],
   );
-  await app.db.query('UPDATE tenants SET next_order_number = 4211 WHERE id = $1', [a.tenant.id]);
+  await app.db.platform.query('UPDATE tenants SET next_order_number = 4211 WHERE id = $1', [a.tenant.id]);
   const order = await addOrder(a, product);
   assert.match(order.order_number, /(^|\D)4211$/);
 });

@@ -27,7 +27,7 @@ test('an address that is not the seller\'s own to claim is refused and nothing i
     assert.equal(res.status, 400, bad);
     assert.equal(res.json().code, 'validation_failed', bad);
   }
-  assert.deepEqual(await app.db.query('SELECT domain FROM tenant_domains WHERE tenant_id = $1', [shop.tenant.id]), []);
+  assert.deepEqual(await app.db.platform.query('SELECT domain FROM tenant_domains WHERE tenant_id = $1', [shop.tenant.id]), []);
 });
 
 test('only the owner changes domains, staff with catalog can read them, and the free plan has none', async (t) => {
@@ -71,7 +71,7 @@ test('a verified domain is exclusive to its business, unless that business has c
   assert.equal((await add('held.kesarhome.example')).status, 409, 'adding it twice is refused too');
 
   need(await askForCertificate(app, 'held.kesarhome.example'), 200, 'Still served');
-  await app.db.query(`UPDATE tenants SET status = 'closed' WHERE id = $1`, [shop.tenant.id]);
+  await app.db.platform.query(`UPDATE tenants SET status = 'closed' WHERE id = $1`, [shop.tenant.id]);
   const taken = need(await them.add('held.kesarhome.example'), 201, 'A closed business no longer holds it').json();
   assert.equal(taken.status, 'pending', 'and the new owner still has to prove it');
   assert.ok(isDenied(await askForCertificate(app, 'held.kesarhome.example')));
@@ -155,13 +155,13 @@ test('a replaced primary keeps its 301 for 12 months, with no chains', async (t)
   for (const name of ['x', 'y', 'z']) await verified(`${name}.kesarhome.example`);
   for (const name of ['x', 'y', 'z']) need(await primary(`${name}.kesarhome.example`), 200, `Primary ${name}`);
 
-  const rows = await app.db.query('SELECT domain, is_primary, redirect_to, redirect_until FROM tenant_domains WHERE tenant_id = $1 ORDER BY domain', [shop.tenant.id]);
+  const rows = await app.db.platform.query('SELECT domain, is_primary, redirect_to, redirect_until FROM tenant_domains WHERE tenant_id = $1 ORDER BY domain', [shop.tenant.id]);
   assert.deepEqual(rows.map((r) => [r.is_primary, r.redirect_to]), [[false, 'z.kesarhome.example'], [false, 'z.kesarhome.example'], [true, '']]);
   const days = (new Date(rows[0].redirect_until) - Date.now()) / 86_400_000;
   assert.ok(days > 360 && days < 370, `kept for ${days} days`);
   assert.equal((await hit(app, '/', { host: 'x.kesarhome.example' })).headers.location, 'https://z.kesarhome.example/', 'straight to the current primary');
 
-  await app.db.query(`UPDATE tenant_domains SET redirect_until = now() - interval '1 day' WHERE domain = 'y.kesarhome.example'`);
+  await app.db.platform.query(`UPDATE tenant_domains SET redirect_until = now() - interval '1 day' WHERE domain = 'y.kesarhome.example'`);
   need(await hit(app, '/', { host: 'y.kesarhome.example' }), 200, 'After 12 months it is served again');
 });
 
@@ -196,7 +196,7 @@ test('removing a domain stops it being served; the primary has to be replaced fi
   assert.deepEqual((await list()).map((d) => d.domain), ['keep.kesarhome.example']);
   assert.ok(isDenied(await askForCertificate(app, 'drop.kesarhome.example')));
 
-  const log = await app.db.query(`SELECT action, target FROM audit_log WHERE tenant_id = $1 AND action LIKE 'domain.%' ORDER BY id`, [shop.tenant.id]);
+  const log = await app.db.platform.query(`SELECT action, target FROM audit_log WHERE tenant_id = $1 AND action LIKE 'domain.%' ORDER BY id`, [shop.tenant.id]);
   assert.deepEqual(log.map((r) => r.action), ['domain.add', 'domain.add', 'domain.primary', 'domain.remove']);
 });
 
@@ -251,14 +251,14 @@ test('the certificate check: reserved hosts never, fallback hosts of live busine
   need(await askForCertificate(app, `${shop.slug}.${NEUTRAL}`), 200, 'The fallback host');
 
   for (const label of ['admin', 'www', 'app', 'api', 'bhava', 'edge']) {
-    await app.db.query('INSERT INTO tenant_domains (domain, tenant_id) VALUES ($1, $2)', [`${label}.${NEUTRAL}`, shop.tenant.id]);
+    await app.db.platform.query('INSERT INTO tenant_domains (domain, tenant_id) VALUES ($1, $2)', [`${label}.${NEUTRAL}`, shop.tenant.id]);
     assert.ok(isDenied(await askForCertificate(app, `${label}.${NEUTRAL}`)), label);
   }
   for (const host of [NEUTRAL, `nobody.${NEUTRAL}`, `deep.${shop.slug}.${NEUTRAL}`, '']) assert.ok(isDenied(await askForCertificate(app, host)), `"${host}"`);
   assert.equal((await hit(app, '/tls/ask', { host: CONSOLE_HOST })).status, 400);
   assert.equal((await hit(app, '/tls/ask?domain=a.example&domain=b.example', { host: CONSOLE_HOST })).status, 400);
 
-  await app.db.query(`UPDATE tenants SET status = 'closed' WHERE id = $1`, [shop.tenant.id]);
+  await app.db.platform.query(`UPDATE tenants SET status = 'closed' WHERE id = $1`, [shop.tenant.id]);
   assert.ok(isDenied(await askForCertificate(app, `${shop.slug}.${NEUTRAL}`)), 'a closed business\'s fallback host');
 });
 
@@ -288,7 +288,7 @@ test('the scheduled check verifies each business\'s pending domains and leaves r
   const before = dns.calls;
   await service.checkDue();
   assert.equal(dns.calls, before, 'a domain checked a moment ago isn\'t looked up again');
-  await app.db.query(`UPDATE tenant_domains SET last_checked_at = now() - interval '6 minutes' WHERE domain = 'waiting.kesarhome.example'`);
+  await app.db.platform.query(`UPDATE tenant_domains SET last_checked_at = now() - interval '6 minutes' WHERE domain = 'waiting.kesarhome.example'`);
   await service.checkDue();
   assert.ok(dns.calls > before, 'five minutes later it is');
   assert.doesNotMatch(logs.text(), /kesarhome|leafandclay/, 'logs hold counts and ids');
@@ -299,7 +299,7 @@ test('after 72 hours the schedule stops, and owner and ops are told exactly once
   const operator = await consoleUser(app);
   const service = scheduledChecks(app, dns, { mailTransport: mail });
   const row = await added('late.kesarhome.example');
-  await app.db.query(`UPDATE tenant_domains SET check_until = now() - interval '1 minute' WHERE domain = 'late.kesarhome.example'`);
+  await app.db.platform.query(`UPDATE tenant_domains SET check_until = now() - interval '1 minute' WHERE domain = 'late.kesarhome.example'`);
 
   await Promise.all([service.checkDue(), service.checkDue()]);
   await service.checkDue();
@@ -318,7 +318,7 @@ test('after 72 hours the schedule stops, and owner and ops are told exactly once
 test('adding a stopped domain again starts a fresh 72 hours', async (t) => {
   const { app, dns, added, check, shop, mail } = await domainWorld(t);
   const row = await added('late.kesarhome.example');
-  await app.db.query(`UPDATE tenant_domains SET created_at = now() - interval '73 hours' WHERE domain = 'late.kesarhome.example'`);
+  await app.db.platform.query(`UPDATE tenant_domains SET created_at = now() - interval '73 hours' WHERE domain = 'late.kesarhome.example'`);
   assert.equal((await check(row.id)).json().status, 'stopped');
   assert.ok(isDenied(await askForCertificate(app, 'late.kesarhome.example')));
 
@@ -326,7 +326,7 @@ test('adding a stopped domain again starts a fresh 72 hours', async (t) => {
   assert.equal(again.status, 'pending');
   dns.publish(again.records);
   assert.equal((await check(row.id)).json().status, 'verified');
-  const [{ n }] = await app.db.query(`SELECT count(*)::int AS n FROM alerts WHERE tenant_id = $1 AND audience = 'owner' AND kind = 'domain.stopped'`, [shop.tenant.id]);
+  const [{ n }] = await app.db.platform.query(`SELECT count(*)::int AS n FROM alerts WHERE tenant_id = $1 AND audience = 'owner' AND kind = 'domain.stopped'`, [shop.tenant.id]);
   assert.equal(n, 1);
   assert.equal(mail.sent.length, 1);
 });
@@ -334,7 +334,7 @@ test('adding a stopped domain again starts a fresh 72 hours', async (t) => {
 test('a closed business\'s pending domains are left out of the schedule', async (t) => {
   const { app, dns, added, shop } = await domainWorld(t);
   await added('quiet.kesarhome.example');
-  await app.db.query(`UPDATE tenants SET status = 'closed' WHERE id = $1`, [shop.tenant.id]);
+  await app.db.platform.query(`UPDATE tenants SET status = 'closed' WHERE id = $1`, [shop.tenant.id]);
   const before = dns.calls;
   await scheduledChecks(app, dns).checkDue();
   assert.equal(dns.calls, before);
@@ -361,7 +361,7 @@ test('a failure on one domain doesn\'t stop the others being checked', async (t)
 
 test('a business can\'t pile up domains without limit', async (t) => {
   const { app, shop, add } = await domainWorld(t);
-  for (let i = 0; i < 20; i++) await app.db.query('INSERT INTO tenant_domains (domain, tenant_id) VALUES ($1, $2)', [`d${i}.kesarhome.example`, shop.tenant.id]);
+  for (let i = 0; i < 20; i++) await app.db.platform.query('INSERT INTO tenant_domains (domain, tenant_id) VALUES ($1, $2)', [`d${i}.kesarhome.example`, shop.tenant.id]);
   const res = await add('one-more.kesarhome.example');
   assert.equal(res.status, 409);
   assert.match(res.json().error, /20/);

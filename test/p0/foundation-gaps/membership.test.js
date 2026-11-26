@@ -76,9 +76,9 @@ test('losing the role at the other business counts on the very next call', async
 
 test('deleting the account at the other business ends the membership', async (t) => {
   const { app, a, b, inB, token } = await member(t);
-  await app.db.query('DELETE FROM users WHERE tenant_id = $1 AND id = $2', [b.tenant.id, inB.user.id]);
+  await app.db.platform.query('DELETE FROM users WHERE tenant_id = $1 AND id = $2', [b.tenant.id, inB.user.id]);
   assert.equal((await asTenant(app, a, token, b.tenant.id)).status, 403);
-  assert.deepEqual(await app.db.query('SELECT 1 FROM memberships'), [], 'neither direction is left behind');
+  assert.deepEqual(await app.db.platform.query('SELECT 1 FROM memberships'), [], 'neither direction is left behind');
 });
 
 test('a header for the business the session is already in changes nothing, and nonsense is refused without a server fault', async (t) => {

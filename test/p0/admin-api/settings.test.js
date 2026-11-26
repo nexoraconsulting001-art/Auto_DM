@@ -100,7 +100,7 @@ test('a token Instagram refuses shows as not connected, and the answer is cached
     assert.equal(checks, 1);
     await ok(await api('GET', '/settings/setup'));
     assert.equal(checks, 1);
-    await db.query(`UPDATE ig_accounts SET access_token_enc = '' WHERE tenant_id = $1`, [tenant.id]);
+    await db.platform.query(`UPDATE ig_accounts SET access_token_enc = '' WHERE tenant_id = $1`, [tenant.id]);
     assert.deepEqual((await ok(await api('GET', '/settings/setup'))).instagram, { connected: false, username: '' });
     assert.equal(checks, 1);
   })();

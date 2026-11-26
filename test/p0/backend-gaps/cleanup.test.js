@@ -58,7 +58,7 @@ test('reserved addresses cannot be taken, by slug, by name or directly in the da
     await assert.rejects(() => platform.tenants.create({ slug, name: 'Anything' }), /reserved/, slug);
     await assert.rejects(() => platform.tenants.create({ name: slug.toUpperCase() }), /reserved/, slug);
     await assert.rejects(() => platform.tenants.create({ slug: `  ${slug.toUpperCase()}!! `, name: 'Anything' }), /reserved/, slug);
-    await assert.rejects(() => db.query(`INSERT INTO tenants (slug, name) VALUES ($1, 'x')`, [slug]), /check constraint/, slug);
+    await assert.rejects(() => db.platform.query(`INSERT INTO tenants (slug, name) VALUES ($1, 'x')`, [slug]), /check constraint/, slug);
   }
   assert.equal((await platform.tenants.create({ slug: 'bhava-mehta', name: 'Allowed' })).slug, 'bhava-mehta');
   assert.equal((await platform.tenants.create({ slug: 'admins', name: 'Allowed' })).slug, 'admins');

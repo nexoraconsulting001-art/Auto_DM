@@ -78,7 +78,7 @@ test('uploaded images go to storage, not the database, and stay with their busin
   const repos = createRepos(db, { storage });
   const ra = bindTenant(repos, a);
   const id = await ra.media.save(Buffer.from('png-bytes'), 'image/png');
-  const [row] = await db.query('SELECT * FROM media WHERE id = $1', [id]);
+  const [row] = await db.platform.query('SELECT * FROM media WHERE id = $1', [id]);
   assert.equal(row.storage_key, `t/${a.id}/media/${id}`);
   assert.equal('data' in row, false);
   assert.equal((await ra.media.get(id)).data.toString(), 'png-bytes');
@@ -136,9 +136,9 @@ test(`queue (${drivers.queueDriver}): a failing job is retried, then marked fail
     if (queue.driver === 'pg') {
       await queue.enqueue(name, {}, { maxAttempts: 2 });
       await queue.drain(name, async () => { tries++; throw new Error('boom'); });
-      await db.query(`UPDATE jobs SET run_at = now() WHERE queue = $1`, [name]); // skip the backoff wait
+      await db.platform.query(`UPDATE jobs SET run_at = now() WHERE queue = $1`, [name]); // skip the backoff wait
       await queue.drain(name, async () => { tries++; throw new Error('boom'); });
-      const [job] = await db.query('SELECT status, attempts, last_error FROM jobs WHERE queue = $1', [name]);
+      const [job] = await db.platform.query('SELECT status, attempts, last_error FROM jobs WHERE queue = $1', [name]);
       assert.deepEqual([job.status, job.attempts, job.last_error], ['failed', 2, 'boom']);
     } else {
       queue.work(name, async () => { tries++; throw new Error('boom'); });
@@ -159,9 +159,9 @@ test('queue (pg): a job running when its worker died becomes unknown unless safe
   await queue.enqueue('dm', { to: 'x' });
   await queue.enqueue('refresh', {}, { retryInFlight: true });
   // Simulate two workers that claimed these jobs and then crashed.
-  await db.query(`UPDATE jobs SET status = 'running', attempts = 1, lease_until = now() - interval '1 second'`);
+  await db.platform.query(`UPDATE jobs SET status = 'running', attempts = 1, lease_until = now() - interval '1 second'`);
   await queue.recoverStale();
-  const rows = await db.query('SELECT queue, status FROM jobs ORDER BY queue');
+  const rows = await db.platform.query('SELECT queue, status FROM jobs ORDER BY queue');
   assert.deepEqual(rows.map((r) => [r.queue, r.status]), [['dm', 'unknown'], ['refresh', 'queued']]);
   let sent = 0;
   assert.equal(await queue.drain('dm', async () => sent++), 0);

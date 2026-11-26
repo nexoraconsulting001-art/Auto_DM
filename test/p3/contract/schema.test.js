@@ -30,7 +30,7 @@ const product = (db, tenant, name, extra = {}) => one(db, tenant,
 test('every Phase 3 business table has row-level security, its policy and a tenant_id', async () => {
   const { db } = await setup();
   for (const table of BUSINESS_TABLES) {
-    const [row] = await db.query(
+    const [row] = await db.platform.query(
       `SELECT c.relrowsecurity AS secured, (SELECT count(*)::int FROM pg_policies p WHERE p.tablename = $1 AND p.policyname = 'tenant_fence') AS policies,
               (SELECT count(*)::int FROM information_schema.columns i WHERE i.table_name = $1 AND i.column_name = 'tenant_id') AS tenant_column
        FROM pg_class c WHERE c.oid = format('public.%I', $1::text)::regclass`,
@@ -43,8 +43,8 @@ test('every Phase 3 business table has row-level security, its policy and a tena
 test('every foreign key on a Phase 3 table has an index its lookups and cascades can use', async () => {
   const { db } = await setup();
   const tables = [...BUSINESS_TABLES, 'products', 'reels', 'media'];
-  const foreign = await db.query(`SELECT conrelid::regclass::text AS tbl, conname, conkey FROM pg_constraint WHERE contype = 'f' AND conrelid = ANY($1::regclass[])`, [tables]);
-  const indexes = await db.query(`SELECT indrelid::regclass::text AS tbl, string_to_array(indkey::text, ' ')::int[] AS columns FROM pg_index WHERE indrelid = ANY($1::regclass[]) AND indpred IS NULL`, [tables]);
+  const foreign = await db.platform.query(`SELECT conrelid::regclass::text AS tbl, conname, conkey FROM pg_constraint WHERE contype = 'f' AND conrelid = ANY($1::regclass[])`, [tables]);
+  const indexes = await db.platform.query(`SELECT indrelid::regclass::text AS tbl, string_to_array(indkey::text, ' ')::int[] AS columns FROM pg_index WHERE indrelid = ANY($1::regclass[]) AND indpred IS NULL`, [tables]);
   assert.ok(foreign.length >= 30, `found ${foreign.length}`);
   for (const fk of foreign.filter((f) => BUSINESS_TABLES.includes(f.tbl) || /cover|_fk$/.test(f.conname))) {
     const key = fk.conkey.map(Number);
@@ -81,7 +81,7 @@ test('nothing in the catalog, pages, categories or leads can link to another bus
 
 test('money is bigint paise, an MRP below the price is refused, and amounts past 32 bits fit', async () => {
   const { db, a } = await twoBusinesses();
-  const types = await db.query(`SELECT table_name, column_name, data_type FROM information_schema.columns WHERE column_name LIKE '%paise' AND table_name IN ('products', 'product_variants', 'product_checks')`);
+  const types = await db.platform.query(`SELECT table_name, column_name, data_type FROM information_schema.columns WHERE column_name LIKE '%paise' AND table_name IN ('products', 'product_variants', 'product_checks')`);
   assert.ok(types.length >= 5);
   for (const t of types) assert.equal(t.data_type, 'bigint', `${t.table_name}.${t.column_name}`);
   await assert.rejects(() => one(db, a, `INSERT INTO products (tenant_id, name, slug, price_paise, mrp_paise) VALUES ($1, 'Pot', 'pot', 129900, 99900) RETURNING id`, [a.id]), /check constraint/i, 'K-02');
@@ -95,7 +95,7 @@ test('money is bigint paise, an MRP below the price is refused, and amounts past
 
 test('leads hold a first name, one contact and the consent given, and no column for an IP, device or message', async () => {
   const { db, a } = await twoBusinesses();
-  const columns = (await db.query(`SELECT column_name FROM information_schema.columns WHERE table_name IN ('leads', 'lead_consents')`)).map((r) => r.column_name);
+  const columns = (await db.platform.query(`SELECT column_name FROM information_schema.columns WHERE table_name IN ('leads', 'lead_consents')`)).map((r) => r.column_name);
   assert.deepEqual(columns.filter((c) => /ip|agent|device|message|address|city/.test(c)), []);
   const text = await one(db, a, `INSERT INTO lead_consent_texts (tenant_id, version, body, channels) VALUES ($1, 1, 'I agree that A may contact me by WhatsApp.', '{whatsapp}') RETURNING id`, [a.id]);
   await assert.rejects(() => one(db, a, `INSERT INTO leads (tenant_id, first_name, source, consent_text_id) VALUES ($1, 'Asha', 'landing', $2) RETURNING id`, [a.id, text.id]), /check constraint/i, 'K-55: a contact is required');

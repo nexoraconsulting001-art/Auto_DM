@@ -64,7 +64,7 @@ test('U-01: the invoice email and the invoice never show the platform name', asy
   assert.ok(message, 'No invoice email reached the guest');
   noPlatformName('The buyer email', message);
   // The invoice is a PDF drawn from the document's own row: the row (seller, buyer, brand, lines) and the file's headers are read.
-  const [invoice] = await app.db.query('SELECT * FROM invoices WHERE tenant_id = $1 AND order_id = $2', [shop.tenant.id, placed.id]);
+  const [invoice] = await app.db.platform.query('SELECT * FROM invoices WHERE tenant_id = $1 AND order_id = $2', [shop.tenant.id, placed.id]);
   assert.ok(invoice, 'No invoice was made for the paid order');
   noPlatformName('The invoice', invoice);
   const file = need(await hit(app, buyerPaths.invoice(placed.public_token, invoice.number), { host: shop.host }), 200, 'The buyer\'s invoice');
@@ -76,7 +76,7 @@ test('U-05: an order alert email carries the platform\'s name and sender, with t
   const mail = fakeMail();
   const { app, shop, products } = await store(t, { options: { overrides: { [hooks.mail]: mail } } });
   await shop.repos.brandKit.save({ logoUrl: SELLER_LOGO, colors: { primary: '#234D33' } });
-  await app.db.query('UPDATE users SET email = $2 WHERE tenant_id = $1 AND role = $3', [shop.tenant.id, 'owner@seller.example', 'owner']);
+  await app.db.platform.query('UPDATE users SET email = $2 WHERE tenant_id = $1 AND role = $3', [shop.tenant.id, 'owner@seller.example', 'owner']);
   await placeOrder(app, shop, products[0], { customer: CUSTOMER, email: CUSTOMER_EMAIL, paid: true });
   const alert = await waitFor(async () => (await drainNotifications(app), (await mail.messages()).find((m) => String(m.to).includes('owner@seller.example'))), 10_000);
   assert.ok(alert, 'No order alert reached the owner');
@@ -90,7 +90,7 @@ test('U-05: an order alert email carries the platform\'s name and sender, with t
 test('U-05: the weekly report email carries the platform\'s name, logo and sender domain', async (t) => {
   const mail = fakeMail();
   const { app, shop } = await store(t, { options: { overrides: { [hooks.mail]: mail } } });
-  await app.db.query('UPDATE users SET email = $2 WHERE tenant_id = $1 AND role = $3', [shop.tenant.id, 'owner@seller.example', 'owner']);
+  await app.db.platform.query('UPDATE users SET email = $2 WHERE tenant_id = $1 AND role = $3', [shop.tenant.id, 'owner@seller.example', 'owner']);
   // The weekly report is not run from the console: the reports job runs it for each business on its Monday (src/modules/reports/jobs.js).
   const week = { kind: 'weekly', periodStart: '2026-11-16', periodEnd: '2026-11-22' };
   await withTenant(shop.tenant, () => jobHandlers(app.ctx)[QUEUE_PERIODIC]({ payload: week, attempt: 1 }));

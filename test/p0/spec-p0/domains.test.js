@@ -46,7 +46,7 @@ test('F-08: an unknown host gets a neutral 404 with no brand of any kind', async
 test('F-08: a reserved host never resolves to a business, even if one claims it', async (t) => {
   const app = await startWorld(t);
   const shop = await addBusiness(app, { slug: 'grabby', name: 'Grabby Shop' });
-  await app.db.query('INSERT INTO tenant_domains (domain, tenant_id) VALUES ($1, $2)', [CONSOLE_HOST, shop.tenant.id]);
+  await app.db.platform.query('INSERT INTO tenant_domains (domain, tenant_id) VALUES ($1, $2)', [CONSOLE_HOST, shop.tenant.id]);
   const res = await hit(app, '/', { host: CONSOLE_HOST });
   assert.doesNotMatch(res.text, /Grabby Shop/);
 });
@@ -165,7 +165,7 @@ test('F-17: an unverified domain pointed at the platform is denied a certificate
 test('F-17: a closed business\'s verified domain is denied a certificate', async (t) => {
   const { app, shop, verify } = await domainWorld(t);
   await verify('gone.kesarhome.example');
-  await app.db.query(`UPDATE tenants SET status = 'closed' WHERE id = $1`, [shop.tenant.id]);
+  await app.db.platform.query(`UPDATE tenants SET status = 'closed' WHERE id = $1`, [shop.tenant.id]);
   assert.notEqual((await askForCertificate(app, 'gone.kesarhome.example')).status, 200);
 });
 
@@ -174,7 +174,7 @@ test('F-18: when the TXT record is still missing after 72 h, checks stop and own
   const operator = await consoleUser(app);
   const added = await addDomain('late.kesarhome.example');
   assert.equal((await check(added.id)).status, 'pending', 'within 72 h the check keeps waiting');
-  await app.db.query(`UPDATE tenant_domains SET created_at = now() - interval '73 hours' WHERE domain = $1`, ['late.kesarhome.example']);
+  await app.db.platform.query(`UPDATE tenant_domains SET created_at = now() - interval '73 hours' WHERE domain = $1`, ['late.kesarhome.example']);
 
   const stopped = await check(added.id);
   assert.ok(['failed', 'stopped', 'expired'].includes(stopped.status), `status after 72 h: ${stopped.status}`);

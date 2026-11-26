@@ -48,7 +48,7 @@ const openTasks = (w) => sql(w, `SELECT guideline_key FROM app_review_tasks WHER
 
 test('every Phase 6 business table is fenced, the platform tables refuse the app login, and app_transitions equals APP_TRANSITIONS', async () => {
   const w = await world();
-  const tables = await w.db.query(
+  const tables = await w.db.platform.query(
     `SELECT c.relname AS name, c.relrowsecurity AS fenced,
             EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped) AS has_tenant,
             has_table_privilege('bhava_app', c.oid, 'SELECT') AS app_reads, has_table_privilege('bhava_app', c.oid, 'INSERT') AS app_inserts,

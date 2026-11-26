@@ -119,7 +119,7 @@ test('F-14: a sender set before DKIM is verified sends from the neutral domain u
   const { app, shop, token } = await storeWithKit(t, { overrides: { [hooks.mail]: mail } });
   // The seller's own domain is added but not verified yet, and the sender on it is chosen (orders@mehtamart.example): the
   // save is refused by name, so mail stays on the neutral domain.
-  await app.db.query(`INSERT INTO tenant_domains (domain, tenant_id, status) VALUES ('mehtamart.example', $1, 'pending')`, [shop.tenant.id]);
+  await app.db.platform.query(`INSERT INTO tenant_domains (domain, tenant_id, status) VALUES ('mehtamart.example', $1, 'pending')`, [shop.tenant.id]);
   const refusal = await api(app, shop, token, alertPaths.settings, { method: 'PATCH', body: { emailFrom: 'own', emailFromLocal: 'orders' } });
   assert.equal(refusal.status, 400, 'the unverified domain is refused as a sender');
   assert.ok(refusal.json().fields?.emailFrom, 'the refusal names the sender field');
@@ -177,7 +177,7 @@ test('F-74: the default-gateway checkout hands Razorpay the seller\'s name, logo
 test('F-76: the order page in every status is on the seller\'s domain in the seller\'s kit', async (t) => {
   const { app, shop, order } = await paidOrder(t);
   for (const status of ['awaiting_payment', 'payment_submitted', 'paid', 'shipped', 'cancelled']) {
-    await app.db.query('UPDATE orders SET status = $2 WHERE id = $1', [order.id, status]);
+    await app.db.platform.query('UPDATE orders SET status = $2 WHERE id = $1', [order.id, status]);
     await assertBuyerPageClean(app, shop, `/order/${order.public_token}`);
     const { source } = await pageSource(app, shop.host, `/order/${order.public_token}`);
     assert.ok(usesKit(source), `status ${status} does not use the seller's kit`);

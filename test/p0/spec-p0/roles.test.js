@@ -85,7 +85,7 @@ test('U-04: a platform admin opening a business is logged with who, when and why
 
   const res = await onConsole(app, operator, consolePaths.impersonate(shop.tenant.id), { method: 'POST', body: { reason: 'ticket 123' } });
   need(res, [200, 201], 'Open a business\'s admin to help');
-  const [row] = await app.db.query(`SELECT * FROM audit_log WHERE tenant_id = $1 AND action ILIKE '%impersonat%'`, [shop.tenant.id]);
+  const [row] = await app.db.platform.query(`SELECT * FROM audit_log WHERE tenant_id = $1 AND action ILIKE '%impersonat%'`, [shop.tenant.id]);
   assert.ok(row, 'No audit row for opening the business');
   // D2 decision: the row keeps the operator's id; the audit views show the email beside it when they are read.
   assert.match(row.actor, /^platform:[0-9]+$/, 'who');
@@ -103,7 +103,7 @@ test('U-04: opening a business with no reason is refused and leaves no session',
   for (const body of [{}, { reason: '' }, { reason: '   ' }]) {
     assert.equal((await onConsole(app, operator, consolePaths.impersonate(shop.tenant.id), { method: 'POST', body })).status, 400);
   }
-  assert.deepEqual(await app.db.query(`SELECT 1 FROM audit_log WHERE tenant_id = $1 AND action ILIKE '%impersonat%'`, [shop.tenant.id]), []);
+  assert.deepEqual(await app.db.platform.query(`SELECT 1 FROM audit_log WHERE tenant_id = $1 AND action ILIKE '%impersonat%'`, [shop.tenant.id]), []);
 });
 
 test('U-04: a business owner cannot open another business through the console', async (t) => {

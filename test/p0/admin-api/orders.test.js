@@ -49,7 +49,7 @@ test('orders filter by status and search by number, name or phone', withApp(asyn
 }));
 
 test('paging reaches every order, past the 200 the core repo stops at, newest first', withApp(async ({ api, db, tenant }) => {
-  await db.query(
+  await db.platform.query(
     `INSERT INTO orders (tenant_id, order_number, public_token, customer_name, phone, address, city, state, pincode, subtotal_paise, shipping_paise, total_paise)
      SELECT $1, 'ORD-' || n, 'token-' || n, 'Buyer', '9876543210', 'Addr', 'City', 'State', '411001', 100, 0, 100 FROM generate_series(1, 205) n`,
     [tenant.id],

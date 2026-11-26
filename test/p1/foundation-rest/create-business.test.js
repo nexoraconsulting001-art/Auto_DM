@@ -18,8 +18,8 @@ async function world(t, fetcher) {
   const app = await startWorld(t, { overrides: { [hooks.siteFetcher]: fetcher ?? site(page('<title>x</title>')) } });
   const operator = await consoleUser(app);
   const create = (body, who = operator) => onConsole(app, who, '/tenants', { method: 'POST', body });
-  const tenantCount = async () => (await app.db.query('SELECT count(*)::int AS n FROM tenants'))[0].n;
-  const productsOf = (id) => app.db.query('SELECT name, price_paise, images, stock, active FROM products WHERE tenant_id = $1 ORDER BY name', [id]);
+  const tenantCount = async () => (await app.db.platform.query('SELECT count(*)::int AS n FROM tenants'))[0].n;
+  const productsOf = (id) => app.db.platform.query('SELECT name, price_paise, images, stock, active FROM products WHERE tenant_id = $1 ORDER BY name', [id]);
   return { app, operator, create, tenantCount, productsOf };
 }
 
@@ -30,16 +30,16 @@ test('a new business starts in onboarding with what the form said, and its owner
   assert.equal(res.tenant.slug, 'plant-store');
   assert.equal(res.tenant.plan, 't2');
 
-  const [row] = await app.db.query('SELECT website, expected_ig_handle, billing_cycle FROM tenants WHERE id = $1', [res.tenant.id]);
+  const [row] = await app.db.platform.query('SELECT website, expected_ig_handle, billing_cycle FROM tenants WHERE id = $1', [res.tenant.id]);
   assert.deepEqual(row, { website: SITE, expected_ig_handle: 'sample_handle', billing_cycle: 'yearly' });
-  const [owner] = await app.db.query(`SELECT name, phone, email, role FROM users WHERE tenant_id = $1`, [res.tenant.id]);
+  const [owner] = await app.db.platform.query(`SELECT name, phone, email, role FROM users WHERE tenant_id = $1`, [res.tenant.id]);
   assert.deepEqual(owner, { name: 'Ravi Kumar', phone: '9123456780', email: 'ravi@seller.example', role: 'owner' });
 });
 
 test('the audit row says who created it and carries no contact details', async (t) => {
   const { app, operator, create } = await world(t);
   const { tenant } = need(await create(form('Plant Store', SITE)), 201, 'Create').json();
-  const rows = await app.db.query(`SELECT actor, action, details FROM audit_log WHERE tenant_id = $1`, [tenant.id]);
+  const rows = await app.db.platform.query(`SELECT actor, action, details FROM audit_log WHERE tenant_id = $1`, [tenant.id]);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].actor, `platform:${operator.email}`);
   assert.equal(rows[0].action, 'business.create');
@@ -157,23 +157,23 @@ test('retrying fills the draft, and retrying again adds nothing twice', async (t
   const retry = () => onConsole(app, operator, `/tenants/${tenant.id}/import/retry`, { method: 'POST' });
 
   need(await retry(), 202, 'Retry while the site is still down');
-  const [alert] = await app.db.query(`SELECT message FROM alerts WHERE audience = 'ops' AND kind = 'business.import_failed' AND tenant_id = $1`, [tenant.id]);
+  const [alert] = await app.db.platform.query(`SELECT message FROM alerts WHERE audience = 'ops' AND kind = 'business.import_failed' AND tenant_id = $1`, [tenant.id]);
   assert.match(alert.message, /Plant Store/);
 
   body = page(`<meta name="theme-color" content="#2E7D32">${ld([product('Snake Plant'), product('Money Plant', '199')])}`);
   need(await retry(), 202, 'Retry with the site back');
   need(await retry(), 202, 'And again');
   assert.deepEqual((await productsOf(tenant.id)).map((p) => [p.name, p.price_paise, p.active]), [['Money Plant', 19900, false], ['Snake Plant', 34900, false]]);
-  const [kit] = await app.db.query('SELECT colors FROM brand_kits WHERE tenant_id = $1', [tenant.id]);
+  const [kit] = await app.db.platform.query('SELECT colors FROM brand_kits WHERE tenant_id = $1', [tenant.id]);
   assert.equal(kit.colors.primary, '#2E7D32');
 });
 
 test('a retry never overwrites a kit someone has already saved', async (t) => {
   const { app, operator, create } = await world(t, site(page('<meta name="theme-color" content="#2E7D32">')));
   const { tenant } = need(await create(form('Plant Store', SITE)), 201, 'Create').json();
-  await app.db.query(`UPDATE brand_kits SET colors = colors || '{"primary":"#123456"}' WHERE tenant_id = $1`, [tenant.id]);
+  await app.db.platform.query(`UPDATE brand_kits SET colors = colors || '{"primary":"#123456"}' WHERE tenant_id = $1`, [tenant.id]);
   need(await onConsole(app, operator, `/tenants/${tenant.id}/import/retry`, { method: 'POST' }), 202, 'Retry');
-  const [kit] = await app.db.query('SELECT colors FROM brand_kits WHERE tenant_id = $1', [tenant.id]);
+  const [kit] = await app.db.platform.query('SELECT colors FROM brand_kits WHERE tenant_id = $1', [tenant.id]);
   assert.equal(kit.colors.primary, '#123456');
 });
 
@@ -202,7 +202,7 @@ test('opening a business for support points at its own address, and needs a real
   // The one-time entry address of the operator session (PRD 5.10, built in Phase 7: src/modules/impersonation ENTRY_PATH), on the business's own host.
   const entry = (url) => { const u = new URL(url); return [u.origin, u.pathname, /^[A-Za-z0-9_-]{20,}$/.test(u.searchParams.get('t') ?? '')]; };
   assert.deepEqual(entry(need(await open(shop.tenant.id), 200, 'Open').json().url), [`https://kesar-home.${NEUTRAL}`, '/operator/enter', true]);
-  await app.db.query(`INSERT INTO tenant_domains (domain, tenant_id, is_primary) VALUES ('shop.kesarhome.example', $1, true)`, [shop.tenant.id]);
+  await app.db.platform.query(`INSERT INTO tenant_domains (domain, tenant_id, is_primary) VALUES ('shop.kesarhome.example', $1, true)`, [shop.tenant.id]);
   assert.deepEqual(entry(need(await open(shop.tenant.id), 200, 'Open').json().url), ['https://shop.kesarhome.example', '/operator/enter', true]);
   assert.equal((await open(999999)).status, 404);
 });
