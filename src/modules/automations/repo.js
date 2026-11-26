@@ -177,7 +177,7 @@ export function automationsRepo(db) {
         const id = await db.tx(async (t) => {
           await t.query('SELECT pg_advisory_xact_lock($1::int, $2::int)', [CREATE_LOCK, tenantId()]);
           const [{ n }] = await t.query(`SELECT count(*)::int AS n FROM automations WHERE tenant_id = $1 AND state <> 'archived'`, [tenantId()]);
-          if (n >= limit) throw new ApiError('validation_failed', `Your plan includes ${limit} automations. Archive one or upgrade to add another.`);
+          if (n >= limit) throw new ApiError('plan.limit_reached', `Your plan includes ${limit} automations. Archive one or upgrade to add another.`, { reason: 'plan', feature: 'automations', limit, used: n });
           const values = { ...columnsFrom(input), slug: await freeSlug(t, input.name), any_mode_acknowledged: input.anyModeAcknowledged ? new Date() : null, created_by: createdBy };
           const columns = Object.keys(values);
           const [row] = await t.query(
