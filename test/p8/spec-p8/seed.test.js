@@ -10,7 +10,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ShowcaseError, loadShowcase, seedShowcase } from '../../../scripts/showcase.js';
 import { routeList } from '../../../src/contracts/api/index.js';
-import { PEOPLE_RULES, SHOWCASE, problemsWithPeople, problemsWithPerson } from '../../../src/contracts/seed.js';
+import { PEOPLE_RULES, SHOWCASE, inventedPerson, problemsWithPeople, problemsWithPerson } from '../../../src/contracts/seed.js';
 import { bindTenant } from '../../../src/repos/index.js';
 import { openDb } from '../../../src/db/index.js';
 import {
@@ -331,7 +331,7 @@ const WRITE_ONE = routeList.filter((r) => ['PATCH', 'PUT', 'DELETE'].includes(r.
 
 /** What belongs to one business and to no other: the strings its seed holds that the other's does not. */
 function own(of, other) {
-  const set = (b) => new Set([...b.catalogue.products.map((p) => p.name), ...b.seed.reels.map((r) => r.igMediaId), ...b.seed.coupons.map((c) => c.code), ...b.seed.faq.map((f) => f.question), b.seed.business.owner.phone.slice(-9), b.seed.business.igUsername, b.seed.business.name]);
+  const set = (b) => new Set([...b.catalogue.products.map((p) => p.name), ...b.seed.reels.map((r) => r.igMediaId), ...b.seed.coupons.map((c) => c.code), ...b.seed.faq.map((f) => f.question), b.seed.business.owner.phone.slice(-12), b.seed.business.igUsername, b.seed.business.name]);
   const theirs = set(other);
   return [...set(of)].filter((s) => s && s.length >= 6 && !theirs.has(s));
 }
@@ -434,6 +434,14 @@ test('Q-04: the buyer pages of each business show none of the other\'s products,
 test('Q-04: the database fence, as the app login, shows each business only its own rows and nothing with no business set', { timeout: 540_000 }, async () => {
   const { app, a, b } = await twoSeeded();
   const tables = await tenantTables(app);
+  // The seed files make no orders (the thirty days of activity do), so each business gets one here: the fence is only proved on rows that exist.
+  for (const [i, { business }] of [a, b].entries()) {
+    const [has] = await sql(app, 'SELECT count(*)::int AS n FROM orders WHERE tenant_id = $1', [business.tenant.id]);
+    if (has.n) continue;
+    const who = inventedPerson(i);
+    await sql(app, `INSERT INTO orders (tenant_id, order_number, public_token, customer_name, phone, address, city, state, pincode, subtotal_paise, shipping_paise, total_paise)
+      VALUES ($1, $2, $3, $4, $5, 'Sample street 1', 'Mumbai', 'Maharashtra', '400001', 100, 0, 100)`, [business.tenant.id, `SEED-FENCE-${i}`, `fence-token-${i}-${business.tenant.id}`, who.name, who.phone]);
+  }
   for (const table of ['products', 'reels', 'orders', 'categories', 'settings'].filter((t) => tables.includes(t))) {
     const [mixed] = await sql(app, `SELECT count(DISTINCT tenant_id)::int AS n FROM "${table}" WHERE tenant_id = ANY($1)`, [[a.business.tenant.id, b.business.tenant.id]]);
     assert.ok(mixed.n >= 1, table);

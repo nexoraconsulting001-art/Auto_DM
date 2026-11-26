@@ -113,9 +113,14 @@ async function signIn(world, host, who) {
 /** Connects the made-up Instagram account through the real consent flow, against the Meta simulator. */
 async function connectInstagram(world, { api, repos, seed, tenant }) {
   const { igUserId, igUsername } = seed.business;
+  // Already connected (a second run): the consent flow is not walked again. It writes an audit row, events and a sign-in state every time, so a second run would grow those tables.
+  const present = (await api.get('/instagram/connection')).data;
+  const [passed] = await world.sql('SELECT gate_passed_at FROM compliance_settings WHERE tenant_id = $1', [tenant.id]);
   const meta = world.sims.meta;
+  // The simulator starts empty every run, so the account is made there either way. Its app-scoped id is a made-up one in the reserved range (the simulator's own would be 9 + the id).
+  await once(() => meta.post('/accounts', { igUserId, appScopedId: `90009${String(igUserId).slice(5)}`, username: igUsername, subscribedFields: [] }));
+  if (present?.status === 'active' && present.igUserId === igUserId && passed?.gate_passed_at) return;
   await repos.igConnect.allowAppRole();
-  await once(() => meta.post('/accounts', { igUserId, username: igUsername, subscribedFields: [] }));
   await meta.post('/oauth/next', { igUserId });
   const started = await api.post('/instagram/connect', { returnTo: '/admin/settings' });
   const dialog = await fetch(started.data.authorizeUrl, { redirect: 'manual' });
@@ -140,9 +145,16 @@ async function connectInstagram(world, { api, repos, seed, tenant }) {
 /** Payments, shipping, WhatsApp and consent: the default path, in test mode, against the simulators. */
 async function setUpStore(world, { api, seed }, count) {
   const { owner } = seed.business;
-  await api.post('/setup/terms', { version: '1' });
+  // Each of these writes an audit row, so a second run leaves alone what is already as the seed says.
+  const [terms] = await world.sql(`SELECT 1 AS yes FROM audit_log WHERE tenant_id = (SELECT id FROM tenants WHERE slug = $1) AND action = 'onboarding.terms_accepted' LIMIT 1`, [seed.business.slug]);
+  if (!terms) await api.post('/setup/terms', { version: '1' });
 
-  await api.put('/whatsapp-account', { wabaId: `waba-${seed.business.slug}`, phoneNumberId: `ph-${seed.business.slug}`, accessToken: world.sims.whatsapp.token ?? 'sim-whatsapp-token', displayNumber: owner.phone });
+  // Connected with a token this process can still read (a new process without a fixed DATA_KEY cannot read the last one): the sync answers 409 when not.
+  const whatsapp = (await api.get('/whatsapp-account')).data;
+  const readable = whatsapp?.connected && (await api.post('/whatsapp-templates/sync', {}, { allow: [409] })).status !== 409;
+  if (!readable) {
+    await api.put('/whatsapp-account', { wabaId: `waba-${seed.business.slug}`, phoneNumberId: `ph-${seed.business.slug}`, accessToken: world.sims.whatsapp.token ?? 'sim-whatsapp-token', displayNumber: owner.phone });
+  }
   const synced = await api.post('/whatsapp-templates/sync');
   for (const t of synced.data?.items ?? []) await world.sims.whatsapp.post('/templates', { name: t.name, language: t.language, category: t.category, status: 'APPROVED' });
   await api.post('/whatsapp-templates/sync');
@@ -161,7 +173,9 @@ async function setUpStore(world, { api, seed }, count) {
   const options = (await api.get('/payment-settings')).data;
   if (!options.cod) await api.patch('/payment-settings', { cod: true });
 
-  await api.patch('/shipping-settings', { mode: 'managed', pickupName: `${seed.business.name} Dispatch`, pickupPhone: owner.phone.replace(/^\+91/, ''), pickupLine1: '4 Mill Lane', pickupCity: 'Pune', pickupStateCode: '27', pickupPincode: '411002' });
+  const pickup = { mode: 'managed', pickupName: `${seed.business.name} Dispatch`, pickupPhone: owner.phone.replace(/^\+91/, ''), pickupLine1: '4 Mill Lane', pickupCity: 'Pune', pickupStateCode: '27', pickupPincode: '411002' };
+  const shipping = (await api.get('/shipping-settings')).data;
+  if (!(shipping?.pickupRegistered && Object.entries(pickup).every(([key, value]) => shipping[key] === value))) await api.patch('/shipping-settings', pickup);
   const registered = await world.until(async () => (await api.get('/shipping-settings')).data.pickupRegistered, 15_000);
   if (!registered) throw new SeedError('The pickup address did not register with the courier simulator');
   const notice = (await api.get('/consent-notice', { allow: [404] })).data;
@@ -268,11 +282,15 @@ async function loadReelsAndPages({ world, api, seed, catalogue }, categoryIds, p
     const names = namesFor(source, catalogue);
     const categories = t.page?.categories?.length ? t.page.categories : (t.reel?.categories ?? []);
     let page = existing.get(t.mediaId);
-    if (page) count.kept('page');
+    if (page) {
+      count.kept('page');
+      if (t.reel) count.kept('reels');
+    }
     else {
       const made = await api.post('/pages', { kind: t.kind, mediaId: t.mediaId, slug, headline, productIds: idOf(names), categoryIds: catsOf(categories) });
       page = made.data;
       count.made('page');
+      if (t.reel) count.made('reels');
     }
     out.push({ key: t.reel?.key ?? null, pageSlug: t.page?.slug ?? null, slug: page.slug, mediaId: t.mediaId, kind: t.kind, url: page.url, caption: t.caption });
   }
@@ -350,10 +368,15 @@ async function loadAppConfig({ api, repos, seed, host }, count) {
   const images = {};
   if (!current.iconMediaId) images.iconMediaId = await repos.media.save(png({ width: 1024, height: 1024, color: seed.brandKit.colors.primary ?? '#3B2FC9' }), 'image/png');
   if (!current.splashMediaId) images.splashMediaId = await repos.media.save(png({ width: 1284, height: 1284, color: app.splashBackground }), 'image/png');
-  await api.put('/app-publishing', {
-    ...images,
+  const wanted = {
     appName: app.appName, shortName: app.shortName, urlScheme: app.urlScheme, androidPackage: app.androidPackage, iosBundleId: app.iosBundleId,
     splashBackground: app.splashBackground, supportEmail: app.supportEmail, shopDomain: host, privacyUrl: `https://${host}/privacy`,
+  };
+  // Saved once: a second run with the same details writes nothing (the save is an audit row).
+  if (current.iconMediaId && current.splashMediaId && Object.entries(wanted).every(([key, value]) => current[key] === value)) return count.kept('appConfig');
+  await api.put('/app-publishing', {
+    ...images,
+    ...wanted,
     // Made up from the business's own name: the shape of a Play App Signing fingerprint, belonging to no real key.
     playSigningSha256: [crypto.createHash('sha256').update(`sample:${seed.business.slug}`).digest('hex').toUpperCase().match(/../g).join(':')],
   });
@@ -370,6 +393,9 @@ export async function seedBusiness(world, business) {
   const tenant = await ensureTenant(world, seed, count);
   const host = `${seed.business.slug}.${world.config.platformDomain}`;
   const owner = await ensureOwner(world, tenant, seed.business.owner, count);
+  // One session per sample owner: the one the last run made is dropped, so a second run adds none.
+  const ownerRow = await owner.repos.users.findByPhone(owner.phone);
+  await world.sql('DELETE FROM sessions WHERE tenant_id = $1 AND user_id = $2', [tenant.id, ownerRow.id]);
   const session = { token: '', login: () => signIn(world, host, owner) };
   session.token = await session.login();
   const api = sellerApi(world, host, session);

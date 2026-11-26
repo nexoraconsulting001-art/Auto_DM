@@ -40,6 +40,8 @@ export const adminConsole = {
       maxAge: '1h',
       setHeaders: (res, file) => {
         if (file.endsWith('.html')) res.set(SHELL_HEADERS);
+        // The worker file is looked up afresh every time, or a fix to it would wait out the hour (Q-12).
+        else if (path.basename(file) === 'sw.js') res.set('Cache-Control', 'no-cache');
       },
     }));
 
