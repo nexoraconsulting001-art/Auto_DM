@@ -4,6 +4,7 @@ import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { cleanLevel, cleanProduct, idOf } from './products.js';
 import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
+import { createWebhookDrain } from '../../platform/webhook-drain.js';
 import { secretBinding } from '../../contracts/secrets.js';
 
 /**
@@ -113,43 +114,18 @@ export function createShopifyWebhook(ctx, { products, connection }) {
     }
   }
 
-  async function drain() {
-    let total = 0;
-    for (let pass = 0; pass < 100; pass++) {
-      const rows = await platformDb().query(
-        `SELECT * FROM provider_webhook_events WHERE provider = 'shopify' AND status = 'received'
-           AND (attempts = 0 OR received_at < now() - make_interval(secs => least(3600, 5 * power(4, attempts - 1))))
-         ORDER BY id LIMIT $1`,
-        [BATCH],
-      );
-      for (const row of rows) await processOne(row);
-      total += rows.length;
-      if (rows.length < BATCH) break;
-    }
-    return total;
-  }
+  /**
+   * The web app (at once) and the worker both work a shop's deliveries through the one shared drainer
+   * (platform/webhook-drain.js, R4-WH-3): a delivery is claimed before it is worked, so it is applied once, and one
+   * business's deliveries are applied one at a time in the order they came (a delete never races the update before it).
+   */
+  const drainer = createWebhookDrain({
+    db: platformDb, name: 'shopify.webhook', providers: ['shopify'], scopes: ['tenant:%'], batch: BATCH, process: processOne,
+    subjects: { sql: 'ARRAY[scope]', of: (row) => [row.scope] },
+  });
+  const drain = async () => (await drainer.drain()).length;
+  const { kick } = drainer;
+  const settle = async () => (await drainer.settle()).length;
 
-  let running = null;
-  let again = false;
-  function kick() {
-    if (running) {
-      again = true;
-      return running;
-    }
-    running = (async () => {
-      try {
-        do {
-          again = false;
-          await drain();
-        } while (again);
-      } catch (err) {
-        reportError(err, { msg: 'shopify.webhook_drain_failed' });
-      } finally {
-        running = null;
-      }
-    })();
-    return running;
-  }
-
-  return { receive, drain, kick, async settle() { while (running) await running; return drain(); } };
+  return { receive, drain, kick, settle };
 }

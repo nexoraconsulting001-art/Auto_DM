@@ -5,6 +5,7 @@ import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { opsAlert } from '../payments/util.js';
 import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
+import { createWebhookDrain } from '../../platform/webhook-drain.js';
 
 /**
  * The billing provider's webhooks (PRD 5.12, F-51, F-52), at BILLING_WEBHOOK.path, before any business is known.
@@ -15,11 +16,11 @@ import { countWebhookProcessed, countWebhookStored } from '../../platform/metric
  * work is done from that table, here at once and by the worker's sweep for anything left: each event id once, each payment
  * id one payment and one invoice, and an event older than the state already applied changes no status ('stale').
  *
- * The web app (at once) and the worker (each minute) both work through the table, so a drainer first takes an event: while
- * an event is 'received', processed_at is when a drainer took it, and nobody else touches it until that drainer has
- * finished it or let it go (or LEASE has passed, for a drainer that died). An event whose subscription has an earlier event
- * being worked on right now waits for it, so events are applied in the order they came and each one is finished (and so
- * counted by lastApplied) before the next is weighed (R4-MONEY-2).
+ * The web app (at once) and the worker (each minute) both work through the table through the one shared drainer
+ * (platform/webhook-drain.js): a drainer first takes an event (while 'received', processed_at is when a drainer took it;
+ * LEASE for one that died), and an event whose subscription has an earlier event in another drainer's hands waits for it,
+ * so events are applied in the order they came and each one is finished (and so counted by lastApplied) before the next is
+ * weighed (R4-MONEY-2, R4-WH-1).
  */
 const BATCH = 50;
 const MAX_ATTEMPTS = 8;
@@ -157,37 +158,8 @@ export function createBillingWebhooks(ctx, service) {
     return { tenantId, run: () => service.applyPeriod({ ev, eventAtMs, lastMs }) };
   }
 
-  /** Takes the event for this drainer, or says another one has it. */
-  async function claim(row) {
-    const mine = await platformDb.query(
-      `UPDATE provider_webhook_events SET processed_at = now()
-       WHERE id = $1 AND status = 'received' AND (processed_at IS NULL OR processed_at < now() - $2::interval) RETURNING id`,
-      [row.id, LEASE],
-    );
-    return mine.length > 0;
-  }
-  const letGo = (row) => platformDb.query(`UPDATE provider_webhook_events SET processed_at = NULL WHERE id = $1 AND status = 'received'`, [row.id]);
-
-  /** Whether an earlier event of the same subscription is being worked on by another drainer right now. */
-  async function earlierInHand(row) {
-    const subId = row.payload?.subscription?.id;
-    if (!subId) return false;
-    const earlier = await platformDb.query(
-      `SELECT 1 FROM provider_webhook_events
-       WHERE provider = 'razorpay' AND scope = $1 AND status = 'received' AND id < $2 AND payload->'subscription'->>'id' = $3
-         AND processed_at >= now() - $4::interval LIMIT 1`,
-      [BILLING_WEBHOOK.scope, row.id, subId, LEASE],
-    );
-    return earlier.length > 0;
-  }
-
-  /** One event, if this drainer gets it: null when another drainer has it or has an earlier one of its subscription. */
+  /** One claimed event (webhook-drain.js has it alone, and nothing of its subscription is ahead of it in another's hands). */
   async function processOne(row) {
-    if (!(await claim(row))) return null;
-    if (await earlierInHand(row)) {
-      await letGo(row);
-      return null;
-    }
     try {
       const routed = await route(row);
       if (routed.ignore) {
@@ -204,66 +176,11 @@ export function createBillingWebhooks(ctx, service) {
     }
   }
 
-  /** One pass over what is waiting and nobody has in hand, oldest first; a failure waits longer before each try. -> what this drainer did */
-  async function dispatch({ limit = BATCH, tried = new Set() } = {}) {
-    const rows = await platformDb.query(
-      `SELECT * FROM provider_webhook_events
-       WHERE provider = 'razorpay' AND scope = $1 AND status = 'received'
-         AND (attempts = 0 OR received_at < now() - make_interval(secs => least(3600, 5 * power(4, attempts - 1))))
-         AND (processed_at IS NULL OR processed_at < now() - $3::interval) AND NOT (id = ANY($4::bigint[]))
-       ORDER BY id LIMIT $2`,
-      [BILLING_WEBHOOK.scope, limit, LEASE, [...tried]],
-    );
-    const results = [];
-    for (const row of rows) {
-      tried.add(Number(row.id));
-      const result = await processOne(row);
-      if (result) results.push(result);
-    }
-    return results;
-  }
-
-  /**
-   * Passes until one finds nothing to do, so an event another drainer left waiting behind this one's is taken up here. An
-   * event is tried once per drain: one that failed waits for its next turn.
-   */
-  async function drain() {
-    const all = [];
-    const tried = new Set();
-    for (let pass = 0; pass < 100; pass++) {
-      const results = await dispatch({ tried });
-      all.push(...results);
-      if (!results.length) break;
-    }
-    return all;
-  }
-
-  let running = null;
-  let again = false;
-  function kick() {
-    if (running) {
-      again = true;
-      return;
-    }
-    running = (async () => {
-      try {
-        do {
-          again = false;
-          await drain();
-        } while (again);
-      } catch (err) {
-        reportError(err, { msg: 'billing.webhooks_drain_failed' });
-      } finally {
-        running = null;
-      }
-    })();
-  }
-
-  /** Waits for a run in progress, then drains what is left (tests and the worker). */
-  async function settle() {
-    while (running) await running;
-    return drain();
-  }
+  // Only the billing scope's rows: the store's managed account is provider 'razorpay' too.
+  const { dispatch, drain, kick, settle } = createWebhookDrain({
+    db: platformDb, name: 'billing.webhooks', providers: [BILLING_WEBHOOK.provider], scopes: [BILLING_WEBHOOK.scope], lease: LEASE, batch: BATCH, process: processOne,
+    subjects: { sql: `array_remove(ARRAY[payload->'subscription'->>'id'], NULL)`, of: (row) => [row.payload?.subscription?.id] },
+  });
 
   return { receive, dispatch, drain, kick, settle, route };
 }
