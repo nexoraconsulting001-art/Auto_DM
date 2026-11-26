@@ -51,8 +51,10 @@ test('the worker schedules housekeeping once per hour however many workers run',
   const config = { backupStorageDriver: '' };
   const schedule = registerJobs({ db, platform: { ...platform, queue: { ...platform.queue, work() {}, every: platform.queue.every.bind(platform.queue), enqueue: platform.queue.enqueue } }, config });
   await Promise.all([schedule(), schedule(), schedule()]);
-  const rows = await db.query('SELECT queue FROM jobs');
-  assert.deepEqual(rows.map((r) => r.queue), [HOUSEKEEPING]);
+  // The modules schedule their own jobs here too (order events, abandoned carts, ...); this test is about housekeeping.
+  const queues = (await db.query('SELECT queue FROM jobs')).map((r) => r.queue);
+  assert.deepEqual(queues.filter((q) => q === HOUSEKEEPING), [HOUSEKEEPING], 'one housekeeping job for three workers');
+  assert.equal(queues.includes(BACKUP), false, 'no backup without backup storage');
 });
 
 test('backups are scheduled only when backup storage is set', async () => {
@@ -62,7 +64,8 @@ test('backups are scheduled only when backup storage is set', async () => {
   const config = { backupStorageDriver: 'local', backupStorageDir: dir, databaseUrl: '' };
   const schedule = registerJobs({ db, platform: { ...platform, queue: { ...platform.queue, work() {}, every: platform.queue.every.bind(platform.queue), enqueue: platform.queue.enqueue } }, config });
   await schedule();
-  assert.deepEqual((await db.query('SELECT queue FROM jobs ORDER BY queue')).map((r) => r.queue), [BACKUP, HOUSEKEEPING]);
+  const queues = (await db.query('SELECT queue FROM jobs ORDER BY queue')).map((r) => r.queue);
+  assert.deepEqual(queues.filter((q) => q === BACKUP || q === HOUSEKEEPING), [BACKUP, HOUSEKEEPING]);
 });
 
 test('pg tools get the connection from the environment, with the password decoded', () => {
