@@ -30,7 +30,7 @@ test('G-15: the go-live screen lists every item as ready or missing with who mus
   const text = await page.evaluate(() => document.body.innerText);
   expect(text).toMatch(/not ready/i);
   expect(text).toMatch(/missing/i);
-  expect(text).toMatch(/\bus\b/i);
+  expect(text).toMatch(/\bus\b|\bBhava team\b/i); // the screen names the build team "Bhava team" (OWNER_LABELS)
   expect(text).toMatch(/\byou\b|\bfounder\b|\buser\b/i);
   const firstBlocking = text.indexOf(blocking[0].title);
   const firstOptional = text.indexOf(GOLIVE_ITEMS.find((i) => !i.blocks && i.check.kind !== 'per_business').title);
