@@ -208,7 +208,13 @@ export function categorySequencesRepo(db) {
         const wanted = [...pinned, ...order];
         const known = new Set(current.map((r) => r.page_id));
         if (new Set(wanted).size !== wanted.length) throw refuse('validation_failed', 'A reel is in the list twice.', { order: 'A reel is in the list twice' });
-        if (wanted.length !== known.size || wanted.some((id) => !known.has(id))) {
+        // An id that is none of this business's reels is a bad request (400); a real reel that has joined or left the category since the list was read is a stale list (409).
+        const strangers = wanted.filter((id) => !known.has(id));
+        if (strangers.length) {
+          const own = await t.query('SELECT id FROM reels WHERE tenant_id = $1 AND id = ANY($2::int[])', [t0(), strangers]);
+          if (own.length !== new Set(strangers).size) throw refuse('validation_failed', 'One of those reels isn’t in your account.', { order: 'One of those reels isn’t in your account' });
+        }
+        if (wanted.length !== known.size || strangers.length) {
           throw refuse('conflict', 'This category changed while you were arranging it. Reload it and try again.');
         }
         // The pinned reels' last unpinned places, kept among the new order of the rest.
@@ -316,7 +322,8 @@ export function categorySequencesRepo(db) {
         const all = await t.query('SELECT id FROM categories WHERE tenant_id = $1 FOR UPDATE', [t0()]);
         const known = new Set(all.map((r) => r.id));
         if (new Set(ids).size !== ids.length) throw refuse('validation_failed', 'A category is in the list twice.', { ids: 'A category is in the list twice' });
-        if (ids.length !== known.size || ids.some((id) => !known.has(id))) throw refuse('conflict', 'Your categories changed while you were arranging them. Reload and try again.');
+        if (ids.some((id) => !known.has(id))) throw refuse('validation_failed', 'One of those categories isn’t in your account.', { ids: 'One of those categories isn’t in your account' });
+        if (ids.length !== known.size) throw refuse('conflict', 'Your categories changed while you were arranging them. Reload and try again.');
         await t.query(
           'UPDATE categories c SET position = v.position FROM unnest($2::int[], $3::int[]) AS v(id, position) WHERE c.tenant_id = $1 AND c.id = v.id',
           [t0(), ids, ids.map((_, i) => i + 1)],
