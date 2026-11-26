@@ -79,6 +79,8 @@ export function storeOrigin(input) {
   try {
     const url = new URL(text);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !url.hostname.includes('.')) return null;
+    // www.store.com and store.com are one store (the same rule as a product address, K-11): both read, and are recorded, as the bare name.
+    url.hostname = url.hostname.replace(/^www\./i, '');
     return url.origin;
   } catch {
     return null;
