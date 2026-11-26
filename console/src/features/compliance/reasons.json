@@ -110,6 +110,8 @@
 
     "ai.low_confidence": "The AI wasn’t sure, so it didn’t answer.",
     "ai.ungrounded": "The AI had nothing to base an answer on.",
+    "ai.handoff": "This kind of message always goes to a person, so the AI didn’t answer.",
+    "ai.provider_failed": "The AI service didn’t answer, so a person needs to reply.",
     "wa.no_optin": "This person hasn’t opted in on WhatsApp."
   }
 }

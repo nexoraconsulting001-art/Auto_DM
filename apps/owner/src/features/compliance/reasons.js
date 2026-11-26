@@ -123,6 +123,8 @@ const REASONS = {
     'deletion.completed': 'A person’s data was deleted.',
     'ai.low_confidence': 'The AI wasn’t sure, so it didn’t answer.',
     'ai.ungrounded': 'The AI had nothing to base an answer on.',
+    'ai.handoff': 'This kind of message always goes to a person, so the AI didn’t answer.',
+    'ai.provider_failed': 'The AI service didn’t answer, so a person needs to reply.',
     'wa.no_optin': 'This person hasn’t opted in on WhatsApp.',
   },
   hi: {
@@ -212,6 +214,8 @@ const REASONS = {
     'deletion.completed': 'एक व्यक्ति का डेटा हटा दिया गया।',
     'ai.low_confidence': 'AI पक्का नहीं था, इसलिए उसने जवाब नहीं दिया।',
     'ai.ungrounded': 'AI के पास जवाब का कोई आधार नहीं था।',
+    'ai.handoff': 'इस तरह का मैसेज हमेशा किसी व्यक्ति को जाता है, इसलिए AI ने जवाब नहीं दिया।',
+    'ai.provider_failed': 'AI सेवा ने जवाब नहीं दिया, इसलिए किसी व्यक्ति को जवाब देना होगा।',
     'wa.no_optin': 'इस व्यक्ति ने WhatsApp पर सहमति नहीं दी है।',
   },
 };
