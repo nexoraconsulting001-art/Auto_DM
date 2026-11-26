@@ -73,7 +73,11 @@ test('Q-03: the days are spread across the window, and the businesses\' orders a
     assert.equal(money.n, 0, `${key}: every order has a total in paise`);
   }
   const first = (await rowsOf(world, 'SELECT min(created_at) AS at FROM orders'))[0].at;
-  assert.ok(new Date(first) < new Date(Date.parse(START)), 'the data is in the past of the clock\'s end');
+  // The generator's clock is virtual: the app reads the real time, so travel() moves every stored time back and the last slot is "now"
+  // (tools/sim/activity/world.mjs). The window ends now and starts DAYS days before it.
+  const age = Date.now() - new Date(first).getTime();
+  assert.ok(age > 0, 'the data is in the past of the window\'s end (now)');
+  assert.ok(age < (DAYS + 1) * 86_400_000, `the first order is inside the ${DAYS}-day window (${(age / 86_400_000).toFixed(1)} days old)`);
 });
 
 test('Q-03: everything arrived through the doors: messages reached the simulator, orders moved through their states, nothing is marked sent that was not', { timeout: FULL ? 3_000_000 : 900_000 }, async (t) => {
