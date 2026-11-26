@@ -35,7 +35,10 @@ const sources = sourceFiles.map((file) => ({ file: path.relative(repoRoot, file)
 const featureIndex = (name) => fs.readFileSync(path.join(featuresDir, name, 'index.jsx'), 'utf8');
 
 test('every screen of the old admin has a feature with its routes', () => {
-  assert.deepEqual(fs.readdirSync(featuresDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort(), Object.keys(SCREENS).sort());
+  // The console has grown past the old admin (accounts, billing, catalog, themes and more came with later phases): every
+  // old screen must still be a feature, and nothing else is pinned here.
+  const features = fs.readdirSync(featuresDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  for (const screen of Object.keys(SCREENS)) assert.ok(features.includes(screen), `${screen} is a feature`);
   for (const [feature, paths] of Object.entries(SCREENS)) {
     const text = featureIndex(feature);
     for (const route of paths) {
@@ -87,8 +90,12 @@ test('the console imports nothing the Docker build doesn\'t copy', () => {
 });
 
 test('no console screen reaches past the API client', () => {
+  // features/account/signin.js asks two public sign-in questions before anyone is signed in (is the password form on, does
+  // Google start here): a bare request with no data and no token, which the client's typed calls cannot express (P-11, F-117).
+  const PRE_SIGN_IN_PROBES = new Set(['console/src/features/account/signin.js']);
   for (const { file, text } of sources) {
-    assert.doesNotMatch(text, /\bfetch\(|XMLHttpRequest|\/admin\/media|axios/, file);
+    const rule = PRE_SIGN_IN_PROBES.has(file) ? /XMLHttpRequest|\/admin\/media|axios/ : /\bfetch\(|XMLHttpRequest|\/admin\/media|axios/;
+    assert.doesNotMatch(text, rule, file);
   }
 });
 
@@ -127,9 +134,12 @@ test('the console\'s lists of statuses, image types, colours and fonts match the
 test('F-75: the console is Bhava\'s; a seller\'s logo appears only as the workspace identity', () => {
   const uses = sources.filter(({ text }) => /business\.logoUrl|\.logoUrl\b/.test(text)).map(({ file }) => file).sort();
   assert.deepEqual(uses, [
+    'console/src/features/account/AccountPage.jsx', // the business switcher: each workspace's identity
     'console/src/features/brand-kit/BrandKitPage.jsx', // editing the kit
     'console/src/features/brand-kit/options.js', // editing the kit
     'console/src/features/reels/ReelFormPage.jsx', // the preview of the shopper's DM
+    'console/src/features/themes/ThemePage.jsx', // editing the logo
+    'console/src/platform/features/businesses/pages.jsx', // the operator's draft kit when onboarding a business
     'console/src/shell/AppShell.jsx', // the workspace identity
   ]);
   const shell = sources.find(({ file }) => file.endsWith('shell/AppShell.jsx')).text;
@@ -138,7 +148,10 @@ test('F-75: the console is Bhava\'s; a seller\'s logo appears only as the worksp
 });
 
 test('U-10, F-119: the console offers no raw event log export', () => {
-  for (const { file, text } of sources) assert.doesNotMatch(text, /raw[ -_]?(event|log|export)|\.csv\b|download=/i, file);
+  // `api.imports.csv(` is the catalog CSV import (a file going in), not an export.
+  // The Bhava Console (console/src/platform, for Bhava's own operators, super-admin only: platform.rawExport) has raw exports; U-10 and F-119 are
+  // about what an owner or creator is offered, which is everything else in the console.
+  for (const { file, text } of sources.filter(({ file }) => !file.startsWith('console/src/platform/'))) assert.doesNotMatch(text.replaceAll('api.imports.csv(', ''), /raw[ -_]?(event|log|export)|\.csv\b|download=/i, file);
 });
 
 test('what a shopper receives carries no Bhava text', () => {
