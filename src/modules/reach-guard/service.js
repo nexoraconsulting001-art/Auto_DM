@@ -25,10 +25,14 @@ const WEBHOOK_SILENCE_MS = 72 * HOUR;
 const CALL_STATS_KEEP_MS = 7 * DAY;
 const INT32_MAX = 2_147_483_647;
 
-/** Not an API failure. "Not enough viewers" (7.3), and insights calls Meta answered with "gone" or "expired", which the adapter also treats as an answer. */
+/**
+ * Not an API failure. "Not enough viewers" (7.3), and insights calls Meta answered with "gone" or "expired", which the adapter also treats as an answer.
+ * An insights call refused for permission is the insights scope being denied: the poller records it (analytics_accounts.permission 'denied') and it
+ * costs its own 30 as a missing scope (7.7, 4.2), so it is not counted a second time as an API error.
+ */
 function isNotAFailure(call) {
   if (call.kind === 'not_enough_viewers') return true;
-  return /\/insights$/.test(call.pathname ?? '') && (call.kind === 'insights_expired' || call.kind === 'not_found');
+  return /\/insights$/.test(call.pathname ?? '') && (call.kind === 'insights_expired' || call.kind === 'not_found' || call.kind === 'permission');
 }
 
 const failed = (call) => Boolean(call.kind) || call.status === 0 || call.status >= 400;
