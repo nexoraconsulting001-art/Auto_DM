@@ -11,7 +11,9 @@ import { currentTenant } from '../tenancy.js';
  *   reportError(err, fields)    logs it and passes it to every reporter added with onError()
  */
 const requestContext = new AsyncLocalStorage();
-const PRIVATE_FIELD = /^(user_?name|ig_?user_?name|text|message|body|caption|comment|reply|phone|mobile|email|address|password|passwd|secret|api_?key|token|access_?token|refresh_?token|authorization|cookie|signature)$/i;
+// `comment` is not here: by convention it is the comment's id (dm.sent, webhook.comment), which is what a log needs to
+// trace a delivery. What a person wrote is `text`, `message` or `comment_text`, and those are dropped.
+const PRIVATE_FIELD = /^(user_?name|ig_?user_?name|text|message|comment_?text|body|caption|reply|phone|mobile|email|address|password|passwd|secret|api_?key|token|access_?token|refresh_?token|authorization|cookie|signature)$/i;
 const SECRET_SHAPES = [
   [/(Bearer\s+)[\w.~+/=-]+/gi, '$1[token]'],
   [/\b(EAA|IGQ|IGAA)[\w-]{12,}/g, '[token]'],

@@ -51,9 +51,12 @@ test('there is no forwarding to another app and no /l/ redirect, even with the o
     await seedReel(app.repos);
     const body = JSON.stringify({ entry: [{ id: 'ME', changes: [{ field: 'comments', value: { id: 'c2', text: 'LINK', media: { id: '999' }, from: { id: 'u1', username: 'bob' } } }] }] });
     await fetch(`${app.base}/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(body) }, body });
-    await waitFor(async () => (await app.repos.activity.count()) > 0);
+    // Since the compliance intake (Phase 1) a comment is stored and worked through here (inbound_events), and a comment on
+    // a reel the store doesn't use belongs to the automations engine, so it no longer writes the Phase 0 reel activity row.
+    const worked = async () => (await app.db.platform.query(`SELECT status FROM inbound_events WHERE object_id = 'c2'`))[0]?.status;
+    await waitFor(async () => (await worked()) === 'done');
     await pause(100); // room for a forward, if there were one
-    assert.equal(await app.repos.activity.count(), 1);
+    assert.equal(await worked(), 'done', 'the comment was worked through here');
     assert.deepEqual(outgoing, []);
 
     const res = await fetch(`${app.base}/l/winter-bulbs?src=dm`, { redirect: 'manual' });
