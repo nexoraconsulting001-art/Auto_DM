@@ -8,8 +8,7 @@ import { OfflineBanner, useStrings } from '@bhava/app-core';
 import { Badge, Banner, Button, Card, ConfirmSheet, Divider, EmptyState, Field, IconButton, ListRow, LoadingRows, Screen, Section, Sheet, Text, Toggle, WorkspaceBadge, useTheme } from '@bhava/ui';
 import { useServices, useSession } from '../../shell/hooks.js';
 import { NothingSaved, RecordState, Refusal, formatPaise, useWritable } from '../compliance/kit.js';
-import { KeywordEditor } from './KeywordEditor.js';
-import { MAX_BUTTON_TEXT, MAX_REEL_PRODUCTS, NEW_REEL, formToReel, moveItem, previewMessage, reelToForm, serverFieldErrors } from './form.js';
+import { MAX_REEL_PRODUCTS, NEW_REEL, formToReel, legacyDm, moveItem, previewMessage, reelToForm, serverFieldErrors } from './form.js';
 import { Thumb, useReelSources } from './ReelsScreen.js';
 
 export const reelKey = (id) => ['reels', 'detail', String(id)];
@@ -107,10 +106,30 @@ function DmPreview({ message, button }) {
             <Text variant="meta" testID="reel-preview-name">{business?.name}</Text>
             <View style={{ backgroundColor: theme.color.surfaceSunken, borderRadius: theme.radius.tile, padding: theme.space[3], gap: theme.space[2] }}>
               <Text variant="body" testID="reel-preview-text">{previewMessage(message) || t('reels.previewEmpty')}</Text>
-              <Text variant="small" tone="primary" testID="reel-preview-button">{button || NEW_REEL.buttonText}</Text>
+              <Text variant="small" tone="primary" testID="reel-preview-button">{button}</Text>
             </View>
           </View>
         </View>
+        <Text variant="meta">{t('reels.dmHint')}</Text>
+      </Card>
+    </Section>
+  );
+}
+
+/**
+ * Where a comment's DM is set up: Automations (D-11), where the plan's limits and the message and link checks apply. A
+ * Phase 0 reel that still sends its own keyword DM says so, read-only, until it is set up as an automation.
+ */
+function CommentDms({ dm, navigation }) {
+  const { t } = useStrings();
+  return (
+    <Section title={t('reels.whenComments')}>
+      <Card testID="reel-comment-dms">
+        <Text variant="body" testID="reel-comment-dms-text">
+          {dm ? t('reels.legacyDm', { keywords: dm.keywords.join(', ') }) : t('reels.dmsInAutomations')}
+        </Text>
+        {dm?.publicReply ? <Text variant="small">{t('reels.legacyPublicReply', { reply: dm.publicReply })}</Text> : null}
+        <Button testID="reel-open-automations" kind="secondary" label={t('reels.openAutomations')} onPress={() => navigation?.navigate?.('automations.index')} />
       </Card>
     </Section>
   );
@@ -123,6 +142,7 @@ function Editor({ id, reel, post, navigation }) {
   const queryClient = useQueryClient();
   const writable = useWritable();
   const [form, setForm] = useState(() => (reel ? reelToForm(reel) : { ...NEW_REEL, headline: (post?.caption ?? '').trim().slice(0, 60) }));
+  const dm = legacyDm(reel);
   const [errors, setErrors] = useState({});
   const [asking, setAsking] = useState(false);
   const set = (name) => (value) => setForm((current) => ({ ...current, [name]: value }));
@@ -156,7 +176,6 @@ function Editor({ id, reel, post, navigation }) {
       return;
     }
     setErrors({});
-    setForm((current) => ({ ...current, keywords: body.keywords, keywordDraft: '' }));
     save.mutate(body);
   };
 
@@ -178,31 +197,8 @@ function Editor({ id, reel, post, navigation }) {
         </Card>
       </Section>
       <Products picked={form.products} onChange={set('products')} error={words('products')} disabled={!writable} />
-      <Section title={t('reels.whenComments')}>
-        <Card>
-          <KeywordEditor
-            testID="reel-keywords"
-            keywords={form.keywords}
-            draft={form.keywordDraft}
-            onChange={set('keywords')}
-            onDraft={set('keywordDraft')}
-            error={words('keywords')}
-            disabled={!writable}
-            labelKey="reels.addKeyword"
-            hintKey="reels.keywordHint"
-            removeKey="reels.removeKeyword"
-          />
-        </Card>
-      </Section>
-      <Section title={t('reels.replyWith')}>
-        <Card>
-          <Field testID="reel-dm" label={t('reels.dm')} hint={t('reels.dmHint')} value={form.dmMessage} onChangeText={set('dmMessage')} maxLength={1000} multiline editable={writable} error={words('dmMessage')} />
-          <Field testID="reel-button" label={t('reels.button')} hint={t('reels.buttonHint', { max: MAX_BUTTON_TEXT })} value={form.buttonText} onChangeText={set('buttonText')} maxLength={40} editable={writable} error={words('buttonText')} />
-          <Toggle testID="reel-public" title={t('reels.publicReply')} subtitle={t('reels.publicReplyHint')} value={form.publicReplyOn} onValueChange={set('publicReplyOn')} disabled={!writable} />
-          {form.publicReplyOn ? <Field testID="reel-public-text" label={t('reels.publicReplyText')} value={form.publicReply} onChangeText={set('publicReply')} maxLength={1000} editable={writable} error={words('publicReply')} /> : null}
-        </Card>
-      </Section>
-      <DmPreview message={form.dmMessage} button={form.buttonText.trim()} />
+      <CommentDms dm={dm} navigation={navigation} />
+      {dm ? <DmPreview message={dm.dmMessage} button={dm.buttonText.trim()} /> : null}
       <Refusal error={save.error ?? remove.error} testID="reel-refusal" />
       {save.isSuccess ? <Banner testID="reel-saved" tone="good">{t('reels.saved')}</Banner> : null}
       <Button testID="reel-save" label={t(reel ? 'reels.save' : 'reels.create')} busy={save.isPending} disabled={!writable} onPress={submit} />
@@ -227,7 +223,7 @@ function Editor({ id, reel, post, navigation }) {
 }
 
 /**
- * One reel's store (the console's /reels/:id): its products, keywords and DM. Whether the post has a store comes from
+ * One reel's store (the console's /reels/:id): its page and products; comment DMs are Automations'. Whether the post has a store comes from
  * the list, so a first visit is never a refused lookup; a post with none is set up from what Instagram said about it.
  */
 export default function ReelScreen({ route, navigation }) {

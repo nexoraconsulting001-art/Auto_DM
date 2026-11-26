@@ -137,7 +137,7 @@ export function createAutomationEngine({ db, repos, compliance, meta, inbound = 
   async function onComment(event) {
     const automation = await repos.automations.forMedia(event.channel, event.mediaId);
     if (!automation || automation.triggerType !== 'comment') {
-      if (await repos.reels?.getActiveByMediaId(event.mediaId)) return false; // a Phase 0 reel: compliance answers it
+      if (await repos.reels?.getLegacyDmByMediaId(event.mediaId)) return false; // a Phase 0 reel with a keyword DM: compliance answers it
       if (await answeredByTwin(event)) return false; // linked to its Instagram twin: the facebook module answers it
       await skip(event, 'unmapped');
       return true;

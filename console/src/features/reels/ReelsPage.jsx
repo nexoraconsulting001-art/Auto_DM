@@ -33,7 +33,7 @@ export default function ReelsPage() {
   return (
     <>
       <PageHeader title="Reels" />
-      <p className="lead">Each reel gets its own store with 1 to 20 products. When someone comments the reel’s keyword, they get a DM with a button to that store.</p>
+      <p className="lead">Each reel gets its own store with 1 to 20 products. Send its link in a comment DM set up in Automations.</p>
       {posts.isError && <Banner tone="warn">We couldn’t load your Instagram posts: {posts.error.message} Reels you already set up are still listed.</Banner>}
       <Loadable query={reels} label="Loading your reels" errorTitle="We couldn’t load your reels">
         {(configured) => {

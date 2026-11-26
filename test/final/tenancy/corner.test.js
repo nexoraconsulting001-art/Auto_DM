@@ -14,7 +14,7 @@ import { addBusiness, addStaff, api, need, nextPhone, startWorld } from '../../p
 
 const MINE = '17900000000001701';
 const THEIRS = '17900000000001801';
-const body = (productIds, headline = 'Edit') => ({ keywords: ['LINK'], productIds, headline });
+const body = (productIds, headline = 'Edit') => ({ productIds, headline });
 
 function ownedIg(owners, hooks = {}) {
   const ig = fakeIg();

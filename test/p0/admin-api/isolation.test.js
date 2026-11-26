@@ -8,7 +8,7 @@ import { NoTenantError, withTenant } from '../../../src/tenancy.js';
 import { REEL_ID, fakeIg, openTestDb } from '../../helpers.js';
 import { capturingLogs, ok, placeOrder, refused, secondBusiness, withApp } from './support.js';
 
-const reelBody = (productIds) => ({ keywords: ['LINK'], productIds, headline: 'Secret reel', slug: 'secret-reel' });
+const reelBody = (productIds) => ({ productIds, headline: 'Secret reel', slug: 'secret-reel' });
 
 const LEAF_IG = 'IG-leaf';
 

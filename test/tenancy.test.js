@@ -272,7 +272,7 @@ test('R-01: every route, used by another business’s owner, finds nothing of bu
       ['PATCH', `/api/v1/categories/${category.id}`, { name: 'Hijacked' }],
       ['DELETE', `/api/v1/categories/${category.id}`],
       ['POST', `/api/v1/customers/${customer.id}/reset-password`],
-      ['PUT', `/api/v1/reels/${REEL_ID}`, { headline: 'Hijacked', keywords: ['LINK'], productIds: [own.id], active: true }],
+      ['PUT', `/api/v1/reels/${REEL_ID}`, { headline: 'Hijacked', productIds: [own.id], active: true }],
       ['DELETE', `/api/v1/reels/${REEL_ID}`],
       ['POST', `/api/v1/orders/${order.id}/status`, { status: 'cancelled' }],
     ];

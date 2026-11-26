@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { REEL_ID, fakeIg } from '../../helpers.js';
 import { at, bearer, jsonRequest, ok, refused, secondBusiness, walk, withApp } from './support.js';
 
-const save = (productIds, extra = {}) => ({ keywords: ['LINK'], productIds, headline: 'Brunch edit', ...extra });
+const save = (productIds, extra = {}) => ({ productIds, headline: 'Brunch edit', ...extra });
 
 async function products(api, n = 2) {
   const ids = [];
@@ -14,13 +14,11 @@ async function products(api, n = 2) {
 
 test('saving creates the reel store and shows its products in the chosen order', withApp(async ({ api }) => {
   const [a, b] = await products(api);
-  const reel = await ok(await api('PUT', `/reels/${REEL_ID}`, save([b, a], { keywords: ['LINK', 'SHOP'], dmMessage: 'Hello', buttonText: 'Open', publicReply: 'Sent', permalink: 'https://instagram.com/reel/x', thumbnailUrl: 'https://cdn.example/t.jpg', videoUrl: 'https://cdn.example/v.mp4', caption: 'Hi' })));
+  const reel = await ok(await api('PUT', `/reels/${REEL_ID}`, save([b, a], { permalink: 'https://instagram.com/reel/x', thumbnailUrl: 'https://cdn.example/t.jpg', videoUrl: 'https://cdn.example/v.mp4', caption: 'Hi' })));
   assert.equal(reel.id, REEL_ID);
   assert.equal(reel.slug, 'brunch-edit');
-  assert.deepEqual(reel.keywords, ['LINK', 'SHOP']);
-  assert.equal(reel.dmMessage, 'Hello');
-  assert.equal(reel.buttonText, 'Open');
-  assert.equal(reel.publicReply, 'Sent');
+  // A reel is its store; its DM is an automation's (D-11), so a new reel has no keyword DM of its own.
+  assert.deepEqual([reel.keywords, reel.dmMessage, reel.publicReply], [[], '', '']);
   assert.equal(reel.active, true);
   assert.equal(reel.permalink, 'https://instagram.com/reel/x');
   assert.equal(reel.thumbnailUrl, 'https://cdn.example/t.jpg');
@@ -46,16 +44,16 @@ test('saving again replaces the store but keeps the link already sent in DMs, an
   assert.equal(moved.storeUrl, 'https://shop.test/r/new-link?src=dm');
 }));
 
-test('a keyword with a comma, a dangerous link and a product that is gone are all refused', withApp(async (app) => {
+test('keyword DM fields, a dangerous link and a product that is gone are all refused', withApp(async (app) => {
   const { api } = app;
   const [a] = await products(api, 1);
   const url = `/reels/${REEL_ID}`;
-  assert.ok((await refused(await api('PUT', url, save([a], { keywords: ['one,two'] })), 400, 'validation_failed')).fields.keywords);
+  assert.match((await refused(await api('PUT', url, save([a], { keywords: ['one,two'] })), 400, 'validation_failed')).fields.keywords, /Automations/);
   assert.ok((await refused(await api('PUT', url, save([a], { permalink: 'javascript:alert(1)' })), 400, 'validation_failed')).fields.permalink);
   assert.ok((await refused(await api('PUT', url, save([a], { thumbnailUrl: 'javascript:alert(1)' })), 400, 'validation_failed')).fields.thumbnailUrl);
   await refused(await api('PUT', url, save([a + 999])), 400, 'validation_failed');
   await refused(await api('PUT', url, save([])), 400, 'validation_failed');
-  await refused(await api('PUT', url, { productIds: [a], keywords: ['LINK'] }), 400, 'validation_failed'); // no headline or slug
+  await refused(await api('PUT', url, { productIds: [a] }), 400, 'validation_failed'); // no headline or slug
   await refused(await api('GET', url), 404, 'not_found');
 
   const leaf = await secondBusiness(app);

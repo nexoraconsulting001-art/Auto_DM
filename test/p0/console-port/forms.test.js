@@ -8,7 +8,7 @@ import { describeResult } from '../../../console/src/features/activity/results.j
 import { CHECKLIST_STEPS, checklistView } from '../../../console/src/features/home/checklist.js';
 import { orderStatus } from '../../../console/src/features/orders/status.js';
 import { EMPTY_PRODUCT, RENAME as PRODUCT_RENAME, formToProduct, productToForm } from '../../../console/src/features/products/form.js';
-import { NEW_REEL, addKeywords, formToReel, mergeReelCards, postKind, previewMessage, reelToForm } from '../../../console/src/features/reels/form.js';
+import { NEW_REEL, formToReel, legacyDm, mergeReelCards, postKind, previewMessage, reelToForm } from '../../../console/src/features/reels/form.js';
 import { formToSettings, settingsToForm } from '../../../console/src/features/settings/form.js';
 import { describeFailure } from '../../../console/src/lib/forms.js';
 import { imageProblem, isWebLink } from '../../../console/src/lib/images.js';
@@ -80,45 +80,45 @@ test('a new category goes last, and reordering changes only what moved', () => {
 
 const reelForm = (changes) => ({ ...NEW_REEL, headline: 'Brunch', products: [{ id: 5 }, { id: 2 }], ...changes });
 
-test('a new reel starts live with public replies off and no platform name', () => {
+const DM_FIELDS = ['keywords', 'dmMessage', 'buttonText', 'publicReply'];
+
+test('a new reel starts live with no platform name and no keyword DM of its own (D-11: comment DMs are automations)', () => {
   assert.equal(NEW_REEL.active, true);
-  assert.equal(NEW_REEL.publicReplyOn, false);
-  assert.equal(NEW_REEL.publicReply, '');
+  assert.deepEqual(Object.keys(NEW_REEL).sort(), ['active', 'headline', 'products', 'slug']);
   assert.doesNotMatch(JSON.stringify(NEW_REEL), /bhava/i);
   const { body } = formToReel(reelForm());
-  assert.equal(body.publicReply, '');
+  for (const field of DM_FIELDS) assert.equal(field in body, false, `${field} is refused by the API, so the form never sends it`);
 });
 
 test('a reel form keeps the products in order, carries what Instagram said, and passes the contract', () => {
   const caption = 'c'.repeat(900);
-  const { body } = formToReel(reelForm({ keywordDraft: 'shop, LINK', publicReplyOn: true, publicReply: ' Sent ' }), { permalink: 'https://instagram.com/reel/x', thumbnailUrl: 'https://cdn.test/t.jpg', caption });
+  const { body } = formToReel(reelForm(), { permalink: 'https://instagram.com/reel/x', thumbnailUrl: 'https://cdn.test/t.jpg', caption });
   assert.deepEqual(body.productIds, [5, 2]);
-  assert.deepEqual(body.keywords, ['LINK', 'shop'], 'a keyword still being typed counts, without duplicates');
-  assert.equal(body.publicReply, 'Sent');
   assert.equal(body.caption.length, 500);
   assert.equal(body.permalink, 'https://instagram.com/reel/x');
   assert.equal(ReelSave.safeParse(body).success, true);
 });
 
-test('a reel form refuses what the API would refuse, in the seller\'s words', () => {
+test('a reel form refuses what the API would refuse, in the seller’s words', () => {
   assert.match(formToReel(reelForm({ headline: ' ' })).errors.headline, /headline/);
-  assert.match(formToReel(reelForm({ keywords: [], keywordDraft: '' })).errors.keywords, /at least one keyword/);
   assert.match(formToReel(reelForm({ products: [] })).errors.products, /at least 1/);
   assert.match(formToReel(reelForm({ products: Array.from({ length: 21 }, (_, id) => ({ id: id + 1 })) })).errors.products, /at most 20/);
-  assert.match(formToReel(reelForm({ buttonText: 'x'.repeat(21) })).errors.buttonText, /20 characters/);
-  assert.match(formToReel(reelForm({ publicReplyOn: true, publicReply: ' ' })).errors.publicReply, /turn public replies off/);
 });
 
-test('keywords add up without repeats, ignoring case', () => {
-  assert.deepEqual(addKeywords(['LINK'], 'link, Shop,shop ,  '), ['LINK', 'Shop']);
-  assert.deepEqual(addKeywords([], ''), []);
+test('list text splits without repeats', () => {
   assert.deepEqual(splitList(' a ,b,,a'), ['a', 'b']);
 });
 
-test('a saved reel opens with its public reply showing', () => {
-  const reel = { headline: 'H', slug: 's', keywords: ['A'], dmMessage: 'M', buttonText: 'B', publicReply: '', active: false, products: [] };
-  assert.equal(reelToForm(reel).publicReplyOn, false);
-  assert.equal(reelToForm({ ...reel, publicReply: 'Hi' }).publicReplyOn, true);
+test('a saved Phase 0 reel opens as its store only, and its own keyword DM is shown read-only; saving it again passes the contract', () => {
+  const reel = { headline: 'H', slug: 's', keywords: ['A'], dmMessage: 'M', buttonText: 'B', publicReply: 'Hi', active: false, products: [{ id: 3 }] };
+  const form = reelToForm(reel);
+  assert.deepEqual(form, { headline: 'H', slug: 's', active: false, products: [{ id: 3 }] });
+  assert.deepEqual(legacyDm(reel), { keywords: ['A'], dmMessage: 'M', buttonText: 'B', publicReply: 'Hi' });
+  assert.equal(legacyDm({ ...reel, keywords: [] }), null);
+  assert.equal(legacyDm(undefined), null);
+  const { body } = formToReel(form);
+  for (const field of DM_FIELDS) assert.equal(field in body, false);
+  assert.equal(ReelSave.safeParse(body).success, true);
 });
 
 test('the DM preview fills in a name, and only a name', () => {

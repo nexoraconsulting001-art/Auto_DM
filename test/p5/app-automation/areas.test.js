@@ -128,10 +128,11 @@ test('warnings, launch checks, the plan’s triggers and the per-reel ids follow
   assert.deepEqual(trackingChanges({ ...amazon, media: [] }, []), []);
 });
 
-test('a reel store’s body is one the API accepts, and the default DM names only the seller', () => {
-  const { body } = formToReel({ ...NEW_REEL, headline: 'Spice box', products: [{ id: 3 }], keywordDraft: 'spice' }, { permalink: 'https://www.instagram.com/reel/a', caption: 'c' });
+test('a reel store’s body is one the API accepts, with none of the keyword DM fields it refuses (D-11), and the default DM names only the seller', () => {
+  const { body } = formToReel({ ...NEW_REEL, headline: 'Spice box', products: [{ id: 3 }] }, { permalink: 'https://www.instagram.com/reel/a', caption: 'c' });
   assert.deepEqual(ReelSave.parse(body).productIds, [3]);
-  assert.doesNotMatch(NEW_REEL.dmMessage, /bhava/i);
+  for (const field of ['keywords', 'dmMessage', 'buttonText', 'publicReply']) assert.equal(field in body, false, field);
+  assert.doesNotMatch(JSON.stringify(NEW_REEL), /bhava/i);
   assert.doesNotMatch(`${newForm().tapButtonTitle} ${newForm().linkButtonTitle}`, /bhava/i);
 });
 
