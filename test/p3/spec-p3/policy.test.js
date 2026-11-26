@@ -60,7 +60,7 @@ test('F-96: a switch is one business\'s row: it can\'t be set for another throug
   const a = await addP3Shop(world, { plan: 't1' });
   const b = await addP3Shop(world, { plan: 't1' });
   await setFeature(a, 'whatsapp_order', true);
-  await a.whatsapp('+91 93200 01717');
+  await a.whatsapp('+91 98111 22233');
   await b.whatsapp('+91 93200 01718');
   assert.equal((await a.must('GET', '/page-settings')).whatsappAvailable, true);
   assert.equal((await b.must('GET', '/page-settings')).whatsappAvailable, false, 'Tier 1 without the switch has no WhatsApp order button');

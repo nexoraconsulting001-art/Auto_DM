@@ -7,7 +7,7 @@ The requirements (PRD) and build plan live outside this repo, because the repo i
 ## Status (26 Nov 2026)
 
 - **Built:** Phases 0 to 10 (store, reels, DMs, checkout, delivery, WhatsApp, owner and shopper apps, billing, Platform Console, production setup).
-- **Final stage (review, attack round, tests), paused at the weekly usage limit:**
+- **Final stage (review, attack round, tests), paused:**
   - Code review: 98 confirmed problems. All critical and high ones are fixed, and most medium ones, each with a regression test and a root-cause note. The 29 low ones are kept for later.
   - Attack round on money, sign-in, business separation and Meta compliance: 17 confirmed bugs, all fixed with tests.
   - First full GitHub run after those fixes: about 220 test files still fail, mostly outside the demo path.
@@ -27,8 +27,8 @@ The requirements (PRD) and build plan live outside this repo, because the repo i
   6. Fix the low-priority list.
 - **Where to pick up:**
   - Code: this branch (`bhava/build`) plus the fix branches above.
-  - Website: the separate repo `nexoraconsulting001-art/Auto_DM_Plugin`, folder `site/`.
-  - Private notes stay off git, because this repo is public. They are on the build laptop in `C:\bhava\docs`:
+  - Website: a separate repository, folder `site/`.
+  - Private notes stay off git, because this repo is public. They are kept on the build machine, outside the repository:
     - PRD and build plan.
     - Problem notes `p0-attack-r1.md` and `p1..p9-known-problems.md`.
     - `rca-log.md` and `rca-escalations.md`.

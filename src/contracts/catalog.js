@@ -203,7 +203,7 @@ export function isSiteRoot(input) {
 
 // ---- the WhatsApp order button (8.11) -------------------------------------------------------------------------------
 
-/** A saved number in international digits: "+91 93200 01717" is 919320001717 (K-36). Null when it can't be one. */
+/** A saved number in international digits: "+91 98111 22233" is 919811122233 (K-36). Null when it can't be one. */
 export function whatsappDigits(input) {
   const digits = String(input ?? '').replace(/\D/g, '');
   return /^[1-9]\d{7,14}$/.test(digits) ? digits : null;

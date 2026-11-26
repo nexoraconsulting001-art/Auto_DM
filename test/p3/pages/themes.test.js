@@ -98,7 +98,7 @@ test('F-102, F-103, F-104: picking a look with a logo tunes the accent, and swit
 });
 
 test('F-105: one landing page drawn in all five presets has the same sections in the same order; only the look differs', async (t) => {
-  const s = await shop(t, { whatsapp: '919320001717' });
+  const s = await shop(t, { whatsapp: '919811122233' });
   await withPage(s);
   await s.api('PATCH', '/page-settings', { whatsappOrder: true });
   const pages = {};

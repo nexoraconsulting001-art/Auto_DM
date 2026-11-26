@@ -9,7 +9,7 @@ import {
 
 const world = useP3World();
 
-const NUMBER = '+91 93200 01717';
+const NUMBER = '+91 98111 22233';
 const waLinks = (html) => linksOf(html).filter((a) => /^https?:\/\/(wa\.me|api\.whatsapp\.com|web\.whatsapp\.com)\b/i.test(a.href) || /^whatsapp:/i.test(a.href));
 const open = async (shop, landing, query = '') => need(await shop.open(`/r/${landing.slug}${query}`), 200, 'The landing page').text;
 
@@ -40,7 +40,7 @@ test('K-35: the WhatsApp button for "Steel Bottle ₹349" opens wa.me with the n
   const html = (await shopper.open(`/r/${landing.slug}${query}`)).text;
   const link = orderLink(html, 'Steel Bottle');
   assert.equal(link.origin, 'https://wa.me', 'Straight to wa.me');
-  assert.equal(link.pathname, '/919320001717');
+  assert.equal(link.pathname, '/919811122233');
   assert.deepEqual([...link.searchParams.keys()], ['text'], 'Only the prefilled text: no UTM on a WhatsApp link');
   const text = link.searchParams.get('text');
   assert.ok(text.includes('Steel Bottle'), 'The name');
@@ -85,7 +85,7 @@ test('K-35: the button is per business and per product, only ever to the busines
   const texts = waLinks(html).map((a) => new URL(a.href)).filter((u) => u.searchParams.has('text'));
   assert.ok(texts.some((u) => u.searchParams.get('text').includes('With button')));
   assert.ok(!texts.some((u) => u.searchParams.get('text').includes('Without button')), 'A product switched off has no button');
-  for (const a of waLinks(html)) assert.match(a.href, /^https:\/\/wa\.me\/919320001717(\?|$)/, `Every WhatsApp link goes to the business's own number: ${a.href}`);
+  for (const a of waLinks(html)) assert.match(a.href, /^https:\/\/wa\.me\/919811122233(\?|$)/, `Every WhatsApp link goes to the business's own number: ${a.href}`);
   assert.ok(!html.includes('919811122334') && !html.includes('919999999999'), 'Never another number');
 
   await setTier(world, shop, 't1');
@@ -95,17 +95,17 @@ test('K-35: the button is per business and per product, only ever to the busines
 
 // ---- K-36 ------------------------------------------------------------------------------------------------------------------
 
-test('K-36: the saved number "+91 93200 01717" is used as 919320001717', async () => {
+test('K-36: the saved number "+91 98111 22233" is used as 919811122233', async () => {
   const shop = await whatsappShop();
   const product = await shop.product({ name: 'Number check', pricePaise: 5000 });
   const landing = await shop.page({ productIds: [product.id] });
   const link = orderLink(await open(shop, landing), 'Number check');
-  assert.equal(`${link.origin}${link.pathname}`, 'https://wa.me/919320001717');
-  assert.equal((await shop.must('GET', '/page-settings')).whatsappNumber.replace(/\D/g, ''), '919320001717');
-  for (const written of ['+91-93200-01717', '(+91) 93200 01717', '91 9320001717', '+91.93200.01717']) {
+  assert.equal(`${link.origin}${link.pathname}`, 'https://wa.me/919811122233');
+  assert.equal((await shop.must('GET', '/page-settings')).whatsappNumber.replace(/\D/g, ''), '919811122233');
+  for (const written of ['+91-98111-22233', '(+91) 98111 22233', '91 9811122233', '+91.98111.22233']) {
     await shop.whatsapp(written);
     const again = orderLink(await open(shop, landing), 'Number check');
-    assert.equal(again.pathname, '/919320001717', `"${written}" is used as digits`);
+    assert.equal(again.pathname, '/919811122233', `"${written}" is used as digits`);
   }
 });
 
@@ -113,14 +113,14 @@ test('K-36: a number that can\'t be one, or none at all, hides the button rather
   const shop = await whatsappShop();
   const product = await shop.product({ name: 'No number', pricePaise: 5000 });
   const landing = await shop.page({ productIds: [product.id] });
-  for (const written of ['', '12345', '0093200 01717', 'call me', '+', '<script>alert(1)</script>', '+91 93200 01717 ext 4']) {
+  for (const written of ['', '12345', '0098111 22233', 'call me', '+', '<script>alert(1)</script>', '+91 98111 22233 ext 4']) {
     const res = await shop.send('PATCH', '/settings', { supportWhatsapp: written });
     assert.ok(res.status === 200 || res.status === 400, `Saving "${written}" answered ${res.status}`);
     if (res.status === 400) await shop.whatsapp('');
     const html = await open(shop, landing);
     const links = waLinks(html);
     for (const a of links) assert.match(a.href, /^https:\/\/wa\.me\/[1-9]\d{7,14}(\?|$)/, `"${written}" made a broken WhatsApp link: ${a.href}`);
-    if (['', '12345', '0093200 01717', 'call me', '+'].includes(written)) {
+    if (['', '12345', '0098111 22233', 'call me', '+'].includes(written)) {
       assert.deepEqual(links, [], `"${written}": no usable number, so no button`);
       assert.equal((await shop.must('GET', '/page-settings')).whatsappAvailable, false);
     }

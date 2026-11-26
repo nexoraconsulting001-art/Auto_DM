@@ -17,7 +17,7 @@ Runs next to the live apps, without touching them.
 
 ```bash
 free -h                                    # all sites share 6 GB; Bhava needs up to about 1.4 GB
-git clone https://github.com/nexoraconsulting001-art/Auto_DM ~/bhava
+git clone <this repository> ~/bhava
 cd ~/bhava && git checkout bhava/build
 cd deploy/bhava && cp .env.example .env && nano .env
 docker compose up -d --build

@@ -1,8 +1,9 @@
 /**
  * `node tools/gh-results.mjs [sha] [--out file] [--max-minutes N] [--interval-s N] [--repo owner/name]`
+ * The repository defaults to GITHUB_REPOSITORY, else the origin remote.
  *
  * Waits until every GitHub Actions run for one commit (default HEAD) has finished, then writes a Markdown report
- * (default C:/bhava/tmp/ci-<sha7>.md): each job's name, conclusion and duration; the tests each job counted; and for a
+ * (default <system temp folder>/ci-<sha7>.md): each job's name, conclusion and duration; the tests each job counted; and for a
  * failed job its failing tests with a short excerpt of the error, read from the job's log. It also writes the
  * per-file times the node:test shards printed (tools/ci-timing.mjs) beside the report, as <report>-timings.json, so
  * tools/ci-timings.json can be refreshed from a real run.
@@ -15,6 +16,7 @@
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const API = 'https://api.github.com';
@@ -26,11 +28,22 @@ function option(name, fallback) {
 }
 const positional = process.argv.slice(2).filter((arg, i, all) => !arg.startsWith('--') && !(i > 0 && all[i - 1].startsWith('--')));
 
-const repo = option('repo', 'nexoraconsulting001-art/Auto_DM');
+/** owner/name from --repo, GITHUB_REPOSITORY, or the origin remote's URL. */
+function repoName() {
+  const given = option('repo', process.env.GITHUB_REPOSITORY || '');
+  if (given) return given;
+  try {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return url.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?$/)?.[1] ?? '';
+  } catch {
+    return '';
+  }
+}
+const repo = repoName();
 const maxMinutes = Number(option('max-minutes', 180));
 const intervalMs = Number(option('interval-s', 60)) * 1000;
 const sha = execFileSync('git', ['rev-parse', positional[0] ?? 'HEAD'], { encoding: 'utf8' }).trim();
-const out = path.resolve(option('out', `C:/bhava/tmp/ci-${sha.slice(0, 7)}.md`));
+const out = path.resolve(option('out', path.join(os.tmpdir(), `ci-${sha.slice(0, 7)}.md`)));
 
 /** The account named in the origin remote's URL (https://user@github.com/...), so GCM can pick its saved sign-in. */
 function originUser() {

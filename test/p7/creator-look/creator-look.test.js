@@ -147,7 +147,7 @@ test('the badge follows PLATFORM_SITE_URL, and is words only when there is no si
 
 test('the page is a profile: cover, photo or initials, name, about line, wide buttons, search, link blocks and tiles, in every preset', async (t) => {
   const w = await world(t, { plan: 't2' });
-  await w.repos.settings.update({ store_name: 'Zari & Co', support_whatsapp: '+91 93200 01717' });
+  await w.repos.settings.update({ store_name: 'Zari & Co', support_whatsapp: '+91 98111 22233' });
   const reel = await addPage(w, { headline: 'Brass lamp' });
   const shelf = await addCategory(w, 'Home');
   await must(w, `/categories/${shelf.id}/reels`, 'POST', { pageId: reel.id });
@@ -179,7 +179,7 @@ test('the page is a profile: cover, photo or initials, name, about line, wide bu
     assert.equal((text.match(/<h1\b/g) ?? []).length, 1);
     assert.match(head, /<p>Brass, clay &amp; cotton<\/p>/);
     assert.match(head, /<a class="btn" href="https:\/\/zari\.example\/shop" rel="noopener">Visit website<\/a>/);
-    assert.match(head, /<a class="outline-btn" href="https:\/\/wa\.me\/919320001717" rel="noopener">.*WhatsApp<\/a>/);
+    assert.match(head, /<a class="outline-btn" href="https:\/\/wa\.me\/919811122233" rel="noopener">.*WhatsApp<\/a>/);
     // The search field, then the link blocks as cards: a link with an arrow, and a notice with none.
     assert.match(text, /<form class="creator-search" method="get" action="\/zari" role="search">\s*<input type="search" name="q"[^>]*aria-label="Search reels and products"/);
     assert.match(text, /<a class="card creator-link" href="https:\/\/zari\.example\/diwali" rel="noopener"><span>Diwali edit &amp; more<\/span><svg/);

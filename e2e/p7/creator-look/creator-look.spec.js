@@ -76,7 +76,7 @@ const LOOSE = [['Desk makeover', '#31456A', '#DDE6F5'], ['Monsoon skincare', '#3
 
 /** A business with a full creator page: a photo, an about line, both buttons, a link block, two shelves, loose reels, a lead form. */
 async function creatorShop(t) {
-  const s = await shop(t, { plan: 't2', whatsapp: '+91 93200 01717' });
+  const s = await shop(t, { plan: 't2', whatsapp: '+91 98111 22233' });
   const must = async (method, pathname, body) => {
     const res = await s.api(method, pathname, body);
     expect(res.status, `${method} ${pathname}: ${JSON.stringify(res.body)}`).toBeLessThan(300);

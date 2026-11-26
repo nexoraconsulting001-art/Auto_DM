@@ -197,7 +197,7 @@ test('K-33, K-34: one business can never link to, show or open another\'s produc
 });
 
 test('K-35 to K-37: the WhatsApp button names the product, its price and the page, goes straight to wa.me, and follows the plan and the saved number', async (t) => {
-  const s = await shop(t, { whatsapp: '+91 93200 01717' });
+  const s = await shop(t, { whatsapp: '+91 98111 22233' });
   const bottle = await addProduct(s.app, s.repos, s.tenant, { name: 'Steel Bottle', price: '349', externalUrl: 'https://shop.example/bottle' });
   const odd = await addProduct(s.app, s.repos, s.tenant, { name: 'Salt & Pepper #2', price: '1299.50', externalUrl: 'https://shop.example/salt' });
   const never = await addProduct(s.app, s.repos, s.tenant, { name: 'No Chat Jar', externalUrl: 'https://shop.example/jar', whatsappOrder: false });
@@ -207,13 +207,13 @@ test('K-35 to K-37: the WhatsApp button names the product, its price and the pag
   // Off until the owner turns it on.
   assert.deepEqual(cards((await open(s.app, '/r/bottle-day')).text).map((c) => c.wa), ['', '', '']);
   const settings = await s.api('GET', '/page-settings');
-  assert.deepEqual({ on: settings.body.whatsappOrder, available: settings.body.whatsappAvailable, number: settings.body.whatsappNumber }, { on: false, available: true, number: '919320001717' });
+  assert.deepEqual({ on: settings.body.whatsappOrder, available: settings.body.whatsappAvailable, number: settings.body.whatsappNumber }, { on: false, available: true, number: '919811122233' });
   assert.equal((await s.api('PATCH', '/page-settings', { whatsappTemplate: 'Hello there' })).status, 400, 'the message must keep {product}');
   assert.equal((await s.api('PATCH', '/page-settings', { whatsappOrder: true })).status, 200);
 
   const shown = cards((await open(s.app, '/r/bottle-day?utm_source=instagram&utm_medium=dm')).text);
   const link = new URL(shown[0].wa);
-  assert.equal(`${link.origin}${link.pathname}`, 'https://wa.me/919320001717', 'K-36: the saved number as digits, straight to wa.me');
+  assert.equal(`${link.origin}${link.pathname}`, 'https://wa.me/919811122233', 'K-36: the saved number as digits, straight to wa.me');
   assert.equal(link.searchParams.get('text'), 'Hi, I would like to order Steel Bottle (₹349). https://shop.test/r/bottle-day', 'K-35: name, price and the page, with no tracking');
   assert.deepEqual([...link.searchParams.keys()], ['text'], 'no UTM on a WhatsApp link');
   assert.equal(shown[0].productId, String(bottle.id));
@@ -230,7 +230,7 @@ test('K-35 to K-37: the WhatsApp button names the product, its price and the pag
   await s.repos.settings.update({ support_whatsapp: '' });
   assert.deepEqual(cards((await open(s.app, '/r/bottle-day')).text).map((c) => c.wa), ['', '', '']);
   assert.equal((await s.api('GET', '/page-settings')).body.whatsappAvailable, false);
-  await s.repos.settings.update({ support_whatsapp: '+91 93200 01717' });
+  await s.repos.settings.update({ support_whatsapp: '+91 98111 22233' });
 
   // Below tier 2 the button isn't part of the plan: it leaves the page and can't be turned on.
   await setPlan(s.app, s.tenant, 't1');
@@ -415,7 +415,7 @@ test('K-42: "More reels" lists the other live reels of this reel\'s first catego
 });
 
 test('K-40 (the part a server can show): 20 products come gzipped in well under 50 KB, images load lazily, nothing outside is called, and no pixel loads without consent', async (t) => {
-  const s = await shop(t, { whatsapp: '919320001717' });
+  const s = await shop(t, { whatsapp: '919811122233' });
   const ids = [];
   for (let i = 0; i < 20; i++) ids.push((await addProduct(s.app, s.repos, s.tenant, { name: `Handwoven cotton kurta in indigo, size ${i + 1}`, price: String(999 + i), mrp: '1999', externalUrl: `https://shop.example/products/kurta-${i + 1}?ref=home`, image: await upload(s, '#3B2FC9') })).id);
   await s.api('PATCH', '/page-settings', { whatsappOrder: true });
@@ -518,7 +518,7 @@ test('the seller\'s list, the post picker and the page\'s own details', async (t
 });
 
 test('a headline or product name carrying markup is shown as text, in the page and in its share tags', async (t) => {
-  const s = await shop(t, { whatsapp: '919320001717' });
+  const s = await shop(t, { whatsapp: '919811122233' });
   const evil = await addProduct(s.app, s.repos, s.tenant, { name: '"><script>alert(1)</script>', externalUrl: 'https://shop.example/x?a=1&b="><script>alert(2)</script>' });
   await s.api('PATCH', '/page-settings', { whatsappOrder: true, whatsappTemplate: '{product} </a><script>alert(3)</script>' });
   const made = await s.api('POST', '/pages', { kind: 'reel', mediaId: '17900000000000080', headline: '<img src=x onerror=alert(4)>', slug: 'odd', description: '</title><script>alert(5)</script>', productIds: [evil.id] });
