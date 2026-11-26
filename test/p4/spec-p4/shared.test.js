@@ -203,6 +203,8 @@ test('S-101: the platform’s name appears only on the shared consent screen, ac
 });
 
 test('S-102: withdrawing shared consent removes the shared profile; B asks for sign-in again; each keeps its own orders', async () => {
+  // The file's world keeps the profiles the earlier tests made; this test's profile is the one made from here on.
+  const earlier = new Set((await sharedRows('shared_profiles')).map((p) => p.id));
   const { a, b, sub, atA } = await sharedAtA();
   const productA = await a.item({ pricePaise: 30000 });
   const productB = await b.item({ pricePaise: 20000 });
@@ -210,7 +212,7 @@ test('S-102: withdrawing shared consent removes the shared profile; B asks for s
   const atB = buyer(world, b);
   await atB.googleSignIn({ sub });
   const rowB = await atB.buy({ lines: [line(productB)], address: address() });
-  const profiles = await sharedRows('shared_profiles');
+  const profiles = (await sharedRows('shared_profiles')).filter((p) => !earlier.has(p.id));
   assert.ok(profiles.length >= 1, 'No shared profile was made');
   ok(await atB.revokeShared(), 'Withdrawing from B’s account page');
   await world.quiet(1500);
