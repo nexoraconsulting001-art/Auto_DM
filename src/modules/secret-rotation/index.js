@@ -37,6 +37,8 @@ import { log as defaultLog, reportError } from '../../platform/log.js';
  *   createSecretRotation(ctx).progress()   -> RewrapProgress
  *   createSecretRotation(ctx).retirable()  -> { ok, remaining: [{ table, column, count }], oldKeyIds }: may DATA_KEY_OLD go?
  */
+/** The base64url length of a v2 wrapped part that holds a data key and a binding id (src/platform/secrets.js). */
+const BOUND_WRAP_LENGTH = 64;
 const IDENT = /^[a-z_][a-z0-9_]{0,62}$/;
 const ident = (name) => {
   if (!IDENT.test(name)) throw new Error('Not a table or column name');
@@ -75,13 +77,14 @@ export function createSecretRotation(ctx, { batch = REWRAP_BATCH, budgetMs = 20_
   const columnOf = (table, column) => columns.find((c) => c.table === table && c.column === column) ?? null;
 
   /**
-   * SQL that is true for a stored value still under another key, not yet sealed to a record, or, when v2 is written, in
-   * the v1 form. (Whether it is sealed to its own record needs the row's binding: the walk checks that.)
+   * SQL that is true for a stored value still under another key or, when v2 is written, in the v1 form or a v2 form not
+   * sealed to a record (its wrapped part is the bare data key). Whether it is sealed to its own record needs the row's
+   * binding, and a v1 value says so only when opened: the walk checks both.
    */
   const staleWhere = (col, format, at) =>
     format === 'v2'
-      ? `(split_part(${col}, '.', 1) NOT LIKE 'v2~%' OR split_part(${col}, '.', 2) <> $${at})`
-      : `((split_part(${col}, '.', 1) NOT LIKE 'v1~%' AND split_part(${col}, '.', 1) NOT LIKE 'v2~%') OR split_part(${col}, '.', 2) <> $${at})`;
+      ? `(split_part(${col}, '.', 1) <> 'v2' OR split_part(${col}, '.', 2) <> $${at} OR length(split_part(${col}, '.', 5)) <> ${BOUND_WRAP_LENGTH})`
+      : `split_part(${col}, '.', 2) <> $${at}`;
 
   async function remainingIn(q, def, { keyId, format }) {
     const col = ident(def.column);
@@ -263,7 +266,7 @@ export function createSecretRotation(ctx, { batch = REWRAP_BATCH, budgetMs = 20_
 
 export const secretRotation = {
   name: 'secret-rotation',
-  owns: { migrations: ['900_secrets_envelope.sql', '970_secrets_bound.sql'], tables: ['secret_rewraps'], api: [], store: [], platform: [], jobs: [REWRAP_JOB] },
+  owns: { migrations: ['900_secrets_envelope.sql'], tables: ['secret_rewraps'], api: [], store: [], platform: [], jobs: [REWRAP_JOB] },
   jobs(ctx) {
     const rotation = createSecretRotation(ctx);
     ctx.platform.queue.work(REWRAP_JOB, () => rotation.run());

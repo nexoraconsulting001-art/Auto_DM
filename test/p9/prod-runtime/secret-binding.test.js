@@ -31,7 +31,7 @@ test('R2-SEC-1: every secret column writes and reads with its binding, and never
       const stored = secrets.encrypt(`value-of-${col.table}.${col.column}`, here);
       const where = `${format} ${col.table}.${col.column}`;
       assert.deepEqual(describeStored(stored), { version: format, keyId: secrets.currentKeyId }, where);
-      assert.equal(isBound(stored), true, where);
+      assert.equal(isBound(stored), format === 'v2', where);
       assert.equal(secrets.decrypt(stored, here), `value-of-${col.table}.${col.column}`, `${where} reads back`);
       assert.equal(stored.includes('value-of'), false);
       if (col.bind.includes('tenant_id')) assert.equal(codeOf(() => secrets.decrypt(stored, secretBinding(col.table, col.column, rowFor(col, 8)))), 'wrong_record', `${where}: another business`);
@@ -46,26 +46,35 @@ test('R2-SEC-1: every secret column writes and reads with its binding, and never
   assert.throws(() => secretBinding('ig_accounts', 'not_a_column', { tenant_id: 1 }), /SECRET_COLUMNS/);
 });
 
-test('R2-SEC-1: the binding is in the AEAD data: removing, swapping or forging the binding id breaks the value', () => {
-  const secrets = createSecrets({ dataKey: key(), secretsFormat: 'v2' });
-  const a = secretBinding('gateway_keys', 'key_secret_enc', { tenant_id: 1, provider: 'razorpay' });
-  const b = secretBinding('gateway_keys', 'key_secret_enc', { tenant_id: 2, provider: 'razorpay' });
-  const ofA = secrets.encrypt('secret-of-a', a);
-  const ofB = secrets.encrypt('secret-of-b', b);
-  const [headA, ...restA] = ofA.split('.');
-  const [headB] = ofB.split('.');
-  assert.match(headA, /^v2~[A-Za-z0-9_-]{22}$/);
-  assert.equal(codeOf(() => secrets.decrypt(['v2', ...restA].join('.'))), 'tampered', 'the binding id taken off');
-  assert.equal(codeOf(() => secrets.decrypt(['v2', ...restA].join('.'), b)), 'tampered', 'taken off, then read as another business');
-  assert.equal(codeOf(() => secrets.decrypt([headB, ...restA].join('.'), b)), 'tampered', 'B\'s binding id put on A\'s value');
-  assert.equal(codeOf(() => secrets.decrypt(ofA, b)), 'wrong_record');
-  // The same value with the binding of another column of the same business.
-  assert.equal(codeOf(() => secrets.decrypt(ofA, secretBinding('shipping_settings', 'own_password_enc', { tenant_id: 1 }))), 'wrong_record');
-  // A value read with no binding (a tool, the re-wrap's proof) opens as it stands.
-  assert.equal(secrets.decrypt(ofA), 'secret-of-a');
-  for (const error of [() => secrets.decrypt(ofA, b), () => secrets.decrypt([headB, ...restA].join('.'), b)]) {
+test('R2-SEC-1: the binding is sealed in the value: the stored forms stay v1./v2., and cutting, swapping or forging the binding breaks the tag', () => {
+  for (const format of ['v1', 'v2']) {
+    const secrets = createSecrets({ dataKey: key(), secretsFormat: format });
+    const a = secretBinding('gateway_keys', 'key_secret_enc', { tenant_id: 1, provider: 'razorpay' });
+    const b = secretBinding('gateway_keys', 'key_secret_enc', { tenant_id: 2, provider: 'razorpay' });
+    const ofA = secrets.encrypt('secret-of-a', a);
+    const ofB = secrets.encrypt('secret-of-b', b);
+    const unbound = secrets.encrypt('secret-of-a');
+    const parts = ofA.split('.');
+    assert.equal(parts[0], format, 'the form is as before');
+    assert.equal(parts.length, format === 'v2' ? 8 : 5);
+    assert.equal(isBound(ofA), format === 'v2', 'a v2 value shows it is bound; a v1 value only when opened');
+    assert.equal(isBound(unbound), false);
+    const at = 4; // the wrapped data key in v2, the ciphertext in v1: where the binding id is sealed
+    // The binding id cut off: the part shortened to an unbound value's size.
+    const cutDown = parts.map((p, i) => (i === at ? Buffer.from(p, 'base64url').subarray(0, Buffer.from(unbound.split('.')[at], 'base64url').length).toString('base64url') : p)).join('.');
+    assert.equal(codeOf(() => secrets.decrypt(cutDown)), 'tampered', `${format}: the binding cut off`);
+    assert.equal(codeOf(() => secrets.decrypt(cutDown, b)), 'tampered', `${format}: cut off, then read as another business`);
+    // B's sealed parts spliced onto A's value.
+    const spliced = parts.map((p, i) => (i >= 2 && i <= at ? ofB.split('.')[i] : p)).join('.');
+    if (format === 'v2') assert.equal(codeOf(() => secrets.decrypt(spliced, a)), 'tampered', 'B\'s wrapped key and binding with A\'s ciphertext');
+    assert.equal(codeOf(() => secrets.decrypt(ofA, b)), 'wrong_record');
+    // The same value with the binding of another column, or another table, of the same business.
+    assert.equal(codeOf(() => secrets.decrypt(ofA, secretBinding('shipping_settings', 'own_password_enc', { tenant_id: 1 }))), 'wrong_record');
+    // A value read with no binding (a tool, the re-wrap's proof) opens as it stands.
+    assert.equal(secrets.decrypt(ofA), 'secret-of-a');
+    assert.equal(secrets.decrypt(ofA, a), 'secret-of-a');
     try {
-      error();
+      secrets.decrypt(ofA, b);
     } catch (e) {
       assert.equal(`${e.message}${e.stack}`.includes('secret-of'), false, 'the refusal holds no value');
     }
