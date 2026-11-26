@@ -53,7 +53,8 @@ function dayOf(text) {
   return Number.isNaN(+parsed) ? null : parsed.toISOString().slice(0, 10);
 }
 
-const columnOf = (headers, names) => headers.findIndex((h) => names.some((name) => h === name || h.startsWith(`${name} `)));
+// A header may carry its unit: Amazon's own reports say "Earnings(₹)" and "Ad Fees (₹)".
+const columnOf = (headers, names) => headers.findIndex((h) => names.some((name) => h === name || h.startsWith(`${name} `) || h.startsWith(`${name}(`)));
 
 /** An earnings report as rows of { tracking, day, earningsPaise, orders }. The header needn't be the first line: Amazon's reports open with a title. */
 export function parseEarningsReport(text) {

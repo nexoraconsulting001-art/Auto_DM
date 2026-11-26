@@ -46,6 +46,8 @@ export const ComplianceActivity = z.object({
   reason: ReasonCode,
   automationId: Id.nullable(),
   mediaId: z.string(),
+  /** What the media is: reel, post or story ('' when no automation maps it, or there is no media). */
+  mediaType: z.enum(['', 'reel', 'post', 'story']),
   commentId: z.string(),
 });
 export const ComplianceActivityQuery = ListQuery.extend({

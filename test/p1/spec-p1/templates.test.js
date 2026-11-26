@@ -1,7 +1,7 @@
 // PRD 6.5: message templates and A/B variants. A-25 to A-30, A-74, A-75.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COMPLIANCE_LIMITS, addShop, assertNoPlatformText, assertRefused, assertReason, buttonsOf, isButtonTemplate, linkOf, openWorld, textOf, unique, useWorld } from './support.js';
+import { COMPLIANCE_LIMITS, addShop, assertNoPlatformText, assertRefused, assertReason, buttonsOf, isButtonTemplate, linkOf, openWorld, textOf, unique, UNPACED, useWorld } from './support.js';
 
 const world = useWorld();
 const FAULT_PATH = (shop) => `*/${shop.igUserId}/messages`;
@@ -210,20 +210,26 @@ const twoVariants = [
 ];
 
 test('A-29: 2 variants, 200 sends: about 100 each, with stats per variant', { timeout: 120_000 }, async () => {
-  const shop = await addShop(world);
-  const auto = await shop.automate({ variants: twoVariants });
-  for (let i = 0; i < 200; i++) await shop.comment(auto.mediaId);
-  await shop.settle({ ms: 60_000, roundMs: 2000 });
-  const dms = await shop.dms();
-  assert.equal(dms.length, 200);
-  const a = dms.filter((m) => /Version A/.test(textOf(m))).length;
-  const b = dms.filter((m) => /Version B/.test(textOf(m))).length;
-  assert.equal(a + b, 200);
-  assert.ok(a >= 70 && a <= 130, `A got ${a}, B got ${b}`);
-  const stats = await shop.call(`/automations/${auto.id}/stats`, 200);
-  assert.equal(stats.sends, 200);
-  assert.deepEqual(stats.variants.map((v) => v.sends).sort(), [a, b].sort());
-  assert.ok(stats.variants.every((v) => v.leader === false || v.sends >= 100), 'A leader only after 100 sends per variant');
+  // Its own world without the hourly bucket: this is about the split of 200 sends, not about pacing.
+  const fast = await openWorld({ overrides: UNPACED });
+  try {
+    const shop = await addShop(fast);
+    const auto = await shop.automate({ variants: twoVariants });
+    for (let i = 0; i < 200; i++) await shop.comment(auto.mediaId);
+    await shop.settle({ ms: 60_000, roundMs: 2000 });
+    const dms = await shop.dms();
+    assert.equal(dms.length, 200);
+    const a = dms.filter((m) => /Version A/.test(textOf(m))).length;
+    const b = dms.filter((m) => /Version B/.test(textOf(m))).length;
+    assert.equal(a + b, 200);
+    assert.ok(a >= 70 && a <= 130, `A got ${a}, B got ${b}`);
+    const stats = await shop.call(`/automations/${auto.id}/stats`, 200);
+    assert.equal(stats.sends, 200);
+    assert.deepEqual(stats.variants.map((v) => v.sends).sort(), [a, b].sort());
+    assert.ok(stats.variants.every((v) => v.leader === false || v.sends >= 100), 'A leader only after 100 sends per variant');
+  } finally {
+    await fast.close();
+  }
 });
 
 test('A-29: a person always gets the same variant within one automation', async () => {

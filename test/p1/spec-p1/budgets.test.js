@@ -29,11 +29,11 @@ test('C-09: 3,000 keyword comments in an hour never exceed 600 sends per rolling
     const shop = await addShop(world);
     const reel = await shop.automate();
     await commentBurst(world, shop, reel.mediaId, 3000);
-    await shop.settle({ ms: 60_000, roundMs: 2000 });
+    await shop.settle({ ms: 60_000, roundMs: 2000, only: 'compliance' });
     const perMinute = [];
     let seen = 0;
     for (let minute = 0; minute < 330 && seen < 3000 && !t.signal.aborted; minute++) {
-      await shop.settle({ ms: 1500, roundMs: 500 });
+      await shop.settle({ ms: 1500, roundMs: 500, only: 'compliance' });
       const now = (await shop.dms()).length;
       perMinute.push(now - seen);
       seen = now;
@@ -297,10 +297,10 @@ test('C-11: slow mode halves the private-reply budget to 300 an hour, and a seco
       entries.push(commentPayload(shop, { id: comment.id, mediaId, from }).entry[0]);
     }
     need(await world.webhook({ object: 'instagram', entry: entries }), 200, 'One comment on each of 350 reels');
-    await shop.settle({ ms: 40_000, roundMs: 2000 });
+    await shop.settle({ ms: 40_000, roundMs: 2000, only: 'compliance' });
     for (let minute = 0; minute < 59 && !t.signal.aborted; minute++) {
       await world.travel(MINUTE);
-      await shop.settle({ ms: 1500, roundMs: 500 });
+      await shop.settle({ ms: 1500, roundMs: 500, only: 'compliance' });
     }
     const sent = (await shop.dms()).length;
     assert.ok(sent <= COMPLIANCE_LIMITS.privateRepliesPerHour * HALF, `Sent ${sent} in the hour at x0.5`);
@@ -445,7 +445,7 @@ test('C-47: when one business has spent its hour\'s budget, another still has al
   const fresh = await addShop(world);
   const reelA = await spent.automate();
   const reelB = await fresh.automate();
-  await spent.sql(`INSERT INTO send_budgets (tenant_id, channel, account_id, budget, tokens, refilled_at) VALUES ($1, 'instagram', $2, 'private_reply', 0, now()) ON CONFLICT (tenant_id, channel, account_id, budget) DO UPDATE SET tokens = 0, refilled_at = now()`, [spent.tenantId, spent.igUserId]);
+  await spent.sql(`INSERT INTO send_budgets (tenant_id, channel, account_id, budget, tokens, refilled_at) VALUES ($1, 'instagram', $2, 'private_reply', 0, now() + interval '30 minutes') ON CONFLICT (tenant_id, channel, account_id, budget) DO UPDATE SET tokens = 0, refilled_at = now() + interval '30 minutes'`, [spent.tenantId, spent.igUserId]);
   await spent.comment(reelA.mediaId);
   await fresh.comment(reelB.mediaId);
   await spent.settle({ ms: 3000 });

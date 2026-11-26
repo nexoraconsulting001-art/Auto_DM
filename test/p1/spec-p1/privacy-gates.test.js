@@ -1,7 +1,7 @@
 // PRD 4.14, 4.15 and 4.16: logs, release gates and the compliance log. C-51 to C-56.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DAY, HOUR, SCOPES, addShop, asAppRole, assertRefused, captureLogs, commentPayload, connectInstagramFlow, fakeSite, findAppRole, need, unique, useWorld, REASON_CODES } from './support.js';
+import { DAY, HOUR, SCOPES, UNPACED, addShop, asAppRole, assertRefused, captureLogs, commentPayload, connectInstagramFlow, fakeSite, findAppRole, need, openWorld, unique, useWorld, REASON_CODES } from './support.js';
 
 const world = useWorld();
 
@@ -27,22 +27,28 @@ test('C-51: after 1,000 sends the logs hold no username, message text, person id
   process.stderr.write = (chunk, ...rest) => { lines.push(String(chunk)); return stderr(chunk, ...rest); };
   t.after(() => { process.stdout.write = stdout; process.stderr.write = stderr; });
 
-  const shops = [await addShop(world), await addShop(world)];
-  const secretWords = `zebra-${unique()}`;
-  const fans = [];
-  for (const shop of shops) {
-    const reel = await shop.automate();
-    fans.push(...await batchComments(world, shop, reel.mediaId, 500, (i) => `price ${secretWords} 98765${String(i).padStart(5, '0')}`));
-  }
-  await Promise.all(shops.map((shop) => shop.settle({ ms: 200_000, roundMs: 3000 })));
-  assert.equal((await shops[0].dms()).length + (await shops[1].dms()).length, 1000, 'All 1,000 went');
+  // Its own world without the hourly bucket: this is about what the logs hold after 1,000 sends, not about pacing.
+  const fast = await openWorld({ overrides: UNPACED });
+  try {
+    const shops = [await addShop(fast), await addShop(fast)];
+    const secretWords = `zebra-${unique()}`;
+    const fans = [];
+    for (const shop of shops) {
+      const reel = await shop.automate();
+      fans.push(...await batchComments(fast, shop, reel.mediaId, 500, (i) => `price ${secretWords} 98765${String(i).padStart(5, '0')}`));
+    }
+    await Promise.all(shops.map((shop) => shop.settle({ ms: 200_000, roundMs: 3000 })));
+    assert.equal((await shops[0].dms()).length + (await shops[1].dms()).length, 1000, 'All 1,000 went');
 
-  const everything = logs.text() + lines.join('');
-  assert.doesNotMatch(everything, new RegExp(secretWords), 'Message text in the logs');
-  assert.doesNotMatch(everything, /98765\d{5}/, 'A phone number in the logs');
-  assert.doesNotMatch(everything, /fan_\d+\w*_handle/, 'A username in the logs');
-  for (const fan of fans.slice(0, 200)) assert.equal(everything.includes(fan.id), false, 'A person\'s id in the logs');
-  for (const shop of shops) assert.equal(everything.includes(shop.igToken), false, 'A token in the logs');
+    const everything = logs.text() + lines.join('');
+    assert.doesNotMatch(everything, new RegExp(secretWords), 'Message text in the logs');
+    assert.doesNotMatch(everything, /98765\d{5}/, 'A phone number in the logs');
+    assert.doesNotMatch(everything, /fan_\d+\w*_handle/, 'A username in the logs');
+    for (const fan of fans.slice(0, 200)) assert.equal(everything.includes(fan.id), false, 'A person\'s id in the logs');
+    for (const shop of shops) assert.equal(everything.includes(shop.igToken), false, 'A token in the logs');
+  } finally {
+    await fast.close();
+  }
 });
 
 test('C-51: failures log no person either: a refusal, a timeout and a junk answer', async (t) => {

@@ -1,7 +1,7 @@
 // PRD 4.12 and 4.13: pause, kill switch, breaker. C-42 to C-45, C-48, C-57.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COMPLIANCE_LIMITS, HOUR, INSIDE_MS, MINUTE, OUTSIDE_MS, SWITCH_LAG_MS, addShop, addStaff, assertNoDm, assertReason, consoleUser, need, onConsole, openWorld, pause, unique, useWorld } from './support.js';
+import { COMPLIANCE_LIMITS, HOUR, UNPACED, INSIDE_MS, MINUTE, OUTSIDE_MS, SWITCH_LAG_MS, addShop, addStaff, assertNoDm, assertReason, consoleUser, need, onConsole, openWorld, pause, unique, useWorld } from './support.js';
 
 const world = useWorld();
 const PERMISSION = 200;
@@ -80,13 +80,19 @@ test('C-42: any token-invalid error trips it at once', async () => {
   assert.equal((await status(shop)).breaker, 'open');
 });
 
+// Its own world without the hourly bucket: this is about the error rate over 50 sends, which pacing would stretch over minutes.
 test('C-42: over 20% errors across 50 sends trips it', { timeout: 120_000 }, async () => {
-  const shop = await addShop(world);
-  const reel = await shop.automate();
-  await shop.refuseSends({ code: 100, times: 22, after: 0 });
-  for (let i = 0; i < 50; i++) await shop.comment(reel.mediaId);
-  await shop.settle({ ms: 40_000, roundMs: 2000 });
-  assert.equal((await status(shop)).breaker, 'open');
+  const fast = await openWorld({ overrides: UNPACED });
+  try {
+    const shop = await addShop(fast);
+    const reel = await shop.automate();
+    await shop.refuseSends({ code: 100, times: 22, after: 0 });
+    for (let i = 0; i < 50; i++) await shop.comment(reel.mediaId);
+    await shop.settle({ ms: 40_000, roundMs: 2000 });
+    assert.equal((await status(shop)).breaker, 'open');
+  } finally {
+    await fast.close();
+  }
 });
 
 test('C-42: 3 throttle backoff cycles in a row trip it', async () => {
