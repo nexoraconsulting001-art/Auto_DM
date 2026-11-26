@@ -34,12 +34,35 @@ export async function openWorld(t, { at = Date.now() } = {}) {
   const jobCtx = { db: app.db, repos, platform: drivers, config, ig: app.ig, modules: MODULES };
   const handlers = jobHandlers(jobCtx);
 
+  // The pg queue can be drained by hand. A queue that has consumers of its own (BullMQ on the CI production profile) has no drain(): its handlers are
+  // registered once, as src/worker.js does, and a run waits until this module's queues hold nothing queued, delayed or running.
+  const names = Object.keys(handlers).filter((name) => name !== QUEUE_TICK);
+  let consuming = false;
+  async function waitIdle() {
+    const stop = Date.now() + 60_000;
+    for (let quiet = 0; quiet < 3 && Date.now() < stop;) {
+      const stats = await drivers.queue.stats();
+      const busy = names.some((name) => (stats[name]?.queued ?? 0) + (stats[name]?.delayed ?? 0) + (stats[name]?.running ?? 0) > 0);
+      quiet = busy ? 0 : quiet + 1;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
   /** Runs what the module's minute tick finds due, then every queued job of this module, until nothing is left. */
   async function runJobs({ tick = true } = {}) {
     if (tick) await handlers[QUEUE_TICK]();
+    if (typeof drivers.queue.drain !== 'function') {
+      if (!consuming) {
+        for (const name of names) drivers.queue.work(name, handlers[name]);
+        consuming = true;
+        t.after(() => drivers.queue.close?.());
+      }
+      await waitIdle();
+      return;
+    }
     for (let round = 0; round < 10; round++) {
       let ran = 0;
-      for (const [name, handler] of Object.entries(handlers)) if (name !== QUEUE_TICK) ran += await drivers.queue.drain(name, handler);
+      for (const name of names) ran += await drivers.queue.drain(name, handlers[name]);
       if (!ran) return;
     }
   }
