@@ -166,6 +166,22 @@ export async function raiseLowStock(alerts, low = []) {
 }
 
 /**
+ * The owner's prompt for an order held "Paid, out of stock" (S-41): the money is in and the goods are not, so the owner
+ * must refund it or find the stock. Since B-MONEY-2 the payment no longer raises payment.after_cancel for a late payment
+ * on an order whose hold ran out (it may still be revived), so this is the one prompt for it (R3-MONEY-16).
+ */
+export async function raisePaidOutOfStock(alerts, order) {
+  if (!alerts) return;
+  await alerts.raise({
+    kind: 'order.paid_out_of_stock',
+    severity: 'critical',
+    message: `Order ${order.order_number} was paid, but its stock is gone. Restock it or refund the shopper.`,
+    target: `order:${order.id}`,
+    dedupeKey: `paid-out-of-stock:${order.id}`,
+  }).catch((err) => reportError(err, { msg: 'inventory.paid_out_of_stock_alert_failed', orderId: Number(order.id) }));
+}
+
+/**
  * The stock rows whose sold units of this order Shopify holds: the order was pushed to Shopify (PRD 9.11) and the row is
  * linked to a Shopify inventory item (a variant by its id, a product with no options by minus its id, as shopify_links keeps
  * them). Shopify's count is the one both sides sell from, so units it holds come back with its next count, not here.
@@ -285,8 +301,9 @@ export function stockListeners({ db, repos }) {
      */
     async commit(event, ctx) {
       const events = ctx?.orderEvents ?? null;
+      let held = null;
       const low = await db.tx(async (t) => {
-        const [order] = await t.query('SELECT id, flow, fulfilment_status, payment_status, cancel_reason FROM orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE', [tenantId(), event.orderId]);
+        const [order] = await t.query('SELECT id, order_number, flow, fulfilment_status, payment_status, cancel_reason FROM orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE', [tenantId(), event.orderId]);
         if (!order || order.flow !== 'checkout') return [];
         if (order.fulfilment_status === 'cancelled') {
           const late = order.cancel_reason === 'hold_expired' && ['paid', 'advance_paid'].includes(order.payment_status);
@@ -296,7 +313,7 @@ export function stockListeners({ db, repos }) {
             await changeOrder(t, order.id, { fulfilment: 'new', actor: 'system', reason: 'Paid after the hold ran out; the stock was still there', ifAllowed: true });
             return taken.low;
           }
-          await holdOrder(t, order.id, 'paid_out_of_stock', { actor: 'system', reason: 'Paid after the hold ran out and the stock is gone' });
+          if ((await holdOrder(t, order.id, 'paid_out_of_stock', { actor: 'system', reason: 'Paid after the hold ran out and the stock is gone' })).changed) held = order;
           return [];
         }
         if (['rto_initiated', 'rto_delivered'].includes(order.fulfilment_status)) return [];
@@ -304,10 +321,11 @@ export function stockListeners({ db, repos }) {
         // The payment itself may have brought back an order whose hold had just run out (cancelled -> new under the
         // late_payment guard): its lines were given back, so they are taken again from what is on hand, or the order waits.
         const late = await commitLate(t, order.id, { events });
-        if (result.short || !late.ok) await holdOrder(t, order.id, 'paid_out_of_stock', { actor: 'system', reason: 'Paid, and the stock is no longer there' });
+        if ((result.short || !late.ok) && (await holdOrder(t, order.id, 'paid_out_of_stock', { actor: 'system', reason: 'Paid, and the stock is no longer there' })).changed) held = order;
         return [...result.low, ...late.low];
       });
       await raiseLowStock(repos?.alerts, low);
+      if (held) await raisePaidOutOfStock(repos?.alerts, held);
     },
     /** order.cancelled and order.rto_delivered. */
     async giveBack(event, ctx) {
