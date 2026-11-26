@@ -148,7 +148,7 @@ test('R2-SEC-1: through the repos, a token or key copied to another business, or
   await assert.rejects(two.repos.gatewayKeys.get('razorpay'), (e) => e.code === 'wrong_record' && !String(e.message).includes('gateway-of'));
 
   // Another column of the same business: the Meta CAPI token read as the GA4 secret.
-  await one.repos.tagSettings.save({ meta: { pixelId: '123456', capiToken: 'capi-token-of-one' }, ga4: { measurementId: 'G-ABC123', apiSecret: 'ga4-secret-of-one' } }, { actor: 'owner', userId: null });
+  await one.repos.tagSettings.save({ meta: { pixelId: '123456', capiToken: 'capi-token-of-one' }, ga4: { measurementId: 'G-ABC123', apiSecret: 'ga4-secret-of-one' } }, { actor: 'owner', userId: null }); // secret-scan:allow
   const [tags] = await w.q(`SELECT tenant_id, meta_capi_token_enc, ga4_api_secret_enc FROM tag_settings WHERE tenant_id = $1`, [one.tenant.id]);
   assert.equal(w.secrets.decrypt(tags.meta_capi_token_enc, secretBinding('tag_settings', 'meta_capi_token_enc', tags)), 'capi-token-of-one');
   assert.equal(codeOf(() => w.secrets.decrypt(tags.meta_capi_token_enc, secretBinding('tag_settings', 'ga4_api_secret_enc', tags))), 'wrong_record', 'another column of the same row');
