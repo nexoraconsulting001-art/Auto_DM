@@ -13,7 +13,9 @@ test('K-01: two businesses save the same external URL; each sees only its own pr
   const mine = await a.post('/products', { ...pot, externalUrl: url });
   const theirs = await b.post('/products', { name: 'Their pot', pricePaise: 5000, externalUrl: `${url}?utm_source=ig` });
   assert.equal(mine.externalUrl, url);
-  assert.equal(theirs.externalUrl, url, 'tracking parameters are dropped, so two pastes of one page are one address');
+  // The address is kept as typed (K-63, R3-CAT-5); two pastes of one page are still one product, by the key beside it (K-11).
+  assert.equal(theirs.externalUrl, `${url}?utm_source=ig`);
+  assert.equal((await b.call('/products', { method: 'POST', body: { name: 'Their copy', pricePaise: 100, externalUrl: url } })).status, 400, 'the same page without the tracking parameter is the same product');
   assert.deepEqual((await a.products()).map((p) => p.name), ['Clay pot']);
   assert.deepEqual((await b.products()).map((p) => p.name), ['Their pot']);
   assert.equal((await a.call(`/products/${theirs.id}`)).status, 404);

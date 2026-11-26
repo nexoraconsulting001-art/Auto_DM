@@ -18,7 +18,7 @@ const P_COLS = `p.id, p.name, p.slug, p.description, p.price_paise, p.mrp_paise,
   p.price_changed, p.previous_price_paise, p.price_manual, p.owner_edited, p.tags, p.whatsapp_order`;
 
 const WRITABLE = Object.freeze([
-  'name', 'slug', 'description', 'price_paise', 'mrp_paise', 'images', 'option_label', 'option_values', 'stock', 'active', 'featured', 'external_url',
+  'name', 'slug', 'description', 'price_paise', 'mrp_paise', 'images', 'option_label', 'option_values', 'stock', 'active', 'featured', 'external_url', 'external_url_key',
   'in_stock', 'source', 'source_ref', 'fetch_status', 'fetched_at', 'next_check_at', 'check_failures', 'last_check_error', 'price_changed',
   'previous_price_paise', 'price_manual', 'owner_edited', 'tags', 'whatsapp_order',
 ]);
@@ -51,6 +51,9 @@ export function cleanTags(tags = []) {
   return out;
 }
 
+/** The form of a web link two pastes of one page share (K-11), stored beside the link as the owner typed it (K-63); '' for no link. */
+const keyOf = (url) => (url ? canonicalProductUrl(url) ?? '' : '');
+
 /** Checks the columns being written against what the product will be after the write. Throws ValidationError. */
 function validate(changes, current = {}) {
   const next = { ...current, ...changes };
@@ -70,7 +73,7 @@ function validate(changes, current = {}) {
       if (typeof link !== 'string' || link.length > 2000 || !IMAGE_LINK.test(link) || !link.isWellFormed()) throw new ValidationError('An image must be an uploaded file or an http(s) link');
     }
   }
-  if ('external_url' in changes && next.external_url !== '' && canonicalProductUrl(next.external_url) !== next.external_url) {
+  if ('external_url' in changes && next.external_url !== '' && (canonicalProductUrl(next.external_url) === null || next.external_url !== next.external_url.trim())) {
     throw new ValidationError('Use the product’s own web link, starting with http:// or https://');
   }
   if ('source' in changes && !isProductSource(next.source)) throw new ValidationError('Unknown product source');
@@ -333,6 +336,7 @@ export function catalogRepo(db) {
       };
       state.tags = cleanTags(state.tags);
       validate(state);
+      state.external_url_key = keyOf(state.external_url);
       if (state.mrp_paise === state.price_paise) state.mrp_paise = null; // an MRP equal to the price is no MRP (K-02)
       for (let attempt = 0; ; attempt++) {
         try {
@@ -367,6 +371,7 @@ export function catalogRepo(db) {
         const next = { ...changes };
         if ('tags' in next) next.tags = cleanTags(next.tags);
         validate(next, current);
+        if ('external_url' in next) next.external_url_key = keyOf(next.external_url);
         // An MRP equal to the price is no MRP (K-02), whichever of the two the change touched.
         if ('price_paise' in next || 'mrp_paise' in next) {
           const after = { ...current, ...next };
@@ -395,7 +400,7 @@ export function catalogRepo(db) {
 
     async idByExternalUrl(url) {
       if (!url) return null;
-      const [row] = await db.query('SELECT id FROM products WHERE tenant_id = $1 AND external_url = $2', [tenantId(), String(url)]);
+      const [row] = await db.query('SELECT id FROM products WHERE tenant_id = $1 AND external_url_key = $2', [tenantId(), keyOf(url)]);
       return row?.id ?? null;
     },
     async idBySourceRef(source, sourceRef) {

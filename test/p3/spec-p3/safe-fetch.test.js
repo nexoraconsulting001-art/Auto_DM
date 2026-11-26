@@ -106,20 +106,34 @@ test('K-04: reading a website\'s look from a private address, or through a redir
 
 // ---- K-05 ------------------------------------------------------------------------------------------------------------------
 
-test('K-05: a DNS answer that flips from public to 169.254.169.254 between lookups: only the checked IP is used', async () => {
+test('K-05: a DNS answer that flips from public to 169.254.169.254 between imports: the first works at the checked IP, the second is refused', async () => {
   const shop = await addP3Shop(world);
-  world.sites.site('rebind2.example', {
-    dns: { sequence: [[SITE_ADDRESSES.public], [SITE_ADDRESSES.metadata]] },
-    pages: { '/products/lamp': { body: page('<title>Rebind lamp</title><meta property="og:title" content="Rebind lamp"><meta property="og:image" content="https://rebind2.example/lamp.png"><meta property="product:price:amount" content="120">') }, '/lamp.png': { type: 'image/png', body: png({ width: 400, height: 400 }) } },
-  });
+  // One import looks the host up at each hop it follows (the store's own feed, the page, the image), each afresh as K-05 requires, so the
+  // flip is made between two imports, not between two lookups of one import (R3-CAT-4; the mid-import flip is the next test).
+  const pages = { '/products/lamp': { body: page('<title>Rebind lamp</title><meta property="og:title" content="Rebind lamp"><meta property="og:image" content="https://rebind2.example/lamp.png"><meta property="product:price:amount" content="120">') }, '/lamp.png': { type: 'image/png', body: png({ width: 400, height: 400 }) } };
+  world.sites.site('rebind2.example', { dns: [SITE_ADDRESSES.public], pages });
   const mark = world.dials.length;
   const first = await outcome(shop, 'https://rebind2.example/products/lamp');
+  world.sites.site('rebind2.example', { dns: [SITE_ADDRESSES.metadata], pages });
   const second = await outcome(shop, 'https://rebind2.example/products/lamp');
   const dials = world.dialsSince(mark).filter((d) => d.host === 'rebind2.example');
   assert.ok(dials.length >= 1, 'The first import connected');
   assert.ok(dials.every((d) => d.address === SITE_ADDRESSES.public), `Connected to: ${dials.map((d) => d.address).join(', ')}`);
   assert.equal(first.status, 'draft', `The first read, on the public answer, works: ${first.raw.slice(0, 300)}`);
   assertRefusedAs(second, 'blocked', 'The second read, once DNS points at the metadata address');
+});
+
+test('K-05: a DNS answer that flips to 169.254.169.254 in the middle of one import: nothing ever connects to it', async () => {
+  const shop = await addP3Shop(world);
+  world.sites.site('rebind3.example', {
+    dns: { sequence: [[SITE_ADDRESSES.public], [SITE_ADDRESSES.metadata]] },
+    pages: { '/products/lamp': { body: page('<title>Rebind lamp</title><meta property="og:title" content="Rebind lamp"><meta property="og:image" content="https://rebind3.example/lamp.png"><meta property="product:price:amount" content="120">') }, '/lamp.png': { type: 'image/png', body: png({ width: 400, height: 400 }) } },
+  });
+  const mark = world.dials.length;
+  const result = await outcome(shop, 'https://rebind3.example/products/lamp');
+  const dials = world.dialsSince(mark).filter((d) => d.host === 'rebind3.example');
+  assert.ok(dials.every((d) => d.address === SITE_ADDRESSES.public), `Connected to: ${dials.map((d) => d.address).join(', ')}`);
+  assert.ok(result.status === 'draft' || result.reason === 'blocked', `The answer was a draft or a refusal, not a fault: ${result.raw.slice(0, 300)}`);
 });
 
 test('K-05: a redirect to a name that resolves privately is caught at that hop, after a fresh lookup', async () => {

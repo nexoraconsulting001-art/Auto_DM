@@ -65,11 +65,11 @@ const toProductSummary = (p) => ({ ...toProduct(p), reelCount: p.reel_count, cat
 /** A product's variants in the shape the API takes them, each keeping the image it shows. */
 const variantsAsInput = (variants) => variants.map((v) => ({ optionValues: v.option_values, sku: v.sku, pricePaise: v.price_paise, mrpPaise: v.mrp_paise, inStock: v.in_stock, imageIndex: null, sourceRef: v.source_ref }));
 
-/** The product's own web link in the form two pastes of one page share (K-11), or a 400 naming the field. */
+/** The product's own web link as the owner typed it (K-63; the repo keeps the K-11 form beside it), or a 400 naming the field. */
 function externalUrl(value) {
   if (!value) return '';
-  const url = canonicalProductUrl(value);
-  if (!url) throw invalidField('externalUrl', 'Use a web link starting with http:// or https://');
+  const url = String(value).trim();
+  if (!canonicalProductUrl(url)) throw invalidField('externalUrl', 'Use a web link starting with http:// or https://');
   return url;
 }
 
