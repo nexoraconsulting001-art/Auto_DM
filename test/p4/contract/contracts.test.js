@@ -355,7 +355,8 @@ test('nothing but the gate sends to WhatsApp or by email, and the app wires the 
     // Phase 7 adds the model provider behind AI replies: 'none' until one is chosen, and it sends nothing to a shopper.
     assert.deepEqual(Object.keys(ctx.providers).sort(), ['ai', 'email', 'razorpay', 'shiprocket', 'shopify', 'whatsapp']);
     assert.equal(ctx.providers.razorpay.default.kind, 'route', 'Bhava-managed is the default');
-    assert.equal(ctx.platform.consent.built, false, 'until the consent track registers');
+    // Stub era: written while the consent track was not built. The consent module now registers its provider at start.
+    assert.equal(ctx.platform.consent.built, true, 'the consent module has registered');
   } finally {
     app.close();
   }
