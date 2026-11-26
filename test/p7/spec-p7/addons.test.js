@@ -481,7 +481,8 @@ test('A-64: STOP on WhatsApp records the opt-out once, in any case and with punc
   const list = json(need(await shop.send('GET', '/whatsapp/optins?purpose=marketing'), 200, 'Opt-ins'));
   assert.ok(list.items.some((i) => i.withdrawnAt));
   assert.doesNotMatch(JSON.stringify(list), new RegExp(from.slice(-8)), 'no phone number in the list');
-  const confirmations = (await waSent(from)).length;
+  // The saree link was the keyword answer before the shopper stopped; any other message to them is a confirmation.
+  const confirmations = (await waSent(from)).filter((m) => !/stop.example/.test(waText(m))).length;
   assert.ok(confirmations <= 1, 'at most one confirmation');
   const next = await shop.send('GET', '/whatsapp/optins');
   assert.equal(next.status, 200);
@@ -570,7 +571,9 @@ test('A-66: connecting a number takes the owner, the add-on and a state that wor
   const other = await shopOn(world, 't1');
   await feature(other, 'whatsapp_automation');
   await world.wa.post('/signup/codes', { code: 'good-code-1', token: 'sim-whatsapp-token' });
+  // A business made by the shop kit already has its own WhatsApp number (for buyer codes): the state of another business must change nothing of it.
+  const ownBefore = json(need(await other.send('GET', '/whatsapp'), 200, 'Status'));
   assert.ok((await other.send('POST', '/whatsapp/connect/finish', { ...body, code: 'good-code-1' })).status >= 400, "another business's state");
-  assert.equal(json(need(await other.send('GET', '/whatsapp'), 200, 'Status')).connected, false);
+  assert.deepEqual(json(need(await other.send('GET', '/whatsapp'), 200, 'Status')), ownBefore, 'the other business number is as it was');
   assert.equal((await shop.send('POST', '/whatsapp/connect/finish', { code: 'x', state: 'y', wabaId: 'abc', phoneNumberId: '1' })).status, 400);
 });
