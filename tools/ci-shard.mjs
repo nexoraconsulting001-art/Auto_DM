@@ -115,6 +115,12 @@ function parseShard(text) {
   return { k: Number(m[1]), n: Number(m[2]) };
 }
 
+/** The files of shard `text` ("k/n") of a suite: what `files <suite> <k>/<n>` prints. R-05 runs the same split on production drivers. */
+export function shardFiles(suite, text) {
+  const { k, n } = parseShard(text);
+  return split(suiteFiles(suite), n)[k - 1].files;
+}
+
 function suiteFiles(suite) {
   if (!SUITES[suite]) throw new Error(`Unknown suite "${suite}"; one of ${Object.keys(SUITES).join(', ')}`);
   return SUITES[suite]();

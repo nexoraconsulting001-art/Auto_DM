@@ -294,10 +294,16 @@ async function main(config = defaultConfig) {
   secretSource.start(({ changed }) => log.info('secrets.refreshed', { settings: changed }));
   // On a deploy (SIGTERM, SIGINT): readiness turns false, no new connection is taken, the requests in flight finish,
   // and then everything closes, within SHUTDOWN_SECONDS. The runtime track adds its own steps with health.onDrain().
-  platform.health.onDrain('http', () => new Promise((resolve) => {
-    server.close(() => resolve());
-    server.closeIdleConnections?.();
-  }));
+  // The first moments are a grace pause (DRAIN_GRACE_SECONDS) with the listener still open: readiness is false and every other
+  // request gets a 503 that no load balancer treats as having run, so it moves on to another server. Closing the listener at once
+  // would reset the connections already waiting in its queue, and those requests would fail.
+  platform.health.onDrain('http', async () => {
+    await new Promise((resolve) => setTimeout(resolve, (config.drainGraceSeconds ?? 2) * 1000));
+    await new Promise((resolve) => {
+      server.close(() => resolve());
+      server.closeIdleConnections?.();
+    });
+  });
   platform.health.onDrain('secrets', () => secretSource.stop());
   platform.health.onDrain('errors', () => errorSink.flush());
   platform.health.onDrain('cache', () => platform.cache.close());

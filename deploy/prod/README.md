@@ -16,7 +16,7 @@ Rules every folder keeps:
 - **No secrets.** Templates name secrets and mount them; they never hold a value. The app reads them with `SECRETS_DRIVER=file` (a mounted directory, one file per setting) or `http` (a secret manager), see `src/platform/secret-source.js`.
 - **`DEPLOY_ENV=production`** is set by these templates and nowhere else. With it the server refuses to start unless every rule in `src/platform/production-guard.js` holds.
 - **The image** is the repository's `Dockerfile`: one image, two commands (`node src/server.js`, `node src/worker.js`), a non-root user, a read-only file system with `/tmp` as the only writable mount, on arm64 and amd64.
-- **Probes**: `/healthz` (liveness), `/readyz` (readiness) and `/startupz` on the web port and on the worker's `WORKER_HEALTH_PORT`. `SIGTERM` drains within `SHUTDOWN_SECONDS`, so the platform's grace period must be longer.
+- **Probes**: `/healthz` (liveness), `/readyz` (readiness) and `/startupz` on the web port and on the worker's `WORKER_HEALTH_PORT`. `SIGTERM` drains within `SHUTDOWN_SECONDS` (the first `DRAIN_GRACE_SECONDS`, 2 by default, answer 503 with the listener still open so a balancer moves on), so the platform's grace period must be longer.
 - **Metrics**: `/metrics` with `Authorization: Bearer <METRICS_TOKEN>`. Every name is in `src/contracts/metrics.js`; a rule or dashboard that names anything else fails its test.
 
 Validate everything with `npm run prod:validate`. CI runs the same in `.github/workflows/prod.yml`, each tool from its public container image.

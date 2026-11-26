@@ -9,6 +9,8 @@ import { READINESS_CHECKS, missingServices } from '../../../tools/readiness/inde
 import { assertNoneOf, exists, needsCi, read, runNode } from './support.js';
 
 const ENV = process.env;
+/** The Redis database the checks use when the suite's own is busy. */
+const CHECK_REDIS_DB = 15;
 const SECRETS = ['pg-pass-zq81', 'redis-pass-zq82', 'ch-pass-zq83', 's3-secret-zq84', 's3-key-zq85'];
 const remote = {
   TEST_DATABASE_URL: 'postgres://admin:pg-pass-zq81@db.prod-cluster.example.com:5432/bhava', // secret-scan:allow
@@ -44,7 +46,13 @@ for (const [check, spec] of Object.entries(READINESS_CHECKS).filter(([c]) => c !
 
   const named = spec.needs.filter((n) => !ENV[n]);
   test(`${spec.requirement}: ${spec.scenario} passes on the production services, step by step, with nothing but configuration different`, { skip: named.length ? needsCi(named.join(', ')) : false, timeout: 3_000_000 }, async () => {
-    const res = await runNode(['tools/readiness/index.mjs', check, '--json'], { env: { ...Object.fromEntries(spec.needs.map((n) => [n, ENV[n]])), S3_ACCESS_KEY_ID: ENV.S3_ACCESS_KEY_ID ?? '', S3_SECRET_ACCESS_KEY: ENV.S3_SECRET_ACCESS_KEY ?? '' }, timeoutMs: 2_900_000 });
+    // The check needs an EMPTY Redis, and it flushes the one it used. In a job whose suite shares its Redis the first database holds the other tests' keys, so
+    // the check gets a database number of its own on the same server (the app reads the number in REDIS_URL).
+    const own = { ...Object.fromEntries(spec.needs.map((n) => [n, ENV[n]])), ...(ENV.REDIS_URL && spec.needs.includes('REDIS_URL') ? { REDIS_URL: `${ENV.REDIS_URL.replace(/\/\d*$/, '')}/${CHECK_REDIS_DB}` } : {}) };
+    // R-05 runs the suite it is given; run for real inside the suite it would run this test again, and so on. Here it runs the check's own fixture, as
+    // e2e.test.js does; the whole suite is what the prod.yml job runs.
+    if (check === 'r05') Object.assign(own, { READINESS_TEST_FILES: 'test/p9/readiness-checks/fixtures/suite.fixture.js', READINESS_PASS_MODE: 'ok' });
+    const res = await runNode(['tools/readiness/index.mjs', check, '--json'], { env: { ...own, S3_ACCESS_KEY_ID: ENV.S3_ACCESS_KEY_ID ?? '', S3_SECRET_ACCESS_KEY: ENV.S3_SECRET_ACCESS_KEY ?? '' }, timeoutMs: 2_900_000 });
     const out = res.stdout + res.stderr;
     const report = JSON.parse(res.stdout);
     assert.equal(report.check, check);

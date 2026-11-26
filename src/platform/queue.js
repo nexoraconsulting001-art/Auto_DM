@@ -274,6 +274,8 @@ function redisQueue(config, injected = {}) {
     return {
       host: u.hostname,
       port: Number(u.port || 6379),
+      // The database number in the address (redis://host/3), as ioredis reads it for the cache and the readiness probe.
+      db: /^\/\d+$/.test(u.pathname) ? Number(u.pathname.slice(1)) : undefined,
       username: u.username || undefined,
       password: u.password ? decodeURIComponent(u.password) : undefined,
       tls: u.protocol === 'rediss:' ? {} : undefined,
@@ -298,11 +300,9 @@ function redisQueue(config, injected = {}) {
     const listed = await (await registry()).smembers(QUEUE_REGISTRY_KEY);
     return [...new Set([...listed, ...registered])].sort();
   }
-  async function queueFor(name) {
-    if (!queues.has(name)) {
-      const { Queue } = await lib();
-      queues.set(name, new Queue(name, { connection: connection() }));
-    }
+  // The promise is kept, so two callers asking for one queue at once get the same Queue (and one connection), not two.
+  function queueFor(name) {
+    if (!queues.has(name)) queues.set(name, lib().then(({ Queue }) => new Queue(name, { connection: connection() })));
     return queues.get(name);
   }
 
@@ -351,28 +351,32 @@ function redisQueue(config, injected = {}) {
     },
     onRun: (fn) => listeners.add(fn),
     async stats() {
+      // Every queue any process has used is in the registry (a shared server holds many), so they are asked together: asked one by one
+      // the readiness probe's time grows with their number and passes its limit before the connections are made.
       const out = {};
-      for (const name of await names()) {
+      const rows = await Promise.all((await names()).map(async (name) => {
         const q = await queueFor(name);
         const c = await q.getJobCounts('waiting', 'delayed', 'active', 'failed');
         const unknown = c.failed ? (await q.getFailed(0, 1000)).filter((j) => /^unknown:/.test(j?.failedReason || '')).length : 0;
-        out[name] = { queued: c.waiting, delayed: c.delayed, running: c.active, failed: c.failed - unknown, unknown };
-      }
+        return [name, { queued: c.waiting, delayed: c.delayed, running: c.active, failed: c.failed - unknown, unknown }];
+      }));
+      for (const [name, counts] of rows) out[name] = counts;
       return out;
     },
     async oldestWaiting() {
       const out = {};
       const now = Date.now();
-      for (const name of await names()) {
+      const rows = await Promise.all((await names()).map(async (name) => {
         const [oldest] = (await (await queueFor(name)).getWaiting(0, 0)).filter(Boolean); // BullMQ lists the oldest first here
-        if (oldest) out[name] = Math.max(0, (now - readyAt(oldest)) / 1000);
-      }
+        return [name, oldest];
+      }));
+      for (const [name, oldest] of rows) if (oldest) out[name] = Math.max(0, (now - readyAt(oldest)) / 1000);
       return out;
     },
     async cleanup() {},
     async close() {
       await Promise.all(workers.map((w) => w.close()));
-      await Promise.all([...queues.values()].map((q) => q.close()));
+      await Promise.all((await Promise.all([...queues.values()])).map((q) => q.close()));
       if (registryClient && !injected.redis) await (await registryClient).quit();
     },
   };

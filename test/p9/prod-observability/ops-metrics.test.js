@@ -15,7 +15,8 @@ const opsOf = async (app, op, business, query = '') => need(await onConsole(app,
 const call = (extra = {}) => ({ method: 'POST', pathname: 'v21.0/17841/messages', channel: 'instagram', accountId: 'acct-1', status: 200, ms: 40, ...extra });
 
 async function world(t) {
-  const app = await startWorld(t, { overrides: { metricsToken: TOKEN } });
+// These read and write the Postgres events and jobs tables themselves, and a shared ClickHouse or Redis would hold other tests' rows under the same small tenant ids: they run on the pg drivers, as the p1/p2/p3 suites do.
+  const app = await startWorld(t, { overrides: { metricsToken: TOKEN, queueDriver: 'pg', analyticsDriver: 'pg' } });
   const a = await addBusiness(app, { slug: 'alpha', name: 'Alpha Saree House' });
   const b = await addBusiness(app, { slug: 'beta', name: 'Beta Bakes' });
   return { app, a, b, op: await consoleUser(app, 'support') };
