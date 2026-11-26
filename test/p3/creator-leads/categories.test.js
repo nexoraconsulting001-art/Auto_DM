@@ -288,7 +288,7 @@ test('one business never sees or changes another’s sequences', async (t) => {
   for (const [method, path, body] of [['PATCH', `/category-rules/${rule.id}`, { active: false }], ['DELETE', `/category-rules/${rule.id}`], ['POST', `/category-rules/${rule.id}/apply`]]) {
     assert.equal((await w.api(path, { method, body })).status, 404, `${method} ${path}`);
   }
-  assert.equal((await w.api('/categories/order', { method: 'PUT', body: { ids: [mine.category.id, id] } })).status, 409);
+  assert.equal((await w.api('/categories/order', { method: 'PUT', body: { ids: [mine.category.id, id] } })).status, 400, 'a category of another business is a bad request (R3-CAT-3); a list that only misses some of yours is 409 (below)');
 
   assert.deepEqual(await sequenceIds(leaf, id), theirs.ids, 'nothing of theirs changed');
   // Same slug, two hosts: each shows its own reels.

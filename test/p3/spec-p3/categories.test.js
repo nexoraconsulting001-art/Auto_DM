@@ -141,9 +141,9 @@ test('K-45: pinned reels keep their own drag order above the rest; pinning twice
   const category = await categoryWith(shop, 'Pins', Object.values(r));
   await shop.must('POST', `/categories/${category.id}/reels/pin`, { pageId: r.D.id });
   await shop.must('POST', `/categories/${category.id}/reels/pin`, { pageId: r.F.id });
-  assert.deepEqual(ids(await shop.sequence(category.id)), idsOf(r, ['D', 'F', 'A', 'B', 'C', 'E']), 'Pins in the order they were pinned');
+  assert.deepEqual(ids(await shop.sequence(category.id)), idsOf(r, ['F', 'D', 'A', 'B', 'C', 'E']), 'Pin to top (8.13): the newer pin goes above the older one');
   await shop.must('POST', `/categories/${category.id}/reels/pin`, { pageId: r.D.id });
-  assert.deepEqual(ids(await shop.sequence(category.id)), idsOf(r, ['D', 'F', 'A', 'B', 'C', 'E']), 'Pinning again changes nothing');
+  assert.deepEqual(ids(await shop.sequence(category.id)), idsOf(r, ['F', 'D', 'A', 'B', 'C', 'E']), 'Pinning again changes nothing');
   await shop.setOrder(category.id, idsOf(r, ['E', 'C', 'B', 'A']), idsOf(r, ['F', 'D']));
   assert.deepEqual(ids(await shop.sequence(category.id)), idsOf(r, ['F', 'D', 'E', 'C', 'B', 'A']), 'Pinned reels are dragged among themselves, the rest among themselves');
   const stray = await shop.send('POST', `/categories/${category.id}/reels/pin`, { pageId: outsider.id });
