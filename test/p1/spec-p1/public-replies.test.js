@@ -1,7 +1,7 @@
 // PRD 4.9: public comment replies. C-31 to C-33.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COMPLIANCE_LIMITS, HOUR, INSIDE_MS, OUTSIDE_MS, REPLIES, SECOND, addShop, assertReason, need, savePublicReplies, textOf, useWorld } from './support.js';
+import { COMPLIANCE_LIMITS, HOUR, INSIDE_MS, OUTSIDE_MS, REPLIES, SECOND, addShop, assertReason, need, openWorld, savePublicReplies, textOf, useWorld } from './support.js';
 
 const world = useWorld();
 const MAX_DELAY = COMPLIANCE_LIMITS.publicReplyMaxDelayMs;
@@ -93,33 +93,39 @@ test('C-31: a staff member can\'t change the reply set', async () => {
   assert.equal((await shop.api('/brand-kit', { method: 'PATCH', token: staff.token, body: { publicReplyVariants: REPLIES.slice(0, 5) } })).status, 403);
 });
 
-async function liveWithReplies(extra = {}) {
-  const shop = await addShop(world);
+async function liveWithReplies(extra = {}, w = world) {
+  const shop = await addShop(w);
   await savePublicReplies(shop, 5);
   const auto = await shop.automate({ publicReplyEnabled: true, ...extra });
   return { shop, auto };
 }
 
 test('C-32: 600 DMs in one hour, replies on: 20 or fewer on that media, no back-to-back repeat', { timeout: 280_000 }, async () => {
-  const { shop, auto } = await liveWithReplies();
-  const { commentPayload } = await import('./support.js');
-  const entries = [];
-  for (let i = 0; i < 600; i++) {
-    const from = world.fan();
-    const { comment } = await world.meta.post('/comments', { igUserId: shop.igUserId, mediaId: auto.mediaId, from, text: 'price', deliver: false });
-    entries.push(commentPayload(shop, { id: comment.id, mediaId: auto.mediaId, from }).entry[0]);
+  // Its own world: 600 comments left in the shared one would hold up every test after this.
+  const own = await openWorld();
+  try {
+    const { shop, auto } = await liveWithReplies({}, own);
+    const { commentPayload } = await import('./support.js');
+    const entries = [];
+    for (let i = 0; i < 600; i++) {
+      const from = own.fan();
+      const { comment } = await own.meta.post('/comments', { igUserId: shop.igUserId, mediaId: auto.mediaId, from, text: 'price', deliver: false });
+      entries.push(commentPayload(shop, { id: comment.id, mediaId: auto.mediaId, from }).entry[0]);
+    }
+    need(await own.webhook({ object: 'instagram', entry: entries }), 200, 'The batch');
+    await shop.settle({ ms: 60_000, roundMs: 2000 });
+    // 30 steps of 91 s are 45 minutes, which with the time the run itself takes stays inside the one hour the cap counts over (40 of them, 61 minutes, did not).
+    for (let step = 0; step < 30; step++) {
+      await own.travel(MAX_DELAY + SECOND);
+      await shop.settle({ ms: 1500, roundMs: 500 });
+    }
+    const replies = await shop.publicReplies();
+    assert.ok(replies.length >= 1 && replies.length <= 20, `${replies.length} public replies on one media in an hour`);
+    for (let i = 1; i < replies.length; i++) assert.notEqual(textOf(replies[i]), textOf(replies[i - 1]), `Replies ${i - 1} and ${i} repeat`);
+    assert.ok(replies.every((r) => REPLIES.includes(textOf(r))), 'Only the owner\'s saved replies');
+  } finally {
+    await own.close();
   }
-  need(await world.webhook({ object: 'instagram', entry: entries }), 200, 'The batch');
-  await shop.settle({ ms: 60_000, roundMs: 2000 });
-  // 30 steps of 91 s are 45 minutes, which with the time the run itself takes stays inside the one hour the cap counts over (40 of them, 61 minutes, did not).
-  for (let step = 0; step < 30; step++) {
-    await world.travel(MAX_DELAY + SECOND);
-    await shop.settle({ ms: 1500, roundMs: 500 });
-  }
-  const replies = await shop.publicReplies();
-  assert.ok(replies.length >= 1 && replies.length <= 20, `${replies.length} public replies on one media in an hour`);
-  for (let i = 1; i < replies.length; i++) assert.notEqual(textOf(replies[i]), textOf(replies[i - 1]), `Replies ${i - 1} and ${i} repeat`);
-  assert.ok(replies.every((r) => REPLIES.includes(textOf(r))), 'Only the owner\'s saved replies');
 });
 
 test('C-32: a reply goes only after the delay: not before 20 s', async () => {
