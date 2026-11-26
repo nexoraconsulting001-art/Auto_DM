@@ -56,7 +56,8 @@ test('K-54: a first name and phone with the box ticked saves the lead with its s
   const [wording] = await shop.sql('SELECT version, body FROM lead_consent_texts WHERE tenant_id = $1 AND id = $2', [shop.tenantId, lead.consent_text_id]);
   assert.equal(wording.version, 1, 'The consent text version is kept with the lead');
   assert.ok(Math.abs(Date.now() - new Date(lead.consented_at).getTime()) < 60_000, 'And when it was given');
-  assert.deepEqual((await consents(shop, lead.id)).map((c) => [c.channel, c.withdrawn_at]), [['email', null], ['whatsapp', null]], 'Each channel is its own consent');
+  // Each channel is its own consent, and only the channels the shopper gave a contact for are granted: a phone alone never grants email (R3-CAT-7, creator-leads leads.test).
+  assert.deepEqual((await consents(shop, lead.id)).map((c) => [c.channel, c.withdrawn_at]), [['whatsapp', null]]);
   assert.deepEqual(Object.keys(lead).sort(), ['consent_text_id', 'consented_at', 'created_at', 'email', 'first_name', 'id', 'page_id', 'phone', 'source', 'source_ref', 'tenant_id', 'utm_campaign'], 'Nothing else is collected');
 
   const viaApi = (await shop.must('GET', '/leads')).items;
@@ -260,7 +261,14 @@ test('K-57: the leads XLSX holds only this business\'s leads, and the download i
 test('K-57: names that look like formulas are inert in the XLSX and the CSV, and staff without the right can\'t download', async () => {
   const { shop, path } = await withForm();
   const names = ['=HYPERLINK("http://evil.example","Click")', '+1+1', '-2+3', '@SUM(A1:A9)', '=cmd|\' /C calc\'!A0', 'Asha, "the" first\nline two'];
-  for (const [i, firstName] of names.entries()) assert.ok(taken(await submitLead(world, shop, path, { firstName, phone: `98555000${String(10 + i)}` })), `"${firstName}" was refused`);
+  // A first name takes letters, marks, spaces and . ' - only (rules.js cleanFirstName, R3-CAT-7), so a formula can't be a name at all: the form refuses it and stores nothing.
+  // The same text arrives through the one free-text field a shopper's link can fill, the campaign (utm_campaign), and must be inert there, in both files.
+  for (const [i, text] of names.entries()) {
+    const asName = await submitLead(world, shop, path, { firstName: text, phone: `98555001${String(10 + i)}` });
+    assert.ok(asName.sent.status < 500 && !taken(asName), `"${text}" was taken as a first name`);
+  }
+  assert.equal((await shop.leadRows()).length, 0, 'Nothing was stored for a formula-like name');
+  for (const [i, campaign] of names.entries()) assert.ok(taken(await submitLead(world, shop, `${path}?utm_campaign=${encodeURIComponent(campaign)}`, { firstName: 'Asha', phone: `98555000${String(10 + i)}` })), `a campaign of "${campaign}" was refused`);
   const xlsx = await xlsxRows((await leadFile(world, shop, 'xlsx')).file.raw);
   for (const row of xlsx) for (const cell of row) {
     assert.ok(!(cell && typeof cell === 'object' && 'formula' in cell), `A cell is a live formula: ${JSON.stringify(cell)}`);
@@ -270,7 +278,8 @@ test('K-57: names that look like formulas are inert in the XLSX and the CSV, and
   const csv = await leadFile(world, shop, 'csv');
   assert.match(csv.file.headers['content-type'], /text\/csv/);
   const cells = csvRows(csv.file.text).flat();
-  for (const cell of cells) assert.doesNotMatch(cell, /^[=+@]|^-\d|^\t|^\r/, `A CSV cell starts a formula: ${JSON.stringify(cell.slice(0, 40))}`);
+  // The phone column is "+" and 8 to 15 digits by the time it is stored (files.js writes it as is: a number, never a formula); every other cell is checked.
+  for (const cell of cells.filter((c) => !/^\+[1-9]\d{7,14}$/.test(c))) assert.doesNotMatch(cell, /^[=+@]|^-\d|^\t|^\r/, `A CSV cell starts a formula: ${JSON.stringify(cell.slice(0, 40))}`);
   assert.equal(csvRows(csv.file.text).length, names.length + 1, 'A quoted newline is one row');
   assert.ok(cells.some((c) => c.includes('line two')));
   for (const format of ['pdf', 'xls', '', 'XLSX']) assert.equal((await shop.send('POST', '/lead-downloads', { format })).status, 400, `Format "${format}"`);
