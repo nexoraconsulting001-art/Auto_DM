@@ -37,7 +37,8 @@ test('S-30 a new order can\'t jump straight to delivered; packing is a move, and
     const timeline = await api(app, token, `/orders/${order.id}/timeline`);
     const moves = timeline.json.items.map((e) => [e.kind, e.from, e.to, e.actor]);
     assert.deepEqual(moves.find((m) => m[0] === 'fulfilment' && m[2] === 'packed'), ['fulfilment', 'new', 'packed', 'Owner']);
-    assert.ok(timeline.json.items.some((e) => e.kind === 'note' && e.note === 'Wrapped in tissue'));
+    // The note given with the move is that move's own entry (S-32: the app and the web admin show one entry with its note).
+    assert.equal(timeline.json.items.find((e) => e.kind === 'fulfilment' && e.to === 'packed').note, 'Wrapped in tissue');
     assert.ok(timeline.json.items.some((e) => e.kind === 'payment' && e.to === 'paid' && e.actor === 'Payment gateway'));
     // A Phase 0 status can't be set on a checkout order.
     const set = await api(app, token, `/orders/${order.id}/status`, { method: 'POST', body: { status: 'delivered' } });
