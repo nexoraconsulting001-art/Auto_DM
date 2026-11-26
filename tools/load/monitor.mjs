@@ -78,7 +78,14 @@ async function linuxTable() {
       } catch {
         pss = null;
       }
-      rows.push({ pid: Number(entry), ppid, rss, priv: pss });
+      // A Postgres process names what it is doing in its title ("postgres: bhava bhava 127.0.0.1(5) idle", "postgres: autovacuum launcher").
+      let name = '';
+      try {
+        name = fs.readFileSync(`/proc/${entry}/cmdline`, 'utf8').replaceAll(String.fromCharCode(0), ' ').trim().slice(0, 80);
+      } catch {
+        name = '';
+      }
+      rows.push({ pid: Number(entry), ppid, rss, priv: pss, name });
     } catch {
       // the process ended between the listing and the read
     }
@@ -97,7 +104,7 @@ async function unixTable() {
 export const processTable = () => (process.platform === 'win32' ? windowsTable() : process.platform === 'linux' ? linuxTable() : unixTable());
 
 /** One reading of { web, worker, postgres } in MB; a role that cannot be read is null (the report says so, never 0). */
-export async function readMemory({ pids, sharedBuffersMb }) {
+export async function readMemory({ pids, sharedBuffersMb, detail = false }) {
   const table = await processTable();
   const byPid = new Map(table.map((r) => [r.pid, r]));
   const out = { web: null, worker: null, postgres: null };
@@ -116,6 +123,8 @@ export async function readMemory({ pids, sharedBuffersMb }) {
     walk(root.pid);
     const exact = members.every((m) => m.priv !== null);
     out.postgres = Math.round(exact ? members.reduce((sum, m) => sum + m.priv, 0) + sharedBuffersMb : members.reduce((sum, m) => sum + m.rss, 0));
+    // Which processes hold it, largest first, so a reading over the limit says where the memory is (the report keeps the list at the peak).
+    if (detail) out.postgresProcesses = members.map((m) => ({ pid: m.pid, name: m.name || undefined, mb: Math.round(exact ? m.priv : m.rss) })).sort((a, b) => b.mb - a.mb).slice(0, 8);
   }
   return out;
 }
@@ -147,7 +156,9 @@ export function startMonitor({ db, getPids, sharedBuffersMb, everyMs = 2000 }) {
         // a restart in progress: the sample has no queue reading
       }
       try {
-        sample.memory = await readMemory({ pids: getPids(), sharedBuffersMb });
+        const { postgresProcesses, ...memory } = await readMemory({ pids: getPids(), sharedBuffersMb, detail: true });
+        sample.memory = memory;
+        sample.postgresProcesses = postgresProcesses;
       } catch {
         // memory could not be read this time
       }
@@ -162,7 +173,10 @@ export function startMonitor({ db, getPids, sharedBuffersMb, everyMs = 2000 }) {
       running = false;
       await loop;
       closeProcessReader();
-      return { samples, peaks: peaks(samples) };
+      const result = peaks(samples);
+      // The processes of the Postgres server at the moment of its highest reading: one process or many small ones decides what to fix.
+      const atPeak = samples.filter((x) => x.memory?.postgres === result.memoryMb.postgres && x.postgresProcesses).at(-1);
+      return { samples, peaks: result, postgresAtPeak: atPeak?.postgresProcesses ?? null };
     },
   };
 }
