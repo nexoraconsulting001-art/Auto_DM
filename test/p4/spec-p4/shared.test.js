@@ -104,6 +104,9 @@ test('S-99: B’s owner finds nothing of A’s orders in any screen, download, r
   const atB = buyer(world, b);
   await atB.signIn(phone);
   await atB.buy({ lines: [line(await b.item({ pricePaise: 20000 }))] });
+  // Loyalty answers 403 to every route while the add-on is off (S-91), before it looks at the id; with it on at B, the ledger
+  // probe below reaches the handler, so its 404 is about A's shopper, not B's plan.
+  await b.loyaltyOn();
   const id = row.id;
   const probes = [
     ['GET', `/orders/${id}`], ['GET', `/orders/${id}/timeline`], ['GET', `/orders/${id}/payments`], ['GET', `/orders/${id}/refunds`], ['GET', `/orders/${id}/shipments`],
