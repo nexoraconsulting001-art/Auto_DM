@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { FORBIDDEN_LABELS, METRICS, METRIC_LABELS, metricProblem } from '../contracts/metrics.js';
+import { FORBIDDEN_LABELS, METRICS, METRIC_LABELS, ROUTE_GROUPS, metricProblem } from '../contracts/metrics.js';
 import { reportError } from './log.js';
 
 /**
@@ -214,7 +214,7 @@ export function createMetrics({ strict = false, maxSeries = DEFAULT_MAX_SERIES, 
           done = true;
           inFlight--;
           const group = req.path.split('/')[1] || 'home';
-          const labels = { method: req.method, group: /^[a-z-]{1,20}$/.test(group) ? group : 'other', status: String(res.statusCode) };
+          const labels = { method: req.method, group: ROUTE_GROUPS.includes(group) ? group : 'other', status: String(res.statusCode) };
           self.inc('http_requests_total', labels);
           self.observe('http_request_seconds', Number(process.hrtime.bigint() - start) / 1e9, { group: labels.group });
           const provider = webhookProviderOf(req.method, req.path);

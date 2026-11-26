@@ -16,11 +16,19 @@ import { z } from 'zod';
  */
 export const METRIC_TYPES = Object.freeze(['counter', 'gauge', 'histogram']);
 
+/** The first path segments the app mounts, `home` for the root, `store` for a business's own pages, and `other` for everything else. */
+export const ROUTE_GROUPS = Object.freeze([
+  'home', 'store', 'other', 'about', 'account', 'admin', 'api', 'app-listing-assets', 'assets', 'auth', 'billing', 'c', 'checkout', 'console', 'health',
+  'healthz', 'login', 'logout', 'me', 'media', 'metrics', 'order', 'orders', 'p', 'policies', 'products', 'r', 'readyz', 'reels', 'report-files',
+  'review', 'shared', 'shop', 'signup', 'startupz', 'static', 'unsubscribe', 'webhook',
+]);
+
 /** Labels and what each may hold. `values` is the whole set; `pattern` with `max` bounds an open one. */
 export const METRIC_LABELS = Object.freeze({
   method: { values: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] },
-  // The route class: the first path segment when it is a short lower-case word, else `other` (src/platform/metrics.js).
-  group: { pattern: /^[a-z-]{1,20}$/, max: 80 },
+  // The route class: the first path segment when it is one of ROUTE_GROUPS, else `other` (src/platform/metrics.js). Never a free
+  // word: a business's address (slug) is also a first path segment, and a label must not name a business.
+  group: { values: ROUTE_GROUPS },
   status: { pattern: /^[1-5]\d\d$/, max: 60 },
   queue: { pattern: /^[a-z][a-z0-9_.-]{0,40}$/, max: 80 },
   // Job states of the queue (stats() in src/platform/queue.js): `queued` (ready now), `delayed` (waiting for its time), `running`, `failed`, `unknown`.
@@ -82,8 +90,8 @@ export const LABEL_OVERRIDES = Object.freeze({
   businesses: { state: { pattern: /^[a-z_]{1,20}$/, max: 12 } },
 });
 
-/** Metrics that come from the monitoring stack itself, which alert rules and dashboards may also name. */
-export const EXTERNAL_METRICS = Object.freeze(['up', 'probe_success', 'probe_duration_seconds', 'probe_http_status_code', 'probe_ssl_earliest_cert_expiry', 'ALERTS']);
+/** Metrics that come from the monitoring stack itself or the cluster's container metrics (cAdvisor), which alert rules and dashboards may also name: the memory alert reads the last two. */
+export const EXTERNAL_METRICS = Object.freeze(['up', 'probe_success', 'probe_duration_seconds', 'probe_http_status_code', 'probe_ssl_earliest_cert_expiry', 'ALERTS', 'container_memory_working_set_bytes', 'container_spec_memory_limit_bytes']);
 
 /** The names a rule or a dashboard may use: every metric, a histogram's three series, and the external ones. */
 export function metricSeriesNames() {
