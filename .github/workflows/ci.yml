@@ -94,9 +94,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - name: Install the server, the console and the shared client (no app packages)
         run: ${{ env.SERVER_INSTALL }}
-      # The browser tests (e2e/, which the gate runs too) need the console built and Chromium.
-      - name: The seller console builds (browser tests)
-        if: matrix.suite == 'e2e'
+      # Both suites need the console built: the browser tests drive it, and node tests (test/p0/admin-api/moved.test.js) load its
+      # own pages, which answer 503 until it is built. The browser tests also need Chromium.
+      - name: The seller console builds
         run: npm run build:console
       - name: Install Chromium for Playwright (browser tests)
         if: matrix.suite == 'e2e'
