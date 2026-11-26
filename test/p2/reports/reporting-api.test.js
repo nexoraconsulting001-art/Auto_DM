@@ -34,7 +34,9 @@ test('N-63: only the owner makes, lists or revokes a key; it is shown once, stor
   const tier1 = await w.addShop({ plan: 't1' });
   const later = await tier1.call('/api-keys', { method: 'POST', body: { name: 'K' } });
   assert.equal(later.status, 403);
-  assert.match(later.json().error, /tier 2/);
+  // Phase 7: the router answers for the plan from the route table (plan.feature_off naming the lowest plan, tier 2), not this module's own wording.
+  assert.equal(later.json().code, 'plan.feature_off');
+  assert.equal(later.json().plan, 't2');
 });
 
 test('N-64: the key alone names the business: on any address it works, and another business\'s id is 404, with no data, and logged', async (t) => {

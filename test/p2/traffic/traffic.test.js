@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { VISITOR_COOKIE, TRAFFIC_PATHS } from '../../../src/contracts/analytics.js';
 import { setLogSink } from '../../../src/platform/log.js';
 import { withTenant } from '../../../src/tenancy.js';
-import { login, seedReel } from '../../helpers.js';
+import { seedReel } from '../../helpers.js';
+import { ADDRESS, payments, place, placeBody, shopper } from '../../p4/checkout/support.js';
 import { CHROME_UA, INSTAGRAM_UA, WHATSAPP_CRAWLER_UA, api, beacon, newVisitor, page, raw, secondBusiness, startTraffic } from './support.js';
 
 const DM_UTM = { source: 'instagram', medium: 'dm', campaign: 'brunch', content: '18475694065114168' };
@@ -279,17 +280,15 @@ test('an order placed on the site is tied to the visit that placed it, without s
   const world = await startTraffic();
   t.after(world.close);
   const { products } = await seedReel(world.repos, { n: 1 });
-  await world.repos.users.create({ name: 'A Shopper', phone: '9811111111', password: 'secret12' });
-  const session = await login(world.base, { phone: '9811111111', password: 'secret12', csrfPage: '/checkout' });
+  // A tier 3 business places orders through the Phase 4 store checkout (src/contracts/store-routes.js checkoutPlace replaces /api/orders, PRD 9.6):
+  // a signed-in shopper with a verified number, paying cash on delivery, is placed at once.
+  await payments(world, { cod: true });
+  const shopperSession = await shopper(world, { phone: '+919811111111' });
   const visitor = newVisitor();
   await beacon(world, { name: 'page_view', path: '/checkout', pageKind: 'checkout' }, { visitor });
-  const res = await fetch(`${world.base}/api/orders`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', cookie: `${session.cookie}; ${VISITOR_COOKIE}=${visitor}`, 'x-csrf-token': session.csrf },
-    body: JSON.stringify({ items: [{ productId: products[0].id, qty: 1 }], customer: { name: 'A Shopper', phone: '9811111111', address: '12 Long Road', city: 'Pune', state: 'MH', pincode: '411001' } }),
-  });
-  assert.equal(res.status, 201);
-  await assert.doesNotReject(async () => res.json());
+  const res = await place(world, placeBody(products[0].id, { paymentMode: 'cod', address: { ...ADDRESS, phone: '9811111111' } }), { cookie: `${shopperSession.cookie}; ${VISITOR_COOKIE}=${visitor}` });
+  assert.equal(res.status, 201, res.text);
+  assert.ok(res.json, 'The answer is unchanged JSON');
   await waitFor(async () => (await world.inTenant(() => world.db.query(`SELECT 1 FROM traffic_events WHERE name = 'order' AND visitor_id = $1`, [visitor]))).length === 1);
 });
 
