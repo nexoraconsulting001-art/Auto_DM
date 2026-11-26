@@ -90,7 +90,7 @@ test('K-32: the DM link opens with no redirect; tapping a product goes straight 
   expect(response.request().redirectedFrom(), 'The DM link is not a redirect').toBeNull();
   expect(new URL(page.url()).pathname).toBe(`/r/${landing.slug}`);
   expect(await page.content()).not.toMatch(/bhava/i);
-  await expect(page.getByText('₹1,299')).toBeVisible();
+  await expect(page.getByText('₹1,299', { exact: true })).toBeVisible();
 
   const button = page.locator(`a[data-product="${product.id}"]`).first();
   await expect(button).toBeVisible();
