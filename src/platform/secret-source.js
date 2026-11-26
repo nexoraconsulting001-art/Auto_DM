@@ -40,6 +40,7 @@ export function secretDriverOf(env = process.env) {
   return driver;
 }
 
+const isBlank = (text) => String(text).trim() === '';
 const trimEnd = (text) => String(text).replace(/\r?\n$/, '');
 
 function readFileOf(setting, file, readFile) {
@@ -66,7 +67,8 @@ export function readLocalSecrets(names, env = process.env, { readFile = fs.readF
     if (pointed) {
       values[name] = readFileOf(name, pointed, readFile);
       sources[name] = 'file';
-    } else if (dir && exists(path.join(dir, name))) {
+    } else if (dir && exists(path.join(dir, name)) && !isBlank(readFileOf(name, path.join(dir, name), readFile))) {
+      // A blank file in the directory (an empty or whitespace-only mount) holds no secret: the setting counts as missing.
       values[name] = readFileOf(name, path.join(dir, name), readFile);
       sources[name] = 'file';
     } else if (env[name] !== undefined && env[name] !== '') {
