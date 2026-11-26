@@ -17,6 +17,8 @@ import { reportError } from './log.js';
  *   stats() -> { [queue]: { queued, delayed, running, failed, unknown } } for every queue any process has used:
  *       queued is ready to run now, delayed waits for its time (a delay or a retry's backoff).
  *   oldestWaiting() -> { [queue]: seconds } how long the oldest ready job of each queue has waited (queues with one only).
+ *   waitingByTenant() -> [{ tenantId, depth, oldestSeconds }] the ready jobs of every queue, per business that has any
+ *       (a job with no business is in none), sorted by tenantId: ops-metrics samples each business's queue depth from it.
  *   onRun(listener) listener({ queue, result: 'ok' | 'failed' }) after every run of a job in this process (metrics).
  *   close()
  * A job that throws is reported (reportError 'job.failed') by the one run path both drivers share (runJob).
@@ -242,6 +244,13 @@ function pgQueue(db, config) {
       );
       return Object.fromEntries(rows.map((r) => [r.queue, Math.max(0, Number(r.age))]));
     },
+    async waitingByTenant() {
+      const rows = await db.query(
+        `SELECT tenant_id, count(*)::int AS depth, greatest(0, extract(epoch FROM now() - min(run_at)))::float AS oldest
+           FROM jobs WHERE status = 'queued' AND run_at <= now() AND tenant_id IS NOT NULL GROUP BY tenant_id ORDER BY tenant_id`,
+      );
+      return rows.map((r) => ({ tenantId: Number(r.tenant_id), depth: Number(r.depth), oldestSeconds: Math.max(0, Number(r.oldest)) }));
+    },
     /** Deletes finished jobs older than `days`. */
     async cleanup(days = 14) {
       await db.query(`DELETE FROM jobs WHERE status = 'done' AND finished_at < now() - make_interval(days => $1)`, [days]);
@@ -261,6 +270,10 @@ const emptyCounts = () => ({ queued: 0, delayed: 0, running: 0, failed: 0, unkno
 
 /** The Redis set of every queue name any process has worked or enqueued to, so the web process's stats see the worker's queues. */
 export const QUEUE_REGISTRY_KEY = 'bhava:queues';
+
+/** How many waiting jobs waitingByTenant() reads from one Redis queue at a time, and at most in all from one queue. */
+export const WAITING_PAGE = 500;
+export const WAITING_LIMIT = 20_000;
 
 /** When a BullMQ job became ready: its creation plus its first delay, or the start of its last attempt when it is a retry. */
 export const readyAt = (job) => Math.max(Number(job.timestamp) + Number(job.opts?.delay ?? 0), Number(job.processedOn ?? 0));
@@ -372,6 +385,31 @@ function redisQueue(config, injected = {}) {
       }));
       for (const [name, oldest] of rows) if (oldest) out[name] = Math.max(0, (now - readyAt(oldest)) / 1000);
       return out;
+    },
+    async waitingByTenant({ page = WAITING_PAGE, limit = WAITING_LIMIT } = {}) {
+      // A BullMQ job's business is in its data (enqueue above), and Redis has no index by it, so the ready jobs are read: every
+      // registered queue at once, as stats() does, each a page at a time from its oldest, up to `limit` (a sample every few
+      // minutes, not a count to bill by). While workers take jobs from the oldest end a page can shift, so the sample is
+      // approximate on a busy queue, as any count read during work is.
+      const now = Date.now();
+      const byTenant = new Map();
+      await Promise.all((await names()).map(async (name) => {
+        const q = await queueFor(name);
+        for (let start = 0; start < limit; start += page) {
+          const jobs = await q.getWaiting(start, Math.min(start + page, limit) - 1);
+          for (const job of jobs) {
+            const tenantId = job?.data?.tenantId;
+            if (tenantId === null || tenantId === undefined) continue;
+            const key = Number(tenantId);
+            const seen = byTenant.get(key) ?? { tenantId: key, depth: 0, oldestSeconds: 0 };
+            seen.depth += 1;
+            seen.oldestSeconds = Math.max(seen.oldestSeconds, (now - readyAt(job)) / 1000);
+            byTenant.set(key, seen);
+          }
+          if (jobs.length < Math.min(page, limit - start)) break;
+        }
+      }));
+      return [...byTenant.values()].sort((x, y) => x.tenantId - y.tenantId);
     },
     async cleanup() {},
     async close() {

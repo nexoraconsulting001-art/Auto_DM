@@ -118,6 +118,27 @@ test('G-14: the queue depth of each business is sampled for the businesses that 
   assert.equal(samples[0].n, 2, 'a business with nothing waiting is not written to again');
 });
 
+test('R3-OP2-2: the pg queue waitingByTenant() is the ready jobs per business, which the sample reads from the queue in use', async (t) => {
+  const { app, a, b } = await world(t);
+  const { queue } = app.ctx.platform;
+  assert.equal(queue.driver, 'pg');
+  await queue.enqueue('dm.send', {}, { tenantId: a.tenant.id });
+  await queue.enqueue('notify', {}, { tenantId: a.tenant.id });
+  await queue.enqueue('dm.send', {}, { tenantId: b.tenant.id });
+  await queue.enqueue('dm.send', {}, { tenantId: b.tenant.id, delayMs: 60_000 });
+  await queue.enqueue('platform.sweep', {}, { tenantId: null });
+  await app.db.platform.query("UPDATE jobs SET run_at = now() - interval '120 seconds' WHERE tenant_id = $1", [a.tenant.id]);
+  const rows = await queue.waitingByTenant();
+  const ids = [a.tenant.id, b.tenant.id].map(Number);
+  assert.deepEqual(rows.map((r) => [r.tenantId, r.depth]), [[ids[0], 2], [ids[1], 1]].sort((x, y) => x[0] - y[0]), 'across queues, delayed and platform jobs left out');
+  assert.ok(rows.find((r) => r.tenantId === ids[0]).oldestSeconds >= 119);
+  // The sample asks the queue, not the jobs table: a queue that reports nothing waiting writes nothing, whatever the table holds.
+  const tracked = [];
+  const ops = createOpsMetrics({ ...app.ctx, platform: { ...app.ctx.platform, queue: { ...queue, waitingByTenant: async () => [] }, analytics: { track: async (...args) => tracked.push(args) } } });
+  assert.equal(await ops.sampleQueues(), 0);
+  assert.deepEqual(tracked, []);
+});
+
 test('G-04: the platform instruments at /metrics: calls by class, usage, errors by kind, jobs, queue age and businesses by plan, with nothing about one business', async (t) => {
   const { app, a } = await world(t);
   withTenant(a.tenant, () => {
