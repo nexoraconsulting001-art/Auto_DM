@@ -232,7 +232,9 @@ test('F-126: a Free account sees no insights older than 7 days, however it asks,
   const shop = await shopOn(world, 'free');
   const day = (d) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10);
   // Every day an answer carries: its range and each metric's and the follower series' days.
-  const daysIn = (data) => [data.from, ...(data.metrics ?? []).flatMap((m) => (m.days ?? []).map((d) => d.day)), ...(data.followers ?? []).map((d) => d.day)].filter(Boolean).map((d) => String(d).slice(0, 10));
+  // The answer names the days that were asked for (`from`, and each day of the range); a day past the plan's 7 days must carry no
+  // figure: state 'not_available' and value null (src/modules/insights dayState), never a number.
+  const dayRows = (data) => [...(data.metrics ?? []).flatMap((m) => m.days ?? []), ...(data.followers ?? [])];
   const free = await shop.send('GET', '/insights/account?range=7');
   assert.equal(free.status, 200, `the last 7 days are a Free account's: ${free.status}`);
   for (const path of ['/insights/account?range=28', '/insights/account?range=90', `/insights/account?range=custom&from=${day(30)}&to=${day(0)}`, `/insights/account?range=custom&from=${day(20)}&to=${day(10)}`]) {
@@ -240,8 +242,9 @@ test('F-126: a Free account sees no insights older than 7 days, however it asks,
     if (res.status === 200) {
       const data = json(res);
       assert.ok(data?.from, `${path}: an answer with no range`);
-      const old = daysIn(data).filter((d) => d < day(7));
-      assert.deepEqual(old, [], `${path} shows days older than 7 days`);
+      const old = dayRows(data).filter((d) => String(d.day).slice(0, 10) < day(7));
+      assert.deepEqual(old.filter((d) => d.value !== null || d.state !== 'not_available'), [], `${path} shows figures for days older than 7 days`);
+      for (const m of data.metrics ?? []) if ((m.days ?? []).every((d) => String(d.day).slice(0, 10) < day(7))) assert.equal(m.total, null, `${path}: ${m.metric} total of days it may not show`);
     } else assert.ok([402, 403].includes(res.status), `${path} answered ${res.status}`);
   }
   await sql(world, `UPDATE tenants SET plan = 't1' WHERE id = $1`, [shop.tenantId]);
@@ -299,7 +302,7 @@ test('F-128: a Free account upgrading to tier 3 keeps its id, data and automatio
   assert.equal((await features())['store.checkout']?.on ?? false, false);
   await subscribe(world, shop, 't3');
   assert.equal((await features())['store.checkout']?.on ?? false, true);
-  assert.equal((await one(world, 'SELECT count(*) AS n FROM tenants WHERE slug = $1', [shop.slug])).n, '1', 'still one account');
+  assert.equal(Number((await one(world, 'SELECT count(*) AS n FROM tenants WHERE slug = $1', [shop.slug])).n), 1, 'still one account');
   assert.equal((await one(world, `SELECT id FROM users WHERE tenant_id = $1 AND role = 'owner'`, [shop.tenantId])).id, before.owner);
   assert.equal(json(need(await shop.send('GET', `/automations/${json(automation).id}`), 200, 'The automation')).id, json(automation).id);
   assert.equal(json(need(await shop.send('GET', `/products/${product.id}`), 200, 'The product')).id, product.id);
@@ -337,7 +340,7 @@ test('F-129: a self-referral is blocked by the same phone, by the same Instagram
   const code = json(need(await referrer.send('GET', '/referrals'), 200, 'Referrals')).code;
   await assert.rejects(sql(world, `INSERT INTO seller_referrals (tenant_id, referred_tenant_id) VALUES ($1, $1)`, [referrer.tenantId]), /check|violates|itself/i);
   // The same phone signs up again with the referrer's own code.
-  const ownerPhone = (await one(world, `SELECT phone FROM users WHERE tenant_id = $1 AND role = 'owner'`, [referrer.tenantId])).phone;
+  const ownerPhone = `+91${(await one(world, `SELECT phone FROM users WHERE tenant_id = $1 AND role = 'owner'`, [referrer.tenantId])).phone}`;
   await setSignup(world, 'public');
   const person = await appSignIn(world, ownerPhone);
   const res = await person.call('POST', '/signup', { accountType: 'creator', name: 'Me again', referralCode: code });
