@@ -22,7 +22,8 @@ const withInsights = (run, { plan = 't1' } = {}) => async () => {
   const app = await adminApp({ overrides: { complianceNow: () => clock.t, complianceInline: false, graphBaseUrl: sim.url } });
   try {
     await app.db.platform.query('UPDATE tenants SET plan = $1 WHERE id = $2', [plan, app.tenant.id]);
-    const analytics = createAnalytics({ analyticsDriver: 'pg' }, { db: app.db });
+    // The rollups the screens read, on the app's own analytics driver (ClickHouse on the CI production profile), not always Postgres.
+    const analytics = createAnalytics(app.config, { db: app.db });
     const rollups = (fn) => withTenant(app.tenant, () => fn(analytics.rollups));
     const insights = app.repos.insights;
     const ref = await insights.enrol({ igUserId: IG_ACCOUNT.igUserId, collectingSince: dayBack(200), offsetSec: 0, polls: [] });
