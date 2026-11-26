@@ -11,6 +11,8 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 import { after, before } from 'node:test';
+import { COMPLIANCE_LIMITS } from '../../../src/contracts/compliance.js';
+import { DRAIN_QUEUE } from '../../../src/modules/compliance/send.js';
 import { config as baseConfig } from '../../../src/config.js';
 import { platformRouteList, routeList } from '../../../src/contracts/api/index.js';
 import { createInstagram } from '../../../src/instagram.js';
@@ -39,6 +41,12 @@ export const INSIDE_MS = 30 * SECOND;
 export const OUTSIDE_MS = SECOND;
 /** PRD 4.12: every worker applies every switch within 5 s. */
 export const SWITCH_LAG_MS = 5_200;
+
+/**
+ * For a test that is not about pacing but needs hundreds of sends in a few real seconds: the hourly private-reply bucket (PRD 4.3,
+ * about one send per 6 s after a burst of 10) would let only a handful out. Every other rule of the gate stays as it is.
+ */
+export const UNPACED = Object.freeze({ complianceLimits: { privateRepliesPerHour: 1_000_000 } });
 
 export const APP_SECRET = 'spec-app-secret';
 export const FB_APP_SECRET = 'spec-fb-app-secret';
@@ -205,17 +213,31 @@ export async function openWorld({ overrides = {}, worker = true, proxy = false, 
   addWorker();
 
   /** Runs every periodic job now, whatever its interval, by clearing the marks that say it already ran this interval. */
-  async function tick() {
+  async function tick({ only = null } = {}) {
     if (!gate.open) return;
+    // Only the send engine's own turn: for a long simulation (hundreds of simulated minutes) that must not run all of the
+    // product's ~45 periodic jobs, each a pass over every table they watch, again and again.
+    if (only === 'compliance') {
+      for (const w of workers) await w.drivers.queue.enqueue(DRAIN_QUEUE, {}, { retryInFlight: true, maxAttempts: 1 });
+      return;
+    }
     await rawDb.platform.query(`DELETE FROM jobs WHERE dedupe_key LIKE 'every:%' AND status NOT IN ('queued', 'running')`);
     for (const w of workers) await w.schedule();
   }
+
+  // A private reply held back by an empty hourly bucket stays 'queued' with a run_at in the past (the drain just leaves it), so it
+  // would count as pending and every settle() would run its whole window. It is not pending until its bucket holds a token again:
+  // the bucket's tokens plus what the elapsed time refilled at the full rate (a slowed account refills slower, so this never
+  // calls a job waiting that the engine could send).
+  const budgetSpent = `(o.kind = 'private_reply' AND EXISTS (SELECT 1 FROM send_budgets b WHERE b.tenant_id = o.tenant_id AND b.channel = o.channel
+    AND b.account_id = COALESCE(o.ig_user_id, o.fb_page_id, o.wa_phone_number_id) AND b.budget = 'private_reply'
+    AND b.tokens + GREATEST(EXTRACT(EPOCH FROM (now() - b.refilled_at)), 0) * ${(COMPLIANCE_LIMITS.privateRepliesPerHour - Math.floor(COMPLIANCE_LIMITS.privateRepliesPerHour / 60)) / 3600} < 1))`;
 
   async function pendingCount(tenantId) {
     const own = tenantId ? 'AND tenant_id = $1' : '';
     const [{ n }] = await rawDb.platform.query(
       `SELECT (SELECT count(*) FROM inbound_events WHERE status IN ('stored', 'processing') ${own})
-            + (SELECT count(*) FROM outbound_jobs WHERE (status = 'sending' OR (status = 'queued' AND run_at <= now())) ${own})
+            + (SELECT count(*) FROM outbound_jobs o WHERE (status = 'sending' OR (status = 'queued' AND run_at <= now() AND NOT ${budgetSpent})) ${own})
             + (SELECT count(*) FROM jobs WHERE (status = 'running' OR (status = 'queued' AND run_at <= now())) ${tenantId ? 'AND (tenant_id = $1 OR tenant_id IS NULL)' : ''}) AS n`,
       tenantId ? [tenantId] : [],
     );
@@ -235,14 +257,17 @@ export async function openWorld({ overrides = {}, worker = true, proxy = false, 
     return `${row.events}|${row.jobs}|${row.inbound}|${sent.length}`;
   }
 
-  /** Runs the worker until nothing more happens: every queue idle, and nothing has changed over the last rounds. */
-  async function settle({ tenantId, ms = 8000, roundMs = 1200 } = {}) {
+  /**
+   * Runs the worker until nothing more happens: every queue idle, and nothing has changed over the last rounds.
+   * `only: 'compliance'` runs the send engine's turn each round instead of every periodic job (see tick), for a long simulation that loops settle().
+   */
+  async function settle({ tenantId, ms = 8000, roundMs = 1200, only = null } = {}) {
     if (!gate.open) return;
     const end = Date.now() + ms;
     let last = null;
     let same = 0;
     while (Date.now() < end) {
-      await tick();
+      await tick({ only });
       const idleBy = Math.min(end, Date.now() + roundMs);
       while (Date.now() < idleBy && await pendingCount(tenantId)) await pause(15);
       await pause(10);

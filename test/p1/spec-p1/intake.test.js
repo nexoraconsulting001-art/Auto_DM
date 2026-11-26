@@ -1,7 +1,7 @@
 // PRD 4.1 and 4.13: webhook intake and routing. C-01, C-02, C-03, C-46.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { APP_SECRET, DAY, HOUR, addShop, assertNoDm, commentPayload, failingDb, hit, hubSignature, need, openWorld, pause, unique, useWorld, VERIFY_TOKEN } from './support.js';
+import { APP_SECRET, DAY, HOUR, addShop, assertNoDm, commentPayload, failingDb, hit, hubSignature, need, openWorld, pause, unique, useWorld, VERIFY_TOKEN, UNPACED } from './support.js';
 
 const world = useWorld();
 
@@ -206,8 +206,9 @@ test('C-03: the same comment twice inside one batch is 1 row and 1 DM', async ()
   assert.equal((await shop.dms()).length, 1);
 });
 
+// Without the hourly bucket (10 at once, then one every 6 s): this is about two workers sharing 12 events, not about pacing.
 test('C-03: two workers racing over the same events send each DM once', async () => {
-  const w = await openWorld();
+  const w = await openWorld({ overrides: UNPACED });
   try {
     w.addWorker();
     const shop = await addShop(w);

@@ -131,12 +131,25 @@ test('only managers can change funnels, staff can read them, and another busines
   assert.equal((await create(world, { windowMinutes: 10 })).status, 400, 'at least 30 minutes');
 });
 
+/** A visit as the product stores it: cohort returns count a visitor's sessions (traffic_sessions, 7.12), not the raw events. */
+async function insertSessions(world, rows) {
+  await world.db.platform.query(
+    `INSERT INTO traffic_sessions (tenant_id, session_id, visitor_id, day, hour, weekday, started_at, last_hit_at, page_views)
+     SELECT $1, s::uuid, v::uuid, (a::timestamptz AT TIME ZONE 'UTC')::date, extract(hour FROM a::timestamptz AT TIME ZONE 'UTC')::int,
+            extract(dow FROM a::timestamptz AT TIME ZONE 'UTC')::int, a::timestamptz, a::timestamptz, 1
+     FROM unnest($2::text[], $3::text[], $4::text[]) AS x(s, v, a)`,
+    [world.tenant.id, rows.map((r) => r.session), rows.map((r) => r.visitor), rows.map((r) => new Date(r.at).toISOString())],
+  );
+}
+
 async function cohortOf(world, n, { firstSeen, source = 'direct', returnAt = null } = {}) {
   const visitors = Array.from({ length: n }, () => crypto.randomUUID());
   for (const visitor of visitors) {
     await world.db.platform.query(`INSERT INTO traffic_visitors (tenant_id, visitor_id, first_seen_at, first_source, last_seen_at) VALUES ($1, $2, $3::timestamptz, $4, $3::timestamptz)`, [world.tenant.id, visitor, new Date(firstSeen), source]);
   }
-  await insertEvents(world, visitors.map((visitor) => ({ session: crypto.randomUUID(), visitor, at: firstSeen, name: 'page_view' })));
+  const visits = visitors.map((visitor) => ({ session: crypto.randomUUID(), visitor, at: firstSeen, name: 'page_view' }));
+  await insertEvents(world, visits);
+  await insertSessions(world, visits);
   return visitors;
 }
 
@@ -146,7 +159,9 @@ test('N-59: a cohort of 14 shows low volume and no return rate; one of 20 shows 
   const week = (days) => NOW - days * 86_400_000;
   await cohortOf(world, 14, { firstSeen: week(21) });
   const big = await cohortOf(world, 20, { firstSeen: week(14) });
-  await insertEvents(world, big.slice(0, 5).map((visitor) => ({ session: crypto.randomUUID(), visitor, at: week(7), name: 'page_view' })));
+  const returns = big.slice(0, 5).map((visitor) => ({ session: crypto.randomUUID(), visitor, at: week(7), name: 'page_view' }));
+  await insertEvents(world, returns);
+  await insertSessions(world, returns);
   const { status, body } = await api(world, '/cohorts?range=28&groupBy=first_week');
   assert.equal(status, 200);
   const [low, full] = body.cohorts;

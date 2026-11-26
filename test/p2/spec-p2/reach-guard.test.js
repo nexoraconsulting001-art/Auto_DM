@@ -63,6 +63,8 @@ test('N-23: two workers evaluating at the same moment make one trip and one aler
   await history(shop);
   await low(shop, { 5: 5500, 4: 5200, 3: 5800, 2: 5800 });
   await shop.poll({ jobs: ['account_daily'] });
+  // The account was looked at when the shop was set up and Reach Guard looks at one at most every 15 minutes: make it due, as evaluate() does.
+  await shop.sql('UPDATE reach_guard_state SET evaluated_at = NULL WHERE tenant_id = $1', [shop.tenantId]);
   world.addWorker();
   await world.tickTogether();
   await shop.settle({ ms: 4000, roundMs: 300 });

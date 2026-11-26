@@ -273,7 +273,8 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
   }
   addWorker();
 
-  const clearPeriodicMarks = () => rawDb.platform.query(`DELETE FROM jobs WHERE dedupe_key LIKE 'every:%' AND status NOT IN ('queued', 'running')`);
+  // The funnel's per-business sync is keyed by the 5-minute bucket it ran in (traffic/index.js fanOut), so a second run in the same bucket is dropped: it goes with the marks.
+  const clearPeriodicMarks = () => rawDb.platform.query(`DELETE FROM jobs WHERE (dedupe_key LIKE 'every:%' OR dedupe_key LIKE 'traffic-sync:%') AND status NOT IN ('queued', 'running')`);
 
   /** Runs every periodic job now, whatever its interval. */
   async function tick() {
@@ -367,6 +368,13 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
       const shifted = ['started_at', 'last_hit_at'].reduce((expr, key) => `CASE WHEN outbound_host::jsonb ? '${key}' THEN jsonb_set(${expr}, '{${key}}', to_jsonb(to_char(((outbound_host::jsonb ->> '${key}')::timestamptz - interval '${interval}') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')), false) ELSE ${expr} END`, 'outbound_host::jsonb');
       const withDay = days ? `CASE WHEN outbound_host::jsonb ? 'day' THEN jsonb_set(${shifted}, '{day}', to_jsonb(to_char((outbound_host::jsonb ->> 'day')::date - ${days}, 'YYYY-MM-DD')), false) ELSE ${shifted} END` : shifted;
       await t.exec(`UPDATE traffic_events SET outbound_host = (${withDay})::text WHERE outbound_host LIKE '{%'`);
+      // A trip keeps the days (or the media times) that caused it, as JSON. Clearing counts the days after the last of them, so they move too.
+      await t.exec(
+        `UPDATE reach_guard_trips SET observed = (SELECT COALESCE(jsonb_agg(
+           CASE WHEN e ? 'day' THEN jsonb_set(e, '{day}', to_jsonb(to_char((e ->> 'day')::date - ${days}, 'YYYY-MM-DD')), false)
+                WHEN e ? 'postedAt' THEN jsonb_set(e, '{postedAt}', to_jsonb(to_char(((e ->> 'postedAt')::timestamptz - interval '${interval}') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')), false)
+                ELSE e END ORDER BY n), '[]'::jsonb) FROM jsonb_array_elements(observed) WITH ORDINALITY AS x(e, n)) WHERE jsonb_typeof(observed) = 'array'`,
+      );
     });
     if (sim) await meta.post('/clock', { advanceMs: ms });
   }
@@ -526,9 +534,12 @@ export async function addP2Shop(world, { timeZone = 'UTC', followers = 5000, sco
     async poll({ jobs, rounds = 4 } = {}) {
       await shop.settle({ ms: 3000, roundMs: 300 });
       // One worker run covers every business that is due, so earlier tests' backfills wait, and this poll is about this business.
-      await world.rawDb.platform.query(`UPDATE insight_polls SET next_due_at = now() + interval '1 hour' WHERE tenant_id <> $1 AND stopped_at IS NULL AND next_due_at <= now() + interval '1 minute'`, [id]);
+      // Other businesses' polls come due again as they retry or enrol (the 50 businesses of N-37 leave many), so this is done before every round.
+      const parkOthers = () => world.rawDb.platform.query(`UPDATE insight_polls SET next_due_at = now() + interval '1 hour' WHERE tenant_id <> $1 AND stopped_at IS NULL AND next_due_at <= now() + interval '1 minute'`, [id]);
+      await parkOthers();
       let known = (await shop.polls()).length;
       for (let i = 0; i < rounds; i++) {
+        await parkOthers();
         const due = await sql(
           `UPDATE insight_polls SET next_due_at = now() - interval '1 second', lease_until = NULL, locked_by = NULL WHERE tenant_id = $1 AND stopped_at IS NULL ${jobs ? 'AND job = ANY($2)' : ''} RETURNING id, now() AS at`,
           jobs ? [id, jobs] : [id],
@@ -539,6 +550,7 @@ export async function addP2Shop(world, { timeZone = 'UTC', followers = 5000, sco
         while (RealDate.now() < stopAt && due.length) {
           const [{ n }] = await sql(`SELECT count(*)::int AS n FROM insight_polls WHERE id = ANY($1) AND stopped_at IS NULL AND coalesce(last_finished_at, '-infinity') < $2 AND (next_due_at <= now() OR lease_until > now())`, [due.map((p) => p.id), due[0].at]);
           if (!n) break;
+          await parkOthers();
           await world.tick();
           await pause(100);
         }
@@ -578,6 +590,10 @@ export async function addP2Shop(world, { timeZone = 'UTC', followers = 5000, sco
         }
       }
       if (sim && world.meta) await world.meta.post('/insights/daily', { igUserId: shop.igUserId, metric, points: Object.entries(points).map(([back, value]) => ({ day: dayAgo(Number(back)), value })) });
+      // A figure is "not collected" for a day before the account began collecting, and the worker enrols the account on the day the shop is set up:
+      // seeded days were collected, so it began collecting by the oldest of them.
+      const oldest = Object.keys(points).map(Number).sort((a, b) => b - a)[0];
+      if (oldest !== undefined) await sql(`UPDATE analytics_accounts SET collecting_since = $3 WHERE tenant_id = $1 AND ig_user_id = $2 AND collecting_since > $3`, [id, shop.igUserId, dayAgo(oldest)]);
       await sql(`UPDATE analytics_accounts SET last_refresh_at = now() WHERE tenant_id = $1 AND ig_user_id = $2`, [id, shop.igUserId]);
     },
 
@@ -785,3 +801,29 @@ export function fileAt(world, shop, fileUrl, { token = shop.token, cookie, heade
 }
 
 export const reportingKeyHeaders = (key) => ({ authorization: `Bearer ${key}`, 'x-api-key': key });
+
+/**
+ * An order from a shopper's visit. POST /api/orders (which took the visitor cookie) is gone: the store checkout needs a signed-in shopper, a payment
+ * gateway and its own states. A Phase 0 order is the plain one (flow 'manual': its status is written as it is), and what the checkout's
+ * order.created event does for the traffic module - tie the order to the visitor's session - is done here, with the same row (ingest.linkOrder).
+ */
+export async function placeOrderFromVisit(shop, visitor, product) {
+  const order = await shop.repos.orders.create(
+    { items: [{ productId: product.id, qty: 1 }], customer: { name: 'Asha K', phone: '9876543210', email: '', address: '12 Long Road', city: 'Pune', state: 'MH', pincode: '411001' }, visitorId: visitor.visitorId },
+    await shop.repos.settings.getAll(),
+  );
+  const [seen] = await shop.sql('SELECT last_session_id FROM traffic_visitors WHERE tenant_id = $1 AND visitor_id = $2', [shop.tenantId, visitor.visitorId]);
+  await shop.sql(
+    `INSERT INTO traffic_events (tenant_id, session_id, visitor_id, at, surface, name, page_kind, page_ref, path, media_id, order_id, outbound_host, value_paise, event_key)
+     VALUES ($1, $2, $3, now(), 'buyer_page', 'order', 'checkout', '', '/checkout', '', $4, '', 0, $5)`,
+    [shop.tenantId, seen?.last_session_id ?? null, visitor.visitorId, order.id, `order:${order.id}`],
+  );
+  return { ...order, totalPaise: order.total_paise };
+}
+
+/**
+ * The order's status, set where the order is stored. A cash on delivery order placed through the checkout moves only through its own steps
+ * (pack, ship, deliver, cancel), so the "paid", "payment_submitted" and "awaiting_payment" states the figures are checked against are put
+ * on it directly: what is under test is what the funnel and the tags do with an order in that state.
+ */
+export const setOrderStatusDirect = (shop, orderId, status) => shop.sql('UPDATE orders SET status = $3, updated_at = now() WHERE tenant_id = $1 AND id = $2', [shop.tenantId, orderId, status]);

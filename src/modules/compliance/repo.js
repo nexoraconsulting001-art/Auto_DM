@@ -35,6 +35,7 @@ export function complianceRepo(db) {
     reason: row.reason,
     automationId: row.automation_id,
     mediaId: row.media_id,
+    mediaType: row.media_type ?? '',
     commentId: row.comment_id,
   });
 
@@ -125,10 +126,13 @@ export function complianceRepo(db) {
     /** The activity view (PRD 4.16). Never a person's id, hashed or otherwise. */
     async activity({ cursor, limit = 25, reason, outcome, automationId, mediaId } = {}) {
       const rows = await db.query(
-        `SELECT id, created_at, channel, kind, decision, reason, automation_id, media_id, comment_id FROM compliance_events
-         WHERE tenant_id = $1 AND channel IS NOT NULL AND channel <> 'whatsapp' AND ($2::bigint IS NULL OR id < $2::bigint) AND ($3::text IS NULL OR reason = $3)
-           AND ($4::text IS NULL OR decision = $4) AND ($5::integer IS NULL OR automation_id = $5) AND ($6::text IS NULL OR media_id = $6)
-         ORDER BY id DESC LIMIT $7`,
+        `SELECT e.id, e.created_at, e.channel, e.kind, e.decision, e.reason, e.automation_id, e.media_id, e.comment_id,
+           (SELECT t.target_type FROM automation_triggers t WHERE t.tenant_id = e.tenant_id AND t.media_id = e.media_id AND e.media_id <> ''
+              ORDER BY (t.automation_id IS NOT DISTINCT FROM e.automation_id) DESC, t.id DESC LIMIT 1) AS media_type
+         FROM compliance_events e
+         WHERE e.tenant_id = $1 AND e.channel IS NOT NULL AND e.channel <> 'whatsapp' AND ($2::bigint IS NULL OR e.id < $2::bigint) AND ($3::text IS NULL OR e.reason = $3)
+           AND ($4::text IS NULL OR e.decision = $4) AND ($5::integer IS NULL OR e.automation_id = $5) AND ($6::text IS NULL OR e.media_id = $6)
+         ORDER BY e.id DESC LIMIT $7`,
         [tenantId(), cursorId(cursor), reason ?? null, outcome ?? null, automationId ?? null, mediaId ?? null, limit + 1],
       );
       const items = rows.slice(0, limit).map(fromRow);

@@ -53,6 +53,7 @@ test('N-35: 80002 means Watch on Reach Guard and costs 25 on Account Health', as
   await throttled(shop);
   assert.equal((await shop.guard()).state, 'watch');
   await shop.settle({ ms: 2000, roundMs: 200 });
+  await shop.evaluate(); // a score under 10 minutes old is reused (PRD 5.9), and this account was scored when the shop was set up
   const health = await shop.health();
   assert.equal(health.deductions.find((d) => d.code === 'buc_80002')?.points, -25);
 });

@@ -144,9 +144,12 @@ test('N-61: a large export goes through the queue, a Bhava email links to it, an
   const made = await shop.inside(() => downloads.create({ source: 'explore', format: 'xlsx', query: { metrics: ['sessions'], dimensions: ['landing_page'], range: '7' } }, owner));
   assert.deepEqual([made.status, made.background, made.fileUrl], ['queued', true, null]);
   assert.equal((await shop.json(`/downloads/${made.id}`)).status, 'queued');
-  const [job] = await shop.sql(`SELECT * FROM jobs WHERE queue = $1 AND tenant_id = $2`, [QUEUE_DOWNLOAD, shop.tenantId]);
+  // The pg queue is a table that says whose job it is; a queue with consumers of its own (BullMQ, the CI production profile) shows its waiting count.
+  const [job] = typeof w.drivers.queue.drain === 'function'
+    ? await shop.sql(`SELECT * FROM jobs WHERE queue = $1 AND tenant_id = $2`, [QUEUE_DOWNLOAD, shop.tenantId])
+    : [(await w.drivers.queue.stats())[QUEUE_DOWNLOAD]?.queued > 0 ? { queued: true } : undefined];
   assert.ok(job, 'Queued as a job of this business');
-  await w.drivers.queue.drain(QUEUE_DOWNLOAD, jobHandlers(w.jobCtx)[QUEUE_DOWNLOAD]);
+  await w.runJobs({ tick: false });
   const done = await shop.json(`/downloads/${made.id}`);
   assert.deepEqual([done.status, done.rowCount], ['ready', 5]);
   const [mail] = await shop.deliveries('download_id = $2', [made.id]);
@@ -180,7 +183,7 @@ test('N-61: a requester who loses analytics before the worker gets to the file g
   const downloads = createDownloads(w.jobCtx, { sources: reportServices(w.jobCtx).sources, backgroundOverRows: 1 });
   const made = await shop.inside(async () => downloads.create({ source: 'explore', format: 'csv', query: { metrics: ['sessions'], dimensions: ['landing_page'], range: '7' } }, await shop.repos.users.get(staff.user.id)));
   await shop.repos.users.setPermissions(staff.user.id, ['orders']);
-  await w.drivers.queue.drain(QUEUE_DOWNLOAD, jobHandlers(w.jobCtx)[QUEUE_DOWNLOAD]);
+  await w.runJobs({ tick: false });
   const [row] = await shop.sql('SELECT status, storage_key FROM report_downloads WHERE id = $1', [made.id]);
   assert.deepEqual([row.status, row.storage_key], ['failed', '']);
   assert.deepEqual(await shop.deliveries(), []);
