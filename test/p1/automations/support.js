@@ -10,6 +10,11 @@ export const REEL = 'REEL-1';
 export const STORY = 'STORY-1';
 export const PERSON = 'P-100';
 export const LINK = 'https://seller.test/product/1';
+/**
+ * LINK as the DM carries it (PRD 6.6, A-32): a seller-site link gets the 4 UTM tags, on by default. These tests were first
+ * written against the links track's stub, which returned the link untouched (docs/p1-known-problems.md).
+ */
+export const tagged = (automation, content, channel = 'instagram') => `${LINK}?utm_source=${channel}&utm_medium=dm&utm_campaign=${automation.slug}&utm_content=${content}`;
 const OWNER_ACTOR = 'user:1';
 
 export const HOUR = 3_600_000;

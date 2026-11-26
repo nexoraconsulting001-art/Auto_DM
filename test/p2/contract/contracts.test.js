@@ -43,7 +43,8 @@ test('every Phase 2 route belongs to the module named for it', () => {
 });
 
 test('a Phase 2 route not built yet answers 501, in the one error format', async () => {
-  const app = await startApp();
+  // insights.status is built now (Phase 2), so the app runs without the module that answers it: the route is "not built yet".
+  const app = await startApp({ modules: MODULES.filter((m) => m.name !== 'insights') });
   try {
     const token = await signIn(app.base);
     const res = await fetch(`${app.base}/api/v1/insights/status`, { headers: { authorization: `Bearer ${token}` } });

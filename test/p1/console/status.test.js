@@ -187,8 +187,11 @@ test('the way back from Meta is a page of this site the server accepts', () => {
 
 test('every word the server can come back with has a banner, and an unknown one is never a success', () => {
   const source = fs.readFileSync(new URL('../../../src/modules/ig-connect/connect.js', import.meta.url), 'utf8');
-  const words = new Set([...source.matchAll(/return '([a-z_]+)'/g)].map((m) => m[1]));
+  // The callback answers { outcome: 'word' } since D-4 (359bcec), complete() still returns 'word': both reach ?instagram=.
+  const words = new Set([...source.matchAll(/(?:return|outcome:) '([a-z_]+)'/g)].map((m) => m[1]));
   words.add('connected').add('missing_scopes');
+  // 'expired' is only finishByApp's answer to the owner app (instagram.connectFinish); it never comes back to the console.
+  assert.ok(words.delete('expired'), 'the owner app finish still answers expired');
   assert.ok(words.size >= 6, [...words].join());
   words.delete('failed'); // the banner an unknown word falls back to
   for (const word of words) assert.notEqual(returnBanner(word), returnBanner('made_up'), `${word} has no banner of its own`);
