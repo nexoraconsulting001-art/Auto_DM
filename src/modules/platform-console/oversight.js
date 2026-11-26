@@ -1,4 +1,5 @@
 import { reportError } from '../../platform/log.js';
+import { operatorEmails } from '../audit/index.js';
 import { Refusal, idCursor, mountRoute, offsetCursor, platformAudit } from './mount.js';
 
 /**
@@ -80,7 +81,9 @@ export function registerOversight(router, ctx) {
         ORDER BY id DESC LIMIT $5`,
       [query.tenantId ? Number(query.tenantId) : null, query.actor || null, query.action || null, idCursor(query.cursor), query.limit + 1],
     );
-    const items = rows.slice(0, query.limit).map((r) => ({ id: Number(r.id), tenantId: r.tenant_id === null ? null : Number(r.tenant_id), actor: r.actor, action: r.action, target: r.target, details: r.details ?? {}, at: r.created_at }));
+    const shown = rows.slice(0, query.limit);
+    const emails = await operatorEmails(pdb, shown);
+    const items = shown.map((r) => ({ id: Number(r.id), tenantId: r.tenant_id === null ? null : Number(r.tenant_id), actor: r.actor, actorEmail: emails.get(r.actor) ?? null, action: r.action, target: r.target, details: r.details ?? {}, at: r.created_at }));
     return { items, nextCursor: rows.length > query.limit ? String(items.at(-1).id) : null };
   });
 

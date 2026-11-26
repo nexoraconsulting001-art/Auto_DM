@@ -663,7 +663,11 @@ test('C-57: the global kill switch writes 1 audit_log row and 1 compliance_event
     const audits = await w.rawDb.platform.query(`SELECT * FROM audit_log WHERE action ILIKE '%kill%'`);
     assert.equal(audits.length, 1);
     assert.match(JSON.stringify(audits[0]), new RegExp(reason));
-    assert.match(audits[0].actor, new RegExp(one.email));
+    // D2 decision: the log keeps the operator's id; the console's audit view shows the email beside it.
+    assert.match(audits[0].actor, /^platform:[0-9]+$/);
+    assert.ok(!JSON.stringify(audits[0]).includes(one.email), 'no email is stored in the log');
+    const shown = (await need(await onConsole(w, one, '/audit-log'), 200, 'Audit view').json()).items.find((i) => /kill/i.test(i.action));
+    assert.equal(shown.actorEmail, one.email);
     for (const shop of shops) assert.equal((await shop.events(`reason = 'paused.global'`)).length, 1, shop.slug);
   });
 });

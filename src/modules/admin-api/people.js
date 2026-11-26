@@ -40,7 +40,7 @@ const toCustomer = (u) => ({
   createdAt: u.created_at,
 });
 
-const toAuditEntry = (row) => ({ id: String(row.id), actor: row.actor, action: row.action, target: row.target, details: row.details, createdAt: row.created_at });
+const toAuditEntry = (row) => ({ id: String(row.id), actor: row.actor, actorEmail: row.actorEmail ?? null, action: row.action, target: row.target, details: row.details, createdAt: row.created_at });
 
 const toActivity = (a) => ({
   id: a.id,

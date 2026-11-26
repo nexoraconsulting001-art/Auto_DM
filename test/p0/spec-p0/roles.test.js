@@ -87,7 +87,11 @@ test('U-04: a platform admin opening a business is logged with who, when and why
   need(res, [200, 201], 'Open a business\'s admin to help');
   const [row] = await app.db.query(`SELECT * FROM audit_log WHERE tenant_id = $1 AND action ILIKE '%impersonat%'`, [shop.tenant.id]);
   assert.ok(row, 'No audit row for opening the business');
-  assert.match(row.actor, new RegExp(operator.email), 'who');
+  // D2 decision: the row keeps the operator's id; the audit views show the email beside it when they are read.
+  assert.match(row.actor, /^platform:[0-9]+$/, 'who');
+  assert.ok(!JSON.stringify(row).includes(operator.email), 'no email is stored in the log');
+  const shown = need(await onConsole(app, operator, `${consolePaths.auditLog}?tenantId=${shop.tenant.id}`), 200, 'The console audit view').json().items.find((i) => /impersonat/i.test(i.action));
+  assert.equal(shown?.actorEmail, operator.email, 'who, shown as the operator email');
   assert.ok(new Date(row.created_at) >= started, 'when');
   assert.match(JSON.stringify(row.details), /ticket 123/, 'why');
 });
