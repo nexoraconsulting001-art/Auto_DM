@@ -127,10 +127,10 @@ export function createCartReminders(ctx, { clock = () => new Date() } = {}) {
     const unsubscribeUrl = consentLinks(ctx).unsubscribeUrl({ origin: business.base, shopperId: shopper.id, email: shopper.email, channel: 'email', purpose: 'marketing' });
     const items = priced.map((l) => `${l.name}${l.option ? ` (${l.option})` : ''} × ${l.qty} – ${formatRupees(l.linePaise)}`);
     const text = [`Hi ${firstName(shopper.name)},`, '', `You left something in your bag at ${business.name}.`, '', ...items, '', `Back to your bag: ${link}`, '', business.name, '', `Unsubscribe: ${unsubscribeUrl}`].join('\n');
-    const body = html`<!doctype html><html><body style="margin:0;padding:0;background:#f6f6f4;font-family:Arial,Helvetica,sans-serif;color:#1d1d1f">
+    const body = html`<!doctype html><html><body style="margin:0;padding:0;background:#f6f6f4;font-family:${raw(business.bodyFont)};color:#1d1d1f">
 <div style="max-width:560px;margin:0 auto;padding:24px 16px">
 <div style="background:#ffffff;border-radius:12px;padding:24px;border-top:6px solid ${raw(business.color)}">
-<h1 style="margin:0 0 16px;font-size:20px">${business.name}</h1>
+<h1 style="margin:0 0 16px;font-size:20px;font-family:${raw(business.headingFont)}">${business.name}</h1>
 <p style="margin:0 0 12px">Hi ${firstName(shopper.name)},</p>
 <p style="margin:0 0 16px">You left something in your bag. It is still here for you.</p>
 ${items.length ? html`<ul style="margin:0 0 16px;padding-left:18px">${items.map((i) => html`<li>${i}</li>`)}</ul>` : ''}
