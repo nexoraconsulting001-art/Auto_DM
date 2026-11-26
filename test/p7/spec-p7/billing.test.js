@@ -196,6 +196,8 @@ test('F-54: no paid plan is sold and no invoice is issued while Bhava has no leg
   } finally {
     await sql(world, `UPDATE billing_settings SET sac = '998439'`);
   }
+  // The kept event is retried on its backoff (5 s, then 20 s ...): move its clock past that rather than wait for it.
+  await sql(world, `UPDATE provider_webhook_events SET received_at = received_at - interval '1 hour' WHERE scope = 'billing' AND status = 'received'`);
   assert.ok(await world.until(async () => (await invoicesOf(world, shop)).length === 2, 6000), 'the kept charge is invoiced once the SAC is set');
   assert.equal((await paymentsOf(world, shop)).length, 2, 'both charges are recorded');
   await world.quiet(600);
@@ -389,7 +391,9 @@ test('F-81: 6,000 DMs on tier 1 with one pack: 5,000 included plus 1,000 from th
   assert.equal(meter.left, 9000);
   assert.equal(meter.over, false);
   await charge(world, shop);
-  const invoice = await world.until(async () => (await invoicesOf(world, shop)).at(-1));
+  // The next invoice, not the plan invoice subscribe() already waited for (that one is there at once, before the charge lands).
+  const invoice = await world.until(async () => (await invoicesOf(world, shop))[1]);
+  assert.ok(invoice, 'the charge made the next invoice');
   const lines = await linesOf(world, invoice.id);
   const pack = lines.filter((l) => l.kind === 'pack');
   assert.equal(pack.length, 1, 'one pack line');
@@ -420,7 +424,9 @@ test('F-85: a WhatsApp add-on and reel management bought mid-month each appear a
   const again = await shop.send('POST', '/billing/items', { code: 'whatsapp', requestKey: key() });
   refusal(again, 'A second WhatsApp add-on', [400, 409]);
   await charge(world, shop);
-  const invoice = await world.until(async () => (await invoicesOf(world, shop)).at(-1));
+  // The next invoice, not the first plan invoice that is already there (D1: the wait returned that one when the charge was slow).
+  const invoice = await world.until(async () => (await invoicesOf(world, shop))[1]);
+  assert.ok(invoice, 'the renewal charge made the next invoice');
   const lines = await linesOf(world, invoice.id);
   const codes = lines.map((l) => `${l.kind}:${l.code}`);
   assert.ok(codes.some((c) => c === 'addon:whatsapp'), codes.join());
@@ -444,7 +450,9 @@ test('F-116: done-for-you setup is its own line on the next invoice', async () =
   await subscribe(world, shop, 't1');
   need(await shop.send('POST', '/billing/items', { code: 'setup_automation', requestKey: key() }), 201, 'Buying setup');
   await charge(world, shop);
-  const invoice = await world.until(async () => (await invoicesOf(world, shop)).at(-1));
+  // The next invoice, not the plan invoice subscribe() already waited for (that one is there at once, before the charge lands).
+  const invoice = await world.until(async () => (await invoicesOf(world, shop))[1]);
+  assert.ok(invoice, 'the charge made the next invoice');
   const lines = (await linesOf(world, invoice.id)).filter((l) => l.kind === 'setup');
   assert.equal(lines.length, 1);
   assert.equal(Number(lines[0].unit_paise), 499_900);
@@ -463,7 +471,9 @@ test('F-84: a seller on their own gateway and courier gets no gateway or shippin
   assert.equal((await sql(world, 'SELECT 1 FROM pass_through_charges WHERE tenant_id = $1', [shop.tenantId])).length, 0, month);
   need(await shop.send('POST', '/billing/items', { code: 'whatsapp', requestKey: key() }), 201, 'WhatsApp');
   await charge(world, shop);
-  const invoice = await world.until(async () => (await invoicesOf(world, shop)).at(-1));
+  // The next invoice, not the plan invoice subscribe() already waited for (that one is there at once, before the charge lands).
+  const invoice = await world.until(async () => (await invoicesOf(world, shop))[1]);
+  assert.ok(invoice, 'the charge made the next invoice');
   const kinds = (await linesOf(world, invoice.id)).map((l) => l.kind);
   assert.ok(kinds.includes('plan') && kinds.includes('addon'));
   assert.ok(!kinds.includes('pass_through'), `no pass-through lines: ${kinds}`);
@@ -486,7 +496,9 @@ test('F-114: WhatsApp messages and AI usage are billed at cost with counts on se
   const queued = await world.until(async () => (await sql(world, 'SELECT queued_at FROM pass_through_charges WHERE tenant_id = $1', [shop.tenantId])).every((c) => c.queued_at));
   assert.ok(queued, 'the closed month is queued with the provider before the renewal');
   await charge(world, shop);
-  const invoice = await world.until(async () => (await invoicesOf(world, shop)).at(-1));
+  // The next invoice, not the plan invoice subscribe() already waited for (that one is there at once, before the charge lands).
+  const invoice = await world.until(async () => (await invoicesOf(world, shop))[1]);
+  assert.ok(invoice, 'the charge made the next invoice');
   const lines = (await linesOf(world, invoice.id)).filter((l) => l.kind === 'pass_through');
   const wa = lines.find((l) => l.code === 'whatsapp');
   const ai = lines.find((l) => l.code === 'ai');
