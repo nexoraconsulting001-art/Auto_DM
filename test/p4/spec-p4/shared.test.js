@@ -47,7 +47,13 @@ test('S-97: the shared-profile consent screen names the platform as data fiducia
 
 test('S-98: a shopper verified at A who shared their profile checks out by UPI at B with no new sign-up and no code', async () => {
   const { a, b, sub } = await sharedAtA();
-  const before = (await world.wa.get('/sent')).sent.length;
+  // A code is a message on a store's one-time-code template. The paid order's WhatsApp update (the checkout says yes to
+  // order updates) is not one: counting every message made this fail whenever that update went out before the check, as
+  // it does on CI (R3-MONEY-13).
+  const otpNames = new Set((await world.sql(`SELECT name FROM whatsapp_templates WHERE tenant_id = ANY($1) AND purpose = 'otp'`, [[a.tenantId, b.tenantId]])).map((r) => r.name));
+  assert.ok(otpNames.size, 'the stores have a one-time-code template');
+  const codesSent = async () => (await world.wa.get('/sent')).sent.filter((m) => otpNames.has(m.body?.template?.name)).length;
+  const before = await codesSent();
   const atB = buyer(world, b);
   await atB.googleSignIn({ sub, email: `${sub}@mail.example` });
   assert.ok(atB.signedIn, 'The verified shopper could not sign in at B');
@@ -60,7 +66,7 @@ test('S-98: a shopper verified at A who shared their profile checks out by UPI a
   const product = await b.item({ pricePaise: 49900 });
   const row = await atB.buy({ lines: [line(product)], address: address({ line1: '12 Lake Road', city: 'Pune', pincode: '411001' }) });
   assert.equal(row.payment_status, 'paid');
-  assert.equal((await world.wa.get('/sent')).sent.length, before, 'A code was sent to a shopper already verified');
+  assert.equal(await codesSent(), before, 'A code was sent to a shopper already verified');
   const [{ n }] = await b.sql('SELECT count(*)::int AS n FROM shopper_otps WHERE tenant_id = $1', [b.tenantId]);
   assert.equal(n, 0);
   assert.equal((await a.orders()).length, 0, 'B’s order landed at A');
