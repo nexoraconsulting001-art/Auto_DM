@@ -4,6 +4,7 @@ import { STORE_LIMITS } from '../../contracts/orders.js';
 import { currentChannel } from '../../platform/channel.js';
 import { log, reportError } from '../../platform/log.js';
 import { visitorIdFrom } from '../../platform/visitor.js';
+import { openedPageOf } from '../pages/opened.js';
 import { tenantId } from '../../tenancy.js';
 import { CouponUsedUpError, redeem } from '../coupons/rules.js';
 import { OutOfStockError, commit, raiseLowStock, reserve } from '../inventory/stock.js';
@@ -35,11 +36,13 @@ export class CheckoutRefused extends ApiError {
 }
 
 /** Where the order came from (9.5): a landing page of this business, and UTM tags as they arrived, kept short. */
-async function sourceOf(q, body) {
-  let page = null;
-  if (body.pageSlug) {
-    [page] = await q.query('SELECT id, ig_media_id FROM reels WHERE tenant_id = $1 AND slug = $2', [tenantId(), String(body.pageSlug).slice(0, 120)]);
-  }
+/**
+ * The order's source reel is the one this browser opened, as the server recorded it when /r/<slug> was served (S-17). What the
+ * page or the body says (body.pageSlug) is never read: a reel nobody opened here, another business's reel and an unknown slug
+ * all give no source, and with no record the source is unknown (null), never guessed.
+ */
+async function sourceOf(q, req, body) {
+  const page = await openedPageOf(q, req);
   const utm = {};
   for (const [key, value] of Object.entries(body.utm ?? {})) {
     if (/^[a-z_]{1,40}$/.test(key) && Object.keys(utm).length < 10) utm[key] = String(value).replace(/[\0-\x1f\x7f]/g, '').slice(0, 200);
@@ -153,7 +156,7 @@ export async function placeOrder(ctx, req, body) {
     return { status: 200, body: { orderNumber: '', token: '', next: 'verify_phone', gateway: null } };
   }
 
-  const source = await sourceOf(db, body);
+  const source = await sourceOf(db, req, body);
   const visitorId = visitorIdFrom(req);
   const codRisk = await codRiskFor(ctx, { paymentMode: body.paymentMode, shopper });
   const settings = await ctx.repos.settings.getAll();

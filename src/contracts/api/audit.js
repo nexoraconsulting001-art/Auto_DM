@@ -6,6 +6,8 @@ import { ListQuery, Timestamp, page } from './common.js';
 export const AuditEntry = z.object({
   id: z.string(),
   actor: z.string(),
+  /** Shown next to a `platform:<id>` actor, looked up when the row is read; never stored in the log. Null for anyone else. */
+  actorEmail: z.string().nullable(),
   action: z.string(),
   target: z.string(),
   details: z.record(z.string(), z.unknown()),

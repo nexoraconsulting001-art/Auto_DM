@@ -180,7 +180,7 @@ export const opsPlatformRoutes = {
   'platform.pauses': { method: 'GET', path: '/pauses', platformRoles: helpers, query: PauseQuery, response: page(PauseState) },
 
   /** What Bhava's team did, newest first: in one business, or everywhere. Details hold ids only, as every audit row does. */
-  'platform.auditLog': { method: 'GET', path: '/audit-log', platformRoles: helpers, query: ListQuery.extend({ tenantId: IdText.optional(), actor: text(80).optional(), action: text(80).optional() }), response: page(z.object({ id: Id, tenantId: Id.nullable(), actor: z.string(), action: z.string(), target: z.string(), details: z.record(z.string(), z.unknown()), at: Timestamp })) },
+  'platform.auditLog': { method: 'GET', path: '/audit-log', platformRoles: helpers, query: ListQuery.extend({ tenantId: IdText.optional(), actor: text(80).optional(), action: text(80).optional() }), response: page(z.object({ id: Id, tenantId: Id.nullable(), actor: z.string(), actorEmail: z.string().nullable(), action: z.string(), target: z.string(), details: z.record(z.string(), z.unknown()), at: Timestamp })) },
 
   // Health (5.9), worst first.
   'platform.health': { method: 'GET', path: '/tenant-health', platformRoles: helpers, query: ListQuery, response: page(TenantHealth) },

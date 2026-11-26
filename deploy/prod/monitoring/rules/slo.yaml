@@ -5,8 +5,20 @@ groups:
   - name: bhava-slo
     interval: 1m
     rules:
+      # The burn rate: how many times faster than the 99.5% objective allows the probe is failing (errors / 0.005, the error budget).
+      # 1 uses the whole monthly budget exactly; the alerts below fire when it is above 14.4, 6 and 1.
+      - record: probe:uptime_error_budget_burn_rate:5m
+        expr: (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[5m]))) / 0.005
+      - record: probe:uptime_error_budget_burn_rate:30m
+        expr: (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[30m]))) / 0.005
+      - record: probe:uptime_error_budget_burn_rate:1h
+        expr: (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[1h]))) / 0.005
+      - record: probe:uptime_error_budget_burn_rate:6h
+        expr: (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[6h]))) / 0.005
+      - record: probe:uptime_error_budget_burn_rate:3d
+        expr: (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[3d]))) / 0.005
       - alert: UptimeBurnFast
-        expr: (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[1h]))) > 0.072 and (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[5m]))) > 0.072
+        expr: probe:uptime_error_budget_burn_rate:1h > 14.4 and probe:uptime_error_budget_burn_rate:5m > 14.4
         for: 2m
         labels:
           severity: page
@@ -16,7 +28,7 @@ groups:
           description: "The outside probe of webhooks and shopper pages failed so often over 1h (and still over 5m) that a 14.4x burn rate would use the 99.5% monthly objective up early."
           runbook: "deploy/prod/monitoring/README.md#uptimeburnfast"
       - alert: UptimeBurnSlow
-        expr: (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[6h]))) > 0.03 and (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[30m]))) > 0.03
+        expr: probe:uptime_error_budget_burn_rate:6h > 6 and probe:uptime_error_budget_burn_rate:30m > 6
         for: 15m
         labels:
           severity: page
@@ -26,7 +38,7 @@ groups:
           description: "The outside probe of webhooks and shopper pages failed so often over 6h (and still over 30m) that a 6x burn rate would use the 99.5% monthly objective up early."
           runbook: "deploy/prod/monitoring/README.md#uptimeburnslow"
       - alert: UptimeBurnTicket
-        expr: (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[3d]))) > 0.005 and (1 - avg by (probe) (avg_over_time(probe_success{probe=~"webhook|shopper_page"}[6h]))) > 0.005
+        expr: probe:uptime_error_budget_burn_rate:3d > 1 and probe:uptime_error_budget_burn_rate:6h > 1
         for: 1h
         labels:
           severity: ticket

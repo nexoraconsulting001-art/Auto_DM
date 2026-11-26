@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { FORBIDDEN_LABELS, METRIC_LABELS, UPTIME_SLO } from '../../../src/contracts/metrics.js';
-import { MONITORING, allDashboards, allRules, expressionProblems, files, readYaml } from './lib.js';
+import { MONITORING, allDashboards, allRecordings, allRules, expandRecorded, expressionProblems, files, readYaml } from './lib.js';
 import { evaluate, expandValues, parse, parseDuration, runRuleTests } from './promql.js';
 
 const rules = allRules();
@@ -48,7 +48,8 @@ test('G-06: the rules cover everything the brief names, with a page for what cus
 });
 
 test('G-06: every rule names only metrics in the catalogue, only labels those metrics have, and no counter is treated as a gauge', () => {
-  for (const rule of rules) assert.deepEqual(expressionProblems(rule.expr), [], rule.alert);
+  for (const rule of rules) assert.deepEqual(expressionProblems(expandRecorded(rule.expr)), [], rule.alert);
+  for (const rule of allRecordings()) assert.deepEqual(expressionProblems(rule.expr), [], rule.record);
 });
 
 test('G-06: the catalogue check itself fails on a made-up metric, a forbidden or unknown label, a value outside a label\'s set, and rate() of a gauge', () => {
@@ -142,13 +143,18 @@ test('G-13: the burn-rate alerts are the contract\'s (windows, rates and severit
   const burn = rules.filter((r) => r.alert.startsWith('UptimeBurn'));
   assert.equal(burn.length, UPTIME_SLO.burnAlerts.length);
   for (const spec of UPTIME_SLO.burnAlerts) {
-    const rule = burn.find((r) => r.expr.includes(`[${spec.longWindow}]`) && r.expr.includes(`[${spec.shortWindow}]`));
+    // D2 decision (R2-PROD-E1): the factor is visible. The alerts read a named recording rule (errors / 0.005 over a window) and fire
+    // above the contract's burn rate; the windows and the probes are read through that rule, so the expressions are expanded first.
+    const rule = burn.find((r) => expandRecorded(r.expr).includes(`[${spec.longWindow}]`) && expandRecorded(r.expr).includes(`[${spec.shortWindow}]`));
     assert.ok(rule, `${spec.longWindow}/${spec.shortWindow}`);
     assert.equal(rule.labels.severity, spec.severity);
-    const limit = Number((spec.burnRate * (1 - UPTIME_SLO.objective)).toFixed(4));
     const limits = [...rule.expr.matchAll(/> ([\d.]+)/g)].map((m) => Number(m[1]));
-    assert.deepEqual(limits, [limit, limit], `${rule.alert} trips at ${limit} on both windows`);
-    for (const probe of UPTIME_SLO.probes) assert.match(rule.expr, new RegExp(`${probe}`));
+    assert.deepEqual(limits, [spec.burnRate, spec.burnRate], `${rule.alert} trips above a burn rate of ${spec.burnRate} on both windows`);
+    const budget = (1 - UPTIME_SLO.objective).toFixed(3);
+    const used = allRecordings().filter((r) => rule.expr.includes(r.record));
+    assert.equal(used.length, 2, `${rule.alert} reads a recorded burn rate for each window`);
+    for (const record of used) assert.ok(record.expr.trim().endsWith(`/ ${budget}`), `${record.record} divides the error rate by the budget ${budget}`);
+    for (const probe of UPTIME_SLO.probes) assert.match(expandRecorded(rule.expr), new RegExp(`${probe}`));
     assert.match(rule.expr, / and /);
   }
   assert.deepEqual(UPTIME_SLO.probes, ['webhook', 'shopper_page']);

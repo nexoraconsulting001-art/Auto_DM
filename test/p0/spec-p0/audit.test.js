@@ -71,7 +71,12 @@ test('F-62: a kill switch across 40 businesses writes 1 audit row and 40 complia
   const audits = await app.db.query(`SELECT * FROM audit_log WHERE action ILIKE '%kill%'`);
   assert.equal(audits.length, 1);
   assert.match(JSON.stringify(audits[0]), new RegExp(reason));
-  assert.match(audits[0].actor, new RegExp(operator.email));
+  // D2 decision: the log keeps the operator's id; the console's audit view shows the email beside it, looked up when it is read.
+  assert.match(audits[0].actor, /^platform:[0-9]+$/);
+  assert.ok(!JSON.stringify(audits[0]).includes(operator.email), 'no email is stored in the log');
+  const shown = need(await onConsole(app, operator, '/audit-log'), 200, 'The console audit view').json().items.find((i) => /kill/i.test(i.action));
+  assert.equal(shown.actor, audits[0].actor);
+  assert.equal(shown.actorEmail, operator.email, 'the operator email is shown beside the id');
   const compliance = await app.db.query(`SELECT tenant_id FROM compliance_events WHERE kind ILIKE '%kill%' OR reason = 'paused.global'`);
   assert.equal(compliance.length, 40);
   assert.equal(new Set(compliance.map((r) => r.tenant_id)).size, 40, 'one per business');
@@ -88,6 +93,18 @@ test('F-63: the owner of A opening the log sees only A\'s rows', async (t) => {
   assert.doesNotMatch(res.text, /beta-row/);
   assert.doesNotMatch(res.text, /platform-row/);
   assert.ok(res.json().items.length >= 1);
+});
+
+test('D2: the seller\'s activity view shows the operator email beside a platform actor, and the stored row keeps only the id', async (t) => {
+  const { app, a } = await storeWithEvents(t);
+  const operator = await consoleUser(app);
+  const [{ id }] = await app.db.query('SELECT id FROM platform_users WHERE email = $1', [operator.email]);
+  await app.db.query(`INSERT INTO audit_log (tenant_id, actor, action, target) VALUES ($1, $2, 'impersonation.start', 'help'), ($1, 'owner-a', 'brand.update', 'own-row')`, [a.tenant.id, `platform:${id}`]);
+  const items = need(await api(app, a, await signIn(app, a), sellerPaths.auditLog), 200, 'The owner opens the audit log').json().items;
+  assert.equal(items.find((i) => i.action === 'impersonation.start').actorEmail, operator.email);
+  assert.equal(items.find((i) => i.action === 'brand.update').actorEmail, null, 'only a platform actor has an operator email');
+  const [stored] = await app.db.query(`SELECT actor FROM audit_log WHERE action = 'impersonation.start'`);
+  assert.equal(stored.actor, `platform:${id}`);
 });
 
 const RAW_OR_EVENT_EXPORT = /raw|event[-_ ]?log|audit.*export|export.*(?:audit|compliance|events)/i;

@@ -256,7 +256,12 @@ test('S-17 an order after a DM link for reel X has reel X as its source', async 
     const reel = await inTenant(app, () => app.platform.reels.save('17900000000000001', { headline: 'Lamp reel', keywords: 'LAMP', productIds: [lamp.id], active: 'on' }));
     const [page] = await q(app, 'SELECT id, slug FROM reels WHERE tenant_id = $1 AND ig_media_id = $2', [app.tenant.id, '17900000000000001']);
     assert.ok(page && reel);
-    const res = await place(app, placeBody(lamp.id, { pageSlug: page.slug, utm: { utm_source: 'instagram', utm_medium: 'dm', utm_campaign: 'lamp' } }));
+    // D2 (S-17): the source is what the server recorded when the DM link was opened, not what the body says, so the shopper opens it first.
+    const opened = await hit(app, `/r/${page.slug}`, { headers: { accept: 'text/html' } });
+    assert.equal(opened.status, 200, opened.text);
+    const mine = [opened.headers['set-cookie'] ?? []].flat().map((c) => c.split(';')[0]).find((c) => c.startsWith('_bso='));
+    assert.ok(mine, 'opening the reel link starts the store session');
+    const res = await place(app, placeBody(lamp.id, { pageSlug: page.slug, utm: { utm_source: 'instagram', utm_medium: 'dm', utm_campaign: 'lamp' } }), { cookie: mine });
     assert.equal(res.status, 201, res.text);
     const order = await orderByNumber(app, res.json.orderNumber);
     assert.deepEqual([order.page_id, order.reel_id, order.source, order.utm.utm_campaign], [page.id, '17900000000000001', 'dm', 'lamp']);

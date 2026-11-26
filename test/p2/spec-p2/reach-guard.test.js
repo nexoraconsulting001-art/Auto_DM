@@ -170,11 +170,14 @@ test('N-23: only the owner may change the thresholds, within limits, and a chang
   for (const body of [{ reachDropPercent: 39 }, { reachDropPercent: 81 }, { reachDropPercent: 50.5 }, { reachDropPercent: 'x' }, { mediaDropPercent: 29 }, { mediaDropPercent: 71 }, { clearPercent: 59 }, { clearPercent: 96 }]) {
     assert.equal((await shop.raw('/reach-guard/thresholds', undefined, { method: 'PATCH', body })).status, 400, JSON.stringify(body));
   }
-  for (const body of [{ reachDropPercent: 40 }, { reachDropPercent: 80 }, { clearPercent: 60 }, { clearPercent: 95 }]) need(await shop.raw('/reach-guard/thresholds', undefined, { method: 'PATCH', body }), 200, JSON.stringify(body));
   const saved = await shop.patch('/reach-guard/thresholds', { reachDropPercent: 50 });
   assert.equal(saved.thresholds.reachDropPercent, 50);
   await shop.evaluate();
   assert.notEqual((await shop.guard()).state, 'tripped', '5,500 is not below 50% of 10,000');
+  // The limits themselves are accepted. Done last: a drop of 40 trips at 5,500 of 10,000, and a trip stays open until it recovers.
+  for (const body of [{ reachDropPercent: 40 }, { reachDropPercent: 80 }, { clearPercent: 60 }, { clearPercent: 95 }]) need(await shop.raw('/reach-guard/thresholds', undefined, { method: 'PATCH', body }), 200, JSON.stringify(body));
+  // D2: clear (% of usual reached again) must be above 100 - drop (the level the trip fired at): drop 40 trips at 60% of usual, so a clear of 60 is refused.
+  assert.equal((await shop.raw('/reach-guard/thresholds', undefined, { method: 'PATCH', body: { reachDropPercent: 40, clearPercent: 60 } })).status, 400, 'clear at the trip level');
 });
 
 test('N-23: a trip costs 20 points on Account Health', async () => {

@@ -88,6 +88,7 @@ export function mountBuyerRoutes(app, ctx) {
     const crawler = PREVIEW_CRAWLERS.test(req.get('user-agent') ?? '');
     if (!req.query.preview && !TEAM.has(req.user?.role) && !crawler) {
       await repos.landingPages.recordVisit(page.ig_media_id, typeof req.query.src === 'string' ? req.query.src.replace(/[^\w-]/g, '') : '').catch((err) => reportError(err, { msg: 'page.visit_failed' }));
+      await repos.landingPages.recordOpen(req, res, page.id).catch((err) => reportError(err, { msg: 'page.open_failed' }));
     }
     refreshMedia(page);
 

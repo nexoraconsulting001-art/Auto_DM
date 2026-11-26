@@ -93,5 +93,14 @@ export function expressionProblems(expr) {
   return problems;
 }
 
-export const allRules = () => files('rules', '.yaml').flatMap((f) => readYaml(`rules/${f}`).groups.flatMap((g) => g.rules.map((r) => ({ ...r, file: f }))));
+const everyRule = () => files('rules', '.yaml').flatMap((f) => readYaml(`rules/${f}`).groups.flatMap((g) => g.rules.map((r) => ({ ...r, file: f }))));
+/** The alert rules. Recording rules (a `record:` name, such as the uptime burn rate) are listed by allRecordings. */
+export const allRules = () => everyRule().filter((r) => r.alert);
+export const allRecordings = () => everyRule().filter((r) => r.record);
 export const allDashboards = () => files('dashboards', '.json').map((f) => ({ file: f, ...JSON.parse(fs.readFileSync(path.join(MONITORING, 'dashboards', f), 'utf8')) }));
+
+/** An expression with each recording rule's name replaced by the expression it records, so the metrics and windows it reads can be checked. */
+export function expandRecorded(expr) {
+  const recorded = new Map(allRecordings().map((r) => [r.record, `(${String(r.expr).replace(/\s+/g, ' ')})`]));
+  return String(expr).replace(/\s+/g, ' ').replace(/[A-Za-z_:][A-Za-z0-9_:]*/g, (name) => recorded.get(name) ?? name);
+}

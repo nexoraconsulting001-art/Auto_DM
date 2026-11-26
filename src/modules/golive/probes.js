@@ -13,7 +13,6 @@ import { DEFAULT_GRAPH_VERSION, META_HOSTS } from '../../adapters/meta/index.js'
 import { createMetaHttp } from '../../adapters/meta/http.js';
 import { RAZORPAY_HOST } from '../../adapters/razorpay/index.js';
 import { SHIPROCKET_HOST } from '../../adapters/shiprocket/index.js';
-import { WHATSAPP_HOST, createWhatsApp } from '../../adapters/whatsapp/index.js';
 import { GOOGLE_TOKEN_URL, readServiceAccount } from '../../adapters/push/fcm.js';
 import { readApnsKey } from '../../adapters/push/apns.js';
 import { EAS_ORIGIN } from '../../adapters/eas/index.js';
@@ -457,9 +456,12 @@ for (const name of GOLIVE_PROBES) if (!PROBES[name]) throw new Error(`The go-liv
 
 /** The outside world the probes use; tests replace parts of it. */
 export function probeWorld(config, overrides = {}) {
-  let whatsapp;
   return {
-    whatsapp: () => (whatsapp ??= overrides.whatsapp ?? createWhatsApp(config)),
+    // A read-only client (templates and phone number status), handed in by the app; the checks hold nothing that can send.
+    whatsapp: () => {
+      if (!overrides.whatsapp) throw new Error('no read-only WhatsApp client was given to the go-live checks');
+      return overrides.whatsapp;
+    },
     dns: { lookupAll, resolveTxt: (name) => dns.promises.resolveTxt(name), ...overrides.dns },
     tls: { certificateDays, ...overrides.tls },
   };
