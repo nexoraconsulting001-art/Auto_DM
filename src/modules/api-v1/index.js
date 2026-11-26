@@ -92,7 +92,7 @@ function pathParams(schema, value) {
   return parsed.data;
 }
 
-function uploader({ field, maxBytes, mimeTypes }) {
+function uploader({ field, maxBytes, mimeTypes, tooLarge }) {
   const receive = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: maxBytes, files: 1 },
@@ -101,7 +101,9 @@ function uploader({ field, maxBytes, mimeTypes }) {
       else done(new ApiError('unsupported_media_type'));
     },
   }).single(field);
-  return (req, res) => new Promise((resolve, reject) => receive(req, res, (err) => (err ? reject(err) : resolve())));
+  // A route may say in its own words what to do about a file over the limit (the CSV import: "Upload a file of 2 MB or less.").
+  const refused = (err) => (tooLarge && err?.code === 'LIMIT_FILE_SIZE' ? new ApiError('payload_too_large', tooLarge) : err);
+  return (req, res) => new Promise((resolve, reject) => receive(req, res, (err) => (err ? reject(refused(err)) : resolve())));
 }
 
 /** Refused and missing lookups are logged with ids only: another business's id ends up here (PRD 11, R-01). */

@@ -92,7 +92,7 @@ export const DraftSave = ProductCreate;
 
 export const SiteAdapter = z.object({ name: z.string(), label: z.string(), enabled: z.boolean() });
 
-export const CSV_UPLOAD = Object.freeze({ field: 'file', maxBytes: L.csvBytes, mimeTypes: Object.freeze(['text/csv', 'text/plain', 'application/vnd.ms-excel', 'application/csv', 'application/octet-stream']) });
+export const CSV_UPLOAD = Object.freeze({ field: 'file', maxBytes: L.csvBytes, tooLarge: IMPORT_REASONS.file_too_large, mimeTypes: Object.freeze(['text/csv', 'text/plain', 'application/vnd.ms-excel', 'application/csv', 'application/octet-stream']) });
 
 export const importRoutes = {
   'imports.link': { feature: 'catalog.import', method: 'POST', path: '/imports/link', access, body: LinkImport, response: LinkImportResult },
