@@ -2,7 +2,8 @@ import { displayPrice } from '../../contracts/catalog.js';
 import { BIO_UTM } from '../../contracts/buyer-pages.js';
 import { priceText, productCard, safeHref } from '../../views/buyer/index.js';
 import { html, raw } from '../../views/html.js';
-import { currentTenant, tenantId } from '../../tenancy.js';
+import { tenantId } from '../../tenancy.js';
+import { storeBaseUrl } from '../admin-api/urls.js';
 import { sized } from '../pages/variants.js';
 import { LIVE_PRODUCT_SQL, tileImage, tileTitle } from './repo.js';
 
@@ -19,10 +20,9 @@ export const nowOf = (config) => new Date((config?.pagesNow ?? Date.now)());
  * The address a buyer page is seen at, for its canonical link and og:url: the business's verified domain when it has one,
  * else the address the shopper used. Never the platform's own domain unless the shopper is already on it.
  */
-export function pageBase(req) {
-  const primary = currentTenant()?.primary_domain ?? null;
-  if (primary) return `https://${primary}`;
-  return `${req.protocol}://${req.get('host')}`;
+export function pageBase(req, config) {
+  // The address buyers are sent to, the same one the landing pages use: https on the business's own address, not whatever the proxy hop said (K-53).
+  return storeBaseUrl(req, config);
 }
 
 /** A path on this host made absolute for a share tag; a web link stays as it is. */

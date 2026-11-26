@@ -50,7 +50,7 @@ export function registerCategoryPages(app, ctx) {
         repos.categorySequences.live(category.id, { now, limit: 60 }),
         categoryProducts(db, category.id, { limit: 48 }),
       ]);
-      const base = pageBase(req);
+      const base = pageBase(req, config);
       const image = category.image_url || (reels[0] ? tileImage(reels[0], now) : '');
       const main = html`${tileStyles()}
 ${section({ theme, id: 'category-h', kicker: 'Category', title: category.name, body: html`${category.description ? html`<p>${category.description}</p>` : ''}
@@ -88,7 +88,7 @@ ${products.length ? section({ theme, id: 'category-products-h', kicker: 'Shop', 
       const rows = picked ? picked.items : allReels(shelves, uncategorized);
       const chips = [{ href: '/reels', label: 'All' }, ...shelves.map((s) => ({ href: `/reels?c=${encodeURIComponent(s.category.slug)}`, label: s.category.name }))];
       const current = picked ? `/reels?c=${encodeURIComponent(picked.category.slug)}` : '/reels';
-      const base = pageBase(req);
+      const base = pageBase(req, config);
       const first = rows[0];
       const main = html`${tileStyles()}
 ${chipRow(chips, current, 'Reel categories')}
