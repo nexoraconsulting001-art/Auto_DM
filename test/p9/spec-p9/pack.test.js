@@ -61,7 +61,7 @@ test('G-18: each permission has a section with its use, its justification, a scr
 /** A copy of what the pack's checker reads, so the code can be changed without touching this repository. */
 function cloneRepo() {
   const dest = scratch('bhava-p9-clone-');
-  const keep = ['src', 'tools', 'scripts', 'docs', 'deploy', 'requirements', 'shared', 'apps', 'package.json', 'HANDOFF.md', 'README.md'];
+  const keep = ['src', 'tools', 'scripts', 'docs', 'deploy', 'requirements', 'shared', 'apps', 'packages', 'package.json', 'HANDOFF.md', 'README.md'];
   for (const name of keep) {
     if (!exists(name)) continue;
     fs.cpSync(path.join(ROOT, name), path.join(dest, name), { recursive: true, filter: (src) => !/node_modules|[\\/]\.git([\\/]|$)|[\\/]test-results/.test(src) });
@@ -143,7 +143,10 @@ function listingFields() {
       const parts = text.split(/^#{2,4}\s+/m).slice(1);
       for (const part of parts) {
         const [head, ...body] = part.split('\n');
-        add(head.replace(/\s*\(.*\)\s*$/, ''), body.join('\n').replace(/^\s*```\w*\n?|\n?```\s*$/g, '').trim());
+        // The value is the fenced block when the section has one (the generated listing puts a category line after it), else the whole section.
+        const text = body.join('\n');
+        const fenced = /^```\w*\n([\s\S]*?)\n```\s*$/m.exec(text);
+        add(head.replace(/\s*\(.*\)\s*$/, ''), (fenced ? fenced[1] : text.replace(/^\s*```\w*\n?|\n?```\s*$/g, '')).trim());
       }
     } else {
       const walkObj = (node, prefix = '') => {
@@ -221,7 +224,8 @@ function declaredByApps() {
   for (const app of ['owner', 'shopper']) {
     const file = `apps/${app}/app.config.js`;
     if (!exists(file)) continue;
-    const text = read(file);
+    // A permission in blockedPermissions is one the app refuses (a library may ask for it), not one it declares: the privacy answers owe it nothing.
+    const text = read(file).replace(/blockedPermissions:\s*\[[^\]]*\]/g, '');
     for (const m of text.matchAll(/android\.permission\.([A-Z_]+)/g)) out.android.add(m[1]);
     for (const m of text.matchAll(/\b(NS[A-Za-z]+UsageDescription)\b/g)) out.ios.add(m[1]);
   }

@@ -378,9 +378,10 @@ export const PROBES = Object.freeze({
   'backups.recent': {
     settings: ['BACKUP_STORAGE_DRIVER'], simulators: [], local: true,
     async run(p) {
-      if (!p.db) return unknown();
-      const [row] = await p.db.query(`SELECT max(finished_at) AS at FROM jobs WHERE queue = 'system.backup' AND status = 'done'`);
-      const at = row?.at ? new Date(row.at).getTime() : 0;
+      // The active queue driver knows where its jobs are (the jobs table on pg, Redis on redis); the table is empty on Redis.
+      if (typeof p.queue?.lastFinished !== 'function') return unknown();
+      const finished = await p.queue.lastFinished('system.backup');
+      const at = finished ? new Date(finished).getTime() : 0;
       if (!at || p.now() - at > 26 * 3_600_000) return missing('backupOld');
       const report = path.join(p.config.rootDir ?? process.cwd(), 'test-results', 'drill', 'report.json');
       try {

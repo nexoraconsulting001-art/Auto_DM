@@ -381,6 +381,8 @@ export async function run(options) {
         for (let i = around(r, mean.visit); i > 0; i--) await visit(b, r, day, { path: r.chance(0.6) ? '/' : `/r/${r.pick(b.reels).slug}`, referrer: r.chance(0.5) ? 'https://l.instagram.com/' : '' });
         for (let i = around(r, mean.cart); i > 0; i--) await cart(b, r, day);
         for (let i = around(r, mean.order); i > 0; i--) await order(b, r, day);
+        // A shop that trades has an order on every day it is open: the random rounding above can leave a short run (3 days, a mean of about 4 orders) with all of them on one day, and a day with none shows an empty orders screen in the demo.
+        if (slot === SLOTS - 1 && !events.some(([d, key, kind]) => d === day && key === b.key && kind === 'checkout')) await order(b, r, day);
       }
       await world.settle();
       for (const b of businesses) await chat(b, rngs.get(b.key), day);

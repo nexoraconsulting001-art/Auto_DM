@@ -7,11 +7,14 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { MIN_SAMPLES } from '../../../tools/load/analyze.mjs';
 import { PART_REQUIREMENTS, PARTS, loadBudgets, run as runLoad } from '../../../tools/load/index.mjs';
 import { addShop, openWorld } from '../../p1/spec-p1/support.js';
 import { FULL, filesUnder, json, read, repoRoot } from './support.js';
 
 const budgets = () => structuredClone(loadBudgets());
+/** Seconds of the mix in which even the rarest class sends MIN_SAMPLES requests (a p95 over fewer proves nothing, and the check fails), with a third to spare. A 10 second run at 15 a second gives the 3% class 4 requests and the 10% class 15. */
+const mixSecondsFor = (b) => Math.ceil(((MIN_SAMPLES * 100) / (b.run.requestsPerSecond * Math.min(...b.mix.map((m) => m.weight)))) * 1.33);
 let serial = 0;
 const out = (part) => `p8-spec-${part}-${process.pid}-${++serial}`;
 const reportOf = (name) => JSON.parse(fs.readFileSync(path.join(repoRoot, 'test-results', name, 'report.json'), 'utf8'));
@@ -65,7 +68,7 @@ test('Q-05: the command line refuses production and bad options before it starts
 test('Q-05: ten businesses under the stated mix: no failed request, every p95 inside its target, web, worker and Postgres inside their memory limit', { timeout: FULL ? 1_800_000 : 900_000 }, async () => {
   const b = budgets();
   const name = out('mix');
-  const report = await runLoad({ parts: ['mix'], seconds: FULL ? null : 10, out: name, budgets: b });
+  const report = await runLoad({ parts: ['mix'], seconds: FULL ? null : mixSecondsFor(b), out: name, budgets: b });
   assertReportFiles(name, report);
   const checks = checksOf(report, 'Q-05');
   assert.ok(checks.length >= 1 + Object.keys(b.p95Ms).length + 3, `a check for failed requests, each class and each process (got ${checks.length})`);

@@ -145,7 +145,7 @@ export async function runDrill({ budgets, only, out = 'drill', root, say = (m) =
     });
 
     // ---- compare --------------------------------------------------------------------------------------------------
-    await step('compare', 'Q-08', 'every business: row counts and checksums match, table by table', 'no difference', async () => {
+    await step('compare', 'Q-08', 'compare every business: row counts and checksums match, table by table', 'no difference', async () => {
       const diffs = diffSnapshots(ctx.sourceSnap, ctx.restoredSnap, { only: ['rows', 'sequences'] });
       const cover = coverage(ctx.restoredSnap);
       data.compare = { ...cover, differences: diffs };

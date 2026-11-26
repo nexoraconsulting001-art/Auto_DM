@@ -24,7 +24,8 @@ let world;
 let seeded;
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  world = await openWorld();
+  // The test app pins its own platform domain, so the PLATFORM_DOMAIN set above never reaches it: say it where the app is made, or <slug>.shops.example is no business's address and every /r/ page answers 404 with the default business's look.
+  world = await openWorld({ overrides: { platformDomain: 'shops.example' } });
   seeded = await seedShowcase({ db: world.app.db, repos: world.app.platform, ctx: world.app.ctx, businesses });
 });
 test.afterAll(async () => {

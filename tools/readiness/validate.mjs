@@ -49,7 +49,7 @@ export function metricsIn(expression) {
     .replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`/g, '""')
     .replace(/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/g, '1')
     .replace(/\[[^\]]*\]/g, '')
-    .replace(/\b\d[\w.]*/g, ' ');
+    .replace(/(?<![\w:])\d[\w.]*/g, ' '); // a number, not the digits ending a recorded name such as probe:burn_rate:5m
   // Label matchers are inside braces; a metric name stands before them. Grouping lists follow by, without, on, ignoring, group_*.
   text = text.replace(/\{[^}]*\}/g, '').replace(/\b(by|without|on|ignoring|group_left|group_right)\s*\([^)]*\)/g, ' ');
   const names = new Set();
