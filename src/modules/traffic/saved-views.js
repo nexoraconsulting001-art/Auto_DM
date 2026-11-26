@@ -58,9 +58,11 @@ export function savedViewsRepo(db) {
       return toView({ ...row, pinned: true }, user.id);
     },
 
+    /** False when the view is not one this person can see (another business's, or someone's private one): not found, as for pin. Unpinning a view that isn't pinned is done. */
     async unpin(id, user) {
-      const rows = await db.query('DELETE FROM saved_view_pins WHERE tenant_id = $1 AND view_id = $2 AND user_id = $3 RETURNING view_id', [tenantId(), id, user.id]);
-      return rows.length > 0;
+      if (!await find(id, user)) return false;
+      await db.query('DELETE FROM saved_view_pins WHERE tenant_id = $1 AND view_id = $2 AND user_id = $3', [tenantId(), id, user.id]);
+      return true;
     },
 
     async pinned(user) {
