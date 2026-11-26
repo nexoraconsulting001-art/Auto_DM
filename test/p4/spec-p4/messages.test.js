@@ -273,7 +273,12 @@ test('S-50: a reminder due in quiet hours waits until 9 am India time', async ()
   await world.age(now.getTime() - lastNight22);
   await world.quiet(3000);
   const sent = await withTemplate(phone, name);
-  for (const m of sent) assert.equal(quietUntil(new Date(m.at)), null, 'A reminder was sent inside quiet hours');
+  // The simulator stamps `at` on its own clock, which world.age() moved on by every age so far; the store's clock (the one
+  // the quiet-hours rule is about, as in S-51 and the night branch above) did not move. So each stamp is taken back by how
+  // far the simulator's clock is ahead before asking whether it fell in quiet hours.
+  const { now: simNow } = await world.wa.get('/clock');
+  const simAhead = simNow - Date.now();
+  for (const m of sent) assert.equal(quietUntil(new Date(m.at - simAhead)), null, 'A reminder was sent inside quiet hours');
   const rows = await shop.sql(`SELECT * FROM cart_reminders WHERE tenant_id = $1 AND status = 'scheduled'`, [shop.tenantId]);
   for (const r of rows) assert.equal(quietUntil(new Date(r.scheduled_for)), null, `A reminder is scheduled for ${r.scheduled_for}, inside quiet hours`);
 });
