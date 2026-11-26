@@ -142,6 +142,11 @@ export async function placeOrder(ctx, req, body) {
   const quoteIn = {
     lines: body.lines, address, phone, paymentMode: body.paymentMode, couponCode: body.couponCode, redeemPoints: body.redeemPoints, shopperId: shopper?.id ?? null, referral,
   };
+  // The consent choices name the notice that was on screen; one this business never published is refused before anything is
+  // made (as POST /api/store/consent does), not thrown from inside the order's transaction.
+  if (platform.consent?.built && body.consent.noticeVersion > ((await platform.consent.notice())?.version ?? 1)) {
+    throw new ApiError('conflict', 'This page is out of date. Refresh it and try again.');
+  }
   if (body.paymentMode === 'cod' && !(await phoneProved(ctx, { phone, checkoutKey: body.idempotencyKey, shopper }))) {
     // Refused now, with the reason, rather than after the code: cash on delivery this order can't have is never offered a code.
     refuseUnplaceable(await buildQuote(db, ctx, quoteIn), body);
