@@ -5,6 +5,7 @@ import { isOptOut } from '../compliance/words.js';
 import { toE164 } from '../shoppers/keys.js';
 import { tenantId, withTenant } from '../../tenancy.js';
 import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
+import { createWebhookDrain } from '../../platform/webhook-drain.js';
 
 /**
  * WhatsApp's webhooks (PRD 9.16): delivery reports for what was sent, and shoppers' replies, of which only STOP matters.
@@ -196,43 +197,21 @@ export function createWhatsappWebhook(ctx) {
     }
   }
 
-  async function drain() {
-    let total = 0;
-    for (let pass = 0; pass < 100; pass++) {
-      const rows = await platformDb().query(
-        `SELECT * FROM provider_webhook_events WHERE provider = 'whatsapp' AND status = 'received'
-           AND (attempts = 0 OR received_at < now() - make_interval(secs => least(3600, 5 * power(4, attempts - 1))))
-         ORDER BY id LIMIT $1`,
-        [BATCH],
-      );
-      for (const row of rows) await processOne(row);
-      total += rows.length;
-      if (rows.length < BATCH) break;
-    }
-    return total;
-  }
+  /**
+   * The web app (at once) and the worker's sweep both work WhatsApp's deliveries through the one shared drainer
+   * (platform/webhook-drain.js, R4-WH-4): a delivery is claimed before it is worked, so a STOP is recorded once, and a
+   * delivery waits while an earlier one about the same message is in another drainer's hands.
+   */
+  const drainer = createWebhookDrain({
+    db: platformDb, name: 'whatsapp.webhook', providers: ['whatsapp'], scopes: ['managed'], batch: BATCH, process: processOne,
+    subjects: {
+      sql: `ARRAY(SELECT s->>'messageId' FROM jsonb_array_elements(COALESCE(payload->'statuses', '[]'::jsonb)) s WHERE s->>'messageId' IS NOT NULL)`,
+      of: (row) => (row.payload?.statuses ?? []).map((st) => st?.messageId),
+    },
+  });
+  const drain = async () => (await drainer.drain()).length;
+  const { kick } = drainer;
+  const settle = async () => (await drainer.settle()).length;
 
-  let running = null;
-  let again = false;
-  function kick() {
-    if (running) {
-      again = true;
-      return running;
-    }
-    running = (async () => {
-      try {
-        do {
-          again = false;
-          await drain();
-        } while (again);
-      } catch (err) {
-        reportError(err, { msg: 'whatsapp.webhook_drain_failed' });
-      } finally {
-        running = null;
-      }
-    })();
-    return running;
-  }
-
-  return { verify, receive, drain, kick, async settle() { while (running) await running; return drain(); } };
+  return { verify, receive, drain, kick, settle };
 }

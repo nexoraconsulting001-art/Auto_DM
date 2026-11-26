@@ -5,6 +5,7 @@ import { writeAudit } from '../audit/index.js';
 import { opsAlert } from './alerts.js';
 import { cleanText, isAwb, providerId } from './util.js';
 import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
+import { createWebhookDrain } from '../../platform/webhook-drain.js';
 
 /**
  * The courier's tracking webhook (PRD 9.7, 9.10): POST /webhooks/courier, one address for Bhava's master account. The token
@@ -142,57 +143,15 @@ export function createWebhooks(ctx, { tracking }) {
     }
   }
 
-  /** One pass over what is waiting, oldest first. A failure waits longer before each try (5 s, 20 s, 80 s, ... up to an hour). */
-  async function dispatch({ limit = BATCH } = {}) {
-    const rows = await platformDb.query(
-      `SELECT * FROM provider_webhook_events
-       WHERE provider = 'shiprocket' AND status = 'received'
-         AND (attempts = 0 OR received_at < now() - make_interval(secs => least(3600, 5 * power(4, attempts - 1))))
-       ORDER BY id LIMIT $1`,
-      [limit],
-    );
-    const results = [];
-    for (const row of rows) results.push(await processOne(row));
-    return results;
-  }
-
-  async function drain() {
-    const all = [];
-    for (let pass = 0; pass < 100; pass++) {
-      const results = await dispatch();
-      all.push(...results);
-      if (results.length < BATCH) break;
-    }
-    return all;
-  }
-
-  let running = null;
-  let again = false;
-  /** Works through new events soon, in this process. One run at a time. */
-  function kick() {
-    if (running) {
-      again = true;
-      return;
-    }
-    running = (async () => {
-      try {
-        do {
-          again = false;
-          await drain();
-        } while (again);
-      } catch (err) {
-        reportError(err, { msg: 'shipping.webhooks_drain_failed' });
-      } finally {
-        running = null;
-      }
-    })();
-  }
-
-  /** For tests and the worker: waits for a run in progress, then drains what is left. */
-  async function settle() {
-    while (running) await running;
-    return drain();
-  }
+  /**
+   * The web app (at once) and the worker (each minute) both work the courier's events through the one shared drainer
+   * (platform/webhook-drain.js, R4-WH-2): an event is claimed before it is worked, so it is applied once, and an event waits
+   * while an earlier event of the same AWB is in another drainer's hands.
+   */
+  const { dispatch, drain, kick, settle } = createWebhookDrain({
+    db: platformDb, name: 'shipping.webhooks', providers: ['shiprocket'], scopes: ['managed'], batch: BATCH, process: processOne,
+    subjects: { sql: `array_remove(ARRAY[payload->>'awb'], NULL)`, of: (row) => [row.payload?.awb] },
+  });
 
   return { receive, dispatch, drain, kick, settle, route };
 }
