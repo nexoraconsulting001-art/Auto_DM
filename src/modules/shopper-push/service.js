@@ -10,6 +10,7 @@ import { hiddenReason, PAGE_COLS } from '../categories/repo.js';
 import { keyedHash } from '../shoppers/keys.js';
 import { parseBody } from '../storefront/http.js';
 import { checkApnsKey, checkServiceAccount, senderFor } from './sender.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * Push to shoppers from the brand's own app (PRD 10.11): the service behind shopperPushFor(ctx). Everything runs as one
@@ -220,7 +221,6 @@ export function createShopperPush(ctx) {
       keep = false;
     }
     const hash = keep ? keyedHash(config, `shopper-push-token:${tid()}`, token) : '';
-    const encrypted = keep ? secrets.encrypt(token) : null;
     const notice = await noticeVersion();
     const saved = await db.tx(async (t) => {
       if (hash) await t.query('SELECT pg_advisory_xact_lock($1, hashtext($2))', [LOCK_SPACE, `${tid()}:${hash}`]);
@@ -228,6 +228,8 @@ export function createShopperPush(ctx) {
       // A token is on one install only: one that moved here leaves the row it was on.
       if (hash) await t.query(`UPDATE shopper_push_devices SET token_enc = NULL, token_hash = '', updated_at = now() WHERE tenant_id = $1 AND token_hash = $2 AND id <> $3`, [tid(), hash, row.id]);
       if (permission === 'denied') row = await turnOff(t, row, 'system_permission', notice);
+      // Sealed to this install's row (R2-SEC-1), so it is made once the row is known.
+      const encrypted = keep ? secrets.encrypt(token, secretBinding('shopper_push_devices', 'token_enc', { tenant_id: tid(), id: row.id })) : null;
       const [updated] = await t.query(
         `UPDATE shopper_push_devices SET token_enc = $3, token_hash = $4,
            permission_at = CASE WHEN permission = $5 AND permission_at IS NOT NULL THEN permission_at ELSE now() END, permission = $5,
@@ -445,7 +447,7 @@ export function createShopperPush(ctx) {
     }
     let token;
     try {
-      token = secrets.decrypt(row.token_enc);
+      token = secrets.decrypt(row.token_enc, secretBinding('shopper_push_devices', 'token_enc', { tenant_id: tid(), id: row.device_row_id }));
     } catch {
       return (await endRow(id, 'skipped', 'token_unreadable')) ? 'skipped' : 'gone';
     }
@@ -815,9 +817,9 @@ export function createShopperPush(ctx) {
       const body = parseBody(PushCredentialsUpdate, input);
       if (body.fcm !== undefined) await requireApp('android');
       if (body.apns !== undefined) await requireApp('ios');
-      const encrypt = (value) => {
+      const encrypt = (value, column) => {
         if (!secrets.configured) throw new ApiError('conflict', 'Keys can’t be stored yet. Please contact support.');
-        return secrets.encrypt(value);
+        return secrets.encrypt(value, secretBinding('app_push_credentials', column, { tenant_id: tid() }));
       };
       const sets = [];
       const params = [];
@@ -831,7 +833,7 @@ export function createShopperPush(ctx) {
         changed.fcm = 'removed';
       } else if (body.fcm) {
         const { projectId, clientEmail } = checkServiceAccount(body.fcm.serviceAccount);
-        set('fcm_project_id', projectId); set('fcm_client_email', clientEmail); set('fcm_service_account_enc', encrypt(body.fcm.serviceAccount)); set('fcm_status', 'ok');
+        set('fcm_project_id', projectId); set('fcm_client_email', clientEmail); set('fcm_service_account_enc', encrypt(body.fcm.serviceAccount, 'fcm_service_account_enc')); set('fcm_status', 'ok');
         changed.fcm = 'set';
       }
       if (body.apns === null) {
@@ -841,7 +843,7 @@ export function createShopperPush(ctx) {
         checkApnsKey(body.apns.key);
         const [app] = await db.query('SELECT ios_bundle_id FROM app_configs WHERE tenant_id = $1', [tid()]);
         set('apns_key_id', body.apns.keyId); set('apns_team_id', body.apns.teamId); set('apns_topic', String(app?.ios_bundle_id ?? '').slice(0, 155));
-        set('apns_env', body.apns.env); set('apns_key_enc', encrypt(body.apns.key)); set('apns_status', 'ok');
+        set('apns_env', body.apns.env); set('apns_key_enc', encrypt(body.apns.key, 'apns_key_enc')); set('apns_status', 'ok');
         changed.apns = 'set';
       }
       const actorId = Number(actor?.id);

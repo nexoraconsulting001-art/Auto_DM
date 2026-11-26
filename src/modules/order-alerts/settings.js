@@ -4,6 +4,7 @@ import { log } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { writeAudit } from '../audit/index.js';
 import { TEMPLATE_LANGUAGE, TEMPLATE_PURPOSES, WHATSAPP_TEMPLATES, reviewStatus, templateComponents, templateName } from './templates.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * The owner's side of shopper alerts (PRD 9.16, S-96): which alerts go out and from where, the business's own WhatsApp
@@ -104,7 +105,7 @@ export function createAlertSettings({ db, platform, providers, config }) {
     const a = await accountRow();
     if (!a || a.status !== 'active' || !a.access_token_enc) return null;
     try {
-      return { wabaId: a.waba_id, phoneNumberId: a.phone_number_id, accessToken: platform.secrets.decrypt(a.access_token_enc) };
+      return { wabaId: a.waba_id, phoneNumberId: a.phone_number_id, accessToken: platform.secrets.decrypt(a.access_token_enc, secretBinding('whatsapp_accounts', 'access_token_enc', { tenant_id: tenantId() })) };
     } catch {
       // A token that no longer decrypts (the key changed) reads as needing a reconnect, never a server error.
       return null;
@@ -131,7 +132,7 @@ export function createAlertSettings({ db, platform, providers, config }) {
            VALUES ($1, $2, $3, $4, $5, 'active', now(), now())
            ON CONFLICT (tenant_id) DO UPDATE SET waba_id = EXCLUDED.waba_id, phone_number_id = EXCLUDED.phone_number_id, display_number = EXCLUDED.display_number,
              access_token_enc = EXCLUDED.access_token_enc, status = 'active', connected_at = now(), updated_at = now()`,
-          [tenantId(), wabaId, phoneNumberId, String(shown).slice(0, 20), platform.secrets.encrypt(accessToken)],
+          [tenantId(), wabaId, phoneNumberId, String(shown).slice(0, 20), platform.secrets.encrypt(accessToken, secretBinding('whatsapp_accounts', 'access_token_enc', { tenant_id: tenantId() }))],
         );
         // Another WhatsApp account has its own templates and reviews: read them again rather than trust the old ones.
         if (before && before.waba_id !== wabaId) await t.query(`UPDATE whatsapp_templates SET status = 'pending', provider_id = NULL, checked_at = NULL, updated_at = now() WHERE tenant_id = $1`, [tenantId()]);

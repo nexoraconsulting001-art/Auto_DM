@@ -1,5 +1,6 @@
 import { log } from '../../platform/log.js';
 import { keyedHash, newToken, readToken, signToken } from './keys.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * The shared shopper profile (PRD 9.22, 9.18): one person across stores, held by the platform, never by a business.
@@ -32,14 +33,21 @@ export function createSharedProfiles({ db, config, platform }) {
   const phoneHash = (phone) => keyedHash(config, 'shared:phone', phone);
   const googleHash = (sub) => keyedHash(config, 'shared:google', sub);
   const grievanceContact = () => config.platformGrievanceEmail || (config.platformDomain ? `privacy@${config.platformDomain}` : 'the address on the platform’s website');
-  const enc = (value) => platform.secrets.encrypt(JSON.stringify(value));
-  const dec = (stored) => {
+  // A profile's phone and an address are sealed to their own row (R2-SEC-1): `row` names the row, as secretBinding() takes it.
+  const enc = (value, column, row) => platform.secrets.encrypt(JSON.stringify(value), secretBinding(column === 'address_enc' ? 'shared_addresses' : 'shared_profiles', column, row));
+  const dec = (stored, column, row) => {
     try {
-      return JSON.parse(platform.secrets.decrypt(stored));
+      return JSON.parse(platform.secrets.decrypt(stored, secretBinding(column === 'address_enc' ? 'shared_addresses' : 'shared_profiles', column, row)));
     } catch {
       return null;
     }
   };
+  /** A saved address on profile `profileId`, on `t`: the row first, then its address sealed to it (R2-SEC-1). */
+  async function addressRow(t, profileId, a, isDefault) {
+    const [row] = await t.query("INSERT INTO shared_addresses (profile_id, address_enc, is_default) VALUES ($1, '', $2) RETURNING id, profile_id", [profileId, isDefault]);
+    const sealed = enc({ name: a.name, phone: a.phone, line1: a.line1, line2: a.line2, landmark: a.landmark, city: a.city, stateCode: a.stateCode, pincode: a.pincode, kind: a.kind }, 'address_enc', row);
+    await t.query('UPDATE shared_addresses SET address_enc = $2 WHERE id = $1', [row.id, sealed]);
+  }
   const seal = (profileId) => platform.secrets.encrypt(String(Number(profileId)));
   /** A token's payload with its sealed profile id opened as `p`, or null when it can't be. */
   const opened = (payload) => {
@@ -107,12 +115,14 @@ export function createSharedProfiles({ db, config, platform }) {
         let [profile] = await t.query('SELECT id, phone_hash, google_hash FROM shared_profiles WHERE ($1::text IS NOT NULL AND phone_hash = $1) OR ($2::text IS NOT NULL AND google_hash = $2) ORDER BY id LIMIT 1 FOR UPDATE', [pHash, gHash]);
         if (!profile) {
           [profile] = await t.query(
-            `INSERT INTO shared_profiles (phone_hash, phone_enc, google_hash, notice_version) VALUES ($1, $2, $3, $4) RETURNING id, phone_hash, google_hash`,
-            [pHash, pHash ? enc({ phone: shopper.phone }) : '', gHash, current.version],
+            `INSERT INTO shared_profiles (phone_hash, phone_enc, google_hash, notice_version) VALUES ($1, '', $2, $3) RETURNING id, phone_hash, google_hash`,
+            [pHash, gHash, current.version],
           );
+          // The phone is sealed to the new row, so it is written once the row's id is known, in the same transaction.
+          if (pHash) await t.query('UPDATE shared_profiles SET phone_enc = $2 WHERE id = $1', [profile.id, enc({ phone: shopper.phone }, 'phone_enc', profile)]);
         } else {
           // The same person proving a second way to sign in adds it, unless another profile already holds it.
-          if (pHash && !profile.phone_hash) await t.query(`UPDATE shared_profiles SET phone_hash = $2, phone_enc = $3, updated_at = now() WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM shared_profiles WHERE phone_hash = $2)`, [profile.id, pHash, enc({ phone: shopper.phone })]);
+          if (pHash && !profile.phone_hash) await t.query(`UPDATE shared_profiles SET phone_hash = $2, phone_enc = $3, updated_at = now() WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM shared_profiles WHERE phone_hash = $2)`, [profile.id, pHash, enc({ phone: shopper.phone }, 'phone_enc', profile)]);
           if (gHash && !profile.google_hash) await t.query(`UPDATE shared_profiles SET google_hash = $2, updated_at = now() WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM shared_profiles WHERE google_hash = $2)`, [profile.id, gHash]);
           await t.query('UPDATE shared_profiles SET notice_version = $2, updated_at = now() WHERE id = $1', [profile.id, current.version]);
         }
@@ -121,9 +131,7 @@ export function createSharedProfiles({ db, config, platform }) {
         let hasDefault = n > 0;
         for (const a of n === 0 ? addresses.slice(0, 20) : []) {
           const makeDefault = !hasDefault && (a.isDefault || a === addresses[0]);
-          await t.query('INSERT INTO shared_addresses (profile_id, address_enc, is_default) VALUES ($1, $2, $3)', [
-            profile.id, enc({ name: a.name, phone: a.phone, line1: a.line1, line2: a.line2, landmark: a.landmark, city: a.city, stateCode: a.stateCode, pincode: a.pincode, kind: a.kind }), makeDefault,
-          ]);
+          await addressRow(t, profile.id, a, makeDefault);
           hasDefault ||= makeDefault;
         }
         await t.query('INSERT INTO shared_consent_log (subject_hash, granted, notice_version) VALUES ($1, true, $2)', [pHash ?? gHash, current.version]);
@@ -149,8 +157,8 @@ export function createSharedProfiles({ db, config, platform }) {
     async addresses(tenantId, shopperId) {
       const profile = await profileOf(tenantId, shopperId);
       if (!profile) return [];
-      const rows = await pdb.query('SELECT id, address_enc, is_default FROM shared_addresses WHERE profile_id = $1 ORDER BY is_default DESC, id', [profile.id]);
-      return rows.map((row) => ({ row, a: dec(row.address_enc) })).filter(({ a }) => a).map(({ row, a }) => ({ ...a, id: null, sharedId: `s${row.id}`, isDefault: row.is_default, shared: true }));
+      const rows = await pdb.query('SELECT id, profile_id, address_enc, is_default FROM shared_addresses WHERE profile_id = $1 ORDER BY is_default DESC, id', [profile.id]);
+      return rows.map((row) => ({ row, a: dec(row.address_enc, 'address_enc', row) })).filter(({ a }) => a).map(({ row, a }) => ({ ...a, id: null, sharedId: `s${row.id}`, isDefault: row.is_default, shared: true }));
     },
 
     /** An address the shopper saved here also joins their shared profile, when they have one. */
@@ -159,9 +167,7 @@ export function createSharedProfiles({ db, config, platform }) {
       if (!profile) return;
       const [{ n }] = await pdb.query('SELECT count(*)::int AS n FROM shared_addresses WHERE profile_id = $1', [profile.id]);
       if (n >= 20) return;
-      await pdb.query('INSERT INTO shared_addresses (profile_id, address_enc, is_default) VALUES ($1, $2, $3)', [
-        profile.id, enc({ name: a.name, phone: a.phone, line1: a.line1, line2: a.line2, landmark: a.landmark, city: a.city, stateCode: a.stateCode, pincode: a.pincode, kind: a.kind }), n === 0,
-      ]);
+      await pdb.tx((t) => addressRow(t, profile.id, a, n === 0));
     },
 
     /**
@@ -238,8 +244,8 @@ export function createSharedProfiles({ db, config, platform }) {
     },
     /** The verified phone of a profile, for the store the ticket was made for. null when the profile has none (Google only) or is gone. */
     async verifiedPhone(profileId) {
-      const [row] = await pdb.query('SELECT phone_enc FROM shared_profiles WHERE id = $1', [profileId]);
-      return row?.phone_enc ? dec(row.phone_enc)?.phone ?? null : null;
+      const [row] = await pdb.query('SELECT id, phone_enc FROM shared_profiles WHERE id = $1', [profileId]);
+      return row?.phone_enc ? dec(row.phone_enc, 'phone_enc', row)?.phone ?? null : null;
     },
   };
 }

@@ -4,6 +4,7 @@ import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { cleanLevel, cleanProduct, idOf } from './products.js';
 import { countWebhookProcessed, countWebhookStored } from '../../platform/metrics.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * POST /webhooks/shopify (PRD 9.11, S-38). Each business's shop signs with its own app's secret, so the shop named in
@@ -43,7 +44,7 @@ export function createShopifyWebhook(ctx, { products, connection }) {
       : [];
     let secret = '';
     try {
-      secret = conn?.webhook_secret_enc ? platform.secrets.decrypt(conn.webhook_secret_enc) : '';
+      secret = conn?.webhook_secret_enc ? platform.secrets.decrypt(conn.webhook_secret_enc, secretBinding('shopify_connections', 'webhook_secret_enc', conn)) : '';
     } catch {
       secret = '';
     }

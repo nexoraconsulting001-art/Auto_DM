@@ -1,6 +1,7 @@
 import { DEVICE_ID, tokenHash } from '../../contracts/accounts.js';
 import { PUSH_PLATFORMS, PUSH_TOKEN, PUSH_TOKEN_GONE } from '../../contracts/notifications.js';
 import { log } from '../../platform/log.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 /**
  * Where a person's owner app can be pushed to (push_devices, migration 521). Platform-only: every call here runs on
@@ -39,7 +40,7 @@ export function createDevices({ platformDb, secrets }) {
     if (!Number.isSafeInteger(personId) || personId <= 0) throw new Error('A push device belongs to a person');
     if (!DEVICE_ID.test(String(deviceId)) || !PUSH_PLATFORMS.includes(platform) || !PUSH_TOKEN.test(String(token))) throw new Error('Not a push device');
     const hash = tokenHash(token);
-    const encrypted = secrets.encrypt(token);
+    const encrypted = secrets.encrypt(token, secretBinding('push_devices', 'token_enc', { person_id: personId, device_id: deviceId }));
     return platformDb.tx(async (t) => {
       // One registration of a token at a time, so a token that moves between devices is never on two rows.
       await t.query('SELECT pg_advisory_xact_lock($1, hashtext($2))', [LOCK_SPACE, `token:${hash}`]);
@@ -109,13 +110,13 @@ export function createDevices({ platformDb, secrets }) {
     );
     for (const row of gone) log.info('push.device_dropped', { pushDeviceId: Number(row.id), reason: row.delete_reason });
     const rows = await platformDb.query(
-      'SELECT id, platform, token_enc FROM push_devices WHERE person_id = $1 AND deleted_at IS NULL ORDER BY id DESC LIMIT $2',
+      'SELECT id, person_id, device_id, platform, token_enc FROM push_devices WHERE person_id = $1 AND deleted_at IS NULL ORDER BY id DESC LIMIT $2',
       [personId, MAX_DEVICES],
     );
     const devices = [];
     for (const row of rows) {
       try {
-        devices.push({ id: Number(row.id), platform: row.platform, token: secrets.decrypt(row.token_enc) });
+        devices.push({ id: Number(row.id), platform: row.platform, token: secrets.decrypt(row.token_enc, secretBinding('push_devices', 'token_enc', row)) });
       } catch {
         log.warn('push.token_unreadable', { pushDeviceId: Number(row.id) });
       }

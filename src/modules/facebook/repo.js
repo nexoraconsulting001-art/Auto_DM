@@ -5,6 +5,7 @@ import { ValidationError } from '../../util.js';
 import { isRowId, pageOfFetched, readCursor } from '../admin-api/paging.js';
 import { writeAudit } from '../audit/index.js';
 import { DISCONNECTED_BY_OWNER, raiseAlert } from '../ig-accounts/index.js';
+import { secretBinding } from '../../contracts/secrets.js';
 
 // Any fixed number: it only has to differ from the other advisory locks taken on a business.
 const LINK_LOCK = 4_242_106;
@@ -25,7 +26,7 @@ export function fbPagesRepo(db, { secrets }) {
   function reveal(row) {
     if (!row.access_token_enc || row.status !== 'active') return '';
     try {
-      return secrets.decrypt(row.access_token_enc);
+      return secrets.decrypt(row.access_token_enc, secretBinding('fb_pages', 'access_token_enc', row));
     } catch {
       log.warn('fb_pages.undecryptable', { pageId: row.page_id });
       return '';
@@ -112,7 +113,7 @@ export function fbPagesRepo(db, { secrets }) {
     async saveConnection({ pageId, name = '', igUserId = '', token, scopes = [], connectedBy = null }) {
       const id = String(pageId);
       if (!token) throw new ValidationError('An access token is required');
-      const encrypted = secrets.encrypt(token);
+      const encrypted = secrets.encrypt(token, secretBinding('fb_pages', 'access_token_enc', { tenant_id: tenantId(), page_id: id }));
       return db.tx(async (t) => {
         const [row] = await t.query(
           `UPDATE fb_pages SET name = $3, linked_ig_user_id = $4, access_token_enc = $5, token_version = token_version + 1, token_updated_at = now(), token_expires_at = NULL,
