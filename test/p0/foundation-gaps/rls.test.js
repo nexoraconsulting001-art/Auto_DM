@@ -52,8 +52,14 @@ test('the fence lasts one transaction: nothing stays on the connection afterward
   const { db, tenantA } = await twoBusinesses();
   await withTenant(tenantA, () => db.query('SELECT 1'));
   const [after] = await db.query(`SELECT current_user AS name, current_setting('app.tenant_id', true) AS tenant`);
-  assert.notEqual(after.name, APP_ROLE);
   assert.ok(!after.tenant, 'no business is left set');
+  // The role is read on the connection itself: with one login db.platform is that same pool (the one the transaction used comes
+  // back first), and the owner it logs in as must not still be stepped down. With two logins business work is on the app login,
+  // which never was anything else (R5-PP-3).
+  const [connection] = await db.platform.query(`SELECT current_user AS name, current_setting('app.tenant_id', true) AS tenant`);
+  if (db.logins === 1) assert.notEqual(connection.name, APP_ROLE);
+  else assert.equal(after.name, APP_ROLE);
+  assert.ok(!connection.tenant, 'no business is left set on the connection');
 });
 
 test('db.platform is unfenced even inside a business, for the few things that look across them', async () => {
@@ -89,8 +95,9 @@ test('every table with a tenant_id, nullable ones too, has row-level security an
 
 test('the logs are add-and-read for the app role: no update, delete or truncate, and no platform rows', async () => {
   const { db, tenantA, tenantB } = await twoBusinesses();
-  await db.query(`INSERT INTO audit_log (tenant_id, actor, action) VALUES ($1, 'a', 'x'), ($2, 'b', 'x'), (NULL, 'ops', 'x')`, [tenantA.id, tenantB.id]);
-  await db.query(`INSERT INTO compliance_events (tenant_id, kind, decision) VALUES ($1, 'dm', 'allow')`, [tenantA.id]);
+  // The rows to look at are seeded by the owner (db.platform): no business may write another's rows or a platform row (R5-PP-3).
+  await db.platform.query(`INSERT INTO audit_log (tenant_id, actor, action) VALUES ($1, 'a', 'x'), ($2, 'b', 'x'), (NULL, 'ops', 'x')`, [tenantA.id, tenantB.id]);
+  await db.platform.query(`INSERT INTO compliance_events (tenant_id, kind, decision) VALUES ($1, 'dm', 'allow')`, [tenantA.id]);
   assert.equal((await withTenant(tenantA, () => db.query('SELECT actor FROM audit_log'))).length, 1, 'neither B\'s row nor the platform row');
   for (const sql of ['UPDATE compliance_events SET reason = $$x$$', 'DELETE FROM compliance_events', 'UPDATE audit_log SET actor = $$x$$', 'DELETE FROM audit_log', 'TRUNCATE audit_log', 'TRUNCATE compliance_events']) {
     await assert.rejects(() => withTenant(tenantA, () => db.query(sql)), /permission denied/, sql);
@@ -108,7 +115,8 @@ test('the order counter is the one thing a business can change on its tenants ro
 
 test('the recipe in HANDOFF.md fences a new table in one line', async () => {
   const { db, tenantA, tenantB } = await twoBusinesses();
-  await db.exec(`
+  // A new table is made by a migration, which runs as the owner (db.platform); the app login may create nothing (R5-PP-3).
+  await db.platform.exec(`
     CREATE TABLE recipe_widgets (
       id serial PRIMARY KEY,
       tenant_id integer NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
