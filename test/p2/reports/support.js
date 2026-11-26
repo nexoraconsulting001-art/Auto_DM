@@ -23,11 +23,13 @@ export const unique = () => `${process.pid}${++serial}${crypto.randomInt(1000)}`
 
 export async function openWorld(t, { at = Date.now() } = {}) {
   const clock = { t: at };
-  const overrides = { platformDomain: NEUTRAL, publicBaseUrl: '', defaultTenant: '', reportsNow: () => clock.t };
+  // The test is the worker: it runs the queued jobs itself with the queue's drain(), which only the pg queue has (the Redis queue is
+  // worked by BullMQ workers), and the tests read the jobs table. So the app and the worker share the pg queue on every profile (R5-PP-2).
+  const overrides = { platformDomain: NEUTRAL, publicBaseUrl: '', defaultTenant: '', reportsNow: () => clock.t, queueDriver: 'pg' };
   const app = await startApp({ overrides });
   t.after(() => app.close());
   // The worker's side: the same database, its own drivers, as src/worker.js builds them, from the app's own config, so on the CI production profile
-  // (STORAGE_DRIVER, QUEUE_DRIVER, ... from the environment) the worker writes files to the store and jobs to the queue the web app reads.
+  // (STORAGE_DRIVER, ANALYTICS_DRIVER, ... from the environment) the worker writes files to the store and rollups where the web app reads them.
   const config = { ...app.config };
   const drivers = createPlatform(config, { db: app.db });
   const repos = createRepos(app.db, { storage: drivers.storage, secrets: drivers.secrets, modules: MODULES });
