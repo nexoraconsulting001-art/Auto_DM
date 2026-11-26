@@ -127,7 +127,7 @@ test('Q-11 each flow set has the flows the showcase promises, and every flow cou
     expect[kind].forEach((pattern, i) => assert.match(texts[i], pattern, `${kind} flow ${names[i]}`));
     for (const [i, text] of texts.entries()) {
       const flow = yaml.loadAll(text);
-      assert.match(flow[0].name, /^Q-11: /, `${names[i]} starts with its requirement id`);
+      assert.match(flow[0].name, /^Q-11 - /, `${names[i]} starts with its requirement id`);
       assert.ok(Array.isArray(flow[1]) && flow[1].length > 2, `${names[i]} has steps`);
       assert.equal(flow[0].appId, '${APP_ID}');
     }

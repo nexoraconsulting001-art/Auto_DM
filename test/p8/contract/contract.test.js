@@ -412,12 +412,13 @@ test('the commands, the web-app hooks of the seller console, and the showcase wo
   // The workflow: by hand, and on a push that touches the seed or the build tool; the four jobs in order; no business named.
   const workflow = read('.github/workflows/showcase.yml');
   assert.match(workflow, /\non:\n  workflow_dispatch:\n  push:\n    paths:\n      - 'seed\/\*\*'\n      - 'tools\/build-brand\/\*\*'/);
-  for (const job of ['seed', 'build', 'emulator', 'ready']) assert.match(workflow, new RegExp(`\\n  ${job}:\\n`), job);
+  // The built workflow's stages (the contract phase planned four jobs; the build made one per stage, and test/p8/showcase-apps/workflow.test.js holds each stage's detail).
+  for (const job of ['seed', 'android', 'owner', 'ios', 'shopper-flows', 'owner-flows', 'package', 'ready']) assert.match(workflow, new RegExp(`\\n  ${job}:\\n`), job);
   assert.match(workflow, /needs: seed\n/);
-  assert.match(workflow, /needs: \[seed, build\]\n/);
+  assert.match(workflow, /needs: \[seed, android\]\n/);
   assert.match(workflow, /npm run showcase -- --check/);
-  assert.match(workflow, /--export-brands/);
-  assert.match(workflow, /npm run build-brand -- .*--driver local/);
+  assert.match(workflow, /node tools\/showcase-build\/index\.mjs brands /);
+  assert.match(workflow, /node tools\/showcase-build\/index\.mjs build .*--platform android/);
   assert.match(workflow, /android-emulator-runner/);
   assert.match(workflow, /permissions:\n  contents: read/);
   assert.equal(/secrets\./.test(workflow), false, 'no secret is used');
