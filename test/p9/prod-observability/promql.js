@@ -375,7 +375,12 @@ export function evaluate(ast, store, now) {
 
 export function loadRules(file) {
   const doc = yaml.load(fs.readFileSync(file, 'utf8'));
-  return doc.groups.flatMap((g) => g.rules.map((rule) => ({ ...rule, group: g.name, ast: parse(String(rule.expr).replace(/\s+/g, ' ')) })));
+  // A recording rule's value is its expression at the same instant, so an alert that reads the recorded name is the alert over that
+  // expression (Prometheus evaluates a group's rules in order at one timestamp).
+  const flat = (expr) => String(expr).replace(/\s+/g, ' ');
+  const recorded = new Map(doc.groups.flatMap((g) => g.rules.filter((r) => r.record).map((r) => [r.record, flat(r.expr)])));
+  const expand = (expr) => flat(expr).replace(/[A-Za-z_:][A-Za-z0-9_:]*/g, (name) => (recorded.has(name) ? `(${recorded.get(name)})` : name));
+  return doc.groups.flatMap((g) => g.rules.filter((r) => r.alert).map((rule) => ({ ...rule, group: g.name, ast: parse(expand(rule.expr)) })));
 }
 
 /** The alerts firing at `evalTimes` (ms), from simulating every evaluation from time 0, as Prometheus does. */

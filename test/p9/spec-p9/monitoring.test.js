@@ -242,10 +242,14 @@ test('G-07: a dashboard holds no address, token or person', () => {
 
 test('G-13: the objective is 99.5% over 30 days and each burn rate has an alert with its windows, factor and severity', () => {
   assert.deepEqual([UPTIME_SLO.objective, UPTIME_SLO.windowDays], [0.995, 30]);
-  const alerts = ruleDefs().filter((r) => r.alert && /probe_success|slo|burn/i.test(`${r.expr} ${r.alert}`));
+  // D2 decision (R2-PROD-E1): the burn rate is a named recording rule (errors / 0.005) and each alert fires above its factor, so the
+  // factor is visible. The windows, the probe and the budget are read through the recording rules the alert names.
+  const recordings = new Map(ruleDefs().filter((r) => r.record).map((r) => [r.record, `(${String(r.expr).replace(/\s+/g, ' ')})`]));
+  const through = (expr) => String(expr).replace(/[A-Za-z_:][A-Za-z0-9_:]*/g, (name) => recordings.get(name) ?? name);
+  const alerts = ruleDefs().filter((r) => r.alert && /probe_success|slo|burn/i.test(`${through(r.expr)} ${r.alert}`)).map((r) => ({ ...r, source: r.expr, expr: through(r.expr) }));
   assert.ok(alerts.length >= UPTIME_SLO.burnAlerts.length, 'one alert for each burn rate');
   for (const burn of UPTIME_SLO.burnAlerts) {
-    const match = alerts.find((a) => String(a.expr).includes(`[${burn.longWindow}]`) && String(a.expr).includes(`[${burn.shortWindow}]`) && String(a.expr).includes(String(burn.burnRate)));
+    const match = alerts.find((a) => String(a.expr).includes(`[${burn.longWindow}]`) && String(a.expr).includes(`[${burn.shortWindow}]`) && [...String(a.source).matchAll(/> ([\d.]+)/g)].every((m) => Number(m[1]) === burn.burnRate));
     assert.ok(match, `no alert for ${burn.longWindow}/${burn.shortWindow} at ${burn.burnRate}x`);
     assert.equal(match.labels.severity, burn.severity, `${match.alert}: severity`);
     assert.ok(/0\.005|\(1\s*-\s*0\.995\)/.test(match.expr) || /0\.995/.test(match.expr), `${match.alert}: the error budget is 1 - 0.995`);
