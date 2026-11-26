@@ -204,7 +204,7 @@ export async function openP4World({ overrides = {}, worker = true, defaultTenant
     /** A signed (or badly signed) Razorpay webhook body, posted by hand. */
     razorpayHook(payload, { secret = rzp.webhookSecret, signature, eventId = `evt_spec_${unique()}`, path = STORE_PROVIDER_PATHS.razorpayManaged.path } = {}) {
       const raw = typeof payload === 'string' ? payload : JSON.stringify(payload);
-      const sig = signature ?? crypto.createHmac('sha256', secret).update(raw).digest('hex');
+      const sig = signature !== undefined ? signature : crypto.createHmac('sha256', secret).update(raw).digest('hex');
       return hit(world, path, { method: 'POST', headers: { 'content-type': 'application/json', ...(sig === null ? {} : { [SIGNATURE_HEADERS.razorpay]: sig }), [SIGNATURE_HEADERS.razorpayEventId]: eventId }, body: raw });
     },
     webhookRows: (provider) => sql('SELECT * FROM provider_webhook_events WHERE provider = $1 ORDER BY id', [provider]),

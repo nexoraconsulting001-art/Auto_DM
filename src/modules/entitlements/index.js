@@ -42,20 +42,25 @@ export function entitlementsRepo(db) {
   async function lookup(feature) {
     const [row] = await db.query(
       `SELECT CASE WHEN o.feature IS NOT NULL THEN o.enabled ELSE f.feature IS NOT NULL END AS enabled,
-              CASE WHEN o.feature IS NOT NULL THEN o.limit_value ELSE f.limit_value END AS limit_value
+              CASE WHEN o.feature IS NOT NULL THEN o.limit_value ELSE f.limit_value END AS limit_value,
+              o.feature IS NOT NULL AS overridden
        FROM tenants t
        LEFT JOIN plan_features f ON f.plan_code = t.plan AND f.feature = $2
        LEFT JOIN tenant_features o ON o.tenant_id = t.id AND o.feature = $2
        WHERE t.id = $1`,
       [tenantId(), String(feature)],
     );
-    return row ?? { enabled: false, limit_value: null };
+    return row ?? { enabled: false, limit_value: null, overridden: false };
   }
 
-  /** A feature an app brings with it (APP_ENTITLEMENTS.includes: loyalty) is on whenever either app is, by plan or by override. */
+  /**
+   * A feature an app brings with it (APP_ENTITLEMENTS.includes: loyalty) is on whenever either app is, by plan or by override,
+   * unless this business has its own row for the feature itself: a tenant_features row switching it off wins over the plan
+   * and over the app that would bring it (S-91), as it does for every other feature.
+   */
   async function resolve(feature) {
-    const row = await lookup(feature);
-    if (row.enabled || !APP_ENTITLEMENTS.includes.includes(String(feature))) return row;
+    const { overridden, ...row } = await lookup(feature);
+    if (row.enabled || overridden || !APP_ENTITLEMENTS.includes.includes(String(feature))) return row;
     for (const app of [APP_ENTITLEMENTS.android, APP_ENTITLEMENTS.ios]) if ((await lookup(app)).enabled) return { enabled: true, limit_value: row.limit_value };
     return row;
   }

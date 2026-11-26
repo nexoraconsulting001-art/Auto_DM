@@ -156,6 +156,10 @@ async function setUpStore(world, { api, seed }, count) {
     if (!verified) throw new SeedError('The test-mode payment account did not become verified');
     count.made('paymentAccount');
   } else count.kept('paymentAccount');
+  // The activity run pays for about a quarter of its orders at the door (run.mjs), as a real store does: every sample
+  // business offers cash on delivery through the same seller call an owner uses. A second run finds it on and changes nothing.
+  const options = (await api.get('/payment-settings')).data;
+  if (!options.cod) await api.patch('/payment-settings', { cod: true });
 
   await api.patch('/shipping-settings', { mode: 'managed', pickupName: `${seed.business.name} Dispatch`, pickupPhone: owner.phone.replace(/^\+91/, ''), pickupLine1: '4 Mill Lane', pickupCity: 'Pune', pickupStateCode: '27', pickupPincode: '411002' });
   const registered = await world.until(async () => (await api.get('/shipping-settings')).data.pickupRegistered, 15_000);

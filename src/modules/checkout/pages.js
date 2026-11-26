@@ -118,7 +118,7 @@ function orderState(order, latestPayment) {
   if (order.hold_reason === 'paid_out_of_stock') return { title: 'Payment received', body: 'We have your payment, but an item ran out. We’ll be in touch about it shortly.' };
   if (order.fulfilment_status === 'pending') {
     const amount = order.payment_mode === 'part_advance' ? formatRupees(Number(order.advance_paise)) : total;
-    if (latestPayment?.status === 'failed') return { title: 'Payment didn’t go through', body: `No order is confirmed yet. You can try paying ${amount} again.`, pay: true };
+    if (latestPayment?.status === 'failed') return { title: 'Payment didn’t go through', body: `No order is confirmed yet. You can try paying ${amount} again.`, pay: true, payLabel: 'Try again' };
     return { title: 'Waiting for payment', body: `Pay ${amount} to confirm your order.`, pay: true };
   }
   if (order.fulfilment_status === 'delivered') return { title: 'Delivered', body: 'Your order was delivered. Thank you for shopping with us.' };
@@ -129,12 +129,21 @@ function orderState(order, latestPayment) {
   return { title: 'Order confirmed', body: 'Thank you! We’re getting your order ready.' };
 }
 
+/** What has come back to the shopper (9.8, S-27): "Partially refunded ₹200", or "Refunded ₹999" once it is all back. */
+function refundNote(order) {
+  const refunded = Number(order.refunded_paise ?? 0);
+  if (!(refunded > 0)) return '';
+  const label = refunded < Number(order.paid_paise ?? 0) ? 'Partially refunded' : 'Refunded';
+  return html`<p data-refunded>${label} ${formatRupees(refunded)}</p>`;
+}
+
 function orderMain({ order, items, state, canCancel, trackHref = '' }) {
   const address = order.shipping_address ?? {};
   const row = (label, paise, show = true) => (show ? html`<span>${label}</span><span>${formatRupees(Number(paise))}</span>` : '');
   return ({ theme }) => html`<div data-order-page data-token="${order.public_token}" data-number="${order.order_number}">
 ${section({ theme, id: 'order-h', kicker: `Order ${order.order_number}`, title: state.title, body: html`<p>${state.body}</p>
-${state.pay ? html`<button class="btn wide" type="button" data-pay>Pay now</button><p class="error" data-pay-error hidden></p>` : ''}
+${refundNote(order)}
+${state.pay ? html`<button class="btn wide" type="button" data-pay>${state.payLabel ?? 'Pay now'}</button><p class="error" data-pay-error hidden></p>` : ''}
 <div class="panel"><ul class="lines">${items.map((i) => html`<li class="line">${safeHref(i.image) ? html`<img src="${safeHref(i.image)}" alt="" width="64" height="76">` : html`<span class="ph"></span>`}<div><b>${i.name}</b><div class="muted small">${[i.option_value, `Qty ${i.qty}`].filter(Boolean).join(' · ')}</div></div><b>${formatRupees(Number(i.price_paise) * i.qty)}</b></li>`)}</ul></div>
 <div class="panel"><div class="totals">
 ${row('Items', order.subtotal_paise)}${row('Discount', -Number(order.discount_paise), Number(order.discount_paise) > 0)}${row('Points', -Number(order.loyalty_paise), Number(order.loyalty_paise) > 0)}

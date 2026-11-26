@@ -152,6 +152,8 @@ export async function buildQuote(q, ctx, { lines: linesIn, address = null, phone
   if (!options.cod) codReason = 'Cash on delivery isn’t offered by this store.';
   else if (options.codMaxPaise !== null && codTotal > options.codMaxPaise) codReason = capReason;
   else codReason = doorReason;
+  // A store that offers cash on delivery tells the shopper why this order can't have it, beside the bag's other notices (S-22).
+  if (options.cod && codReason) notices.push(codReason);
   const split = advanceSplit(options, beforeFees);
   let advanceReason = '';
   if (!options.partAdvance) advanceReason = 'Part payment isn’t offered by this store.';

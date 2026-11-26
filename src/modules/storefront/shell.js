@@ -62,11 +62,12 @@ export const storeStyles = () => html`<style>${raw(STORE_CSS)}</style>`;
 
 /**
  * Where the account chip leads (9.3, 9.17): a signed-in shopper's account, else sign-in that brings the shopper back to the
- * page they were on (S-07: back to checkout with the bag intact). Sign-in itself never asks to return to sign-in.
+ * page they were on (S-07: back to checkout with the bag intact), by its path. Sign-in itself never asks to return to sign-in.
  */
 function accountChip(req) {
   if (req?.shopper?.id) return { href: '/account', label: 'Account', aria: 'Your account' };
-  const here = String(req?.originalUrl ?? '');
+  // The page's path only: its query is the shopper's typing (a search) or a link's tags, never echoed back into the page (S-02).
+  const here = String(req?.originalUrl ?? '').split(/[?#]/)[0];
   const back = here.startsWith('/') && !here.startsWith('//') && !here.startsWith('/login') && here.length <= 300 ? `?next=${encodeURIComponent(here)}` : '';
   return { href: `/login${back}`, label: 'Sign in', aria: 'Sign in' };
 }
