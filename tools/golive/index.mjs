@@ -8,6 +8,7 @@ import { config as runtimeConfig, loadSecrets } from '../../src/config.js';
 import { openDb } from '../../src/db/index.js';
 import { createSecrets } from '../../src/platform/secrets.js';
 import { createGolive } from '../../src/modules/golive/checklist.js';
+import { createWhatsAppReader } from '../../src/adapters/whatsapp/index.js';
 
 export { formatMarkdown, formatText, groups, verdictLine } from './report.mjs';
 
@@ -53,7 +54,7 @@ export async function run(options = {}, deps = {}) {
     }
   }
   try {
-    return await createGolive({ config, db }, { env, secrets, ...deps.options }).status({ live });
+    return await createGolive({ config, db }, { env, secrets, ...deps.options, world: { whatsapp: createWhatsAppReader(config), ...deps.options?.world } }).status({ live });
   } finally {
     if (db && deps.db === undefined) await db.close?.().catch(() => {});
   }

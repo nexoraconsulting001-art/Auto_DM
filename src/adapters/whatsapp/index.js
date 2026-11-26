@@ -104,7 +104,7 @@ export function createWhatsApp(config = {}, { env = process.env } = {}) {
     return { authorization: `Bearer ${account.accessToken}` };
   };
 
-  return {
+  const client = {
     async sendTemplate(account, { to, name, language = 'en', components = [] }) {
       if (!/^[1-9][0-9]{7,14}$/.test(String(to))) throw new Error('WhatsApp needs the number in international format, digits only');
       // No retry: a send that may have gone out is not repeated.
@@ -160,6 +160,15 @@ export function createWhatsApp(config = {}, { env = process.env } = {}) {
     parseMessages,
     platform: platformSender(config, request),
   };
+  // The go-live checks read the platform number's status and templates and nothing else: this view has no send method at all,
+  // so the code that holds it cannot send even by mistake.
+  client.readOnly = Object.freeze({ templates: client.templates, phoneNumber: client.phoneNumber });
+  return client;
+}
+
+/** A WhatsApp client that can only read (templates, phone number status), for the go-live checks and their command line. */
+export function createWhatsAppReader(config = {}, options = {}) {
+  return createWhatsApp(config, options).readOnly;
 }
 
 function platformSender(config, request) {

@@ -176,7 +176,7 @@ export function createGolive(ctx = {}, options = {}) {
   const timeoutMs = Math.max(200, Math.min(30_000, Number(options.timeoutMs) || 8_000));
   const value = settingReader(config, env);
   const db = ctx.db?.platform ?? ctx.db ?? null;
-  const world = probeWorld(config, { whatsapp: ctx.providers?.whatsapp, ...options.world });
+  const world = probeWorld(config, { whatsapp: ctx.providers?.whatsapp?.readOnly, ...options.world });
   const probes = { ...PROBES, ...options.probes };
   const attestationsFile = options.attestationsFile ?? config.goliveAttestations ?? 'deploy/golive/attestations.json';
   const readFile = options.readFile ?? fs.readFileSync;
