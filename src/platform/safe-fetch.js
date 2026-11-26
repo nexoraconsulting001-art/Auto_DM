@@ -230,6 +230,7 @@ export function requestRaw(url, pinned, { signal, maxBytes = MAX_PAGE_BYTES, acc
 export function memoryHostGate({ gapMs = 1000, now = () => Date.now() } = {}) {
   const next = new Map();
   return {
+    gapMs,
     /** Resolves with the milliseconds to wait before calling `host`, having reserved that slot; null when that is longer than maxWaitMs. */
     async reserve(host, { maxWaitMs = 2000 } = {}) {
       const at = Math.max(next.get(host) ?? 0, now());
@@ -250,6 +251,7 @@ export function pgHostGate(db, { gapMs = 1000 } = {}) {
   const platform = db.platform ?? db;
   const gap = `${Math.max(0, Math.round(gapMs))} milliseconds`;
   return {
+    gapMs,
     async reserve(host, { maxWaitMs = 2000 } = {}) {
       const rows = await platform.query(
         `INSERT INTO fetch_hosts AS f (host, next_at) VALUES ($1, clock_timestamp() + $2::interval)
@@ -283,6 +285,8 @@ export function createSafeFetch({ lookup = systemLookup, dial = null, hostGate =
   }
 
   /** Every hop checked and pinned, within the profile's total time. Resolves { url, status, headers, contentType, body }. */
+  const lastConnect = new Map();
+
   async function fetchWith(input, profileName, { signal } = {}) {
     const profile = FETCH_PROFILES[profileName];
     if (!profile || profileName === 'linkCheck') throw new Error(`safeFetch: unknown profile "${profileName}"`);
@@ -301,10 +305,22 @@ export function createSafeFetch({ lookup = systemLookup, dial = null, hostGate =
     const walk = async () => {
       for (let hop = 0; ; hop++) {
         const host = bareHost(url.hostname).toLowerCase();
+        // The name is checked first and the host's turn is taken last, so the time between taking the turn and connecting is only
+        // the wait itself: a slow lookup can't bunch two requests to one host closer than the gap (K-26). The connection is pinned
+        // to the address that was checked, so waiting after the check changes nothing about where it goes (K-05).
+        const pinned = await resolvePublic(url, lookup);
         const wait = await hostGate.reserve(host, { maxWaitMs: maxHostWaitMs });
         if (wait === null) throw new SafeFetchError('host_busy', { url: url.href });
         await delay(wait, controller.signal);
-        const pinned = await resolvePublic(url, lookup);
+        // A turn is taken in the database, but a timer can fire late when the process is busy, and the next request's timer on time:
+        // two would then connect closer together than the gap. So the gap is also kept from the last connection this process made.
+        const gap = hostGate.gapMs ?? 0;
+        if (gap > 0) {
+          // Looked at again after every wait, and marked with no await in between, so two waiting requests can't both take the same moment.
+          for (let early = gap - (Date.now() - (lastConnect.get(host) ?? 0)); early > 0; early = gap - (Date.now() - (lastConnect.get(host) ?? 0))) await delay(early, controller.signal);
+          lastConnect.set(host, Date.now());
+          if (lastConnect.size > 10_000) lastConnect.delete(lastConnect.keys().next().value);
+        }
         const res = await requestRaw(url, pinned, { signal: controller.signal, maxBytes: profile.maxBytes, accept: profile.accept, types: profile.types, dial, userAgent });
         if (REDIRECTS.has(res.status)) {
           if (!res.headers?.location) throw new SafeFetchError('http_status', { status: res.status, url: url.href });
