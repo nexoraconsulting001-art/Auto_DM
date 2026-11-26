@@ -561,7 +561,8 @@ export function buyer(world, shop, { ua = UA.phone, ip = `203.0.113.${crypto.ran
     cancelOrder: (orderNumber, body = {}) => self.api('POST', `/api/store/orders/${encodeURIComponent(orderNumber)}/cancel`, body),
     consent: () => self.api('GET', '/api/store/consent'),
     saveConsent: (choices) => self.api('POST', '/api/store/consent', { choices: { noticeVersion: shop.noticeVersion ?? 1, ...choices } }),
-    dataRequest: (kind = 'erasure') => self.api('POST', '/api/store/data-requests', { kind }),
+    // As the account page sends it: an erasure carries the shopper's confirmation (consent/routes.js refuses one without it).
+    dataRequest: (kind = 'erasure') => self.api('POST', '/api/store/data-requests', kind === 'erasure' ? { kind, confirm: true } : { kind }),
     review: (body) => self.api('POST', '/api/store/reviews', body),
     /** A return request as the return page sends it: multipart, with the proof files given. */
     async askReturn(orderNumber, { fields = {}, files = [] } = {}) {
