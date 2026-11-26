@@ -61,7 +61,7 @@ test('G-18: each permission has a section with its use, its justification, a scr
 /** A copy of what the pack's checker reads, so the code can be changed without touching this repository. */
 function cloneRepo() {
   const dest = scratch('bhava-p9-clone-');
-  const keep = ['src', 'tools', 'scripts', 'docs', 'deploy', 'requirements', 'shared', 'apps', 'package.json', 'HANDOFF.md', 'README.md'];
+  const keep = ['src', 'tools', 'scripts', 'docs', 'deploy', 'requirements', 'shared', 'apps', 'packages', 'package.json', 'HANDOFF.md', 'README.md'];
   for (const name of keep) {
     if (!exists(name)) continue;
     fs.cpSync(path.join(ROOT, name), path.join(dest, name), { recursive: true, filter: (src) => !/node_modules|[\\/]\.git([\\/]|$)|[\\/]test-results/.test(src) });
