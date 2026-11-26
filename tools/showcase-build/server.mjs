@@ -157,7 +157,7 @@ export async function startShowcaseServer({ mode, key = '', brandsDir = '', bran
       if (mode === 'owner') {
         await withTenant(tenant, async () => {
           entry.order = await codOrder(db, { tenant, product, number: orderNumber(i + 1), changeOrder });
-          await db.query("INSERT INTO users (tenant_id, name, phone, email, password_hash, role) VALUES ($1, $2, $3, '', '!', 'owner')", [tenant.id, OPERATOR.name, OPERATOR.phone]);
+          await db.query("INSERT INTO users (tenant_id, name, phone, email, password_hash, role) VALUES ($1, $2, $3, '', NULL, 'owner')", [tenant.id, OPERATOR.name, OPERATOR.phone]);
         });
       }
       seeded.push(entry);

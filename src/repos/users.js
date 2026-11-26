@@ -14,7 +14,9 @@ export async function hashPassword(password) {
   return `scrypt$${salt}$${key.toString('base64url')}`;
 }
 
+/** True only for a real scrypt hash that matches. NULL (no password, migration 976) and anything else never match. */
 export async function checkPassword(password, stored) {
+  if (typeof stored !== 'string' || !stored) return false;
   const [scheme, salt, hash] = String(stored || '').split('$');
   if (scheme !== 'scrypt' || !salt || !hash) return false;
   const key = await scrypt(String(password ?? ''), salt, 32);

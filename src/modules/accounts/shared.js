@@ -38,5 +38,8 @@ export function maskedAccountPhone(phone) {
   return '';
 }
 
-/** A placeholder in password_hash: no password ever matches it (checkPassword wants scrypt$...). */
-export const NO_PASSWORD = '!';
+/**
+ * password_hash of an account with no password: NULL (migration 976, user decision 2026-11-26, F-122; it was the '!'
+ * placeholder while the column was NOT NULL). checkPassword never matches it, so it never signs in by password.
+ */
+export const NO_PASSWORD = null;
