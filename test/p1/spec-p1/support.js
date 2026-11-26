@@ -135,12 +135,12 @@ export function failingDb(db, pattern, state) {
   return { ...wrap(db), platform: wrap(db.platform) };
 }
 
-export async function openWorld({ overrides = {}, worker = true, proxy = false, wrapDb, defaultTenant = '' } = {}) {
+export async function openWorld({ overrides = {}, worker = true, proxy = false, wrapDb, defaultTenant = '', poolSize } = {}) {
   installFakeInternet();
   const meta = createMeta({ app: { id: IG_APP_ID, secret: APP_SECRET, verifyToken: VERIFY_TOKEN }, facebookApp: { id: FB_APP_ID, secret: FB_APP_SECRET } });
   await meta.start();
   const graph = proxy ? await startGraphProxy(meta.port) : null;
-  const rawDb = await openTestDb();
+  const rawDb = await openTestDb({ poolSize });
   const db = wrapDb ? wrapDb(rawDb) : rawDb;
   const secrets = createSecrets({ dataKey: TEST_DATA_KEY });
   const platform = createRepos(rawDb, { secrets });

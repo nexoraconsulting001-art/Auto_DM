@@ -54,7 +54,7 @@ export function isPrivateAddress(address) {
  * The app and its worker with the outside web simulated. `hostGapMs` is safeFetch's per-host gap (0 here unless a test is
  * about it). `world.dials` is every connection safeFetch made: { host, address, at }.
  */
-export async function openP3World({ overrides = {}, defaultTenant = '', hostGapMs = 0, worker = true } = {}) {
+export async function openP3World({ overrides = {}, defaultTenant = '', hostGapMs = 0, worker = true, poolSize } = {}) {
   const sites = createSites();
   await sites.start();
   const shopify = createShopify();
@@ -69,7 +69,7 @@ export async function openP3World({ overrides = {}, defaultTenant = '', hostGapM
       return inner.dial(url, pinned);
     },
   };
-  const world = await openWorld({ overrides: { safeFetchTransport: transport, fetchHostGapMs: hostGapMs, ...overrides }, worker, defaultTenant });
+  const world = await openWorld({ overrides: { safeFetchTransport: transport, fetchHostGapMs: hostGapMs, ...overrides }, worker, defaultTenant, poolSize });
   const closeWorld = world.close;
   return Object.assign(world, {
     sites,

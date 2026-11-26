@@ -172,7 +172,8 @@ test('the page is a profile: cover, photo or initials, name, about line, wide bu
     const text = res.text;
     assert.match(text, /<body class="creator">/, preset);
     // The profile: initials when there is no photo, the name as the one h1, the about line, then the two buttons.
-    const head = /<div class="creator-cover" aria-hidden="true"><\/div>\s*<section class="creator-head" aria-labelledby="creator-name">[\s\S]*?<\/section>/.exec(text)?.[0];
+    // The cover holds the seller's seal when the look has one (F-106, R2-CAT-16: every buyer page shows it), and nothing else.
+    const head = /<div class="creator-cover" aria-hidden="true">(?:<svg class="seal"[^>]*>[\s\S]*?<\/svg>)?<\/div>\s*<section class="creator-head" aria-labelledby="creator-name">[\s\S]*?<\/section>/.exec(text)?.[0];
     assert.ok(head, `${preset}: the profile header`);
     assert.match(head, /<span class="creator-photo"><span aria-hidden="true">ZP<\/span><\/span>/);
     assert.match(head, /<h1 id="creator-name">Zari &lt;picks&gt;<\/h1>/);

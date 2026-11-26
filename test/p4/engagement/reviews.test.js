@@ -173,7 +173,8 @@ test('reviews belong to one business: another approves nothing and shows nothing
 });
 
 test('the review request after delivery goes through the gate as marketing, once, and not without the shopper’s yes', async () => {
-  const app = await storeApp({ overrides: { reviewRequestDelayMs: 0 } });
+  // The tests read the Postgres jobs table and run the queue themselves, so the queue is Postgres's whatever QUEUE_DRIVER says (CI's production-drivers job: Redis), as R3-PROD-7 and R3-CAT-2 (R3-MONEY-14).
+  const app = await storeApp({ overrides: { reviewRequestDelayMs: 0, queueDriver: 'pg' } });
   try {
     await payments(app);
     const lamp = await product(app, { stock: 10 });

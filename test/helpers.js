@@ -127,8 +127,10 @@ export function appLoginUrl(ownerUrl) {
  * `logins: 2` opens it the way production does, with the restricted app login for business work and the owner for
  * db.platform. That needs TEST_DATABASE_URL; the returned handle has `urls: { owner, app }`.
  * TEST_DB_LOGINS=2 makes that the default for every test, to see what still leans on the owner outside db.platform.
+ * `poolSize` is the connections a Postgres handle may open (3; with two logins the owner gets half, at least 2): a test
+ * that holds many statements waiting at once needs more.
  */
-export async function openTestDb({ migrate = true, logins = DEFAULT_LOGINS } = {}) {
+export async function openTestDb({ migrate = true, logins = DEFAULT_LOGINS, poolSize = 3 } = {}) {
   const url = process.env.TEST_DATABASE_URL;
   if (logins === 2 && !url) throw new Error('A two-login test database needs TEST_DATABASE_URL');
   if (!url) return openDb({ migrate });
@@ -140,9 +142,9 @@ export async function openTestDb({ migrate = true, logins = DEFAULT_LOGINS } = {
   await admin.close();
   const target = new URL(url);
   target.pathname = `/${name}`;
-  if (logins !== 2) return openDb({ url: target.href, poolSize: 3, migrate });
+  if (logins !== 2) return openDb({ url: target.href, poolSize, migrate });
   const urls = { owner: target.href, app: appLoginUrl(target.href) };
-  return Object.assign(await openDb({ url: urls.app, ownerUrl: urls.owner, poolSize: 3, migrate }), { urls });
+  return Object.assign(await openDb({ url: urls.app, ownerUrl: urls.owner, poolSize, migrate }), { urls });
 }
 
 /**

@@ -72,7 +72,7 @@ export const address = (fields = {}) => ({ name: 'Asha Rao', phone: newPhone(), 
 
 // ---- the world ------------------------------------------------------------------------------------------------------------
 
-export async function openP4World({ overrides = {}, worker = true, defaultTenant = '' } = {}) {
+export async function openP4World({ overrides = {}, worker = true, defaultTenant = '', poolSize } = {}) {
   const rzp = createRazorpay();
   const ship = createShiprocket();
   const wa = createWhatsApp();
@@ -86,6 +86,7 @@ export async function openP4World({ overrides = {}, worker = true, defaultTenant
     world = await openP3World({
       worker,
       defaultTenant,
+      poolSize,
       overrides: {
         providerTimeoutMs: 1500,
         orderEventsPollMs: 40,
@@ -165,9 +166,25 @@ export async function openP4World({ overrides = {}, worker = true, defaultTenant
         );
         const byTable = new Map();
         for (const { table_name: table, column_name: column } of columns) byTable.set(table, [...(byTable.get(table) ?? []), column]);
+        // Postgres checks a unique key row by row as an UPDATE goes, so moving every row back by `ms` at once can land one on
+        // a key another row holds until it moves too (shipment_events: a courier's history scanned again after an age, so the
+        // same scan is stored at t and t + ms). Such tables move far into the past first, then forward to their place, so no
+        // row ever lands where another still is (R3-MONEY-6).
+        const keyed = new Set((await t.query(
+          `SELECT DISTINCT c.relname AS table FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
+           WHERE i.indisunique AND n.nspname = 'public' AND a.atttypid = 'timestamptz'::regtype AND c.relname = ANY($1)`,
+          [P4_CLOCK_TABLES],
+        )).map((r) => r.table));
+        const shift = (list, by) => list.map((c) => `"${c}" = "${c}" ${by}`).join(', ');
         for (const [table, list] of byTable) {
           await t.exec(`ALTER TABLE "${table}" DISABLE TRIGGER USER`);
-          await t.exec(`UPDATE "${table}" SET ${list.map((c) => `"${c}" = "${c}" - interval '${interval}'`).join(', ')}`);
+          if (keyed.has(table)) {
+            await t.exec(`UPDATE "${table}" SET ${shift(list, `- interval '1000 years' - interval '${interval}'`)}`);
+            await t.exec(`UPDATE "${table}" SET ${shift(list, `+ interval '1000 years'`)}`);
+          } else {
+            await t.exec(`UPDATE "${table}" SET ${shift(list, `- interval '${interval}'`)}`);
+          }
           await t.exec(`ALTER TABLE "${table}" ENABLE TRIGGER USER`);
         }
       });

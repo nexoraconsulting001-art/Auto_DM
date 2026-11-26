@@ -180,6 +180,30 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     });
   }
 
+  /**
+   * Moves tenants.status to what the subscription says (PRD 5.1, 5.12; R3-MONEY-1): a suspended subscription suspends the
+   * business, and when it is no longer suspended the business gets back the status it had. Only a suspension billing made
+   * is lifted (billing_suspended_from marks it). Runs after the transaction that changed the subscription, on the platform
+   * handle (the app login cannot write tenants.status), re-reading both rows under their locks, so it always ends at the
+   * subscription's last word; graceSweep() runs it for any business whose two rows disagree.
+   */
+  async function syncStatus(business) {
+    return platformDb.tx(async (p) => {
+      const [s] = await p.query('SELECT status FROM subscriptions WHERE tenant_id = $1 FOR UPDATE', [business]);
+      await p.query('SELECT id FROM tenants WHERE id = $1 FOR UPDATE', [business]);
+      if (s?.status === 'suspended') {
+        return (await p.query(
+          `UPDATE tenants SET status = 'suspended', billing_suspended_from = status WHERE id = $1 AND status IN ('onboarding', 'active', 'paused') RETURNING id`,
+          [business],
+        )).length > 0;
+      }
+      return (await p.query(
+        `UPDATE tenants SET status = billing_suspended_from, billing_suspended_from = NULL WHERE id = $1 AND status = 'suspended' AND billing_suspended_from IS NOT NULL RETURNING id`,
+        [business],
+      )).length > 0;
+    });
+  }
+
   // ---- the owner-locked pause ----
 
   /** The billing hold on sends: an owner-locked pause (4.12). A pause support set stays support's. */
@@ -837,7 +861,10 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       log.warn('billing.amount_mismatch', { tenantId: business, invoice: outcome.invoiceId, expected: outcome.mismatch.expected, got: outcome.mismatch.got });
       await opsAlert(platformDb, { tenantId: business, kind: 'billing.amount_mismatch', message: `A Bhava charge of ${outcome.mismatch.got} paise does not match the ${outcome.mismatch.expected} paise its invoice lists (invoice ${outcome.invoiceId}). Check it and issue a credit note if needed.`, target: `invoice:${outcome.invoiceId}`, dedupeKey: `billing-mismatch:${outcome.invoiceId}` });
     }
-    if (outcome.outcome === 'processed') await syncPlan(business);
+    if (outcome.outcome === 'processed') {
+      await syncPlan(business);
+      await syncStatus(business);
+    }
     if (outcome.resumed) await switchesChanged();
     return outcome.outcome;
   }
@@ -1091,12 +1118,23 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
             await provider().cancel(moved.s.provider_subscription_id, { atCycleEnd: false }).catch((err) => reportError(err, { msg: 'billing.cancel_failed' }));
           } else {
             done.suspended += 1;
+            await syncStatus(tenantId());
             await switchesChanged();
           }
         } catch (err) {
           reportError(err, { msg: 'billing.grace_failed', tenantId: row.tenant_id });
         }
       });
+    }
+    // A business whose status and subscription disagree (a run stopped between the two writes) is brought into line.
+    const drifted = await platformDb.query(
+      `SELECT t.id FROM tenants t LEFT JOIN subscriptions s ON s.tenant_id = t.id
+        WHERE (s.status = 'suspended' AND t.status IN ('onboarding', 'active', 'paused'))
+           OR (t.status = 'suspended' AND t.billing_suspended_from IS NOT NULL AND s.status IS DISTINCT FROM 'suspended')
+        ORDER BY t.id`,
+    );
+    for (const { id } of drifted) {
+      await withTenant(id, () => syncStatus(Number(id))).catch((err) => reportError(err, { msg: 'billing.status_sync_failed', tenantId: id }));
     }
     return done;
   }
@@ -1143,6 +1181,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
         await writeAudit(t, { actor, action: 'billing.suspended', target: 'billing', details: { reason } });
         await tell(t, { kind: 'billing.suspended', key: `billing:hold:${Date.now()}`, data: {}, message: 'Sending is paused for billing. Your data is safe. Contact Bhava to start again.' });
       });
+      await syncStatus(tenantId());
       await switchesChanged();
       return platform.view();
     },
@@ -1159,6 +1198,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
         await writeAudit(t, { actor, action: 'billing.resumed', target: 'billing', details: { reason } });
         await tell(t, { kind: 'billing.resumed', key: `billing:release:${Date.now()}`, data: {}, message: 'Bhava is sending again.' });
       });
+      await syncStatus(tenantId());
       await switchesChanged();
       return platform.view();
     },

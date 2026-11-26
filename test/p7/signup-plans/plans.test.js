@@ -48,9 +48,10 @@ test('F-34, F-35, F-128: a downgrade pauses the newest automations above the lim
   const made = await api(w, token, 'POST', '/automations', automationBody(6));
   assert.ok(made.status >= 400 && made.status < 500, `refused (${made.status})`);
   assert.equal((await states()).length, 5);
-  // F-125: a link flow other than two-tap is refused on Free.
+  // F-125: a link flow other than two-tap is refused on Free. User decision 2026-11-26 (plan gating): the plan's refusal,
+  // 403 plan.feature_off with the upgrade path, not the 400 this test was written against; the field is still named.
   const oneTap = await api(w, token, 'PATCH', `/automations/${ids[0]}`, { linkMode: 'one_tap' });
-  assert.equal(oneTap.status, 400);
+  assert.deepEqual([oneTap.status, oneTap.json.code, oneTap.json.feature, oneTap.json.upgradeUrl], [403, 'plan.feature_off', 'links.one_tap', '/admin/billing']);
   assert.ok(oneTap.json.fields?.linkMode);
 
   const downgrade = await w.sql(`SELECT actor, details FROM audit_log WHERE tenant_id = $1 AND action = 'plan.changed' ORDER BY id DESC LIMIT 1`, [w.tenant.id]);

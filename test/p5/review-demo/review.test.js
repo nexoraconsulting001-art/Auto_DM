@@ -108,6 +108,10 @@ test('the demo business can never send: the compliance engine holds every messag
   const session = await reviewSession(app);
   const threads = await call(app, '/api/v1/inbox/threads', { headers: session.headers });
   assert.equal(threads.status, 200);
+  // The sample's newest message is from the day before it was built, so after 8 pm India time every sample thread is
+  // outside Instagram's 24-hour window and the reply is refused before the gate (409 window.closed). The person writes
+  // again now, so the reply reaches the gate whatever the hour this runs (R3-MONEY-4).
+  await app.db.platform.query('UPDATE inbox_threads SET last_user_message_at = now() WHERE tenant_id = $1 AND id = $2', [demo.tenantId, threads.json.items[0].id]);
   const reply = await call(app, `/api/v1/inbox/threads/${threads.json.items[0].id}/reply`, { method: 'POST', headers: session.headers, body: { text: 'Hello there' } });
   assert.deepEqual([reply.status, reply.json?.outcome, reply.json?.reason], [200, 'held', 'paused.tenant']);
   assert.deepEqual(app.ig.calls, []);

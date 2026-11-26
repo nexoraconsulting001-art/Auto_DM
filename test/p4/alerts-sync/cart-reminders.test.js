@@ -15,6 +15,15 @@ async function age(app, ms) {
   await q(app, `UPDATE carts SET last_activity_at = last_activity_at - interval '${by}', updated_at = updated_at - interval '${by}' WHERE tenant_id = $1`, [app.tenant.id]);
   await q(app, `UPDATE cart_reminders SET created_at = created_at - interval '${by}', scheduled_for = scheduled_for - interval '${by}', sent_at = sent_at - interval '${by}' WHERE tenant_id = $1`, [app.tenant.id]);
 }
+/**
+ * The latest moment at least `ms` ago whose hour mark (an hour later) is daytime in India, 9 am to 9 pm: within the last
+ * day, so the 24-hour mark is still ahead.
+ */
+function daytimeAgo(ms) {
+  const at = new Date(Date.now() - ms);
+  const hour = new Date(at.getTime() + IST_MS).getUTCHours();
+  return hour >= 9 && hour < 20 ? at : lastIst(19, at);
+}
 const linkIn = (message) => /https?:\/\/[^\s"\\]+\/cart\/restore\/[A-Za-z0-9_-]+(\?[^\s"\\]*)?/.exec(JSON.stringify(message.body))?.[0];
 
 /** A signed-in shopper with marketing consent as given, and a cart left `idleMs` ago. */
@@ -188,7 +197,9 @@ test('coming back to the cart starts a new time; opting out or a STOP stops remi
     await reminders.run();
     assert.ok((await reminderRows(app)).every((r) => r.status !== 'scheduled' || r.episode > 1));
     if (fresh) assert.ok((await reminderRows(app)).some((r) => r.stop_reason === 'active_again'));
-    await age(app, 2 * HOUR);
+    // She leaves again at least two hours ago, at a daytime hour: planning puts an hour mark that falls between 9 pm and
+    // 9 am at 9 am (S-50), so aging by a flat two hours left nothing due when this ran at night (R3-MONEY-5).
+    await age(app, Date.now() - daytimeAgo(2 * HOUR).getTime());
     await reminders.run();
     const [cart] = await q(app, 'SELECT episode FROM carts WHERE tenant_id = $1 AND id = $2', [app.tenant.id, asha.cartId]);
     assert.equal(cart.episode, 2);

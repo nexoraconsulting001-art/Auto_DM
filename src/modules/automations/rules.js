@@ -1,4 +1,4 @@
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planOffMessage } from '../../contracts/api/index.js';
 import { COMPLIANCE_LIMITS as L } from '../../contracts/compliance.js';
 import { checkContent, linksIn } from '../compliance/content.js';
 import { linkProblem } from '../links/rules.js';
@@ -84,18 +84,22 @@ function checkSchedule({ startsAt, endsAt, dailyStart, dailyEnd }) {
   if (dailyStart && dailyStart === dailyEnd) throw refuse('The daily start and end can’t be the same.', 'schedule.dailyEnd', undefined);
 }
 
-/** A feature this plan does not have: 403 plan.feature_off naming the feature and the plan that has it, as the router answers a gated route. */
-async function featureOff(repos, feature, message) {
+/**
+ * A feature this plan does not have: 403 plan.feature_off with the decided words (user decision 2026-11-26) naming the
+ * lowest plan that has it, then the PRD's own reason for this feature (A-36: "One tap needs a paid plan"), with the
+ * feature, the field the form shows it on and the upgrade path (ApiError adds it), as the router answers a gated route.
+ */
+async function featureOff(repos, feature, field, why) {
   const plan = await repos.entitlements.lowestPlan([feature]);
-  return new ApiError('plan.feature_off', message, { reason: 'plan', feature, plan: plan?.code });
+  return new ApiError('plan.feature_off', `${planOffMessage(plan?.name)}. ${why}`, { reason: 'plan', feature, plan: plan?.code, fields: { [field]: why } });
 }
 
 async function checkPlan(input, { repos }) {
   if (PAID_TRIGGERS.has(input.triggerType) && !(await repos.entitlements.can('triggers.story_dm'))) {
-    throw await featureOff(repos, 'triggers.story_dm', 'Story and DM automations need a higher plan.');
+    throw await featureOff(repos, 'triggers.story_dm', 'triggerType', 'Story and DM automations need a higher plan.');
   }
-  if (input.triggerType === 'comment' && !(await repos.entitlements.can('triggers.comment'))) throw await featureOff(repos, 'triggers.comment', 'Comment automations aren’t on your plan.');
-  if (input.linkMode === 'one_tap' && !(await repos.entitlements.can('links.one_tap'))) throw await featureOff(repos, 'links.one_tap', 'One tap needs a paid plan');
+  if (input.triggerType === 'comment' && !(await repos.entitlements.can('triggers.comment'))) throw await featureOff(repos, 'triggers.comment', 'triggerType', 'Comment automations aren’t on your plan.');
+  if (input.linkMode === 'one_tap' && !(await repos.entitlements.can('links.one_tap'))) throw await featureOff(repos, 'links.one_tap', 'linkMode', 'One tap needs a paid plan.');
 }
 
 /** Every text a buyer gets from this automation, by the field it is saved in. */

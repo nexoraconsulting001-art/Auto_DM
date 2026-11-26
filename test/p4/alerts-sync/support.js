@@ -27,6 +27,8 @@ export async function alertsApp({ whatsapp = true, overrides = {} } = {}) {
   const app = await storeApp({
     overrides: {
       providerTimeoutMs: 1500,
+      // The tests read the Postgres jobs table and run the queue themselves, so the queue is Postgres's whatever QUEUE_DRIVER says (CI's production-drivers job: Redis), as R3-PROD-7 and R3-CAT-2 (R3-MONEY-14).
+      queueDriver: 'pg',
       // A neutral platform domain: links built on it must not carry the platform's name.
       platformDomain: 'shops.example',
       whatsappBaseUrl: sims.wa.url,

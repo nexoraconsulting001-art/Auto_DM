@@ -16,6 +16,8 @@ import { Id, IdParams, ListQuery, Timestamp, page, required, text } from './comm
  * business and the operator, and counts down to `expiresAt`. `consoleUrl` is where ending the session returns to.
  */
 export const SessionOperator = z.object({
+  /** The support or service session's own id (impersonation_sessions / service_sessions), never a person's. */
+  id: z.number().int().positive().optional(),
   kind: z.enum(['impersonation', 'service']),
   operatorName: z.string(),
   mode: z.enum([...IMPERSONATION_MODES, ...SERVICE_MODES]),

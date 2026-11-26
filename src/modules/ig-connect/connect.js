@@ -204,6 +204,9 @@ export function createConnect({ db, repos, meta, config, platform, gates }) {
     const claim = await claimAccount(tenant, login);
     if (!claim) {
       log.warn('ig_connect.account_taken', { igUserId: login.igUserId });
+      // The account is another business's: a referral between the two is a self-referral (F-129). The connect trigger of
+      // migration 741 never runs for a refused account, so the block is made here (migration 986).
+      await platformDb.query('SELECT block_same_instagram_referrals($1, $2)', [String(login.igUserId), Number(tenant.id)]);
       await repos.audit.record({ actor: `user:${person.id}`, action: 'instagram.connect_refused', target: `instagram:${login.igUserId}`, details: { reason: 'other_business' } });
       return 'taken';
     }

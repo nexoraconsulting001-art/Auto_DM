@@ -80,10 +80,14 @@ test('a message that is nothing without the name is refused', withApp(async (app
 }));
 
 test('A-36: one tap on the free plan is refused and two taps stay on', withApp(async (app) => {
-  const res = await refused(await app.api('POST', '/automations', body({ linkMode: 'one_tap' })), 400, 'validation_failed');
-  assert.equal(res.error, 'One tap needs a paid plan');
+  // User decision 2026-11-26 (plan gating): 403 plan.feature_off, "Not included in your current plan - upgrade", the
+  // upgrade path; the PRD's own A-36 words stay in the message. The merge of fix/d1-decisions had put back the 400 here.
+  const res = await refused(await app.api('POST', '/automations', body({ linkMode: 'one_tap' })), 403, 'plan.feature_off');
+  assert.match(res.error, /^Not included in your current plan - upgrade/);
+  assert.match(res.error, /One tap needs a paid plan/);
+  assert.deepEqual([res.feature, res.upgradeUrl], ['links.one_tap', '/admin/billing']);
   const saved = await save(app);
-  await refused(await app.api('PATCH', `/automations/${saved.id}`, { linkMode: 'one_tap' }), 400, 'validation_failed');
+  await refused(await app.api('PATCH', `/automations/${saved.id}`, { linkMode: 'one_tap' }), 403, 'plan.feature_off');
   assert.equal((await ok(await app.api('GET', `/automations/${saved.id}`))).linkMode, 'two_tap');
   await setPlan(app, 't1');
   assert.equal((await ok(await app.api('PATCH', `/automations/${saved.id}`, { linkMode: 'one_tap' }))).linkMode, 'one_tap');
@@ -91,7 +95,9 @@ test('A-36: one tap on the free plan is refused and two taps stay on', withApp(a
 
 test('story and DM automations need a plan that includes them', withApp(async (app) => {
   const story = { triggerType: 'story_reply', keywords: [], triggers: [{ targetType: 'any_story' }] };
-  await refused(await app.api('POST', '/automations', body(story)), 400, 'validation_failed');
+  const off = await refused(await app.api('POST', '/automations', body(story)), 403, 'plan.feature_off');
+  assert.deepEqual([off.feature, off.upgradeUrl], ['triggers.story_dm', '/admin/billing']);
+  assert.match(off.error, /^Not included in your current plan - upgrade/);
   await setPlan(app, 't3');
   await save(app, story);
 }));
