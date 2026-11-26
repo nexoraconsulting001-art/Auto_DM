@@ -62,6 +62,7 @@ export function pagesApi(ctx) {
 
   async function checkedProducts(ids) {
     const unique = [...new Set(ids)];
+    if (unique.length !== ids.length) throw invalidField('productIds', 'A product can be on a page only once');
     const limit = await productLimit();
     if (unique.length > limit) {
       const message = limit < L.landingProducts
