@@ -263,7 +263,7 @@ export function createSecretRotation(ctx, { batch = REWRAP_BATCH, budgetMs = 20_
 
 export const secretRotation = {
   name: 'secret-rotation',
-  owns: { migrations: ['900_secrets_envelope.sql', '960_secrets_bound.sql'], tables: ['secret_rewraps'], api: [], store: [], platform: [], jobs: [REWRAP_JOB] },
+  owns: { migrations: ['900_secrets_envelope.sql', '970_secrets_bound.sql'], tables: ['secret_rewraps'], api: [], store: [], platform: [], jobs: [REWRAP_JOB] },
   jobs(ctx) {
     const rotation = createSecretRotation(ctx);
     ctx.platform.queue.work(REWRAP_JOB, () => rotation.run());

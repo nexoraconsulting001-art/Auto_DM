@@ -1,4 +1,4 @@
--- R2-SEC-1 (PRD 5.15, F-64): a stored secret is sealed to its record. A value bound to its row starts `v1~<binding id>.`
+-- 970, R2-SEC-1 (PRD 5.15, F-64): a stored secret is sealed to its record. A value bound to its row starts `v1~<binding id>.`
 -- or `v2~<binding id>.` (src/platform/secrets.js), so the columns whose CHECK named the forms take the bound forms too,
 -- and still nothing in the clear. Each such CHECK is replaced under its own name, as 900 did. No value is rewritten
 -- here: the re-wrap job (src/modules/secret-rotation) binds every stored value to its row, without downtime.
