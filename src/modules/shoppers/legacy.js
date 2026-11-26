@@ -33,14 +33,15 @@ export function legacyAccountRoutes({ repos, auth, config }) {
     const next = safeNext(field(req.body, 'next', 500), '');
     const phone = field(req.body, 'phone', 20);
     const password = field(req.body, 'password', 200);
-    if (await auth.tooManyAttempts(req)) {
+    // Counted before the password is checked, given back only when it matched (B-AUTH-2).
+    if (!(await auth.takeTry(req))) {
       return page(res, loginPage({ settings, next: next || '/', phone, error: 'Too many tries. Wait 15 minutes and try again.' }), 429);
     }
     const user = phone && password && !NUL.test(phone + password) ? await repos.users.verify(phone, password) : null;
     if (!user) {
-      await auth.recordFailure(req);
       return page(res, loginPage({ settings, next: next || '/', phone: NUL.test(phone) ? '' : phone, error: 'That mobile number and password don’t match.' }), 401);
     }
+    await auth.giveBack(req);
     await auth.login(req, res, user);
     return res.redirect(303, next && next !== '/' ? next : home(user));
   }));
@@ -83,13 +84,11 @@ export function legacyAccountRoutes({ repos, auth, config }) {
       page(res, view.replace('<h2>Change password</h2>', `<h2>Change password</h2><p class="form-error" role="alert">${message}</p>`), 400);
     };
     if (isEnvOwner(req.user)) return renderError('The owner password is set in .env (ADMIN_PASSWORD).');
-    if (await auth.tooManyAttempts(req)) return renderError('Too many tries. Wait 15 minutes and try again.');
+    if (!(await auth.takeTry(req))) return renderError('Too many tries. Wait 15 minutes and try again.');
     const current = field(req.body, 'current', 200);
     const password = field(req.body, 'password', 200);
-    if (!current || !(await repos.users.verify(req.user.phone, current))) {
-      await auth.recordFailure(req);
-      return renderError('Your current password isn’t right.');
-    }
+    if (!current || !(await repos.users.verify(req.user.phone, current))) return renderError('Your current password isn’t right.');
+    await auth.giveBack(req);
     try {
       await repos.users.setPassword(req.user.id, password);
     } catch (err) {

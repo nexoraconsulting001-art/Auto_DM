@@ -70,6 +70,19 @@ function loginLimiter(cache, prefix) {
       a.n++;
       await cache.set(key(req), a, Math.max(1, (a.reset - now) / 1000));
     },
+    /** Counts a try as a failure before it is looked at; false when the address has no tries left. See platformLimiter. */
+    async takeTry(req) {
+      const now = Date.now();
+      const a = (await cache.get(key(req))) || { n: 0, reset: now + WINDOW_SECONDS * 1000 };
+      a.n++;
+      await cache.set(key(req), a, Math.max(1, (a.reset - now) / 1000));
+      return a.n <= MAX_FAILURES;
+    },
+    /** Gives back the try takeTry counted, for one that turned out well. */
+    async giveBack(req) {
+      const a = await cache.get(key(req));
+      if (a?.n > 0) await cache.set(key(req), { ...a, n: a.n - 1 }, Math.max(1, (a.reset - Date.now()) / 1000));
+    },
     clearFailures: (req) => cache.del(key(req)),
   };
 }
@@ -91,8 +104,10 @@ function loginLimiter(cache, prefix) {
  */
 const opensForOperator = (found) => Boolean(found) && (found.impersonationId != null || found.serviceSessionId != null);
 
-export function createAuth({ secret, users, sessions, tenants, cache, passwordLogin = false }) {
-  const limiter = loginLimiter(cache, 'login-attempts');
+export function createAuth({ secret, users, sessions, tenants, cache, rateLimit = null, passwordLogin = false }) {
+  // Counted in Postgres like the console's (one statement per try), so tries that arrive together are all counted. A
+  // seller's password change still clears its own address's count (clearFailures), as it did in the cache.
+  const limiter = rateLimit ? platformLimiter(rateLimit, { scope: 'login_failures', clears: true }) : loginLimiter(cache, 'login-attempts');
   const notLoggedIn = (res) => res.status(401).json({ error: 'Please log in again.', code: 'unauthorized' });
   // The app's access tokens always; the Phase 0 30-day token only while PASSWORD_LOGIN is on.
   const bearerKinds = passwordLogin ? ['access', 'bearer'] : ['access'];
@@ -201,9 +216,12 @@ export function createAuth({ secret, users, sessions, tenants, cache, passwordLo
  * The Platform Console's failed sign-ins per address, counted in Postgres (platform.rateLimit) in one statement: a
  * read-then-write count in the cache (Redis in production, two round trips) loses failures that arrive together.
  * Nothing clears it early: one person's good sign-in from an address says nothing about another's guesses there.
+ *
+ * A sign-in route counts its try with takeTry before it looks at the code, and gives it back (giveBack) only when the try
+ * turned out well (B-AUTH-2). Checking with tooManyAttempts and counting with recordFailure after the code was compared let
+ * every guess of a burst from one address pass the check before any of them was counted: thirty at once were all looked at.
  */
-function platformLimiter(rateLimit) {
-  const scope = 'platform_login_failures';
+function platformLimiter(rateLimit, { scope = 'platform_login_failures', clears = false } = {}) {
   const window = { limit: MAX_FAILURES, windowMs: WINDOW_SECONDS * 1000 };
   return {
     async tooManyAttempts(req) {
@@ -212,7 +230,15 @@ function platformLimiter(rateLimit) {
     async recordFailure(req) {
       await rateLimit.hit(scope, String(req.ip), window);
     },
-    clearFailures: async () => {},
+    /** Counts this try as a failure now, in one statement; false when it is past the address's limit (answer 429). */
+    async takeTry(req) {
+      return (await rateLimit.hit(scope, String(req.ip), window)).allowed;
+    },
+    /** The try takeTry counted turned out well: it is not a failure. Gives back that one try, never the window's others. */
+    async giveBack(req) {
+      await rateLimit.release(scope, String(req.ip), window);
+    },
+    clearFailures: clears ? (req) => rateLimit.reset(scope, String(req.ip)) : async () => {},
   };
 }
 

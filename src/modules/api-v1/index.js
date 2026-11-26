@@ -54,13 +54,23 @@ async function checkPlan(route, { repos }, counters, call) {
     const max = count ? await entitlements.limit(route.limit.feature) : Infinity;
     if (max !== Infinity) {
       const used = Number(await count(call)) || 0;
-      if (used >= max) {
-        const plan = await entitlements.lowestPlan([route.limit.feature], { moreThan: max });
-        throw new ApiError('plan.limit_reached', plan ? `You have reached your plan’s limit of ${max}. The ${plan.name} plan has more.` : `You have reached your plan’s limit of ${max}.`, { reason: planRefusalReason(route.id), feature: route.limit.feature, plan: plan?.code, limit: max, used });
-      }
+      if (used >= max) throw await limitReached(route, entitlements, max, used);
     }
   }
 }
+
+/** The plan.limit_reached answer for a route's limit: the router's own refusal, and the database's when requests raced. */
+async function limitReached(route, entitlements, max, used) {
+  const plan = await entitlements.lowestPlan([route.limit.feature], { moreThan: max });
+  return new ApiError('plan.limit_reached', plan ? `You have reached your plan’s limit of ${max}. The ${plan.name} plan has more.` : `You have reached your plan’s limit of ${max}.`, { reason: planRefusalReason(route.id), feature: route.limit.feature, plan: plan?.code, limit: max, used });
+}
+
+/**
+ * The count checkPlan reads is a statement of its own, before the handler writes: requests sent at once all read the
+ * same count. A limit the database also holds (team_invites_within_plan, migration 945) refuses the write that would go
+ * past it with check_violation 'plan.limit_reached' and the feature as its detail; that is answered like checkPlan's.
+ */
+const isLimitError = (err, feature) => err?.code === '23514' && /plan\.limit_reached/.test(String(err?.message ?? '')) && String(err?.detail ?? '') === feature;
 
 function fieldErrors(issues) {
   const fields = {};
@@ -133,7 +143,14 @@ function serve(route, handler, ctx, counters, handlers) {
     const call = { params, query, body, file: req.file, user: req.user ?? null, req, res };
     /** Runs the handler and answers its result as the response schema allows it out; undefined for a route with no body. */
     const apply = async () => {
-      const result = await handler(call);
+      let result;
+      try {
+        result = await handler(call);
+      } catch (err) {
+        if (!route.limit || !isLimitError(err, route.limit.feature)) throw err;
+        const max = await ctx.repos.entitlements.limit(route.limit.feature);
+        throw await limitReached(route, ctx.repos.entitlements, max, max);
+      }
       if (route.response === null) return undefined;
       if (result === null || result === undefined) throw new ApiError('not_found');
       const output = route.response.safeParse(result);

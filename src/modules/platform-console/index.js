@@ -67,12 +67,11 @@ export const platformConsole = {
     // The Phase 0 email and password sign-in, kept only behind PASSWORD_LOGIN (tests and local work).
     r.post('/login', sameOriginOnly, async (req, res) => {
       if (!config.passwordLogin) return res.status(404).type('text').send('Not found.');
-      if (await auth.tooManyAttempts(req)) return res.status(429).json({ error: 'Too many tries. Wait 15 minutes and try again.' });
+      // Counted before the password is checked and given back only when it matched (B-AUTH-2), like the code sign-in.
+      if (!(await auth.takeTry(req))) return res.status(429).json({ error: 'Too many tries. Wait 15 minutes and try again.' });
       const user = await repos.platformUsers.verify(String(req.body?.email ?? '').slice(0, 200), req.body?.password);
-      if (!user) {
-        await auth.recordFailure(req);
-        return res.status(401).json({ error: 'That email and password don’t match.' });
-      }
+      if (!user) return res.status(401).json({ error: 'That email and password don’t match.' });
+      await auth.giveBack(req);
       const csrf = await auth.login(req, res, user);
       res.json({ user: describe(user), csrf });
     });

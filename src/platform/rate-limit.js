@@ -11,6 +11,9 @@ import crypto from 'node:crypto';
  *       via      an open transaction on the platform database to count in, so the hit commits or rolls back with what
  *                it limits (and needs no second connection while that transaction holds a lock).
  *   peek(scope, subject, { limit, windowMs }) -> the same, without counting
+ *   release(scope, subject, { windowMs }) gives back one hit of the current window: for a limit that counts a try before
+ *       it is looked at (so tries arriving together cannot all pass a count none of them has added to yet) and does not
+ *       count the tries that turned out well.
  *   reset(scope, subject)
  *   purge(olderThanMs) removes rows nobody has hit lately (housekeeping).
  *
@@ -49,6 +52,13 @@ export function createRateLimit({ db } = {}) {
         [keyOf(scope, subject), windowMs],
       );
       return row ? answer({ ...row, hits: Number(row.hits) + 1 }, limit, windowMs) : { allowed: true, hits: 0, retryAfterMs: 0 };
+    },
+    async release(scope, subject, { windowMs }) {
+      await need().query(
+        `UPDATE rate_limit_hits SET hits = hits - 1
+         WHERE key = $1 AND hits > 0 AND window_start > now() - make_interval(secs => $2::float / 1000)`,
+        [keyOf(scope, subject), windowMs],
+      );
     },
     async reset(scope, subject) {
       await need().query('DELETE FROM rate_limit_hits WHERE key = $1', [keyOf(scope, subject)]);

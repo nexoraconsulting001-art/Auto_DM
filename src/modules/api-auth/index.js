@@ -29,12 +29,11 @@ export const apiAuth = {
       'auth.login': async ({ body, req, res }) => {
         if (!ctx.config?.passwordLogin) throw new ApiError('not_found');
         const { repos, auth } = ctx;
-        if (await auth.tooManyAttempts(req)) throw new ApiError('rate_limited', 'Too many tries. Wait 15 minutes and try again.');
+        // Counted before the password is checked, given back only when it matched (B-AUTH-2).
+        if (!(await auth.takeTry(req))) throw new ApiError('rate_limited', 'Too many tries. Wait 15 minutes and try again.');
         const user = await repos.users.verify(body.phone, body.password);
-        if (!user) {
-          await auth.recordFailure(req);
-          throw new ApiError('unauthorized', 'That mobile number and password don’t match.');
-        }
+        if (!user) throw new ApiError('unauthorized', 'That mobile number and password don’t match.');
+        await auth.giveBack(req);
         // A good password never wipes the count of guesses made from this address at someone else's.
         if (body.transport === 'cookie') return { ...(await describe(user)), csrf: await auth.login(req, res, user) };
         const token = await repos.sessions.create(user.id, SESSION_DAYS, 'bearer');

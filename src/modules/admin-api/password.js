@@ -41,13 +41,14 @@ export function mountPasswordChange(app, { repos, auth, config }) {
     const { currentPassword, newPassword } = parsed(req.body);
 
     if (isEnvOwner(req.user)) throw new ApiError('conflict', 'The owner password is set in .env (ADMIN_PASSWORD).');
-    if (await auth.tooManyAttempts(req)) throw new ApiError('rate_limited', 'Too many tries. Wait 15 minutes and try again.');
+    // Counted before the password is checked, and given back when it was right (B-AUTH-2).
+    if (!(await auth.takeTry(req))) throw new ApiError('rate_limited', 'Too many tries. Wait 15 minutes and try again.');
     if (!(await repos.users.verify(req.user.phone, currentPassword))) {
-      await auth.recordFailure(req);
       // Not a 401: this session is fine, and the clients sign the person out on any 401.
       const message = 'Your current password isn’t right.';
       throw new ApiError('validation_failed', message, { fields: { currentPassword: message } });
     }
+    await auth.giveBack(req);
 
     await repos.users.setPassword(req.user.id, newPassword);
     log.info('auth.password_changed', { userId: req.user.id });
