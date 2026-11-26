@@ -61,6 +61,10 @@ describe('sign-up cap (PRD 5.20, migration 910, auth-2)', () => {
       }
       const page = await call(app, '/admin/products', { headers: held.auth });
       assert.ok(page.status >= 300, `a page answered ${page.status} for a held place`);
+      // User decision 2026-11-26 (B-AUTH-4): while sign-up is closed, the page it goes to says it is waiting for approval, with no data.
+      const waiting = await call(app, '/admin/waiting', { headers: held.auth });
+      assert.equal(waiting.status, 200, waiting.text);
+      assert.match(waiting.text, /waiting for approval/);
       // Sign-up refuses while closed, whatever the body says.
       const start = await call(app, '/api/v1/signup', { method: 'POST', headers: held.auth, body: { name: 'Sneaky', accountType: 'seller', inviteCode: 'AAAA-BBBB-CCCC' } });
       assert.equal(start.status, 403, start.text);

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import net from 'node:net';
-import { ApiError, isApiV1Url } from '../../contracts/api/index.js';
+import { ApiError, isApiV1Url, planOff } from '../../contracts/api/index.js';
 import { TlsAskQuery } from '../../contracts/api/provider.js';
 import { log, reportError } from '../../platform/log.js';
 import { currentTenant, normalizeHost, tenantId, withTenant } from '../../tenancy.js';
@@ -113,7 +113,7 @@ export function createDomainService({ repos, platform, config, tenantResolver })
     },
 
     async add(input, user) {
-      if (!(await repos.entitlements.can('custom_domain'))) throw new ApiError('forbidden', 'Custom domains aren’t included in your plan.');
+      if (!(await repos.entitlements.can('custom_domain'))) throw planOff('custom_domain');
       if (!edge) throw new ApiError('conflict', 'Custom domains aren’t available yet.');
       const domain = cleanDomain(input, config);
       if ((await repos.domains.countOthers(domain)) >= MAX_DOMAINS) throw new ApiError('conflict', `A business can have up to ${MAX_DOMAINS} domains. Remove one first.`);

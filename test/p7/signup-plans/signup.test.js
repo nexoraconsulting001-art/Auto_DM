@@ -4,6 +4,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SIGNUP_STEPS } from '../../../src/contracts/billing.js';
 import { captureLogs } from '../../p5/accounts/support.js';
+import { checkPassword } from '../../../src/repos/users.js';
 import { world } from './support.js';
 
 let w;
@@ -65,7 +66,8 @@ test('F-122: a person signed in with a WhatsApp code gets one Free business of t
   const [tenant] = await w.sql('SELECT plan, account_type, name FROM tenants WHERE id = $1', [started.json.tenantId]);
   assert.deepEqual(tenant, { plan: 'free', account_type: 'creator', name: 'Admin' });
   const [owner] = await w.sql('SELECT role, password_hash FROM users WHERE tenant_id = $1 AND person_id = $2', [started.json.tenantId, priya.personId]);
-  assert.deepEqual(owner, { role: 'owner', password_hash: '!' });
+  assert.deepEqual(owner, { role: 'owner', password_hash: null }); // no password is NULL (migration 976, user decision 2026-11-26)
+  for (const tried of ['', '!', 'null', 'password']) assert.equal(await checkPassword(tried, owner.password_hash), false, 'no password never signs in by password');
   const audit = await w.sql(`SELECT details FROM audit_log WHERE tenant_id = $1 AND action = 'business.created' ORDER BY id DESC LIMIT 1`, [started.json.tenantId]);
   assert.equal(audit[0].details.via, 'signup');
 

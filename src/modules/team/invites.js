@@ -4,7 +4,7 @@ import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { writeAudit } from '../audit/index.js';
 
-const NO_PASSWORD = '!';
+const NO_PASSWORD = null; // no password: NULL (migration 976), as accounts/shared.js NO_PASSWORD
 const placeholderPhone = (personId) => `person:${Number(personId)}`;
 
 /**

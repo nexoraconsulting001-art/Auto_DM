@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planLimitMessage } from '../../contracts/api/index.js';
 import { COMPLIANCE_LIMITS as L } from '../../contracts/compliance.js';
 import { checkContent } from '../compliance/content.js';
 import { META_ACCESS_HELD } from '../compliance/gate.js';
@@ -53,10 +53,12 @@ export function automationsApi(ctx) {
       try {
         return present(await repos.automations.create(stored(body, body.triggerType), { createdBy: user.id, limit, actor: actorOf(user) }));
       } catch (err) {
-        // The save is refused under the create lock; the answer also names the plan that has more, as the router's own limit answer does.
-        if (err?.code !== 'plan.limit_reached') throw err;
-        const plan = await repos.entitlements.lowestPlan(['automations'], { moreThan: limit });
-        throw new ApiError('plan.limit_reached', plan ? `You have reached your plan’s limit of ${limit} automations. The ${plan.name} plan has more.` : err.message, { reason: err.reason, feature: err.feature, limit: err.limit, used: err.used, plan: plan?.code });
+        // At the limit: the plan that has more, for the upgrade prompt.
+        if (err?.code === 'plan.limit_reached' && !err.plan) {
+          const more = await repos.entitlements.lowestPlan(['automations'], { moreThan: limit });
+          if (more) Object.assign(err, { plan: more.code, message: planLimitMessage(limit, more.name) });
+        }
+        throw err;
       }
     },
 

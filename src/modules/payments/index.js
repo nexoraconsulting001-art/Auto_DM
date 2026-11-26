@@ -1,4 +1,4 @@
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planOff } from '../../contracts/api/index.js';
 import { STORE_PROVIDER_PATHS } from '../../contracts/store-routes.js';
 import { log, reportError } from '../../platform/log.js';
 import { tenantBaseUrl } from '../admin-api/urls.js';
@@ -50,7 +50,7 @@ const api = (fn) => async (...args) => {
 const actorOf = (user) => `user:${user.id}`;
 
 async function needPlan(ctx) {
-  if (!(await ctx.repos.entitlements.can('store.payments'))) throw new ApiError('forbidden', 'Online payments aren’t on your plan.', { reason: 'plan' });
+  if (!(await ctx.repos.entitlements.can('store.payments'))) throw planOff('store.payments', { reason: 'plan' });
 }
 
 export const payments = {

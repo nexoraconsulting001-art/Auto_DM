@@ -1,4 +1,4 @@
-// A failed renewal (PRD 5.12, F-53): seven days of grace with reminders, then an owner-locked pause of every send with all
+// A failed renewal (PRD 5.12, F-53): billing_settings.grace_days of grace (2 by default, user decision 2026-11-26) with reminders, then an owner-locked pause of every send with all
 // data kept; only a payment or Bhava's team lifts it. 'move_to_free' instead ends the subscription.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +9,7 @@ const later = (w, ms) => createBilling(w.app.ctx, { now: () => new Date(Date.now
 const ownerAlerts = (w, shop, kind) => w.sql(`SELECT * FROM alerts WHERE tenant_id = $1 AND audience = 'owner' AND kind = $2 ORDER BY id`, [shop.tenant.id, kind]);
 const told = async (w, shop, kind) => (await ownerAlerts(w, shop, kind)).length + (await w.sql('SELECT 1 FROM notification_events WHERE tenant_id = $1 AND kind = $2', [shop.tenant.id, kind])).length;
 
-test('F-53: unpaid on day 8 the business is suspended, its sends held as an owner-locked pause and its data intact; a payment lifts it', async (t) => {
+test('F-53: unpaid after grace the business is suspended, its sends held as an owner-locked pause and its data intact; a payment lifts it', async (t) => {
   const w = await openBilling(t);
   const shop = await w.business({ state: '29' });
   await shop.subscribe('t1');
@@ -22,7 +22,7 @@ test('F-53: unpaid on day 8 the business is suspended, its sends held as an owne
   const grace = await shop.sub();
   assert.equal(grace.status, 'grace');
   const days = (new Date(grace.grace_until) - Date.now()) / DAY;
-  assert.ok(days > 6.9 && days <= 7.01, `seven days of grace, got ${days}`);
+  assert.ok(days > 1.9 && days <= 2.01, `two days of grace by default (user decision 2026-11-26), got ${days}`);
   assert.equal(await told(w, shop, 'billing.payment_failed'), 1, 'the owner is told');
   assert.equal((await shop.payments()).filter((p) => p.status === 'failed').length, 1);
   assert.equal((await shop.tenantRow()).plan, 't1', 'grace keeps the plan');
@@ -33,18 +33,18 @@ test('F-53: unpaid on day 8 the business is suspended, its sends held as an owne
   assert.equal(+new Date((await shop.sub()).grace_until), +new Date(grace.grace_until));
 
   // Reminders: one a day, however often the job runs.
-  const day3 = later(w, 3 * DAY);
-  assert.equal((await day3.graceSweep()).reminded, 1);
-  await day3.graceSweep();
+  const halfDay = later(w, DAY / 2);
+  assert.equal((await halfDay.graceSweep()).reminded, 1);
+  await halfDay.graceSweep();
   assert.equal(await told(w, shop, 'billing.grace_reminder'), 1);
-  await later(w, 5 * DAY).graceSweep();
+  await later(w, 1.5 * DAY).graceSweep();
   assert.equal(await told(w, shop, 'billing.grace_reminder'), 2);
   assert.equal((await shop.sub()).status, 'grace');
 
-  // Day 8.
-  const day8 = later(w, 8 * DAY);
-  assert.equal((await day8.graceSweep()).suspended, 1);
-  assert.equal((await day8.graceSweep()).suspended, 0, 'once');
+  // A day after grace ended.
+  const afterGrace = later(w, 3 * DAY);
+  assert.equal((await afterGrace.graceSweep()).suspended, 1);
+  assert.equal((await afterGrace.graceSweep()).suspended, 0, 'once');
   const held = await shop.sub();
   assert.equal(held.status, 'suspended');
   const pause = await w.one('SELECT paused, paused_by FROM compliance_settings WHERE tenant_id = $1', [shop.tenant.id]);

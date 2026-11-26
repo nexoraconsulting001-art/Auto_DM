@@ -1,6 +1,6 @@
 import express from 'express';
 import { ANALYTICS_LIMITS as L, REPORTING_BASE_PATH } from '../../contracts/analytics.js';
-import { ApiError, ExploreFilter, ExploreRequest, IdParams, reportingRouteList } from '../../contracts/api/index.js';
+import { ApiError, ExploreFilter, ExploreRequest, IdParams, planOff, reportingRouteList } from '../../contracts/api/index.js';
 import { currentRequestId, log } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { readCursor, writeCursor } from '../admin-api/paging.js';
@@ -128,7 +128,7 @@ export function registerReportingApi(app, ctx) {
       const tenant = business(req);
       await withTenant(tenant, async () => {
         const traffic = trafficServices(ctx);
-        if (!(await ctx.repos.entitlements.can('reporting.api'))) throw new ApiError('forbidden', 'The reporting API is available from tier 2.');
+        if (!(await ctx.repos.entitlements.can('reporting.api'))) throw planOff('reporting.api');
         const result = await fn(req, traffic);
         res.json(result);
       });

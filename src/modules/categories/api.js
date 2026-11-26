@@ -1,4 +1,4 @@
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planOff } from '../../contracts/api/index.js';
 import { PLAN_REASON } from '../../contracts/catalog.js';
 import { writeAudit } from '../audit/index.js';
 import { retryOnRace } from '../admin-api/errors.js';
@@ -89,7 +89,7 @@ export function categoriesApi({ db, repos, config }) {
 
   /** Ordering, pins, schedules and rules are tier 2 (8.13). Reading the order is never refused. */
   async function needSequences() {
-    if (!(await repos.entitlements.can('category_sequences'))) throw new ApiError('forbidden', 'Reel order by category isn’t on your plan.', { reason: PLAN_REASON });
+    if (!(await repos.entitlements.can('category_sequences'))) throw planOff('category_sequences', { reason: PLAN_REASON });
   }
 
   async function sequence(categoryId) {

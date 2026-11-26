@@ -25,6 +25,14 @@ export const Settings = z.object({
   checklistDismissed: z.boolean(),
 });
 
+/**
+ * The account's own phone and email are never store settings: they change only through the verified flow (a code sent to
+ * the new one, auth.linkIdentity, Your account > Ways to sign in). PATCH /settings with either is refused with this, never
+ * quietly dropped (user decision 2026-11-26, F-45).
+ */
+export const CONTACT_CHANGE_MESSAGE = 'Your phone and email aren’t changed here. Change them in Your account > Ways to sign in, where a code confirms the new one.';
+const notHere = z.never({ error: CONTACT_CHANGE_MESSAGE }).optional();
+
 /** Every field is optional: what's left out stays as it is. */
 export const SettingsUpdate = z.object({
   storeName: required(120, 'Store name is required'),
@@ -43,6 +51,10 @@ export const SettingsUpdate = z.object({
   aboutText: text(LONG),
   gstin: text(20),
   checklistDismissed: z.boolean(),
+  phone: notHere,
+  email: notHere,
+  ownerPhone: notHere,
+  ownerEmail: notHere,
 }).partial();
 
 /** Where shoppers' money goes, so it is the owner's alone. The two Razorpay fields go together, and the secret never comes back. */

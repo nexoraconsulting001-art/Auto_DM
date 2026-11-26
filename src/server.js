@@ -23,6 +23,7 @@ import { wireOrderEvents } from './modules/orders/events.js';
 import { createNotify } from './modules/notifications/index.js';
 import { createShopperMessages } from './modules/shopper-messages/index.js';
 import { createSignupGuard } from './modules/signup/guard.js';
+import { heldPages } from './modules/signup/held-page.js';
 import { adminRoutes, baseUrlFor, buyerBaseUrl } from './routes/admin.js';
 import { ApiError, isApiV1Url } from './contracts/api/index.js';
 import { PROVIDER_PATHS } from './contracts/api/provider.js';
@@ -226,13 +227,16 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
   const buildSignInHost = () => {
     const r = express.Router();
     r.use('/api/v1', apiRouterFor(ctx));
+    // A held place gets the waiting page (sign-up closed) or the sign-up screen (open), never a business page (B-AUTH-4).
+    r.use(heldPages({ held: () => Boolean(currentTenant()?.signup_held), mode: async () => (await (db.platform ?? db).query('SELECT mode FROM signup_settings LIMIT 1'))[0]?.mode ?? 'closed' }));
     adminConsole.routes({ use: (mount, consoleRouter) => r.use(mount, consoleRouter) }, { config: { ...config, adminUi: 'console' } });
     r.use((_req, res) => res.status(404).type('text').send('Not found.'));
     return r;
   };
   app.use((req, res, next) => {
     // A session in a held sign-up place (auth-2) is served as before sign-in: the API (whose router lets it sign in and
-    // sign up only) and the console's shell. No module route, page or store of a business answers it.
+    // sign up only), and for a page the waiting page or the console's sign-up screen (heldPages). No module route, page or
+    // store of a business answers it.
     const held = Boolean(currentTenant()?.signup_held);
     if (!held && (!req.appHost || currentTenant())) return next();
     signInHost ??= buildSignInHost();

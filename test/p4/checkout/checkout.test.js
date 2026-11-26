@@ -414,7 +414,9 @@ test('S-71 the checkout and order pages carry the seller\'s brand only; a busine
     const old = await hit(app, '/checkout', { host: basic.host });
     assert.notEqual(old.status, 200, 'the Phase 0 checkout still asks a free-plan shopper to sign in');
     const call = await hit(app, '/api/store/checkout/quote', { method: 'POST', host: basic.host, body: { lines: [{ productId: lamp.id, variantId: null, qty: 1 }] } });
-    assert.equal(call.status, 404);
+    // User decision 2026-11-26 (F-32): a feature not on the plan is the plan refusal, 403 plan.feature_off, never a 404.
+    assert.equal(call.status, 403);
+    assert.equal(JSON.parse(call.text).code, 'plan.feature_off');
   } finally {
     app.close();
   }

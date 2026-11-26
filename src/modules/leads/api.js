@@ -1,4 +1,4 @@
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planOff } from '../../contracts/api/index.js';
 import { PLAN_REASON } from '../../contracts/catalog.js';
 import { log, reportError } from '../../platform/log.js';
 import { writeAudit } from '../audit/index.js';
@@ -51,7 +51,7 @@ export function leadsApi({ db, repos, platform }) {
   const available = () => repos.entitlements.can(FEATURE);
 
   async function needFeature() {
-    if (!(await available())) throw new ApiError('forbidden', 'The lead form isn’t on your plan.', { reason: PLAN_REASON });
+    if (!(await available())) throw planOff('lead_form', { reason: PLAN_REASON });
   }
 
   const businessName = async () => (await repos.settings.getAll()).store_name;

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import sharp from 'sharp';
 import { APP_ENTITLEMENTS, DATA_COLLECTED, assetSpecKey, checkAsset, listingLimits, listingProblems, namesPlatform, storeOf } from '../../contracts/apps.js';
-import { ApiError } from '../../contracts/api/errors.js';
+import { ApiError, planOff } from '../../contracts/api/errors.js';
 import { StoreListingUpdate } from '../../contracts/api/apps.js';
 import { log } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
@@ -81,7 +81,7 @@ function createStoreListings(ctx) {
 
   async function requireApp(platform) {
     if (!['android', 'ios'].includes(platform)) throw new ApiError('not_found');
-    if (!(await ctx.repos.entitlements.can(APP_ENTITLEMENTS[platform]))) throw new ApiError('forbidden', 'Your plan doesn’t include your own app on this store.', { reason: 'plan' });
+    if (!(await ctx.repos.entitlements.can(APP_ENTITLEMENTS[platform]))) throw planOff(APP_ENTITLEMENTS[platform], { reason: 'plan' });
   }
 
   async function businessName() {

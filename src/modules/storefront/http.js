@@ -109,7 +109,8 @@ export function sendStoreError(err, req, res) {
 
 /**
  * Wraps a JSON call: handler(req, res) returns { status?, body }, or null for "this business has no store here", which is a
- * 404 like any address that isn't there. Answers are never cached. The shopper is loaded before the handler runs.
+ * 404 like any address that isn't there. A business whose plan has no store gets 403 plan.feature_off. Answers are never
+ * cached. The shopper is loaded before the handler runs.
  */
 export const storeCall = (ctx, handler) => async (req, res) => {
   try {
@@ -118,7 +119,9 @@ export const storeCall = (ctx, handler) => async (req, res) => {
       if (!req.is('application/json')) throw new ApiError('unsupported_media_type', 'Send this as JSON.');
       if (!fromThisStore(req)) throw new ApiError('forbidden', 'This request didn’t come from the store’s own page.');
     }
-    if (!(await storeOn(ctx.repos))) throw new ApiError('not_found', 'There is nothing here.');
+    // Not on this business's plan: the plan refusal (403), never a 404 (user decision 2026-11-26, F-32/F-34). A buyer reads
+    // this answer, so it carries no link into the seller's console.
+    if (!(await storeOn(ctx.repos))) throw new ApiError('plan.feature_off', undefined, { reason: 'plan', feature: STORE_FEATURE, upgradeUrl: null });
     await shopperFrom(req, ctx.db);
     const out = await handler(req, res);
     if (out) res.status(out.status ?? 200).json(out.body);

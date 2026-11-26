@@ -106,15 +106,21 @@ export function createUsage({ db, config = {}, notify = null, compliance = null,
     }, 'usage.pass_through_failed');
   }
 
-  /** Every business on the default payment or shipping path gets last month's statement made, through the queue. */
+  /**
+   * Every business on the default payment or shipping path gets last month's statement made, through the queue. Only a
+   * business that existed in that month, or has money lines in it, gets one (D1-1, F-83): a business that signed up after
+   * the month closed was given an empty statement for a month it was never in.
+   */
   async function sweepStatements() {
     const month = previousMonth(usageMonthOf(meter.now()));
+    const { start, end } = monthBounds(month);
     const rows = await db.platform.query(
       `SELECT t.id FROM counted_tenants t
        WHERE (EXISTS (SELECT 1 FROM payment_settings p WHERE p.tenant_id = t.id AND p.mode = 'managed' AND p.linked_account_id IS NOT NULL)
            OR EXISTS (SELECT 1 FROM shipping_settings s WHERE s.tenant_id = t.id AND s.mode = 'managed'))
+         AND (t.created_at < $3::timestamptz OR EXISTS (SELECT 1 FROM settlement_lines l WHERE l.tenant_id = t.id AND l.occurred_at >= $2::timestamptz AND l.occurred_at < $3::timestamptz))
          AND NOT EXISTS (SELECT 1 FROM settlement_statements s WHERE s.tenant_id = t.id AND s.month = $1::date AND s.sent_at IS NOT NULL AND s.reconciliation <> 'pending')`,
-      [month],
+      [month, start.toISOString(), end.toISOString()],
     );
     if (!platform.queue) return 0;
     for (const { id } of rows) await platform.queue.enqueue(USAGE_JOBS.statement, { month }, { tenantId: id });

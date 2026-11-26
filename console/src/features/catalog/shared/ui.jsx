@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Badge, EmptyState, ErrorState, NotFoundState, Spinner } from '../../../design/index.jsx';
+import { PLAN_REFUSAL_TITLE, UPGRADE_PATH } from '../../billing/contract.js';
 import { PLAN_REASON } from './limits.js';
 import './p3.css';
 
@@ -11,8 +12,8 @@ const notBuilt = (error) => error?.status === 501;
 /** A feature the plan doesn't include reads as that, never as a failure. The server's own sentence says which feature. */
 export function PlanState({ error }) {
   return (
-    <EmptyState title="This isn’t on your plan">
-      {error?.message || 'This needs a higher plan.'} Ask the Bhava team about moving to a plan that includes it.
+    <EmptyState title={PLAN_REFUSAL_TITLE}>
+      {error?.message || 'This needs a higher plan.'} <Link to={UPGRADE_PATH}>See plans</Link>
     </EmptyState>
   );
 }

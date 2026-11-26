@@ -80,10 +80,10 @@ test('a message that is nothing without the name is refused', withApp(async (app
 }));
 
 test('A-36: one tap on the free plan is refused and two taps stay on', withApp(async (app) => {
-  const res = await refused(await app.api('POST', '/automations', body({ linkMode: 'one_tap' })), 403, 'plan.feature_off');
+  const res = await refused(await app.api('POST', '/automations', body({ linkMode: 'one_tap' })), 400, 'validation_failed');
   assert.equal(res.error, 'One tap needs a paid plan');
   const saved = await save(app);
-  await refused(await app.api('PATCH', `/automations/${saved.id}`, { linkMode: 'one_tap' }), 403, 'plan.feature_off');
+  await refused(await app.api('PATCH', `/automations/${saved.id}`, { linkMode: 'one_tap' }), 400, 'validation_failed');
   assert.equal((await ok(await app.api('GET', `/automations/${saved.id}`))).linkMode, 'two_tap');
   await setPlan(app, 't1');
   assert.equal((await ok(await app.api('PATCH', `/automations/${saved.id}`, { linkMode: 'one_tap' }))).linkMode, 'one_tap');
@@ -91,7 +91,7 @@ test('A-36: one tap on the free plan is refused and two taps stay on', withApp(a
 
 test('story and DM automations need a plan that includes them', withApp(async (app) => {
   const story = { triggerType: 'story_reply', keywords: [], triggers: [{ targetType: 'any_story' }] };
-  await refused(await app.api('POST', '/automations', body(story)), 403, 'plan.feature_off');
+  await refused(await app.api('POST', '/automations', body(story)), 400, 'validation_failed');
   await setPlan(app, 't3');
   await save(app, story);
 }));
@@ -99,14 +99,16 @@ test('story and DM automations need a plan that includes them', withApp(async (a
 test('the free plan stops at 3 automations, counted without archived ones', withApp(async (app) => {
   const made = [];
   for (let i = 0; i < 3; i++) made.push(await save(app, { name: `A${i}`, triggers: [{ targetType: 'reel', mediaId: `R${i}` }] }));
-  await refused(await app.api('POST', '/automations', body({ name: 'A3', triggers: [{ targetType: 'reel', mediaId: 'R9' }] })), 403, 'plan.limit_reached');
+  // User decision 2026-11-26 (F-35): the plan's limit is the plan refusal, 403 plan.limit_reached with the upgrade path.
+  const full = await refused(await app.api('POST', '/automations', body({ name: 'A3', triggers: [{ targetType: 'reel', mediaId: 'R9' }] })), 403, 'plan.limit_reached');
+  assert.deepEqual([full.feature, full.limit, full.used, full.upgradeUrl], ['automations', 3, 3, '/admin/billing']);
   await ok(await app.api('POST', `/automations/${made[0].id}/state`, { state: 'archived' }));
   await save(app, { name: 'A3', triggers: [{ targetType: 'reel', mediaId: 'R9' }] });
 }));
 
 test('the free plan\'s limit holds when the saves arrive together', withApp(async (app) => {
   const saves = await Promise.all(Array.from({ length: 6 }, (_, i) => app.api('POST', '/automations', body({ name: `A${i}`, triggers: [{ targetType: 'reel', mediaId: `R${i}` }] }))));
-  assert.deepEqual(saves.map((r) => r.status).sort(), [201, 201, 201, 403, 403, 403]);
+  assert.deepEqual(saves.map((r) => r.status).sort(), [201, 201, 201, 403, 403, 403]); // 403 plan.limit_reached: user decision 2026-11-26 (F-35)
 }));
 
 test('two automations can\'t use one reel, and archiving frees it', paidApp(async (app) => {

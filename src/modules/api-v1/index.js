@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { APPS, APP_HEADERS, APP_PLATFORMS, isBelowMinimum } from '../../contracts/accounts.js';
-import { ApiError, IdText, isAllowed, maskShopperContacts, planRefusalReason, routeList, routes } from '../../contracts/api/index.js';
+import { ApiError, IdText, isAllowed, maskShopperContacts, planLimitMessage, planOffMessage, planRefusalReason, routeList, routes } from '../../contracts/api/index.js';
 import { log } from '../../platform/log.js';
 import { currentTenant, tenantId, withTenant } from '../../tenancy.js';
 import { auditImpersonated, checkOperator, isOperatorWrite, operatorSession, serviceWrite } from './operator.js';
@@ -46,7 +46,7 @@ async function checkPlan(route, { repos }, counters, call) {
     for (const name of names) on ||= await entitlements.can(name);
     if (!on) {
       const plan = await entitlements.lowestPlan(names);
-      throw new ApiError('plan.feature_off', plan ? `This needs the ${plan.name} plan or higher.` : 'This is an add-on that isn’t on your plan.', { reason: planRefusalReason(route.id), feature: names[0], plan: plan?.code });
+      throw new ApiError('plan.feature_off', planOffMessage(plan?.name), { reason: planRefusalReason(route.id), feature: names[0], plan: plan?.code });
     }
   }
   if (route.limit) {
@@ -62,7 +62,7 @@ async function checkPlan(route, { repos }, counters, call) {
 /** The plan.limit_reached answer for a route's limit: the router's own refusal, and the database's when requests raced. */
 async function limitReached(route, entitlements, max, used) {
   const plan = await entitlements.lowestPlan([route.limit.feature], { moreThan: max });
-  return new ApiError('plan.limit_reached', plan ? `You have reached your plan’s limit of ${max}. The ${plan.name} plan has more.` : `You have reached your plan’s limit of ${max}.`, { reason: planRefusalReason(route.id), feature: route.limit.feature, plan: plan?.code, limit: max, used });
+  return new ApiError('plan.limit_reached', planLimitMessage(max, plan?.name), { reason: planRefusalReason(route.id), feature: route.limit.feature, plan: plan?.code, limit: max, used });
 }
 
 /**
@@ -82,7 +82,7 @@ function validated(schema, value) {
   const parsed = schema.safeParse(value);
   if (parsed.success) return parsed.data;
   const fields = fieldErrors(parsed.error.issues);
-  const messages = Object.values(fields);
+  const messages = [...new Set(Object.values(fields))]; // one sentence said of several fields is said once
   throw new ApiError('validation_failed', messages.length === 1 ? messages[0] : 'Please check the highlighted details.', { fields });
 }
 

@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { MANAGERS } from '@contracts/access.js';
 import { useFeedback } from '../../components/feedback.jsx';
 import { BackLink, Banner, Button, EmptyState, FieldGroup, PageHeader, Panel, Toggle } from '../../design/index.jsx';
 import { api } from '../../lib/api/index.js';
+import { PLAN_REFUSAL_TITLE, UPGRADE_PATH } from '../billing/contract.js';
 import { useForm } from '../../lib/forms.js';
 import { useAllowed, useRefresh } from '../../lib/query.js';
 import { NumberField, RupeeField, StoreScreen } from '../orders/shared/ui.jsx';
@@ -64,7 +66,7 @@ export default function LoyaltySettingsPage() {
       <StoreScreen query={settings} label="Loading your point rules" errorTitle="We couldn’t load your point rules">
         {(data) => (data.available
           ? <SettingsForm key={JSON.stringify(data)} settings={data} />
-          : <EmptyState title="This isn’t on your plan">Loyalty points are an add-on. Ask the Bhava team to add them.</EmptyState>)}
+          : <EmptyState title={PLAN_REFUSAL_TITLE}>Loyalty points are an add-on. <Link to={UPGRADE_PATH}>See plans</Link></EmptyState>)}
       </StoreScreen>
     </>
   );

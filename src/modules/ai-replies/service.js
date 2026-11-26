@@ -6,7 +6,7 @@ import { tenantId, withTenant } from '../../tenancy.js';
 import { buyerBaseUrl } from '../admin-api/urls.js';
 import { dmReplyKey } from '../automations/message.js';
 import { DISCLOSURE_LINE } from '../compliance/content.js';
-import { ApiError } from '../../contracts/api/errors.js';
+import { planOff } from '../../contracts/api/errors.js';
 import { checkDraft, neverAnswer, pickSources, withoutContacts } from './rules.js';
 
 /**
@@ -217,7 +217,7 @@ export function createAiReplies({ db, repos, compliance, providers = {}, config 
    * answer. The switch need not be on; the add-on must be (the route checks it).
    */
   async function testQuestion(question) {
-    if (!(await repos.entitlements.can(FEATURE))) throw new ApiError('plan.feature_off', 'This is an add-on that isn’t on your plan.', { reason: 'plan', feature: FEATURE });
+    if (!(await repos.entitlements.can(FEATURE))) throw planOff(FEATURE);
     const switched = await settings();
     const text = String(question ?? '').trim();
     const decision = await decide(text, switched.threshold);

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { APP_ENTITLEMENTS, PLAYBOOKS, findAppMove, playbookFor, presubmitChecksFor, presubmitPassed } from '../../contracts/apps.js';
-import { ApiError } from '../../contracts/api/errors.js';
+import { ApiError, planOff } from '../../contracts/api/errors.js';
 import { log, reportError } from '../../platform/log.js';
 import { tenantId, withTenant } from '../../tenancy.js';
 import { failureSummary } from '../../../tools/presubmit/checks.mjs';
@@ -49,7 +49,7 @@ function createAppSubmissions(ctx) {
   async function requireApp(platform = null) {
     const can = (p) => ctx.repos.entitlements.can(APP_ENTITLEMENTS[p]);
     const ok = platform ? await can(platform) : (await can('android')) || (await can('ios'));
-    if (!ok) throw new ApiError('forbidden', 'Your plan doesn’t include your own shopper app.', { reason: 'plan' });
+    if (!ok) throw planOff(platform ? APP_ENTITLEMENTS[platform] : APP_ENTITLEMENTS.android, { reason: 'plan' });
   }
 
   // ---- reading ----

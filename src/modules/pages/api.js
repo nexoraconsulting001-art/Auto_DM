@@ -1,4 +1,4 @@
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planOff } from '../../contracts/api/index.js';
 import { CATALOG_LIMITS as L, PLAN_REASON, whatsappDigits } from '../../contracts/catalog.js';
 import { log } from '../../platform/log.js';
 import { ValidationError } from '../../util.js';
@@ -235,7 +235,7 @@ export function pagesApi(ctx) {
 
     'pageSettings.update': async ({ body, user }) => {
       if (body.whatsappOrder === true && !(await repos.entitlements.can('whatsapp_order'))) {
-        throw new ApiError('forbidden', 'The Order on WhatsApp button isn’t part of your plan.', { reason: PLAN_REASON });
+        throw planOff('whatsapp_order', { reason: PLAN_REASON });
       }
       const patch = {};
       if (body.whatsappOrder !== undefined) patch.whatsapp_order = body.whatsappOrder;

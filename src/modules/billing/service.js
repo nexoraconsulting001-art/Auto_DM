@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { ProviderError } from '../../adapters/http.js';
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planOff } from '../../contracts/api/index.js';
 import { financialYearOf, planRank, usageMonthOf } from '../../contracts/billing.js';
 import { log, reportError } from '../../platform/log.js';
 import { tenantId, withTenant } from '../../tenancy.js';
@@ -161,14 +161,16 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
    * Moves tenants.plan to what the subscription says, through one plan_changes row (the trigger moves the plan). Runs after
    * the transaction that changed the subscription, on the platform handle, and re-reads both rows under their locks, so of
    * two changes made at once the plan always ends as the subscription's last word. A subscription that was never paid moves
-   * nothing; a cancelled one moves the business to Free.
+   * nothing. A cancelled one runs to the end of the period already paid for (user decision 2026-11-26, F-51), then moves the
+   * business to Free: until then it changes nothing, and fallBackEnded() (the renewals job) moves it once the period ends.
    */
   async function syncPlan(business, { actor = 'billing', source = 'billing', reason = '' } = {}) {
     return platformDb.tx(async (p) => {
       const [s] = await p.query('SELECT plan, cycle, status, current_period_end FROM subscriptions WHERE tenant_id = $1 FOR UPDATE', [business]);
       if (!s) return null;
       const [t] = await p.query('SELECT plan, billing_cycle FROM tenants WHERE id = $1 FOR UPDATE', [business]);
-      const want = s.status === 'cancelled' ? { plan: 'free', cycle: t.billing_cycle } : s.current_period_end ? { plan: s.plan, cycle: s.cycle } : null;
+      const paidAhead = Boolean(s.current_period_end) && new Date(s.current_period_end) > at();
+      const want = s.status === 'cancelled' ? (paidAhead ? null : { plan: 'free', cycle: t.billing_cycle }) : s.current_period_end ? { plan: s.plan, cycle: s.cycle } : null;
       if (!want || (t.plan === want.plan && t.billing_cycle === want.cycle)) return null;
       await p.query(
         `INSERT INTO plan_changes (tenant_id, from_plan, to_plan, from_cycle, to_cycle, actor, source, reason) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -579,7 +581,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
         const s = await subOf(t, { forUpdate: true });
         const items = await runningItems(t);
         const why = await unavailable(t, addon, { tenant, settings, items });
-        if (why === 'needs_plan') throw new ApiError('plan.feature_off', 'This isn’t available on your plan.', { reason: 'needs_plan', plan: addon.min_plan });
+        if (why === 'needs_plan') throw planOff(addon.feature ?? addon.code, { reason: 'needs_plan', plan: addon.min_plan });
         if (why === 'included') throw new ApiError('conflict', 'Your plan already includes this.', { reason: 'included' });
         if (why === 'already_has') throw new ApiError('conflict', 'You already have this.', { reason: 'already_has' });
         if (!s?.provider_subscription_id || s.status === 'cancelled') throw new ApiError('conflict', 'Pick a paid plan first.', { reason: 'needs_subscription' });
@@ -865,7 +867,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     });
   }
 
-  /** subscription.cancelled: the subscription ended. A business that is not held for money owed goes to Free. */
+  /** subscription.cancelled: the subscription ended. A business not held for money owed keeps its plan to the end of the paid period, then goes to Free (F-51). */
   async function applyCancel({ eventAtMs, lastMs }) {
     const outcome = await locked(async (t) => {
       const s = await subOf(t, { forUpdate: true });
@@ -909,6 +911,31 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
   const liveSubscriptions = () => platformDb.query(`SELECT tenant_id, id, current_period_end FROM subscriptions WHERE status = ANY($1::text[]) AND provider_subscription_id IS NOT NULL ORDER BY tenant_id`, [LIVE]);
 
   /**
+   * F-51 (user decision 2026-11-26): a cancelled subscription keeps its plan to the end of the period paid for; once that
+   * period has ended the business falls back to Free here. Only a business still on the cancelled subscription's plan, and
+   * not moved by Bhava's team since the cancellation, is moved: a console override stands. -> how many fell back
+   */
+  async function fallBackEnded(done) {
+    const rows = await platformDb.query(
+      `SELECT s.tenant_id FROM subscriptions s JOIN tenants t ON t.id = s.tenant_id
+       WHERE s.status = 'cancelled' AND t.plan <> 'free' AND t.plan = s.plan AND (s.current_period_end IS NULL OR s.current_period_end <= $1::timestamptz)
+         AND NOT EXISTS (SELECT 1 FROM plan_changes c WHERE c.tenant_id = s.tenant_id AND c.source = 'console' AND c.created_at > COALESCE(s.cancelled_at, s.updated_at))
+       ORDER BY s.tenant_id`,
+      [iso(at())],
+    );
+    let moved = 0;
+    for (const { tenant_id: business } of rows) {
+      try {
+        if (await withTenant(business, () => syncPlan(business))) moved += 1;
+      } catch (err) {
+        done.failed += 1;
+        reportError(err, { msg: 'billing.fall_back_failed', tenantId: business });
+      }
+    }
+    return moved;
+  }
+
+  /**
    * Queues what the next charge must carry, for every live subscription: each new add-on line not yet queued (the retry of a
    * line whose provider answer was lost: always with its first key), each running monthly line once its period is within a
    * day of renewing, and the last months' WhatsApp and AI costs at cost with their counts (F-114). Ended add-ons lose their
@@ -916,7 +943,8 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
    */
   async function renewals() {
     const settings = await settingsOf(platformDb);
-    const done = { queued: 0, passThrough: 0, failed: 0 };
+    const done = { queued: 0, passThrough: 0, failed: 0, fellBack: 0 };
+    done.fellBack = await fallBackEnded(done);
     if (!complete(settings)) return done;
     // Cancelled subscriptions: lines still open, or a paid period that has since ended with its feature still on (money-10).
     const ending = await platformDb.query(
@@ -1043,7 +1071,9 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
             const [s] = await t.query(`SELECT * FROM subscriptions WHERE tenant_id = $1 AND status IN ('grace', 'past_due') AND grace_until <= $2::timestamptz FOR UPDATE`, [tenantId(), iso(nowAt)]);
             if (!s) return null;
             if (settings.after_grace === 'move_to_free') {
-              await t.query(`UPDATE subscriptions SET status = 'cancelled', cancelled_at = now(), grace_until = NULL, next_plan = NULL, next_cycle = NULL, updated_at = now() WHERE id = $1`, [s.id]);
+              // The period that went unpaid is not a paid period: it ends now, so the plan falls back at once (F-51).
+              await t.query(`UPDATE subscriptions SET status = 'cancelled', cancelled_at = now(), grace_until = NULL, next_plan = NULL, next_cycle = NULL,
+                current_period_end = LEAST(current_period_end, $2::timestamptz), updated_at = now() WHERE id = $1`, [s.id, iso(nowAt)]);
               await writeAudit(t, { actor: 'billing', action: 'billing.moved_to_free', target: `subscription:${s.id}` });
               return { s, how: 'free' };
             }

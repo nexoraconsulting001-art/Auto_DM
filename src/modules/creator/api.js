@@ -1,4 +1,4 @@
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planOff } from '../../contracts/api/index.js';
 import { PLAN_REASON } from '../../contracts/catalog.js';
 import { writeAudit } from '../audit/index.js';
 import { retryOnRace } from '../admin-api/errors.js';
@@ -33,7 +33,7 @@ export function creatorApi({ db, repos, config }) {
   return {
     'creator.get': async ({ req }) => view(req, await pages().get()),
     'creator.update': async ({ body, user, req }) => {
-      if (!(await repos.entitlements.can('creator_page'))) throw new ApiError('forbidden', 'The creator page isn’t on your plan.', { reason: PLAN_REASON });
+      if (!(await repos.entitlements.can('creator_page'))) throw planOff('creator_page', { reason: PLAN_REASON });
       const saved = await retryOnRace(() => pages().save(body));
       await writeAudit(db, { actor: `user:${user.id}`, action: 'creator_page.saved', target: 'creator_page', details: { enabled: saved.enabled, fields: Object.keys(body).sort() } });
       return view(req, saved);

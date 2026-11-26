@@ -59,14 +59,22 @@ test('F-90: a failed or refused operator write leaves no applied change, and no 
 test('F-91: the same operator opening payment keys, billing, payouts, staff or settings gets 403, and nothing in the business changes', async () => {
   const { shop, s } = await catalogJob();
   const before = JSON.stringify(await sql(world, 'SELECT plan, status FROM tenants WHERE id = $1', [shop.tenantId]));
-  const blocked = routeList.filter((r) => NEVER_A_SERVICE.includes(r.id.split('.')[0]) && r.id !== 'auth.logout');
+  // User decision 2026-11-26 (F-91): auth.me answers the operator with their own identity, never the owner's phone or email.
+  const me = need(await s.call('GET', '/auth/me'), 200, 'auth.me for the operator');
+  const owner = await one(world, `SELECT id, phone, email FROM users WHERE tenant_id = $1 AND role = 'owner' ORDER BY id LIMIT 1`, [shop.tenantId]);
+  const session = await one(world, 'SELECT operator_id, operator_name FROM service_sessions WHERE tenant_id = $1 ORDER BY id DESC LIMIT 1', [shop.tenantId]);
+  assert.deepEqual([me.data.user.id, me.data.user.name], [Number(session.operator_id), session.operator_name || 'Bhava team'], 'the operator, as themselves');
+  assert.equal(me.data.user.phone, '', 'no phone of anyone');
+  assert.equal(me.data.operator?.kind, 'service');
+  for (const contact of [owner.phone, owner.email].filter(Boolean)) assert.equal(me.text.includes(contact) || me.text.includes(String(contact).replace(/^\+91/, '')), false, 'the owner’s contact never reaches the operator');
+  const blocked = routeList.filter((r) => NEVER_A_SERVICE.includes(r.id.split('.')[0]) && r.id !== 'auth.logout' && r.id !== 'auth.me');
   assert.ok(blocked.length >= 30, `${blocked.length} routes the contract keeps from a service`);
   for (const r of blocked) {
     const res = await s.call(r.method, r.path.replace(/:[a-zA-Z]+/g, '1'), r.method === 'GET' ? undefined : {});
     assert.equal(res.status, 403, `${r.id}: ${res.status} ${res.text.slice(0, 80)}`);
     assert.equal(res.data?.code, 'service.out_of_scope', r.id);
   }
-  for (const [method, path, body] of [['GET', '/billing'], ['GET', '/payment-settings'], ['PUT', '/setup/own-keys', { provider: 'razorpay', keyId: 'a', keySecret: 'b' }], ['GET', '/team'], ['POST', '/billing/change', { plan: 't5', requestKey: 'abcdefgh12' }], ['GET', '/api-keys'], ['POST', '/refunds', {}]]) {
+  for (const [method, path, body] of [['GET', '/billing'], ['GET', '/payment-settings'], ['PUT', '/setup/own-keys', { provider: 'razorpay', keyId: 'a', keySecret: 'b' }], ['GET', '/team'], ['POST', '/billing/change', { plan: 't5', requestKey: 'abcdefgh12' }], ['GET', '/api-keys'], ['POST', '/orders/1/refunds', {}]]) { // refunds.create's built address (src/contracts/api/payments.js); /refunds was an assumed one
     const res = await s.call(method, path, body);
     assert.equal(res.status, 403, `${method} ${path}`);
   }

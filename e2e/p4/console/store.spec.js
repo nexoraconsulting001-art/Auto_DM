@@ -188,7 +188,7 @@ test('S-91: the loyalty screens show only when the add-on is on', async ({ page 
   await expect(page.getByRole('navigation', { name: 'Customers area' }).getByRole('link', { name: 'Accounts' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Loyalty' })).toHaveCount(0);
   await page.goto(`${world.base}/admin/loyalty`);
-  await expect(page.getByRole('heading', { name: 'This isn’t on your plan' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Not included in your current plan' })).toBeVisible();
 
   await shop.loyaltyOn();
   await page.goto(`${world.base}/admin/customers/shoppers`);

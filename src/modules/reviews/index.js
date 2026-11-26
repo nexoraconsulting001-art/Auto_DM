@@ -1,6 +1,6 @@
 import express from 'express';
 import { z } from 'zod';
-import { ApiError } from '../../contracts/api/errors.js';
+import { ApiError, planOff } from '../../contracts/api/errors.js';
 import { BUYER_ROUTES } from '../../contracts/buyer-pages.js';
 import { ReviewCreate, STORE_ROUTES } from '../../contracts/store-routes.js';
 import { log } from '../../platform/log.js';
@@ -43,7 +43,7 @@ async function featureOn(ctx) {
 function reviewsApi(ctx) {
   const repo = reviewsRepo(ctx.db);
   const plan = async () => {
-    if (!(await ctx.repos.entitlements.can(REVIEWS_FEATURE))) throw new ApiError('forbidden', 'Reviews aren’t on your plan.', { reason: 'plan' });
+    if (!(await ctx.repos.entitlements.can(REVIEWS_FEATURE))) throw planOff(REVIEWS_FEATURE, { reason: 'plan' });
   };
   const decided = (status) => async ({ params, user }) => {
     await plan();

@@ -191,3 +191,18 @@ export const JOB_ENTITLEMENTS = Object.freeze({
   'shopper push': Object.freeze(['app.android', 'app.ios']),
   'managed service sessions': BILLING_FEATURES.services,
 });
+
+/**
+ * DUMMY details for Bhava's own legal entity (the seller on a Bhava invoice), for development, tests and demos ONLY (user
+ * decision 2026-11-26, F-54). They are NOT Bhava's real details: the name says PLACEHOLDER, the GSTIN is made up (it only
+ * has the right shape) and nothing here is secret. Production keeps billing_settings empty until Bhava's team types the
+ * real ones in the Platform Console, and while any of legal name, state or SAC is missing no paid plan can be bought and no
+ * invoice is issued. `npm run billing:placeholder` writes these into a non-production database's empty fields.
+ */
+export const PLACEHOLDER_BILLING_DETAILS = Object.freeze({
+  legal_name: 'PLACEHOLDER Bhava Demo Pvt Ltd (not a real company)',
+  gstin: '27AAAAA0000A1Z5',
+  state_code: '27',
+  address: 'PLACEHOLDER address, not real, Mumbai 400001',
+  sac: '998439',
+});

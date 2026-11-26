@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { REPORTING_KEY_PREFIX, REPORTING_SCOPE } from '../../contracts/analytics.js';
-import { ApiError } from '../../contracts/api/index.js';
+import { ApiError, planOff } from '../../contracts/api/index.js';
 import { tenantId } from '../../tenancy.js';
 import { isRowId, pageOfFetched, readCursor } from '../admin-api/paging.js';
 import { writeAudit } from '../audit/index.js';
@@ -27,7 +27,7 @@ export function createApiKeys({ db, repos }) {
   }
 
   async function create({ name }, user) {
-    if (!(await repos.entitlements.can('reporting.api'))) throw new ApiError('forbidden', 'The reporting API is available from tier 2.');
+    if (!(await repos.entitlements.can('reporting.api'))) throw planOff('reporting.api');
     const key = `${REPORTING_KEY_PREFIX}${crypto.randomBytes(KEY_BYTES).toString('base64url')}`;
     const prefix = key.slice(0, SHOWN_PREFIX);
     const row = await db.tx(async (t) => {
