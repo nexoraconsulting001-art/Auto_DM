@@ -81,7 +81,7 @@ const totalRow = (name, label, hidden = false, grand = false) =>
 function checkoutMain({ shopper, addresses }) {
   const terms = policyLinks().filter((l) => !l.href.endsWith('/privacy'));
   return ({ theme }) => html`<div data-checkout-page>
-${section({ theme, id: 'checkout-h', kicker: 'Checkout', title: 'Your order', body: html`
+${section({ theme, level: 1, id: 'checkout-h', kicker: 'Checkout', title: 'Your order', body: html`
 <p class="notice-box" data-empty hidden>Your bag is empty. <a href="/shop">Keep shopping</a></p>
 <form class="stack" data-checkout-form novalidate>
 <div class="panel"><ul class="lines" data-lines></ul><p class="notice-box" data-notices hidden></p></div>
@@ -157,7 +157,7 @@ function orderMain({ order, items, state, canCancel, trackHref = '' }) {
   const address = order.shipping_address ?? {};
   const row = (label, paise, show = true) => (show ? html`<span>${label}</span><span>${formatRupees(Number(paise))}</span>` : '');
   return ({ theme }) => html`<div data-order-page data-token="${order.public_token}" data-number="${order.order_number}">
-${section({ theme, id: 'order-h', kicker: `Order ${order.order_number}`, title: state.title, body: html`<p>${state.body}</p>
+${section({ theme, level: 1, id: 'order-h', kicker: `Order ${order.order_number}`, title: state.title, body: html`<p>${state.body}</p>
 ${refundNote(order)}
 ${state.pay ? html`<button class="btn wide" type="button" data-pay>${state.payLabel ?? 'Pay now'}</button><p class="error" data-pay-error hidden></p>` : ''}
 <div class="panel"><ul class="lines">${items.map((i) => html`<li class="line">${safeHref(i.image) ? html`<img src="${safeHref(i.image)}" alt="" width="64" height="76">` : html`<span class="ph"></span>`}<div><b>${i.name}</b><div class="muted small">${[i.option_value, `Qty ${i.qty}`].filter(Boolean).join(' · ')}</div></div><b>${formatRupees(Number(i.price_paise) * i.qty)}</b></li>`)}</ul></div>

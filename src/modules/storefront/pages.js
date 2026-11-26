@@ -108,7 +108,7 @@ ${trustRow(String(settings.trust_points ?? '').split('\n').map((label, i) => ({ 
     const found = await catalog.list({ band: bandOf(current.price), categoryId: category?.id ?? null, sort: current.sort, page: current.page });
     return send(req, res, {
       kind: category ? 'category' : 'store', ref: category?.slug ?? 'shop', title,
-      main: ({ theme }) => section({ theme, id: 'list-h', kicker, title, body: html`${category?.description ? html`<p>${category.description}</p>` : ''}
+      main: ({ theme }) => section({ theme, level: 1, id: 'list-h', kicker, title, body: html`${category?.description ? html`<p>${category.description}</p>` : ''}
 ${listControls(path, current)}
 ${found.products.length ? grid(found.products) : html`<p class="muted">Nothing here at this price. Try another.</p>`}
 ${pager(path, current, found)}` }),
@@ -128,7 +128,7 @@ ${pager(path, current, found)}` }),
     const found = q ? await catalog.list({ search: q, page: 1, limit: 48 }) : { products: [], total: 0 };
     return send(req, res, {
       kind: 'store', ref: 'search', title: q ? `Search: ${q}` : 'Search',
-      main: ({ theme }) => section({ theme, id: 'search-h', kicker: 'Search', title: 'Find something', body: html`<form class="row" role="search" action="/search" method="get">
+      main: ({ theme }) => section({ theme, level: 1, id: 'search-h', kicker: 'Search', title: 'Find something', body: html`<form class="row" role="search" action="/search" method="get">
 <label style="flex:1">Search <input type="search" name="q" value="${q}" maxlength="${STORE_LIMITS.searchQueryChars}" autocomplete="off"></label><button class="btn" type="submit">Search</button></form>
 ${q ? html`<p class="muted small">${found.total} found</p>${found.products.length ? grid(found.products) : html`<p>Nothing matches “${q}”. Try another word.</p>`}` : ''}` }),
     });
@@ -171,7 +171,7 @@ ${related.length ? section({ theme, id: 'related-h', kicker: 'More', title: 'You
 
   r.get(STORE_ROUTES.about.path, page(async (req, res) => send(req, res, {
     kind: 'other', ref: 'about', title: 'About',
-    main: ({ theme, business, settings }) => section({ theme, id: 'about-h', kicker: 'About', title: business.name, body: html`<p style="white-space:pre-line">${settings.about_text || settings.tagline}</p>` }),
+    main: ({ theme, business, settings }) => section({ theme, level: 1, id: 'about-h', kicker: 'About', title: business.name, body: html`<p style="white-space:pre-line">${settings.about_text || settings.tagline}</p>` }),
   })));
 
   r.get(STORE_ROUTES.offline.path, page(async (req, res) => send(req, res, {
