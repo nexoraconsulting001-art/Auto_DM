@@ -53,7 +53,8 @@ test('requirements/p0.json is well formed and holds short titles only', () => {
   const list = readJson(path.join(repoRoot, 'requirements', 'p0.json'));
   const { problems: shape } = checkRequirements(repoRoot, 0, list.map((r) => `${r.id} stand-in`));
   assert.deepEqual(shape, []);
-  assert.equal(list.length, 52);
+  // 52 less U-07 and U-08, moved to test/later with the creator page (b5218cc).
+  assert.equal(list.length, 50);
   assert.ok(list.every((r) => r.title.length <= 75), 'titles stay short');
 });
 
