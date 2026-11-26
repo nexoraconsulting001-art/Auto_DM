@@ -153,6 +153,9 @@ export const config = {
   release: (process.env.RELEASE || '').slice(0, 80),
   // SIGTERM and SIGINT: stop taking work, finish what is in flight, and exit within this many seconds.
   shutdownSeconds: positive(process.env.SHUTDOWN_SECONDS, 25),
+  // On SIGTERM the server first answers 503 (readiness false) but keeps listening for this many seconds, so a load balancer that has not
+  // noticed yet is told to use another server instead of having a connection reset when the listener closes. Part of SHUTDOWN_SECONDS.
+  drainGraceSeconds: positive(process.env.DRAIN_GRACE_SECONDS, 2),
   // How long one readiness check may take before its dependency counts as down.
   healthCheckMs: positive(process.env.HEALTH_CHECK_MS, 2000),
   // The worker's probes listen here. 127.0.0.1 on a VM; 0.0.0.0 where the platform probes over the network.

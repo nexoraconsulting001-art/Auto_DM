@@ -90,7 +90,10 @@ jobs:
           files=$(cd deploy/prod/monitoring && printf '/m/%s ' rules/*.yaml)
           docker run --rm -v "$PWD/deploy/prod/monitoring:/m:ro" --entrypoint promtool prom/prometheus:v2.54.1 check rules $files
       - name: Every alert fires and clears (promtool test rules)
-        run: docker run --rm -v "$PWD/deploy/prod/monitoring:/m:ro" -w /m/rules/tests --entrypoint promtool prom/prometheus:v2.54.1 test rules .
+        # promtool test rules takes test FILES (usage: promtool test rules <test-rule-file>...), not a directory. Each file's rule_files (../x.yaml) is relative to the test file.
+        run: |
+          files=$(cd deploy/prod/monitoring/rules/tests && printf '%s ' *.yaml)
+          docker run --rm -v "$PWD/deploy/prod/monitoring:/m:ro" -w /m/rules/tests --entrypoint promtool prom/prometheus:v2.54.1 test rules $files
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - name: Install the server, the console and the shared client (no app packages)
@@ -109,7 +112,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers' }
+          # R-05 is the whole suite (~100+ min of work): it runs as the same 12 shards as ci.yml (tools/ci-shard.mjs), each the full check on its files.
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 1/12', shard: '1/12' }
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 2/12', shard: '2/12' }
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 3/12', shard: '3/12' }
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 4/12', shard: '4/12' }
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 5/12', shard: '5/12' }
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 6/12', shard: '6/12' }
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 7/12', shard: '7/12' }
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 8/12', shard: '8/12' }
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 9/12', shard: '9/12' }
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 10/12', shard: '10/12' }
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 11/12', shard: '11/12' }
+          - { check: 'check:r05', scenario: 'R-05, the suite on production drivers, shard 12/12', shard: '12/12' }
           - { check: 'check:r06', scenario: 'R-06, two web servers' }
           - { check: 'check:r07', scenario: 'R-07, backup to a new database' }
     services:
@@ -174,6 +189,8 @@ jobs:
       - name: The seller console builds
         run: npm run build:console
       - run: npm run ${{ matrix.check }}
+        env:
+          READINESS_SHARD: ${{ matrix.shard }}
 
   ready:
     name: Production readiness

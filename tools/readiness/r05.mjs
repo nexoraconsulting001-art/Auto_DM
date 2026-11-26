@@ -10,6 +10,9 @@
  * The suite runs against a bucket, an analytics database and (empty) Redis made for this run, and on the Postgres server at
  * TEST_DATABASE_URL, where the tests make their own databases; the ones this run made are dropped at the end.
  * With READINESS_ALLOW_SIMPLE_DRIVERS=1 a service that is not named may be left out; the report then says `reduced: true`.
+ * READINESS_SHARD ("k/n") runs only shard k of n of the suite, split exactly as the CI shards are (tools/ci-shard.mjs), so n jobs
+ * together run every file once. The whole suite is ~100+ minutes of work, far more than one runner does in the time limit; the
+ * prod.yml job therefore runs r05 as shards, each of which is the full check (drivers, no source change, suite) on its files.
  * READINESS_TEST_FILES (comma separated) names other test files than the whole suite; it is for trying the check itself.
  */
 import fs from 'node:fs';
@@ -17,6 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { shardFiles } from '../ci-shard.mjs';
 import { STEPS } from '../prod-checks/steps.mjs';
 import { createCleanup } from '../prod-checks/cleanup.mjs';
 import { assertLocalServices, makeScrub } from '../prod-checks/guard.mjs';
@@ -50,7 +54,11 @@ export async function run({ env = process.env, keep = false, log = () => {} } = 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bhava-r05-'));
   cleanup.add('work folder', () => fs.rmSync(dir, { recursive: true, force: true }));
   let settings = null;
-  const patterns = env.READINESS_TEST_FILES ? env.READINESS_TEST_FILES.split(',').map((s) => s.trim()).filter(Boolean) : ['test/**/*.test.js'];
+  const patterns = env.READINESS_TEST_FILES
+    ? env.READINESS_TEST_FILES.split(',').map((s) => s.trim()).filter(Boolean)
+    : env.READINESS_SHARD
+      ? shardFiles('node', env.READINESS_SHARD)
+      : ['test/**/*.test.js'];
 
   try {
     // The databases the tests make on the server, so the ones this run made can be dropped at the end.
