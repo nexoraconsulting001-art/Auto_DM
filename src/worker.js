@@ -25,9 +25,9 @@ import { createErrorSink } from './platform/error-sink.js';
 import { drainOnSignals } from './platform/health.js';
 import { log, onError, reportError } from './platform/log.js';
 import { guardProduction } from './platform/production-guard.js';
+import { BACKUP, HOUSEKEEPING } from './platform/queue.js';
 
-export const HOUSEKEEPING = 'system.housekeeping';
-export const BACKUP = 'system.backup';
+export { BACKUP, HOUSEKEEPING };
 const HOUR = 3_600_000;
 /** How long the worker trusts what it last read of the recorded backup time before reading it again (a CronJob may have run). */
 const BACKUP_READ_MS = 5 * 60_000;
