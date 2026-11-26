@@ -43,6 +43,8 @@ export function cleanBillingEvent(body) {
     payment: pay && {
       id: pid(pay.id), status: word(pay.status, 30), amountPaise: paise(pay.amount), currency: word(pay.currency, 3), method: word(pay.method, 20), errorCode: word(pay.error_code, 80),
       invoiceId: pid(pay.invoice_id), createdAt: secs(pay.created_at),
+      // The card's own id (not the per-customer token) or the UPI handle: an opaque id, noted only as a keyed hash (referrals.notePaymentMethod).
+      methodMark: word(pay.card_id ?? pay.card?.id ?? pay.vpa, 120),
     },
   };
 }
