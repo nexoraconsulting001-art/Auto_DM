@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { addProduct } from '../../p0/spec-p0/support.js';
-import { DAY, FIGURE_TEXT, INSIDE_MS, SOURCE_LABELS, addP2Shop, assertNoFigure, assertRate, captureLogs, comments, hit, liveReel, multipart, need, openP2World, placeStoreOrder, setOrderStatusDirect, shopper, stepOf, tapPayload, unique, useP2World, waitForDms } from './support.js';
+import { DAY, FIGURE_TEXT, INSIDE_MS, SOURCE_LABELS, addP2Shop, assertNoFigure, assertRate, captureLogs, comments, hit, liveReel, multipart, need, openP2World, placeOrderFromVisit, setOrderStatusDirect, shopper, stepOf, tapPayload, unique, useP2World, waitForDms } from './support.js';
 
 const world = useP2World();
 
@@ -192,7 +192,7 @@ test('N-17: visit from Reel A on day 1, Post B on day 3, order on day 4: the ord
   const shop = await addP2Shop(world);
   const product = await addProduct(shop, 'Lamp');
   const visitor = await visitAndBuy(shop, { firstAgoDays: 3, lastAgoDays: 1 });
-  const order = await placeStoreOrder(world, shop, visitor, product);
+  const order = await placeOrderFromVisit(shop, visitor, product);
   await setOrderStatus(shop, order.id, 'paid');
   await shop.settle({ ms: 4000 });
   assert.equal(stepOf(await funnel(shop, 'POST_B'), 'sales').count, 1);
@@ -204,7 +204,7 @@ test('N-17: an untagged visit after the tagged one doesn\'t take the order away 
   const shop = await addP2Shop(world);
   const product = await addProduct(shop, 'Lamp');
   const visitor = await visitAndBuy(shop, { firstAgoDays: 3, lastAgoDays: 1, ignoreUntagged: true });
-  const order = await placeStoreOrder(world, shop, visitor, product);
+  const order = await placeOrderFromVisit(shop, visitor, product);
   await setOrderStatus(shop, order.id, 'paid');
   await shop.settle({ ms: 4000 });
   assert.equal(stepOf(await funnel(shop, 'POST_B'), 'sales').count, 1);
@@ -214,7 +214,7 @@ test('N-17: a visit just under 7 days before the order still gets it', async () 
   const shop = await addP2Shop(world);
   const product = await addProduct(shop, 'Lamp');
   const visitor = await visitAndBuy(shop, { firstAgoDays: 8, lastAgoDays: 7, nowAdjustMs: -INSIDE_MS * 2 });
-  const order = await placeStoreOrder(world, shop, visitor, product);
+  const order = await placeOrderFromVisit(shop, visitor, product);
   await setOrderStatus(shop, order.id, 'paid');
   await shop.settle({ ms: 4000 });
   assert.equal(stepOf(await funnel(shop, 'POST_B'), 'sales').count, 1);
@@ -224,7 +224,7 @@ test('N-17: a visit just over 7 days before the order doesn\'t', async () => {
   const shop = await addP2Shop(world);
   const product = await addProduct(shop, 'Lamp');
   const visitor = await visitAndBuy(shop, { firstAgoDays: 8, lastAgoDays: 7, nowAdjustMs: 2000 });
-  const order = await placeStoreOrder(world, shop, visitor, product);
+  const order = await placeOrderFromVisit(shop, visitor, product);
   await setOrderStatus(shop, order.id, 'paid');
   await shop.settle({ ms: 4000 });
   assert.equal(stepOf(await funnel(shop, 'POST_B'), 'sales').count ?? 0, 0);
@@ -238,7 +238,7 @@ test('N-17: another shopper\'s visit never takes this shopper\'s order, and neit
   await shopper(world, shop, {}).send({ name: 'landing_view', path: '/r/z', pageKind: 'landing', mediaId: 'OTHER_REEL' });
   await shopper(world, other, { vid: visitor.visitorId }).send({ name: 'landing_view', path: '/r/x', pageKind: 'landing', mediaId: 'THEIR_REEL' });
   await world.travel(1000);
-  const order = await placeStoreOrder(world, shop, visitor, product);
+  const order = await placeOrderFromVisit(shop, visitor, product);
   await setOrderStatus(shop, order.id, 'paid');
   await shop.settle({ ms: 4000 });
   assert.equal(stepOf(await funnel(shop, 'POST_B'), 'sales').count, 1);
@@ -251,11 +251,12 @@ test('N-17: another shopper\'s visit never takes this shopper\'s order, and neit
 async function paidOrder(shop) {
   const product = await addProduct(shop, 'Lamp');
   const visitor = shopper(world, shop);
-  // The page that carried the script handed the browser its visitor cookie; the first beacon of a browser with none is a visit with no visitor.
-  await visitor.send({ name: 'page_view', path: '/', pageKind: 'other' });
+  // The first beacon of a browser with no cookie is a visit with no visitor, and starts the session with its media; the page's reload carries the cookie.
+  await visitor.send({ name: 'landing_view', path: '/r/a', pageKind: 'landing', mediaId: 'REEL_C' });
   await visitor.send({ name: 'landing_view', path: '/r/a', pageKind: 'landing', mediaId: 'REEL_C' });
   await shop.settle({ ms: 1500, roundMs: 200 });
-  const order = await placeStoreOrder(world, shop, visitor, product);
+  const order = await placeOrderFromVisit(shop, visitor, product);
+  await setOrderStatus(shop, order.id, 'awaiting_payment');
   return order;
 }
 

@@ -29,8 +29,6 @@ import { createGoogle } from '../../../tools/sim/google/index.mjs';
 import { DEFAULT_SCOPES, createMeta, hubSignature } from '../../../tools/sim/meta/index.mjs';
 import { TEST_DATA_KEY, openTestDb } from '../../helpers.js';
 import { addStaff as p0AddStaff, api, hit, need, nextPhone, pause, signIn } from '../../p0/spec-p0/support.js';
-import { csrfFor } from '../../../src/modules/shoppers/keys.js';
-import { ADDRESS, placeBody } from '../../p4/checkout/support.js';
 import { DAY, HOUR, MINUTE, SECOND, addShop, unique } from '../../p1/spec-p1/support.js';
 
 export { DAY, HOUR, MINUTE, SECOND, addShop, unique, consoleUser, onConsole, hit, need, api, signIn, signInCookie, pause, nextPhone, captureLogs, assertNoPlatformText } from '../../p1/spec-p1/support.js';
@@ -801,33 +799,22 @@ export function fileAt(world, shop, fileUrl, { token = shop.token, cookie, heade
 export const reportingKeyHeaders = (key) => ({ authorization: `Bearer ${key}`, 'x-api-key': key });
 
 /**
- * An order placed on the seller's site as a tier 3 shopper does (PRD 9.6): through the store checkout, signed in with a verified number,
- * carrying the visitor cookie. It replaced POST /api/orders, which no longer exists. Cash on delivery is placed at once.
+ * An order from a shopper's visit. POST /api/orders (which took the visitor cookie) is gone: the store checkout needs a signed-in shopper, a payment
+ * gateway and its own states. A Phase 0 order is the plain one (flow 'manual': its status is written as it is), and what the checkout's
+ * order.created event does for the traffic module - tie the order to the visitor's session - is done here, with the same row (ingest.linkOrder).
  */
-let shopperSerial = 0;
-export async function placeStoreOrder(world, shop, visitor, product) {
-  const id = shop.tenantId;
+export async function placeOrderFromVisit(shop, visitor, product) {
+  const order = await shop.repos.orders.create(
+    { items: [{ productId: product.id, qty: 1 }], customer: { name: 'Asha K', phone: '9876543210', email: '', address: '12 Long Road', city: 'Pune', state: 'MH', pincode: '411001' }, visitorId: visitor.visitorId },
+    await shop.repos.settings.getAll(),
+  );
+  const [seen] = await shop.sql('SELECT last_session_id FROM traffic_visitors WHERE tenant_id = $1 AND visitor_id = $2', [shop.tenantId, visitor.visitorId]);
   await shop.sql(
-    `INSERT INTO payment_settings (tenant_id, mode, kyc_status, cod, cod_fee_paise, part_advance, advance_kind, advance_value, hold_minutes)
-     VALUES ($1, 'managed', 'pending', true, 0, false, 'fixed', 0, 30) ON CONFLICT (tenant_id) DO UPDATE SET cod = true`,
-    [id],
+    `INSERT INTO traffic_events (tenant_id, session_id, visitor_id, at, surface, name, page_kind, page_ref, path, media_id, order_id, outbound_host, value_paise, event_key)
+     VALUES ($1, $2, $3, now(), 'buyer_page', 'order', 'checkout', '', '/checkout', '', $4, '', 0, $5)`,
+    [shop.tenantId, seen?.last_session_id ?? null, visitor.visitorId, order.id, `order:${order.id}`],
   );
-  const phone = `+9199${String(70_000_000 + ++shopperSerial * 7).padStart(8, '0')}`;
-  const [{ id: shopperId }] = await shop.sql(
-    `INSERT INTO shoppers (tenant_id, phone, phone_verified_at) VALUES ($1, $2, now()) RETURNING id`, [id, phone],
-  );
-  const sid = crypto.randomBytes(32).toString('base64url');
-  await shop.sql(
-    `INSERT INTO shopper_sessions (tenant_id, shopper_id, token_hash, method, expires_at) VALUES ($1, $2, $3, 'whatsapp_otp', now() + interval '1 day')`,
-    [id, shopperId, crypto.createHash('sha256').update(sid).digest('hex')],
-  );
-  const res = need(await hit(world, '/api/store/checkout', {
-    host: shop.host, method: 'POST',
-    headers: { cookie: `_sid=${sid}; _vid=${visitor.visitorId}`, 'x-shopper-csrf': csrfFor(world.config, sid) },
-    body: placeBody(product.id, { paymentMode: 'cod', address: { ...ADDRESS, phone: phone.slice(3) } }),
-  }), 201, 'Placing the order').json();
-  const [row] = await shop.sql('SELECT id, total_paise FROM orders WHERE tenant_id = $1 ORDER BY id DESC LIMIT 1', [id]);
-  return { ...res, id: row.id, totalPaise: row.total_paise };
+  return { ...order, totalPaise: order.total_paise };
 }
 
 /**

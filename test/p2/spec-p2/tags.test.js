@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { addProduct, addReel } from '../../p0/spec-p0/support.js';
-import { TAG_HOSTS, UA, addP2Shop, dayAgo, hit, need, placeStoreOrder, setOrderStatusDirect, shopper, unique, useP2World } from './support.js';
+import { TAG_HOSTS, UA, addP2Shop, dayAgo, hit, need, placeOrderFromVisit, setOrderStatusDirect, shopper, unique, useP2World } from './support.js';
 
 const world = useP2World();
 const ALL_HOSTS = [...TAG_HOSTS.meta, ...TAG_HOSTS.ga4];
@@ -40,7 +40,7 @@ async function returning(shop, options) {
 }
 /** Places an order on the seller's site, as a signed-in shopper with the visitor's cookie, and the owner marks it paid: the one thing that makes a Purchase (7.14). */
 async function paidOrder(shop, visitor) {
-  const order = await placeStoreOrder(world, shop, visitor, await addProduct(shop, 'Lamp', { price: '1299' }));
+  const order = await placeOrderFromVisit(shop, visitor, await addProduct(shop, 'Lamp', { price: '1299' }));
   await setOrderStatusDirect(shop, order.id, 'paid');
   return order;
 }
