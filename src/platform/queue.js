@@ -19,6 +19,8 @@ import { reportError } from './log.js';
  *   oldestWaiting() -> { [queue]: seconds } how long the oldest ready job of each queue has waited (queues with one only).
  *   waitingByTenant() -> [{ tenantId, depth, oldestSeconds }] the ready jobs of every queue, per business that has any
  *       (a job with no business is in none), sorted by tenantId: ops-metrics samples each business's queue depth from it.
+ *   lastFinished(queue) -> Date | null when the newest job of that queue finished well (done / completed), null when none is kept
+ *       (finished jobs are kept 14 days in both drivers: pg by cleanup, BullMQ by removeOnComplete): the go-live backup check reads it.
  *   onRun(listener) listener({ queue, result: 'ok' | 'failed' }) after every run of a job in this process (metrics).
  *   close()
  * A job that throws is reported (reportError 'job.failed') by the one run path both drivers share (runJob).
@@ -251,6 +253,10 @@ function pgQueue(db, config) {
       );
       return rows.map((r) => ({ tenantId: Number(r.tenant_id), depth: Number(r.depth), oldestSeconds: Math.max(0, Number(r.oldest)) }));
     },
+    async lastFinished(queue) {
+      const [row] = await db.query(`SELECT max(finished_at) AS at FROM jobs WHERE queue = $1 AND status = 'done'`, [queue]);
+      return row?.at ? new Date(row.at) : null;
+    },
     /** Deletes finished jobs older than `days`. */
     async cleanup(days = 14) {
       await db.query(`DELETE FROM jobs WHERE status = 'done' AND finished_at < now() - make_interval(days => $1)`, [days]);
@@ -410,6 +416,11 @@ function redisQueue(config, injected = {}) {
         }
       }));
       return [...byTenant.values()].sort((x, y) => x.tenantId - y.tenantId);
+    },
+    async lastFinished(queue) {
+      // BullMQ keeps the completed jobs ordered by when they finished; the newest is first in the descending list.
+      const [newest] = (await (await queueFor(queue)).getJobs(['completed'], 0, 0, false)).filter(Boolean);
+      return newest?.finishedOn ? new Date(Number(newest.finishedOn)) : null;
     },
     async cleanup() {},
     async close() {

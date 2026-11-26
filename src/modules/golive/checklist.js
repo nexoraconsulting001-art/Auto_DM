@@ -182,7 +182,7 @@ export function createGolive(ctx = {}, options = {}) {
   const attestationsFile = options.attestationsFile ?? config.goliveAttestations ?? 'deploy/golive/attestations.json';
   const readFile = options.readFile ?? fs.readFileSync;
 
-  const probeContext = () => ({ config, value, bases: { ...options.bases }, timeoutMs, now, db, secrets: ctx.platform?.secrets ?? options.secrets, ...world });
+  const probeContext = () => ({ config, value, bases: { ...options.bases }, timeoutMs, now, db, queue: ctx.platform?.queue, secrets: ctx.platform?.secrets ?? options.secrets, ...world });
 
   async function probeItem(item, live) {
     const def = probes[item.check.probe];
