@@ -5,6 +5,7 @@ import { STORE_ROUTES } from '../../contracts/store-routes.js';
 import { tenantId } from '../../tenancy.js';
 import { html, raw } from '../../views/html.js';
 import { safeHref, section } from '../../views/buyer/index.js';
+import { shopperServices } from '../shoppers/index.js';
 import { trackingPath } from '../shipping/util.js';
 import { shopperFrom, storeOn } from '../storefront/http.js';
 import { CHECKOUT_SCRIPT, policyLinks, sendStoreNotFound, sendStorePage } from '../storefront/shell.js';
@@ -22,9 +23,24 @@ import { CHECKOUT_JS } from './assets.js';
 const STATE_OPTIONS = Object.entries(INDIAN_STATES).sort((a, b) => a[1].localeCompare(b[1]));
 const KIND_LABEL = { home: 'Home', work: 'Work', other: 'Other' };
 
-async function savedAddresses(db, shopper) {
+/**
+ * The signed-in shopper's own saved addresses, then the ones from their shared profile (9.22, S-98) that are not already
+ * here, as the account page and GET /api/store/addresses list them. A shared one has no row at this business, so it is
+ * offered by value (id 's<n>', `shared` holds the address the page sends) rather than by addressId.
+ */
+async function savedAddresses(ctx, shopper) {
   if (!shopper) return [];
-  return db.query('SELECT * FROM shopper_addresses WHERE tenant_id = $1 AND shopper_id = $2 ORDER BY is_default DESC, id LIMIT 20', [tenantId(), shopper.id]);
+  const own = await ctx.db.query('SELECT * FROM shopper_addresses WHERE tenant_id = $1 AND shopper_id = $2 ORDER BY is_default DESC, id LIMIT 20', [tenantId(), shopper.id]);
+  const { shared } = shopperServices(ctx);
+  if (!shared.available || own.length >= 20) return own;
+  const key = (a) => `${a.line1}|${a.pincode}|${a.name}`.toLowerCase();
+  const seen = new Set(own.map(key));
+  const theirs = (await shared.addresses(tenantId(), shopper.id)).filter((a) => !seen.has(key(a))).slice(0, 20 - own.length).map((a) => ({
+    id: a.sharedId, name: a.name, phone: a.phone, kind: a.kind, is_default: own.length === 0 && Boolean(a.isDefault),
+    line1: a.line1, line2: a.line2, city: a.city, state_code: a.stateCode, pincode: a.pincode,
+    shared: { name: a.name, phone: a.phone, line1: a.line1, line2: a.line2 ?? '', landmark: a.landmark ?? '', city: a.city, stateCode: a.stateCode, pincode: a.pincode },
+  }));
+  return [...own, ...theirs];
 }
 
 async function noticeVersion(platform) {
@@ -55,7 +71,7 @@ function savedChoice(addresses) {
   if (!addresses.length) return '';
   const chosen = addresses.find((a) => a.is_default) ?? addresses[0];
   return html`<fieldset class="stack" style="border:0;padding:0;margin:0"><legend class="small">Deliver to</legend>
-${addresses.map((a) => html`<label class="check"><input type="radio" name="addressId" value="${a.id}" data-phone="${a.phone}"${a.id === chosen.id ? raw(' checked') : ''}><span><b>${a.name}</b> · ${KIND_LABEL[a.kind] ?? ''}${a.is_default ? ' · Default' : ''}<br><span class="muted small">${[a.line1, a.line2, a.city, INDIAN_STATES[a.state_code] ?? '', a.pincode].filter(Boolean).join(', ')}</span></span></label>`)}
+${addresses.map((a) => html`<label class="check"><input type="radio" name="addressId" value="${a.id}" data-phone="${a.phone}"${a.shared ? html` data-address="${JSON.stringify(a.shared)}"` : ''}${a.id === chosen.id ? raw(' checked') : ''}><span><b>${a.name}</b> · ${KIND_LABEL[a.kind] ?? ''}${a.is_default ? ' · Default' : ''}<br><span class="muted small">${[a.line1, a.line2, a.city, INDIAN_STATES[a.state_code] ?? '', a.pincode].filter(Boolean).join(', ')}</span></span></label>`)}
 <label class="check"><input type="radio" name="addressId" value="new"><span>Use a new address</span></label></fieldset>`;
 }
 
@@ -214,7 +230,7 @@ export function checkoutPages(ctx) {
     try {
       if (!(await storeOn(repos))) return next();
       const shopper = await shopperFrom(req, db);
-      const [addresses, version] = await Promise.all([savedAddresses(db, shopper), noticeVersion(platform)]);
+      const [addresses, version] = await Promise.all([savedAddresses(ctx, shopper), noticeVersion(platform)]);
       res.set('Cache-Control', 'no-store');
       return await sendStorePage(ctx, req, res, {
         kind: 'checkout', ref: 'checkout', title: 'Checkout', ...paying(CHECKOUT_SCRIPT),

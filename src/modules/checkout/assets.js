@@ -27,6 +27,8 @@ export const CHECKOUT_JS = `(() => {
   const value = (name) => String(field(name)?.value ?? '').trim();
   function chosenAddress() {
     const saved = form.querySelector('input[name="addressId"]:checked');
+    // A shared-profile address (9.22) has no row here: it is sent as the address itself.
+    if (saved && saved.dataset.address) { try { return { address: JSON.parse(saved.dataset.address) }; } catch { return {}; } }
     if (saved && saved.value !== 'new') return { addressId: Number(saved.value) };
     const a = { name: value('name'), phone: value('phone'), line1: value('line1'), line2: value('line2'), landmark: value('landmark'), city: value('city'), stateCode: value('stateCode'), pincode: value('pincode') };
     const complete = a.name.length >= 2 && a.phone.length >= 8 && a.line1.length >= 3 && a.city && /^[0-9]{2}$/.test(a.stateCode) && /^[1-9][0-9]{5}$/.test(a.pincode);
