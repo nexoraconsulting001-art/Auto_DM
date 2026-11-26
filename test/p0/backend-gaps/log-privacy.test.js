@@ -11,7 +11,9 @@ const defaultSink = (line, level) => (level === 'error' ? process.stderr : proce
 const sign = (body) => `sha256=${crypto.createHmac('sha256', 'secret').update(body).digest('hex')}`;
 
 test('nothing in src calls console', () => {
-  const offenders = filesIn('src').filter((f) => f.endsWith('.js') && /\bconsole\s*\./.test(fs.readFileSync(path.join(repoRoot, f), 'utf8')));
+  // A call on the console global, console.<method>(: "the console." in prose and imports of ./console.js (the web and
+  // Platform Console modules) are not calls.
+  const offenders = filesIn('src').filter((f) => f.endsWith('.js') && /\bconsole\s*\.\s*[A-Za-z_$][\w$]*\s*\(/.test(fs.readFileSync(path.join(repoRoot, f), 'utf8')));
   assert.deepEqual(offenders, []);
 });
 

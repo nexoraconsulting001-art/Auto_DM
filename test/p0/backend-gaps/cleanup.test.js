@@ -28,7 +28,8 @@ test('no code or config mentions the old forwarding, the plugin or the global to
     if (!fs.existsSync(path.join(repoRoot, file))) continue;
     const text = read(file);
     assert.doesNotMatch(text, /FORWARD_WEBHOOK_URL|PLUGIN_URL/, file);
-    if (file.startsWith('src/')) assert.doesNotMatch(text, /IG_ACCESS_TOKEN|IG_USER_ID|config\.accessToken|config\.igUserId/, file);
+    // Whole names: config.accessTokenMinutes (the sign-in session's lifetime) is not the old global token.
+    if (file.startsWith('src/')) assert.doesNotMatch(text, /IG_ACCESS_TOKEN|IG_USER_ID|config\.accessToken\b|config\.igUserId\b/, file);
   }
 });
 

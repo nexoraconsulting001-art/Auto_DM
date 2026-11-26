@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { bindTenant, createRepos } from '../src/repos/index.js';
-import { withTenant } from '../src/tenancy.js';
+import { NoTenantError, withTenant } from '../src/tenancy.js';
 import { createStorage } from '../src/platform/storage.js';
 import { createQueue, backoffMs } from '../src/platform/queue.js';
 import { createAnalytics } from '../src/platform/analytics.js';
@@ -214,7 +214,9 @@ test(`analytics (${drivers.analyticsDriver}): events are counted per business`, 
   assert.equal(days.length, 1);
   assert.equal(Number(days[0].n), 2);
   await assert.rejects(() => withTenant(a, () => analytics.track('Bad Name!', {})), /Invalid event name/);
-  await assert.rejects(() => analytics.track('dm.sent', {}), /No business/);
+  // Outside a business it is refused with the one tenancy error (spec F-03 settled its words: "tenant context missing").
+  await assert.rejects(() => analytics.track('dm.sent', {}), NoTenantError);
+  await assert.rejects(() => analytics.track('dm.sent', {}), /tenant context missing/);
 });
 
 // ---- Cache ----

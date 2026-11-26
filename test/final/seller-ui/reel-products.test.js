@@ -28,7 +28,8 @@ test('seller-ui-4: staff with automations but not catalog list their business’
   const found = need(await api(app, shop, staff.token, '/reel-products?search=lamp'), 200, 'search').json();
   assert.deepEqual(found.items.map((p) => p.id), [lamp.id]);
 
-  const saved = need(await api(app, shop, staff.token, `/reels/${REEL_ID}`, { method: 'PUT', body: { keywords: ['LINK'], productIds: [lamp.id], headline: 'Lamp edit' } }), 200, 'creating the reel store').json();
+  // A reel is its landing page; its comment DM is an automation's, so the keyword fields are not sent (D-11, src/contracts/api/reels.js).
+  const saved = need(await api(app, shop, staff.token, `/reels/${REEL_ID}`, { method: 'PUT', body: { productIds: [lamp.id], headline: 'Lamp edit' } }), 200, 'creating the reel store').json();
   assert.deepEqual(saved.products.map((p) => p.id), [lamp.id]);
 });
 

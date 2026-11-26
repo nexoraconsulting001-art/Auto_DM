@@ -65,7 +65,7 @@ test.beforeAll(async () => {
   const reel = await fetch(`${app.base}/api/v1/reels/${REEL_ID}`, {
     method: 'PUT',
     headers: { authorization, 'content-type': 'application/json' },
-    body: JSON.stringify({ headline: 'Brunch edit', keywords: ['LINK'], productIds: ids, active: true }),
+    body: JSON.stringify({ headline: 'Brunch edit', productIds: ids, active: true }),
   });
   expect(reel.status).toBe(200);
   landingPage = `${app.base}/r/${(await reel.json()).slug}?src=dm`;

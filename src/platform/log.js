@@ -11,13 +11,18 @@ import { currentTenant } from '../tenancy.js';
  *   reportError(err, fields)    logs it and passes it to every reporter added with onError()
  */
 const requestContext = new AsyncLocalStorage();
-const PRIVATE_FIELD = /^(user_?name|ig_?user_?name|text|message|body|caption|comment|reply|phone|mobile|email|address|password|passwd|secret|api_?key|token|access_?token|refresh_?token|authorization|cookie|signature)$/i;
+// `comment` is not here: by convention it is the comment's id (dm.sent, webhook.comment), which is what a log needs to
+// trace a delivery. What a person wrote is `text`, `message` or `comment_text`, and those are dropped.
+const PRIVATE_FIELD = /^(user_?name|ig_?user_?name|text|message|comment_?text|body|caption|reply|phone|mobile|email|address|password|passwd|secret|api_?key|token|access_?token|refresh_?token|authorization|cookie|signature)$/i;
 const SECRET_SHAPES = [
   [/(Bearer\s+)[\w.~+/=-]+/gi, '$1[token]'],
   [/\b(EAA|IGQ|IGAA)[\w-]{12,}/g, '[token]'],
   [/\b(rzp_(?:live|test)_|sk_(?:live|test)_|shpat_|whsec_)[\w-]+/gi, '[key]'],
   [/\b((?:access_|refresh_)?token|api_?key|key|secret|password|signature)=[^&\s"']+/gi, '$1=[redacted]'],
-  [/\+?\d(?:[ -]?\d){9,}/g, '[number]'],
+  // Ten or more digits, spaced or not, read as a phone. One unbroken run of 15 or more digits is an id (Instagram and Meta
+  // ids are 15 to 19 digits; a phone is at most 15 with its country code and is written with + or spaces when that long)
+  // and stays, so a refusal is logged with the id it was for (PRD 11, R-01).
+  [/(?<![\d+])\d{15,}(?!\d)|\+?\d(?:[ -]?\d){9,}/g, (found) => (/^\d{15,}$/.test(found) ? found : '[number]')],
 ];
 /** Takes secret-shaped and phone-shaped text out of a string: an error's message can quote what a person wrote or a request carried. */
 export function scrub(text) {

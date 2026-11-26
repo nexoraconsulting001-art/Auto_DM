@@ -10,12 +10,14 @@ import { createAppBuilds } from './service.js';
  * --submit. It prints ids, build numbers and statuses only: no name, no token, no message from a provider.
  */
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
+/** The tool's own output, one line on stdout (src never calls console: everything else goes through the log module). */
+const toStdout = (line) => process.stdout.write(`${line}\n`);
 
 /**
  * Builds the current business (inside withTenant). `options` are the tool's: platforms, submit. `seams` as createAppBuilds
  * takes them (a test's drivers and runner). Answers { ok, builds }.
  */
-export async function runForBusiness(ctx, { platforms = [], submit = false, timeoutMs, everyMs } = {}, print = (line) => console.log(line), seams = {}) {
+export async function runForBusiness(ctx, { platforms = [], submit = false, timeoutMs, everyMs } = {}, print = toStdout, seams = {}) {
   const service = createAppBuilds(ctx, { ...seams, autoSubmit: Boolean(submit) });
   const entitled = await appConfigFor(ctx).entitledPlatforms();
   const asked = platforms.length ? platforms : entitled;
@@ -42,7 +44,7 @@ export async function runForBusiness(ctx, { platforms = [], submit = false, time
 }
 
 /** Opens the database the server uses, finds the business by its slug and builds it. */
-export async function runFromDatabase(slug, options = {}, print = (line) => console.log(line)) {
+export async function runFromDatabase(slug, options = {}, print = toStdout) {
   if (!SLUG.test(String(slug))) {
     print('build-brand: a business is named by its slug: lower-case letters, digits and dashes.');
     return { ok: false };
