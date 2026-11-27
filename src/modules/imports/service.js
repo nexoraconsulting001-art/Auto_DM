@@ -366,6 +366,12 @@ export function createImports(ctx) {
       await mustBeInPlan();
       const result = await judge(url, await newState());
       const answer = { status: result.status, itemId: null, productId: result.productId, readFrom: result.readFrom, reason: result.reason, message: IMPORT_REASONS[result.reason] ?? '', draft: toApiDraft(result.draft) };
+      if (result.status === 'failed' && result.reason === 'adapter_error') {
+        // 8.4: an adapter failure is kept against the business and the address, not only logged; the owner's answer has no item to save.
+        const failedJob = await imports.createJob({ kind: 'link', source: hostOf(canonicalProductUrl(url) ?? url), status: 'done', createdBy: user?.id });
+        await imports.addItems(failedJob.id, [{ line: 1, url: canonicalProductUrl(url) ?? url, status: 'failed', readFrom: '', reason: result.reason }]);
+        await imports.count(failedJob.id);
+      }
       if (result.status === 'failed' || result.status === 'existing') return answer;
       const job = await imports.createJob({ kind: 'link', source: hostOf(result.draft?.externalUrl || canonicalProductUrl(url)), status: 'done', createdBy: user?.id });
       await imports.addItems(job.id, [{ line: 1, url: canonicalProductUrl(url), status: result.status, readFrom: result.readFrom, gatePassed: result.gatePassed, reason: result.reason ?? '', draft: result.draft }]);
