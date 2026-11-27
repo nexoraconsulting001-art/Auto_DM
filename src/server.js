@@ -106,6 +106,11 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
   app.disable('x-powered-by');
   app.use(requestIds());
   app.use(platform.metrics.middleware());
+  // Once draining (SIGTERM, the grace pause below), every request but the three probes is answered 503 before any work
+  // starts, and the requests in flight are counted (src/platform/health.js middleware). Without it the grace pause served
+  // new requests as usual.
+  const health = platform.health ?? createHealth({ db, platform, config });
+  app.use(health.middleware());
   app.use((_req, res, next) => {
     res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'X-Frame-Options': 'SAMEORIGIN' });
     next();
@@ -122,7 +127,6 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
   // Liveness: the process is up, whatever its dependencies do. Readiness: the database, migrations, queue, storage and
   // cache, one word each, and false while draining (load balancers use this). Startup: it has finished starting.
   // None of the three names a business or a setting (src/platform/health.js).
-  const health = platform.health ?? createHealth({ db, platform, config });
   app.get(['/health', HEALTH_PATHS.live], (_req, res) => res.set('Cache-Control', 'no-store').send('ok'));
   app.get(HEALTH_PATHS.ready, async (_req, res) => {
     const state = await health.ready();
