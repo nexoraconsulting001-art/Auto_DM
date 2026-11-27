@@ -58,6 +58,19 @@ export function nextDueAfter(due, everyMs, now) {
   return due + Math.max(1, Math.floor((now - due) / everyMs) + 1) * everyMs;
 }
 
+/**
+ * nextDueAfter, kept at the poll's own place in the hour (its jitter_seconds, N-37). A retry, a deferral or a late run starts off that place, and chaining
+ * from it would carry the drift into every later run and bunch businesses up again; the next run goes back to the nearest moment on the poll's phase.
+ */
+export function nextOnPhase(due, everyMs, now, jitterSeconds) {
+  const next = nextDueAfter(due, everyMs, now);
+  if (!Number.isInteger(jitterSeconds) || everyMs < HOUR || everyMs % HOUR) return next;
+  let onPhase = Math.floor(next / HOUR) * HOUR + jitterSeconds * 1000;
+  if (onPhase - next > HOUR / 2) onPhase -= HOUR;
+  else if (next - onPhase > HOUR / 2) onPhase += HOUR;
+  return onPhase > now ? onPhase : onPhase + HOUR;
+}
+
 /** How often media of this age is read, or null when Meta no longer keeps it (7.8, 4.3 row 20). */
 export function mediaEveryMs(ageMs) {
   if (ageMs < L.mediaYoungUnderMs) return L.mediaYoungEveryMs;

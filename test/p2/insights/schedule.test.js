@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ANALYTICS_LIMITS as L } from '../../../src/contracts/analytics.js';
 import {
-  ACCOUNT_JOBS, accountDaysToFetch, accountJitterSeconds, addDays, eachDay, firstDueAt, mediaEveryMs, mediaJitterSeconds, nextDueAfter, nextStoryDue, onlineFollowerCells, pollOffsetSeconds, retryDelayMs, storyPhase, zonedTime,
+  ACCOUNT_JOBS, accountDaysToFetch, accountJitterSeconds, addDays, eachDay, firstDueAt, mediaEveryMs, mediaJitterSeconds, nextDueAfter, nextOnPhase, nextStoryDue, onlineFollowerCells, pollOffsetSeconds, retryDelayMs, storyPhase, zonedTime,
 } from '../../../src/modules/insights/schedule.js';
 
 const HOUR = 3_600_000;
@@ -46,6 +46,24 @@ test('nextDueAfter keeps the phase and owes nothing for missed runs', () => {
   assert.equal(nextDueAfter(START, DAY, START), START + DAY);
   assert.equal(nextDueAfter(START, DAY, START + 9 * DAY + 5), START + 10 * DAY);
   assert.equal(nextDueAfter(START, DAY, START + DAY), START + 2 * DAY);
+});
+
+test('nextOnPhase: a run that started off its place in the hour (a retry, a late run) puts the next one back on it (N-37)', () => {
+  const jitter = 1234;
+  const onPhase = START + jitter * 1000;
+  assert.equal(nextOnPhase(onPhase, DAY, onPhase, jitter), onPhase + DAY, 'On phase it is nextDueAfter');
+  const retried = onPhase + 17 * 60_000; // a 17-minute retry
+  assert.equal(nextOnPhase(retried, DAY, retried + 5_000, jitter), onPhase + DAY);
+  const early = onPhase - 25 * 60_000;
+  assert.equal(nextOnPhase(early, DAY, early, jitter), onPhase + DAY);
+  assert.equal(nextOnPhase(retried, HOUR, retried, jitter), onPhase + HOUR, 'Never in the past');
+  for (let i = 0; i < 200; i++) {
+    const due = START + i * 7_919_000;
+    const at = due + (i % 13) * 60_000;
+    const next = nextOnPhase(due, 3 * HOUR, at, jitter);
+    assert.ok(next > at);
+    assert.equal(((next - START) / 1000) % 3600, jitter);
+  }
 });
 
 test('how often media is read, by age, at each edge (7.8)', () => {

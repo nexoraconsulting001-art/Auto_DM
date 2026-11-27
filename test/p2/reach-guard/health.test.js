@@ -235,7 +235,8 @@ test('history stops at 90 days and old call stats are purged', async () => {
   await w.db.platform.query(`INSERT INTO meta_call_stats (tenant_id, channel, account_id, hour, calls) VALUES ($1, 'instagram', $2, $3::timestamptz, 1)`, [w.tenant.id, IG, new Date(w.clock.t - 8 * DAY)]);
   await w.guard.sweep();
   const rows = await w.db.platform.query(`SELECT to_char(day, 'YYYY-MM-DD') AS d FROM account_health_history WHERE tenant_id = $1 ORDER BY day`, [w.tenant.id]);
-  assert.deepEqual(rows.map((r) => r.d), [old(89), old(1), old(0)]);
+  // N-29 (coordinator default, 2026-11-27): older than 90 days is removed; the edge day (90) stays.
+  assert.deepEqual(rows.map((r) => r.d), [old(90), old(89), old(1), old(0)]);
   assert.equal((await w.db.platform.query('SELECT 1 FROM meta_call_stats')).length, 0);
 });
 

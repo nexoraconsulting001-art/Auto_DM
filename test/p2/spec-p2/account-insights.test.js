@@ -255,7 +255,8 @@ test('N-03: a real zero is a zero and not a gap', async () => {
 
 test('N-03: if every day is empty the total is null, not 0', async () => {
   const shop = await addP2Shop(world);
-  await shop.seedDays('comments', days(7, null));
+  // The 7-day range is the last 7 full days, yesterday back (decisions-needed E5, 2026-11-27), so the empty week is days 1..7.
+  await shop.seedDays('comments', days(7, null, 1));
   const res = metricOf(await account(shop, { range: '7' }), 'comments');
   assert.equal(res.total, null);
   assert.equal(res.gapDays, 7);

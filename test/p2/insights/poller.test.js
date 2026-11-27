@@ -206,7 +206,10 @@ test('a media poll comes back on the schedule for its age', async (t) => {
     await b.only('media', id);
     await w.tick();
     const poll = await b.poll('media', id);
-    assert.equal(+new Date(poll.next_due_at), w.clock.t + every, id);
+    // The interval for its age, back on the poll's own place in the hour (N-37): this run was made due off it, so the next is the nearest moment on it.
+    const phase = poll.jitter_seconds * 1000;
+    const onPhase = Math.round((w.clock.t + every - phase) / HOUR) * HOUR + phase;
+    assert.equal(+new Date(poll.next_due_at), onPhase, id);
     assert.equal(poll.last_outcome, 'ok');
   }
 });

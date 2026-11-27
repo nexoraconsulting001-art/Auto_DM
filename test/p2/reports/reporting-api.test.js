@@ -51,7 +51,10 @@ test('N-64: the key alone names the business: on any address it works, and anoth
   const id = requestId();
   const res = await reporting(w, a, key, '/metrics?metrics=sessions&range=7', { business: b.tenantId, headers: { 'x-request-id': id } });
   assert.equal(res.status, 404);
-  assert.doesNotMatch(res.text, /sessions|77/);
+  // The 404 echoes the caller's request id, a random uuid that can itself hold "77"; the data check is on everything else in the answer.
+  const { requestId: echoed, ...answer } = res.json();
+  assert.equal(echoed, id);
+  assert.doesNotMatch(JSON.stringify(answer), /sessions|77/);
   assert.ok(logs.forRequest(id).some((l) => /reporting\.not_found/.test(l)), 'The attempt is logged');
   assert.equal(logs.text().includes(key), false, 'The key is never logged');
   for (const bad of ['abc', '0', '-1', "1'--", '99999999999']) assert.equal((await reporting(w, a, key, '/metrics?metrics=sessions', { business: bad })).status, 404, bad);
