@@ -103,7 +103,8 @@ test('C-05: a refresh that keeps failing alerts at 14, 7, 3 and 1 days, once eac
   await setTokenAge(shop, { issuedDaysAgo: 45, expiresInDays: 15 });
   await refuseAllRefreshes();
   try {
-    for (let day = 0; day < 15; day++) {
+    // 14 days, from 15 left to just under 1: the 15th would reach the expiry itself, which ends the token (its own C-05 test), not warns.
+    for (let day = 0; day < 14; day++) {
       await world.travel(DAY - 60 * MINUTE);
       await world.tick();
       await world.travel(60 * MINUTE);
@@ -451,9 +452,12 @@ test('C-49: a valid deletion request answers 200 with a url and code, deletes th
   assert.equal(out.valid, true, JSON.stringify(out.body));
   const [row] = await shop.sql('SELECT * FROM data_deletion_requests WHERE confirmation_code = $1', [out.body.confirmation_code]);
   assert.equal(row.tenant_id, shop.tenantId);
-  assert.equal(row.status, 'requested');
+  // Decision R3-DMS-E2 (2026-11-27): the erasure runs inline, straight after the answer, so it may be finished already.
+  assert.ok(['requested', 'completed'].includes(row.status), row.status);
   assert.ok(Math.abs(new Date(row.due_at) - Date.now() - 30 * DAY) < 60_000, 'Due within 30 days');
-  assert.equal((await shop.account()).access_token_enc, '');
+  // With the erasure finished inline (R3-DMS-E2) the account's row is gone with its token.
+  const account = await shop.account();
+  assert.ok(!account || account.access_token_enc === '', 'The token is deleted');
   await assertReason(shop, 'deletion.requested');
   await world.switchLag();
   await shop.commentDirect(reel.mediaId);
@@ -466,7 +470,8 @@ test('C-49: the status address shows the request by its code, and only that', as
   const out = await world.meta.post('/deletion', { igUserId: shop.igUserId });
   const code = out.body.confirmation_code;
   const status = need(await hit(world, `/meta/deletion/${code}`), 200, 'The status page').json();
-  assert.equal(status.status, 'requested');
+  // Decision R3-DMS-E2 (2026-11-27): the erasure runs inline, so the page may already say it is done.
+  assert.ok(['requested', 'completed'].includes(status.status), status.status);
   assert.doesNotMatch(JSON.stringify(status), new RegExp(shop.igUserId));
   for (const bad of ['nope', `${code}x`, `' OR '1'='1`, '../../etc/passwd']) {
     assert.equal((await hit(world, `/meta/deletion/${encodeURIComponent(bad)}`)).status, 404, bad);
@@ -479,7 +484,9 @@ test('C-49: the same deletion request twice answers both times and deletes once'
   const answers = await Promise.all([world.callback('/meta/deletion', signed), world.callback('/meta/deletion', signed)]);
   assert.deepEqual(answers.map((r) => r.status), [200, 200]);
   for (const answer of answers) assert.ok(answer.json().confirmation_code);
-  const rows = await shop.sql(`SELECT * FROM data_deletion_requests WHERE tenant_id = $1 AND status = 'requested'`, [shop.tenantId]);
+  assert.equal(answers[0].json().confirmation_code, answers[1].json().confirmation_code, 'One request, one code');
+  // Decision R3-DMS-E2 (2026-11-27): the erasure runs inline, so the one request may be open or done already.
+  const rows = await shop.sql(`SELECT * FROM data_deletion_requests WHERE tenant_id = $1`, [shop.tenantId]);
   assert.equal(rows.length, 1);
 });
 
