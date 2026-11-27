@@ -13,12 +13,16 @@ export const MEDIA_LIST_EVERY_MS = L.mediaYoungEveryMs;
 export const STORY_LIST_EVERY_MS = L.storyEveryMs;
 /** An account whose login can't use /stories asks again now and then, since whether it exists is still to confirm (7.3). */
 export const STORY_EDGE_RECHECK_MS = DAY;
-/** Meta keeps 90 days, and they are worth having from the day a business connects; 30 at a time keeps one job well inside its lease. */
+/**
+ * Meta keeps 90 days, and they are worth having from the day a business connects. The account_backfill job reads them once, 30 days a run so one run
+ * stays well inside its lease, an hour apart until none is missing, and then stops; account_daily reads only its own recent days (N-38).
+ */
 export const BACKFILL_DAYS_PER_RUN = 30;
 export const BACKFILL_EVERY_MS = HOUR;
 
 export const CALL_CLASS = Object.freeze({
   account_daily: 'insights',
+  account_backfill: 'insights',
   demographics: 'insights',
   media: 'insights',
   media_list: 'media_list',
@@ -26,7 +30,8 @@ export const CALL_CLASS = Object.freeze({
   story_list: 'story_insights',
 });
 
-export const ACCOUNT_JOBS = Object.freeze(['account_daily', 'demographics', 'media_list', 'story_list']);
+/** The jobs an account is enrolled with. account_backfill is last so the others keep their place in the hour (accountJitterSeconds). */
+export const ACCOUNT_JOBS = Object.freeze(['account_daily', 'demographics', 'media_list', 'story_list', 'account_backfill']);
 
 const GOLDEN_RATIO = 0.6180339887498949;
 
@@ -107,19 +112,23 @@ export function eachDay(from, to) {
   return days;
 }
 
+/** The days account_daily fetches: the last 3 complete days, which Meta may still revise (7.8), newest first. */
+export function accountRecentDays(today) {
+  return Array.from({ length: L.accountRefetchDays }, (_, i) => addDays(today, -(i + 1)));
+}
+
 /**
- * Which days an account poll fetches: the last 3 complete days, which Meta may still revise (7.8), then whatever else of Meta's 90 days isn't stored yet,
- * newest first. The oldest day is 89 back so a whole day's window stays inside the 90 Meta allows.
+ * The older days account_backfill still owes: whatever of Meta's 90 days before the recent 3 isn't stored, newest first, perRun at a time; `more` when
+ * another run is needed. The oldest day is 89 back so a whole day's window stays inside the 90 Meta allows.
  */
-export function accountDaysToFetch(today, storedDays, perRun = BACKFILL_DAYS_PER_RUN) {
-  const recent = Array.from({ length: L.accountRefetchDays }, (_, i) => addDays(today, -(i + 1)));
+export function backfillDaysToFetch(today, storedDays, perRun = BACKFILL_DAYS_PER_RUN) {
   const stored = new Set(storedDays);
   const missing = [];
   for (let back = L.accountRefetchDays + 1; back < L.accountRetentionDays; back++) {
     const day = addDays(today, -back);
     if (!stored.has(day)) missing.push(day);
   }
-  return { days: [...recent, ...missing.slice(0, perRun)], more: missing.length > perRun };
+  return { days: missing.slice(0, perRun), more: missing.length > perRun };
 }
 
 // ---- time zones ---------------------------------------------------------------------------------------------------------

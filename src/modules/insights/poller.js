@@ -6,7 +6,7 @@ import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import {
   ACCOUNT_JOBS, BACKFILL_EVERY_MS, CALL_CLASS, DAY, HOUR, MEDIA_LIST_EVERY_MS, MINUTE, STORY_EDGE_RECHECK_MS, STORY_LIST_EVERY_MS,
-  accountDaysToFetch, accountJitterSeconds, addDays, dayOf, firstDueAt, mediaEveryMs, mediaJitterSeconds, nextDueAfter, nextOnPhase, nextStoryDue, onlineFollowerCells, pollOffsetSeconds, retryDelayMs, storyPhase,
+  accountJitterSeconds, accountRecentDays, addDays, dayOf, firstDueAt, mediaEveryMs, backfillDaysToFetch, mediaJitterSeconds, nextDueAfter, nextOnPhase, nextStoryDue, onlineFollowerCells, pollOffsetSeconds, retryDelayMs, storyPhase,
 } from './schedule.js';
 
 const CLAIM_LIMIT = 120;
@@ -184,14 +184,18 @@ export function createInsightsPoller(ctx) {
     if (available) await repos.insights.saveOnlineFollowers(account.id, onlineFollowerCells(hours, at, await repos.insights.timeZone()), at);
   }
 
-  async function accountDaily({ poll, account, reader }) {
-    const at = now();
-    const today = dayOf(at);
-    const { days, more } = accountDaysToFetch(today, await repos.insights.storedDays(account.id, addDays(today, -L.accountRetentionDays)), config?.insightsBackfillPerRun);
+  async function saveDays(account, days, at, reader) {
     for (const day of days) {
       await repos.insights.replaceDay(account.id, day, await reader.accountDay(day), at);
       await writeRollup('meta_account_daily', accountRollupRows(account.account_id, await repos.insights.dayFigures(account.id, [day])));
     }
+  }
+
+  /** The day's own account poll: the recent days Meta may still revise, and today's followers. Rerunning it rewrites the same days (N-38). */
+  async function accountDaily({ poll, account, reader }) {
+    const at = now();
+    const today = dayOf(at);
+    await saveDays(account, accountRecentDays(today), at, reader);
 
     const followers = await reader.followers();
     await repos.insights.saveFollowers(account.id, today, followers, at);
@@ -199,8 +203,17 @@ export function createInsightsPoller(ctx) {
     if (followers !== null && followers >= L.minFollowersForDemographics && account.online_followers !== 'unavailable') await captureOnlineFollowers(reader, account, at);
 
     await repos.insights.markRefreshed(account.id, at);
-    const due = +poll.next_due_at;
-    return { insightsAnswered: true, nextDueAt: nextOnPhase(due, more ? BACKFILL_EVERY_MS : L.accountEveryMs, at, poll.jitter_seconds) };
+    return { insightsAnswered: true, nextDueAt: nextOnPhase(+poll.next_due_at, L.accountEveryMs, at, poll.jitter_seconds) };
+  }
+
+  /** Meta's 90 days, read once after the business connects, in chunks an hour apart; it stops when nothing is missing. */
+  async function accountBackfill({ poll, account, reader }) {
+    const at = now();
+    const today = dayOf(at);
+    const { days, more } = backfillDaysToFetch(today, await repos.insights.storedDays(account.id, addDays(today, -L.accountRetentionDays)), config?.insightsBackfillPerRun);
+    await saveDays(account, days, at, reader);
+    if (!more) return { insightsAnswered: true, stop: true };
+    return { insightsAnswered: true, nextDueAt: nextOnPhase(+poll.next_due_at, BACKFILL_EVERY_MS, at, poll.jitter_seconds) };
   }
 
   async function demographics({ poll, account, reader }) {
@@ -339,7 +352,7 @@ export function createInsightsPoller(ctx) {
     return { insightsAnswered: true, nextDueAt: posted === null ? nextDueAfter(+poll.next_due_at, L.storyEveryMs, at) : nextStoryDue(posted, at) };
   }
 
-  const JOBS = { account_daily: accountDaily, demographics, media_list: mediaList, story_list: storyList, media: mediaInsights, story: storyInsights };
+  const JOBS = { account_daily: accountDaily, account_backfill: accountBackfill, demographics, media_list: mediaList, story_list: storyList, media: mediaInsights, story: storyInsights };
 
   // ---- what happens when a job doesn't finish ------------------------------------------------------------------------
 
@@ -442,14 +455,35 @@ export function createInsightsPoller(ctx) {
     }).catch((err) => reportError(err, { msg: 'insights.business_failed', tenant: tenantId }));
   }
 
+  /**
+   * A business that reconnects Instagram after its backfill finished may have a gap: the days it was disconnected. Its account_backfill poll starts
+   * again at its own place in the hour, fills only the days still missing (up to 90 back) and stops again. Looks across businesses, as enrolNew does.
+   */
+  function resumeBackfills(at) {
+    return db.platform.query(
+      `UPDATE insight_polls p SET stopped_at = NULL, attempts = 0, lease_until = NULL, locked_by = NULL, last_outcome = 'reconnected',
+         next_due_at = CASE WHEN date_trunc('hour', $1::timestamptz) + p.jitter_seconds * interval '1 second' >= $1::timestamptz
+                            THEN date_trunc('hour', $1::timestamptz) + p.jitter_seconds * interval '1 second'
+                            ELSE date_trunc('hour', $1::timestamptz) + interval '1 hour' + p.jitter_seconds * interval '1 second' END
+       FROM analytics_accounts a
+       JOIN ig_accounts i ON i.tenant_id = a.tenant_id AND i.ig_user_id = a.ig_user_id
+       WHERE p.job = 'account_backfill' AND p.stopped_at IS NOT NULL AND a.tenant_id = p.tenant_id AND a.id = p.account_ref
+         AND i.status = 'active' AND i.access_token_enc <> '' AND i.connected_at > p.stopped_at
+       RETURNING p.id`,
+      [new Date(at).toISOString()],
+    );
+  }
+
   return {
     enrolNew,
+    resumeBackfills,
     claim,
 
     /** What the worker runs every minute. Every worker can run it at once: a poll has one lease holder. */
     async tick() {
       const at = now();
       await enrolNew(at);
+      await resumeBackfills(at);
       const polls = await claim(at);
       const byBusiness = new Map();
       for (const poll of polls) byBusiness.set(poll.tenant_id, [...(byBusiness.get(poll.tenant_id) ?? []), poll]);

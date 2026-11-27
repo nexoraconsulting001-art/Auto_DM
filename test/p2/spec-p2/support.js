@@ -238,7 +238,7 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
     ga4BaseUrl: google.url,
     metaCallbackBaseUrl: base,
     metaTimeoutMs: 1500,
-    insightsBackfillPerRun: 2, // the Meta data these tests set up is at most 4 days old, and reading 33 days takes the worker about 25 seconds on PGlite
+    insightsBackfillPerRun: 2, // the account_backfill job: the Meta data these tests set up is at most 4 days old, and reading 30 days a run takes the worker about 25 seconds on PGlite
     metaLogin: 'instagram',
     facebookPages: true,
     readReceipts: true,

@@ -29,8 +29,9 @@ test('a connected account starts collecting once, with its account polls', async
   const { w, b } = await connected(t);
   await w.enrol();
   const polls = await b.polls();
-  assert.deepEqual(polls.map((p) => p.job).sort(), ['account_daily', 'demographics', 'media_list', 'story_list']);
-  assert.deepEqual(polls.map((p) => p.call_class).sort(), ['insights', 'insights', 'media_list', 'story_insights']);
+  // account_backfill reads Meta's 90 days once and then stops (R6-P2-E1, user decision 2026-11-27).
+  assert.deepEqual(polls.map((p) => p.job).sort(), ['account_backfill', 'account_daily', 'demographics', 'media_list', 'story_list']);
+  assert.deepEqual(polls.map((p) => p.call_class).sort(), ['insights', 'insights', 'insights', 'media_list', 'story_insights']);
   const account = await b.account();
   assert.equal(account.ig_user_id, b.igUserId);
   for (const poll of polls) {
@@ -91,23 +92,71 @@ test('every account figure is fetched for the last 3 complete days, and a late r
   assert.equal(num(reachOf(await b.daily('reach'), day)), 100, 'the settled figure replaced the early one');
 });
 
-test('the first poll starts on Meta\'s 90 days, and the rest follows within hours without leaving the 90', async (t) => {
+test('the daily poll reads only its own recent days; the backfill reads the 90 days Meta keeps once, within hours, and then stops (N-38)', async (t) => {
   const { w, b } = await connected(t);
   await b.only('account_daily');
   await w.tick();
+  assert.equal(new Set((await b.daily('views')).map((r) => r.day)).size, 3, 'The daily poll: the last 3 days');
+
+  await b.only('account_backfill');
+  await w.tick();
   let days = new Set((await b.daily('views')).map((r) => r.day));
   assert.equal(days.size, 33);
-  const next = await b.poll('account_daily');
-  assert.ok(+new Date(next.next_due_at) <= w.clock.t + HOUR, 'more days are owed soon');
+  const next = await b.poll('account_backfill');
+  assert.equal(next.stopped_at, null);
+  assert.ok(+new Date(next.next_due_at) <= w.clock.t + 90 * MINUTE, 'more days are owed soon');
 
-  await w.advance(HOUR);
+  await w.advance(2 * HOUR);
   await w.tick();
-  await w.advance(HOUR);
+  await w.advance(2 * HOUR);
   await w.tick();
   days = new Set((await b.daily('views')).map((r) => r.day));
   assert.equal(days.size, 89);
   assert.equal([...days].sort()[0], dayBack(89, w.clock.t));
-  assert.equal((await b.poll('account_daily')).last_outcome, 'ok');
+  const done = await b.poll('account_backfill');
+  assert.equal(done.last_outcome, 'ok');
+  assert.ok(done.stopped_at, 'Nothing is missing, so the backfill stops');
+
+  const rows = async () => (await b.q('SELECT count(*)::int AS n FROM insight_daily WHERE tenant_id = $1', [b.tenant.id]))[0].n;
+  const before = await rows();
+  await b.only('account_daily');
+  await w.tick();
+  assert.equal(await rows(), before, 'A rerun of the daily poll rewrites its days and adds none');
+});
+
+test('a business that reconnects after a gap gets its backfill again: only the missing days, up to 90 back, and then it stops', async (t) => {
+  const { w, b } = await connected(t);
+  await b.only('account_backfill');
+  for (let i = 0; i < 3; i++) {
+    await b.q(`UPDATE insight_polls SET next_due_at = $2::timestamptz WHERE tenant_id = $1 AND job = 'account_backfill' AND stopped_at IS NULL`, [b.tenant.id, new Date(w.clock.t).toISOString()]);
+    await w.tick();
+  }
+  const finished = await b.poll('account_backfill');
+  assert.ok(finished.stopped_at, 'The first backfill is done');
+  const fetchedAt = async () => new Map((await b.q(`SELECT day::text AS day, max(fetched_at) AS at FROM insight_daily WHERE tenant_id = $1 AND metric <> 'followers_count' GROUP BY day`, [b.tenant.id])).map((r) => [r.day, +new Date(r.at)]));
+  const before = await fetchedAt();
+  assert.equal(before.size, 86);
+
+  // Disconnected for a while: those days were never read. Without a reconnect nothing starts again.
+  const gap = [dayBack(20), dayBack(21), dayBack(22)];
+  await b.q(`DELETE FROM insight_daily WHERE tenant_id = $1 AND day = ANY($2::date[])`, [b.tenant.id, gap]);
+  await w.advance(HOUR);
+  await w.tick();
+  assert.ok((await b.poll('account_backfill')).stopped_at, 'No reconnect, no backfill');
+
+  await b.q(`UPDATE ig_accounts SET connected_at = $3::timestamptz WHERE tenant_id = $1 AND ig_user_id = $2`, [b.tenant.id, b.igUserId, new Date(w.clock.t).toISOString()]);
+  await w.tick();
+  const resumed = await b.poll('account_backfill');
+  assert.equal(resumed.stopped_at, null, 'The reconnect starts the backfill again');
+  assert.ok(+new Date(resumed.next_due_at) >= w.clock.t && +new Date(resumed.next_due_at) < w.clock.t + HOUR, 'At its own place in the next hour');
+  assert.equal(((+new Date(resumed.next_due_at) / 1000) - resumed.jitter_seconds) % 3600, 0);
+
+  await w.advance(HOUR);
+  await w.tick();
+  const after = await fetchedAt();
+  for (const day of gap) assert.ok(after.has(day), `${day} is filled`);
+  for (const [day, at] of before) if (!gap.includes(day)) assert.equal(after.get(day), at, `${day} was already stored and is not read again`);
+  assert.ok((await b.poll('account_backfill')).stopped_at, 'Nothing missing: it stops again');
 });
 
 test('followers are snapshotted daily and the rollup holds the same figures, through the analytics module', async (t) => {
