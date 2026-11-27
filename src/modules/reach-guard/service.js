@@ -300,7 +300,8 @@ export function createReachGuard({ db, repos, compliance }) {
        ORDER BY s.evaluated_at ASC NULLS FIRST, a.id LIMIT $2`,
       [new Date(+at - EVALUATE_EVERY_MS), SWEEP_BATCH],
     );
-    const oldest = addDays(dayOf(at), -(L.healthHistoryDays - 1));
+    // N-29: only history older than healthHistoryDays goes; the day exactly that old is the edge day and stays.
+    const oldest = addDays(dayOf(at), -L.healthHistoryDays);
     for (const row of due) {
       try {
         await withTenant(row.tenant_id, async () => {
