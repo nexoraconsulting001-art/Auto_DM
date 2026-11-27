@@ -102,7 +102,20 @@ jobs:
         if: matrix.suite == 'e2e'
         run: npx playwright install --with-deps chromium
       - name: The shard's tests
+        env:
+          # Browser shard only: ci-shard.mjs then adds Playwright's json reporter, written to this file.
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ matrix.suite == 'e2e' && format('{0}/e2e-report-{1}.json', runner.temp, matrix.shard) || '' }}
         run: npm run test:shard -- ${{ matrix.suite }} ${{ matrix.shard }}/${{ matrix.of }}
+      # The JSON report holds the full error text the log cuts off; tools/gh-results.mjs reads it. It has test titles, errors
+      # and the config's settings, no environment values.
+      - name: Upload the browser test report
+        if: ${{ failure() && matrix.suite == 'e2e' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/e2e-report-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+          retention-days: 3
 
   production-profile:
     name: All tests on production drivers [${{ matrix.shard }}/${{ matrix.of }}]
