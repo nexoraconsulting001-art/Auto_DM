@@ -308,14 +308,15 @@ test('A-28: with no name available the DM still reads correctly, and with one it
   assert.deepEqual(asked(w).map((a) => a.action.message.text), ['Hi Asha, here it is', 'Hi, here it is']);
 }));
 
-test('A-28: when the profile lookup fails the DM still goes, and a name holding template syntax stays as written', async () => {
+test('A-28: when the profile lookup fails the DM still goes, and a name holding template syntax is no name (never expanded, and the DM still reads correctly)', async () => {
   const meta = { client: { forAccount: () => ({ getPerson: async (id) => { if (id === 'P-BAD') throw new Error('nope'); return { name: '{url}' }; } }) } };
   const w = await world({ meta });
   try {
     await w.create({ linkMode: 'one_tap', variants: [{ label: 'A', body: 'Hi {first_name}, here it is' }] });
     await w.handle(await w.events.comment({ from: 'P-BAD' }));
     await w.handle(await w.events.comment({ from: 'P-SYNTAX' }));
-    assert.deepEqual(asked(w).map((a) => a.action.message.text), ['Hi, here it is', 'Hi {url}, here it is']);
+    // "Hi {url}, here it is" would never be expanded, but the gate refuses a text with a variable left in it (content.bad_variable), so nobody would get the DM (spec A-28).
+    assert.deepEqual(asked(w).map((a) => a.action.message.text), ['Hi, here it is', 'Hi, here it is']);
   } finally {
     await closeWorld(w);
   }
