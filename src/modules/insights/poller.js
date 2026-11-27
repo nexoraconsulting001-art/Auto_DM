@@ -6,7 +6,7 @@ import { log, reportError } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import {
   ACCOUNT_JOBS, BACKFILL_EVERY_MS, CALL_CLASS, DAY, HOUR, MEDIA_LIST_EVERY_MS, MINUTE, STORY_EDGE_RECHECK_MS, STORY_LIST_EVERY_MS,
-  accountDaysToFetch, accountJitterSeconds, addDays, dayOf, firstDueAt, mediaEveryMs, mediaJitterSeconds, nextDueAfter, nextStoryDue, onlineFollowerCells, pollOffsetSeconds, retryDelayMs, storyPhase,
+  accountDaysToFetch, accountJitterSeconds, addDays, dayOf, firstDueAt, mediaEveryMs, mediaJitterSeconds, nextDueAfter, nextOnPhase, nextStoryDue, onlineFollowerCells, pollOffsetSeconds, retryDelayMs, storyPhase,
 } from './schedule.js';
 
 const CLAIM_LIMIT = 120;
@@ -200,7 +200,7 @@ export function createInsightsPoller(ctx) {
 
     await repos.insights.markRefreshed(account.id, at);
     const due = +poll.next_due_at;
-    return { insightsAnswered: true, nextDueAt: more ? nextDueAfter(due, BACKFILL_EVERY_MS, at) : nextDueAfter(due, L.accountEveryMs, at) };
+    return { insightsAnswered: true, nextDueAt: nextOnPhase(due, more ? BACKFILL_EVERY_MS : L.accountEveryMs, at, poll.jitter_seconds) };
   }
 
   async function demographics({ poll, account, reader }) {
@@ -216,7 +216,7 @@ export function createInsightsPoller(ctx) {
       }
       if (account.online_followers === 'unavailable' && account.followers_count !== null) await captureOnlineFollowers(reader, account, at); // once a week, in case it came back
     }
-    return { insightsAnswered: enough, nextDueAt: nextDueAfter(+poll.next_due_at, L.demographicsEveryMs, at) };
+    return { insightsAnswered: enough, nextDueAt: nextOnPhase(+poll.next_due_at, L.demographicsEveryMs, at, poll.jitter_seconds) };
   }
 
   /** Stores listed posts and gives each new one its own poll, spread across the hour. */
@@ -246,7 +246,7 @@ export function createInsightsPoller(ctx) {
       pages += 1;
     } while (after && pages < MAX_MEDIA_PAGES);
     await repos.insights.markMediaListed(account.id, at);
-    return { nextDueAt: nextDueAfter(+poll.next_due_at, MEDIA_LIST_EVERY_MS, at) };
+    return { nextDueAt: nextOnPhase(+poll.next_due_at, MEDIA_LIST_EVERY_MS, at, poll.jitter_seconds) };
   }
 
   /** Reads live stories. A Live on this edge isn't a story Meta gives insights for, so it is kept as "not tracked" (7.3); a reshared story can't be told apart yet. */
@@ -255,7 +255,7 @@ export function createInsightsPoller(ctx) {
     let page = await reader.storiesPage({ limit: 100 });
     if (!page.available) {
       await repos.insights.setStoriesEdge(account.id, 'unavailable');
-      return { nextDueAt: nextDueAfter(+poll.next_due_at, STORY_EDGE_RECHECK_MS, at) };
+      return { nextDueAt: nextOnPhase(+poll.next_due_at, STORY_EDGE_RECHECK_MS, at, poll.jitter_seconds) };
     }
     await repos.insights.setStoriesEdge(account.id, 'available');
     for (let pages = 0; pages < MAX_MEDIA_PAGES; pages++) {
@@ -271,7 +271,7 @@ export function createInsightsPoller(ctx) {
       if (!page.next) break;
       page = await reader.storiesPage({ after: page.next, limit: 100 });
     }
-    return { nextDueAt: nextDueAfter(+poll.next_due_at, STORY_LIST_EVERY_MS, at) };
+    return { nextDueAt: nextOnPhase(+poll.next_due_at, STORY_LIST_EVERY_MS, at, poll.jitter_seconds) };
   }
 
   async function mediaInsights({ poll, account, reader }) {
@@ -294,7 +294,7 @@ export function createInsightsPoller(ctx) {
     }
     const every = mediaEveryMs(age);
     if (every === null) return { outcome: 'expired', stop: true, insightsAnswered: true };
-    return { insightsAnswered: true, nextDueAt: nextDueAfter(+poll.next_due_at, every, at) };
+    return { insightsAnswered: true, nextDueAt: nextOnPhase(+poll.next_due_at, every, at, poll.jitter_seconds) };
   }
 
   /** A story, every 2 hours and then once more at 22 to 23.5 hours (7.3). The window is the reason for each branch: past it, Meta is not asked. */
