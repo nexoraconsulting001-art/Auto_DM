@@ -5,7 +5,7 @@ import { tenantId } from '../../tenancy.js';
 import { directLink } from '../links/rules.js';
 import { windowOpen } from './inbox.js';
 import { hasWords, isTooShort, matchesKeywords } from './match.js';
-import { chooseVariant, dmReplyKey, firstMessage, parseFaqPayload, parseTwoTapPayload, plainMessage, render, twoTapPayload } from './message.js';
+import { chooseVariant, dmReplyKey, firstMessage, firstNameFrom, parseFaqPayload, parseTwoTapPayload, plainMessage, render, twoTapPayload } from './message.js';
 import { scheduleStatus } from './schedule.js';
 
 const MEDIA_LABELS = Object.freeze({ REELS: 'reel', FEED: 'post' });
@@ -16,8 +16,6 @@ const MAX_KEY_PART = 150;
 const sha = (text) => crypto.createHash('sha256').update(text).digest('hex').slice(0, 40);
 /** A message id as part of an idempotency key: they run long, and a key stops at 200 characters. */
 const keyPart = (mid) => (String(mid).length > MAX_KEY_PART ? sha(mid) : String(mid));
-/** Outside text on its way to Postgres, which can't store a NUL. */
-const clean = (text) => (typeof text === 'string' ? text.replaceAll('\0', '') : '');
 
 /**
  * Decides which automation answers what people do on Instagram (PRD 6.1 to 6.5, 6.9), and what it says. The webhook worker in the
@@ -49,7 +47,7 @@ export function createAutomationEngine({ db, repos, compliance, meta, inbound = 
       const account = await accountFor(channel, accountId);
       if (!account?.token || !meta?.client) return '';
       const person = await meta.client.forAccount(account).getPerson(personId);
-      return clean(person?.name).trim().split(/\s+/)[0] ?? '';
+      return firstNameFrom(person?.name);
     } catch {
       return '';
     }
@@ -180,8 +178,9 @@ export function createAutomationEngine({ db, repos, compliance, meta, inbound = 
     if (!automation?.followupEnabled || !automation.followupText || !LAUNCHED.has(automation.state)) return;
     const key = `followup:${automation.id}:${sha(event.subject)}`;
     if (await repos.automations.jobExists(key)) return;
+    // A delay that reaches the window's end (23h50m) is still queued: the gate drops it at the end of the window as
+    // window.closed (PRD 4.5), so the "Why no DM?" view says why no follow-up went, instead of nothing being recorded (C-21).
     const sendAt = eventTime(event).getTime() + Math.max(L.followupMinDelayMs, automation.followupDelayMinutes * 60_000);
-    if (sendAt >= dmWindowEnd(event).getTime()) return;
     await compliance.enqueue({
       kind: 'dm', purpose: 'followup', channel: event.channel, accountId: event.accountId, recipientId: event.personId, personId: event.personId, idempotencyKey: key, expiresAt: dmWindowEnd(event),
       automationId: automation.id, isTest: last.is_test, message: plainMessage({ template: automation.followupText, finalUrl: await linkFor(automation, { channel: event.channel }) }),
