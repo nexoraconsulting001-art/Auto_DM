@@ -288,7 +288,9 @@ async function run(suite, k, n) {
   // As tools/gate.mjs runs Playwright: the config's settings, net-guard for the app servers the tests start.
   const guard = pathToFileURL(path.join(root, 'tools', 'net-guard.mjs')).href;
   const env = { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${guard}`.trim() };
-  const args = [path.join(root, 'node_modules', '@playwright', 'test', 'cli.js'), 'test', '--config=playwright.config.mjs', '--reporter=list', ...files.map(e2eFilter)];
+  // CI sets PLAYWRIGHT_JSON_OUTPUT_NAME so the full errors (axe violations, expect diffs) are kept as a JSON report for tools/gh-results.mjs.
+  const reporter = process.env.PLAYWRIGHT_JSON_OUTPUT_NAME ? '--reporter=list,json' : '--reporter=list';
+  const args = [path.join(root, 'node_modules', '@playwright', 'test', 'cli.js'), 'test', '--config=playwright.config.mjs', reporter, ...files.map(e2eFilter)];
   const result = spawnSync(process.execPath, args, { cwd: root, env, stdio: 'inherit' });
   if (result.error) throw result.error;
   return result.status ?? 1;

@@ -18,6 +18,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { renderE2eErrors, unzip } from './gh-e2e-report.mjs';
 
 const API = 'https://api.github.com';
 const PASSED = new Set(['success', 'skipped', 'neutral']);
@@ -109,6 +110,26 @@ async function jobLog(id) {
   }
   if (!res.ok) return null;
   return (await res.text()).split(/\r?\n/).map((l) => l.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z ?/, '')).join('\n');
+}
+
+/** The JSON reports of a run's e2e-report-shard-* artifacts (uploaded by failed Browser tests jobs), parsed; [] when there are none. */
+async function e2eReports(runId) {
+  if (!token) return [];
+  const reports = [];
+  try {
+    const list = await get(`/repos/${repo}/actions/runs/${runId}/artifacts?per_page=100`);
+    for (const art of (list.artifacts ?? []).filter((a) => a.name.startsWith('e2e-report-shard-') && !a.expired)) {
+      // The zip URL answers with a redirect to signed storage, fetched without the token.
+      const first = await fetch(`${API}/repos/${repo}/actions/artifacts/${art.id}/zip`, { headers: headers(), redirect: 'manual', signal: AbortSignal.timeout(60_000) });
+      const location = first.status >= 300 && first.status < 400 ? first.headers.get('location') : null;
+      const res = location ? await fetch(location, { headers: { 'user-agent': 'ci-results' }, signal: AbortSignal.timeout(120_000) }) : first;
+      if (!res.ok) continue;
+      for (const [name, data] of Object.entries(unzip(Buffer.from(await res.arrayBuffer())))) if (name.endsWith('.json')) reports.push(JSON.parse(data.toString('utf8')));
+    }
+  } catch (err) {
+    console.error(`Could not read the browser test reports of run ${runId}: ${err.message}`);
+  }
+  return reports;
 }
 
 async function annotations(job) {
@@ -292,6 +313,8 @@ async function main() {
       }
     }
     md.push('', ...details);
+    const e2e = renderE2eErrors(await e2eReports(run.id));
+    if (e2e) md.push(e2e);
   }
   md.push('## Failing test files by job', '');
   for (const [name, files] of failingFiles) md.push(`### ${name} (${files.size})`, '', ...[...files].sort().map((file) => `- ${file}`), '');
