@@ -40,7 +40,9 @@ test('our team switches an adapter on for one business, and only that business h
   const support = await consoleFor(world, 'support');
   const path = `/tenants/${shop.tenantId}/site-adapters`;
 
-  assert.deepEqual((await admin('GET', path)).json(), { items: [{ name: 'api-site', label: 'API site', enabled: false }] });
+  // The built-in reference adapter (product-api) is always listed beside the one this test registers; this test is about api-site.
+  const mine = (body) => ({ items: body.items.filter((a) => a.name === 'api-site') });
+  assert.deepEqual(mine((await admin('GET', path)).json()), { items: [{ name: 'api-site', label: 'API site', enabled: false }] });
   assert.deepEqual((await shop.json('/import-adapters')).items, [], 'a business sees only the adapters it may use');
   assert.equal((await support('PUT', path, { adapter: 'api-site', enabled: true })).status, 403, 'support can look, not switch');
   assert.equal((await admin('PUT', path, { adapter: 'no-such', enabled: true })).status, 400);
@@ -50,15 +52,16 @@ test('our team switches an adapter on for one business, and only that business h
   assert.notEqual((await shop.call(path)).status, 200, 'a seller can’t reach the console’s route');
 
   const on = await admin('PUT', path, { adapter: 'api-site', enabled: true });
-  assert.deepEqual(on.json(), { items: [{ name: 'api-site', label: 'API site', enabled: true }] });
+  assert.deepEqual(mine(on.json()), { items: [{ name: 'api-site', label: 'API site', enabled: true }] });
+  assert.equal(on.json().items.find((a) => a.name === 'product-api').enabled, false, 'switching one adapter on leaves the others off');
   assert.deepEqual((await shop.json('/import-adapters')).items, [{ name: 'api-site', label: 'API site', enabled: true }]);
   assert.deepEqual((await other.json('/import-adapters')).items, [], 'F-96: switched on for one business, it appears for no other');
-  assert.deepEqual((await admin('GET', `/tenants/${other.tenantId}/site-adapters`)).json().items.map((a) => a.enabled), [false]);
+  assert.deepEqual((await admin('GET', `/tenants/${other.tenantId}/site-adapters`)).json().items.map((a) => a.enabled), [false, false]);
   const audit = await shop.sql(`SELECT actor, action, target FROM audit_log WHERE tenant_id = $1 AND action LIKE 'site_adapter.%'`, [shop.tenantId]);
   assert.equal(audit.length, 1);
   assert.deepEqual([audit[0].action, audit[0].target], ['site_adapter.enabled', 'adapter:api-site']);
 
-  assert.deepEqual((await admin('PUT', path, { adapter: 'api-site', enabled: false })).json().items.map((a) => a.enabled), [false]);
+  assert.deepEqual((await admin('PUT', path, { adapter: 'api-site', enabled: false })).json().items.map((a) => a.enabled), [false, false]);
   assert.deepEqual((await shop.json('/import-adapters')).items, []);
 });
 

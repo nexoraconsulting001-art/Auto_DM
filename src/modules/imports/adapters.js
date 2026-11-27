@@ -15,10 +15,27 @@ import { cleanLine, cleanUrls, htmlToText } from './text.js';
  *
  * When an adapter fails, the import fails and says so: there is no falling back to reading the page (K-13).
  *
- * None is built in yet. The first one waits on a confirmed site (8.4's open question). `extra` (config.siteAdapters) is how a
- * test adds one against the site simulator.
+ * One reference adapter is built in ("product-api", below). It is off for every business until our team turns it on. A site-specific
+ * adapter still waits on a confirmed site (8.4's open question). `extra` (config.siteAdapters) is how a test adds one.
  */
-const BUILT_IN = Object.freeze([]);
+
+/**
+ * Reference adapter: a site whose products are served as JSON at <origin>/api/products/<id>, with the product page at
+ * /product/<id> or /products/<id>. Reads only the JSON through the safe fetcher (no HTML, no redirects to private addresses).
+ */
+const PRODUCT_API = Object.freeze({
+  name: 'product-api',
+  label: 'JSON product service',
+  match: (url) => /^https:\/\/[^/]+\/products?\/[A-Za-z0-9_-]{1,100}\/?(?:[?#].*)?$/.test(url),
+  async fetchProduct(url, { fetcher }) {
+    const { origin, pathname } = new URL(url);
+    const id = pathname.split('/').filter(Boolean).pop();
+    const res = await fetcher.json(`${origin}/api/products/${encodeURIComponent(id)}`);
+    return res?.data ?? res;
+  },
+});
+
+const BUILT_IN = Object.freeze([PRODUCT_API]);
 
 const NAME = /^[a-z0-9-]{1,40}$/;
 
