@@ -51,12 +51,14 @@ export function createBreaker({ db, repos, now, gate }) {
    * "reconnect"), so a second alert saying "we'll retry shortly" would only contradict it (PRD 4.2: one alert for the token). Ops'
    * cross-tenant guard still counts the trip.
    */
-  async function trip(channel, reason, { ownerAlert = true } = {}) {
+  async function trip(channel, reason, { ownerAlert = true, onlyClosed = false } = {}) {
     await ensure(channel);
     const time = at();
+    // One UPDATE decides: of two processes tripping at once only one gets the row back (the other re-reads it as open), so one alert.
+    // onlyClosed (the counted rules): a half-open breaker belongs to its probe, whose result alone reopens or closes it.
     const rows = await db.query(
       `UPDATE breakers SET state = 'open', trip_reason = $3, opened_at = $4::timestamptz, open_until = $5::timestamptz, wait_minutes = $6, throttle_cycles = 0, updated_at = $4::timestamptz
-       WHERE tenant_id = $1 AND channel = $2 AND state <> 'open' RETURNING channel`,
+       WHERE tenant_id = $1 AND channel = $2 AND ${onlyClosed ? `state = 'closed'` : `state <> 'open'`} RETURNING channel`,
       [tenantId(), channel, reason, time, new Date(+time + INITIAL_WAIT_MINUTES * MINUTE), INITIAL_WAIT_MINUTES],
     );
     gate.invalidate();
@@ -74,24 +76,41 @@ export function createBreaker({ db, repos, now, gate }) {
     return true;
   }
 
-  /** Counts the last 15 minutes and the last 50 sends. Reads compliance_events, so nothing else has to keep a tally. */
-  async function shouldTrip(channel) {
-    const since = new Date(+at() - POLICY_WINDOW_MS);
-    const [{ policy }] = await db.query(
-      `SELECT count(*)::int AS policy FROM compliance_events
-       WHERE tenant_id = $1 AND channel = $2 AND created_at > $3::timestamptz AND details->>'errorClass' = 'policy'`,
-      [tenantId(), channel, since],
-    );
-    if (policy >= POLICY_ERRORS_TO_TRIP) return 'policy';
-    const recent = await db.query(
-      `SELECT decision FROM compliance_events
-       WHERE tenant_id = $1 AND channel = $2 AND kind IN ${SEND_KINDS} AND decision IN ${SEND_DECISIONS}
-       ORDER BY id DESC LIMIT ${SAMPLE_SENDS}`,
+  /**
+   * Counts the last 15 minutes and the last 50 sends. Reads compliance_events, so nothing else has to keep a tally. Only what was
+   * logged after the breaker last opened counts: those outcomes already tripped it once, and counting them again would reopen it on
+   * the first send after its probe closed it (the same 50 sends would still read over 20%). `errors` false: a success was logged, which
+   * cannot add a policy error, so only the rate is read.
+   */
+  async function shouldTrip(channel, { errors = true } = {}) {
+    const opened = `COALESCE((SELECT b.opened_at FROM breakers b WHERE b.tenant_id = $1 AND b.channel = $2), '-infinity'::timestamptz)`;
+    if (errors) {
+      const [{ policy }] = await db.query(
+        `SELECT count(*)::int AS policy FROM compliance_events
+         WHERE tenant_id = $1 AND channel = $2 AND created_at > GREATEST($3::timestamptz, ${opened}) AND details->>'errorClass' = 'policy'`,
+        [tenantId(), channel, new Date(+at() - POLICY_WINDOW_MS)],
+      );
+      if (policy >= POLICY_ERRORS_TO_TRIP) return 'policy';
+    }
+    const [{ sends, failed }] = await db.query(
+      `SELECT count(*)::int AS sends, (count(*) FILTER (WHERE decision IN ('unknown', 'failed')))::int AS failed FROM (
+         SELECT decision FROM compliance_events
+         WHERE tenant_id = $1 AND channel = $2 AND kind IN ${SEND_KINDS} AND decision IN ${SEND_DECISIONS} AND created_at > ${opened}
+         ORDER BY id DESC LIMIT ${SAMPLE_SENDS}
+       ) recent`,
       [tenantId(), channel],
     );
-    if (recent.length < SAMPLE_SENDS) return null;
-    const errors = recent.filter((r) => r.decision === 'unknown' || r.decision === 'failed').length;
-    return errors / SAMPLE_SENDS > ERROR_RATE_TO_TRIP ? 'error_rate' : null;
+    if (sends < SAMPLE_SENDS) return null;
+    return failed / SAMPLE_SENDS > ERROR_RATE_TO_TRIP ? 'error_rate' : null;
+  }
+
+  /**
+   * PRD 4.12: the counted rules are weighed after every finished send, success or not. Weighed only after a failure, a window whose
+   * errors came first (11 failed, then 39 sent: 22%) was never looked at once it was full.
+   */
+  async function weigh(channel, options) {
+    const reason = await shouldTrip(channel, options);
+    if (reason) await trip(channel, reason, { onlyClosed: true });
   }
 
   return {
@@ -121,11 +140,12 @@ export function createBreaker({ db, repos, now, gate }) {
       gate.invalidate();
     },
 
+    /** Only a half-open breaker is closed by its probe: one another process (or a refused token) has opened since stays open. */
     async probeSucceeded(channel) {
       const time = at();
       await db.query(
         `UPDATE breakers SET state = 'closed', trip_reason = '', open_until = NULL, wait_minutes = $4, reduced_until = $5::timestamptz, throttle_cycles = 0, updated_at = $3::timestamptz
-         WHERE tenant_id = $1 AND channel = $2`,
+         WHERE tenant_id = $1 AND channel = $2 AND state = 'half_open'`,
         [tenantId(), channel, time, INITIAL_WAIT_MINUTES, new Date(+time + REDUCED_MS)],
       );
       gate.invalidate();
@@ -153,14 +173,15 @@ export function createBreaker({ db, repos, now, gate }) {
       if (row.throttle_cycles >= THROTTLE_CYCLES_TO_TRIP) await trip(channel, 'throttle');
     },
 
+    /** After a delivered send has been logged. */
     async noteSuccess(channel) {
       await db.query(`UPDATE breakers SET throttle_cycles = 0 WHERE tenant_id = $1 AND channel = $2 AND throttle_cycles > 0`, [tenantId(), channel]);
+      await weigh(channel, { errors: false });
     },
 
     /** After a failure has been logged. */
     async noteFailure(channel) {
-      const reason = await shouldTrip(channel);
-      if (reason) await trip(channel, reason);
+      await weigh(channel);
     },
   };
 }
