@@ -258,7 +258,8 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
   });
   await meta.post('/app', { webhookUrl: `${base}/webhook`, deauthorizeUrl: `${base}/meta/deauthorize`, deletionUrl: `${base}/meta/deletion` });
 
-  const gate = { open: true, waiters: [] };
+  // `running` counts the worker's jobs in their handlers, so travel() can wait until none is writing (see there).
+  const gate = { open: true, waiters: [], running: 0, idle: [] };
   const workers = [];
   function addWorker() {
     const drivers = { ...createPlatform(config, { db: rawDb }), consent: consentInterface };
@@ -266,7 +267,13 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
       ...drivers.queue,
       work: (name, handler, options) => drivers.queue.work(name, async (job) => {
         while (!gate.open) await new Promise((resolve) => gate.waiters.push(resolve));
-        return handler(job);
+        gate.running++;
+        try {
+          return await handler(job);
+        } finally {
+          gate.running--;
+          if (!gate.running) gate.idle.splice(0).forEach((resolve) => resolve());
+        }
       }, options),
     };
     workers.push({ drivers, schedule: registerJobs({ db: rawDb, platform: { ...drivers, queue }, config, ig }) });
@@ -343,6 +350,26 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
   async function travel(ms, { sim = false } = {}) {
     const interval = `${Math.round(ms)} milliseconds`;
     const days = Math.floor(ms / DAY);
+    // The world stands still while its clock moves. A job writing between the two steps below (another business's poll, a rollup
+    // rebuild) would have its new row shifted with the old ones in the second step, and on a real Postgres, where the worker's
+    // connections run beside this one, an old row moved back onto its day collided with it ("duplicate key value violates unique
+    // constraint"). On PGlite one connection serialises them, so it never showed there. The worker starts no job until the move
+    // is done, and the move waits for the jobs already running.
+    const wasOpen = gate.open;
+    gate.open = false;
+    while (gate.running) await new Promise((resolve) => gate.idle.push(resolve));
+    try {
+      await shiftStoredTimes(interval, days);
+    } finally {
+      if (wasOpen) {
+        gate.open = true;
+        gate.waiters.splice(0).forEach((resolve) => resolve());
+      }
+    }
+    if (sim) await meta.post('/clock', { advanceMs: ms });
+  }
+
+  async function shiftStoredTimes(interval, days) {
     await rawDb.platform.tx(async (t) => {
       const columns = await t.query(
         `SELECT table_name, column_name, data_type FROM information_schema.columns
@@ -376,7 +403,6 @@ export async function openP2World({ overrides = {}, defaultTenant = '' } = {}) {
                 ELSE e END ORDER BY n), '[]'::jsonb) FROM jsonb_array_elements(observed) WITH ORDINALITY AS x(e, n)) WHERE jsonb_typeof(observed) = 'array'`,
       );
     });
-    if (sim) await meta.post('/clock', { advanceMs: ms });
   }
 
   function webhook(payload, { secret = APP_SECRET, headers = {} } = {}) {
