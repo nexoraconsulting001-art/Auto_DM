@@ -58,6 +58,9 @@ for (const [index, file] of scripts.entries()) {
         const response = await target.goto(onConsole ? world.signInUrl(route) : `${world.shopUrl(route)}`);
         const where = `${path.basename(file)} step ${step.n}: ${route}`;
         expect(response?.status() ?? 200, `${where} answered`).toBeLessThan(400);
+        // The console opens as a spinner ("Opening your console") while it asks who is signed in, then the screen: wait for
+        // its menu before reading the page, as e2e/p8/demo/scripts.spec.js does.
+        if (onConsole) await expect(target.getByRole('navigation', { name: 'Main' }).first(), `${where} opened`).toBeAttached();
         const body = (await target.locator('body').innerText()).trim();
         expect(body.length, `${where} is not blank`).toBeGreaterThan(20);
         expect(body, `${where} is not an error page`).not.toMatch(/page not found|not found|something went wrong|cannot get/i);
