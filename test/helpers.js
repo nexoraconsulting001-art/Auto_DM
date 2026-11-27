@@ -65,6 +65,37 @@ async function dropCreatedDatabases() {
 // Registered while the file loads, so it belongs to the file and not to whichever test happens to open the first database.
 if (process.env.TEST_DATABASE_URL) after(dropCreatedDatabases);
 
+// The analytics database (ClickHouse, on the CI production profile) is one server for the whole run, but every test's Postgres
+// database numbers its businesses from the same start, so business 2 of one test read business 2 of every earlier one's rollups
+// (downloads N-61 counted other tests' traffic rows). In production one Postgres has one analytics database, so each app a test
+// starts gets an analytics database of its own, as it gets its own Postgres database, and the file drops them when it ends.
+const createdAnalyticsDatabases = new Set();
+
+function ownAnalyticsDatabase(appConfig) {
+  if (appConfig.analyticsDriver !== 'clickhouse') return {};
+  const name = `${appConfig.clickhouseDb || 'bhava'}_t${crypto.randomUUID().replace(/-/g, '')}`;
+  createdAnalyticsDatabases.add(name);
+  return { clickhouseDb: name };
+}
+
+async function dropAnalyticsDatabases() {
+  const names = [...createdAnalyticsDatabases];
+  if (!names.length || !config.clickhouseUrl) return;
+  const base = new URL(config.clickhouseUrl);
+  const auth = base.username ? `Basic ${Buffer.from(`${decodeURIComponent(base.username)}:${decodeURIComponent(base.password)}`).toString('base64')}` : undefined;
+  base.username = '';
+  base.password = '';
+  for (const name of names) {
+    const url = new URL(base);
+    url.searchParams.set('query', `DROP DATABASE IF EXISTS ${name}`);
+    const res = await fetch(url, { method: 'POST', headers: auth ? { authorization: auth } : {} });
+    if (!res.ok) throw new Error(`ClickHouse error ${res.status} dropping a test's analytics database: ${(await res.text()).slice(0, 300)}`);
+    createdAnalyticsDatabases.delete(name);
+  }
+}
+
+if (process.env.CLICKHOUSE_URL) after(dropAnalyticsDatabases);
+
 // Every test needs a database with all the migrations applied, and applying them one by one (one transaction each, a hundred or so)
 // is most of what a test costs on a real server: it is why the whole suite on the production drivers did not fit in 40 minutes.
 // So the migrated database is made once per server and per set of migration files (a template named from a hash of their
@@ -164,6 +195,12 @@ export function asAppLoginOutsideBusiness(db) {
   };
 }
 
+// A test's database is used while its test runs and then left open until the file ends (its databases are dropped then). With
+// pg's default 10 s idle time each left handle kept its connections (two pools with two logins) for 10 s after its test, and
+// check:r05 runs four files at once on two logins: the finished tests' idle connections filled the server's slots
+// ("remaining connection slots are reserved"). Idle test connections go back to the server after a second.
+const TEST_POOL_IDLE_MS = 1000;
+
 async function openTestDbOnce({ migrate, logins, poolSize }) {
   const url = process.env.TEST_DATABASE_URL;
   if (logins === 2 && !url) throw new Error('A two-login test database needs TEST_DATABASE_URL');
@@ -176,9 +213,9 @@ async function openTestDbOnce({ migrate, logins, poolSize }) {
   await admin.close();
   const target = new URL(url);
   target.pathname = `/${name}`;
-  if (logins !== 2) return openDb({ url: target.href, poolSize, migrate });
+  if (logins !== 2) return openDb({ url: target.href, poolSize, migrate, idleMs: TEST_POOL_IDLE_MS });
   const urls = { owner: target.href, app: appLoginUrl(target.href) };
-  return Object.assign(await openDb({ url: urls.app, ownerUrl: urls.owner, poolSize, migrate }), { urls });
+  return Object.assign(await openDb({ url: urls.app, ownerUrl: urls.owner, poolSize, migrate, idleMs: TEST_POOL_IDLE_MS }), { urls });
 }
 
 /**
@@ -235,7 +272,8 @@ export async function startApp({ ig = fakeIg(), overrides = {}, modules, logins 
   await repos.igAccounts.setToken(IG_ACCOUNT.igUserId, IG_ACCOUNT.token);
   if (releaseGates) await passReleaseGates(db, tenant.id);
   // Drivers follow the environment, so the CI production profile runs the whole app on Redis, S3 and ClickHouse.
-  const appConfig = { ...config, storageDriver: process.env.STORAGE_DRIVER || 'memory', queueDriver: process.env.QUEUE_DRIVER || 'pg', analyticsDriver: process.env.ANALYTICS_DRIVER || 'pg', cacheDriver: process.env.CACHE_DRIVER || 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', passwordLogin: true, adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dataKey: TEST_DATA_KEY, dryRun: false, oneDmPerUser: false, ...overrides };
+  const chosen = { ...config, storageDriver: process.env.STORAGE_DRIVER || 'memory', queueDriver: process.env.QUEUE_DRIVER || 'pg', analyticsDriver: process.env.ANALYTICS_DRIVER || 'pg', cacheDriver: process.env.CACHE_DRIVER || 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', passwordLogin: true, adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dataKey: TEST_DATA_KEY, dryRun: false, oneDmPerUser: false, ...overrides };
+  const appConfig = { ...chosen, ...(overrides.clickhouseDb ? {} : ownAnalyticsDatabase(chosen)) };
   const drivers = createPlatform(appConfig, { db });
   const app = createApp({ db, ig, config: appConfig, platform: { ...drivers, cache: ownCacheKeys(drivers.cache) }, ...(modules ? { modules } : {}) });
   const server = app.listen(0);
