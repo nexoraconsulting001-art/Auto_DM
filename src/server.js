@@ -36,6 +36,9 @@ import { HEALTH_PATHS, createHealth, drainOnSignals } from './platform/health.js
 import { log, onError, reportError, requestIds, routeOf } from './platform/log.js';
 import { secretRefreshFailed } from './platform/metrics.js';
 import { guardProduction } from './platform/production-guard.js';
+import { BACKUP, HOUSEKEEPING } from './platform/queue.js';
+import { ORDER_EVENTS_QUEUE } from './modules/orders/events.js';
+import { DRAIN_QUEUE } from './modules/compliance/send.js';
 
 export const verifySignature = verifyHubSignature;
 
@@ -129,6 +132,9 @@ export function createApp({ db, config = defaultConfig, modules = MODULES, metaC
     const state = await health.startup();
     res.set('Cache-Control', 'no-store').status(state.ok ? 200 : 503).json(state);
   });
+  // This process runs no jobs, so it names the queues it knows: queue_jobs is served from the first scrape, with zeros, not only once
+  // a job exists (R2-PROD-E2). A failure here (the queue's Redis not up yet) is the readiness probe's to report, not the start's.
+  Promise.resolve(platform.queue.declare?.(HOUSEKEEPING, BACKUP, ORDER_EVENTS_QUEUE, DRAIN_QUEUE)).catch((err) => reportError(err, { msg: 'queue.declare_failed' }));
   platform.metrics.gauge('queue_jobs', async () =>
     Object.entries(await platform.queue.stats()).flatMap(([queue, counts]) =>
       Object.entries(counts).map(([status, value]) => ({ labels: { queue, status }, value }))));

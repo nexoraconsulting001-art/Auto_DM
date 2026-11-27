@@ -167,8 +167,14 @@ export async function runLoad({ budgets, parts, seconds, out, say = (m) => conso
 
     const stopped = await monitor.stop();
     monitor = null;
-    checks.push(...judgeMemory({ budgets, peaks: stopped.peaks }));
+    const memoryChecks = judgeMemory({ budgets, peaks: stopped.peaks });
     data.peaks = stopped.peaks;
+    data.postgresAtPeak = stopped.postgresAtPeak;
+    // A server over its limit says which processes hold the memory (the largest at the highest reading), not only the total.
+    for (const check of memoryChecks) {
+      if (!check.ok && check.name === 'peak memory postgres' && stopped.postgresAtPeak) check.measured += `; largest: ${stopped.postgresAtPeak.map((p) => `${p.mb} MB ${p.name ?? p.pid}`).join(', ')}`;
+    }
+    checks.push(...memoryChecks);
     data.background = await backgroundJobs(world);
     summary.push(['Memory peaks (MB)', `web ${stopped.peaks.memoryMb.web}, worker ${stopped.peaks.memoryMb.worker}, database ${stopped.peaks.memoryMb.postgres}`]);
     summary.push(['Queues (peak)', `webhooks waiting ${stopped.peaks.queue.inbound}, sends waiting ${stopped.peaks.queue.outbound}, oldest webhook ${stopped.peaks.queue.inboundAgeS} s, database answer ${stopped.peaks.dbMs} ms`]);

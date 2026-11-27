@@ -23,25 +23,27 @@ test('Q-11: no sample business is named in the Phase 8 tools, tests, browser tes
   assert.deepEqual(found.map((f) => `${f.file}:${f.line}`), [], 'a name outside seed/ and docs/');
 });
 
-test('Q-11: the workflow builds each business from the manifest, in four jobs that depend on each other, with no account and no secret', () => {
+test('Q-11: the workflow builds each business from the manifest, in stages that depend on each other, with no account and no secret', () => {
   const text = workflow();
-  for (const job of ['seed', 'build', 'emulator', 'ready']) assert.match(text, new RegExp(`^  ${job}:`, 'm'), `job ${job}`);
+  // The stages the build made (the contract phase planned four jobs: seed, build, emulator, ready); test/p8/showcase-apps/workflow.test.js holds each one's detail.
+  for (const job of ['seed', 'android', 'owner', 'ios', 'shopper-flows', 'owner-flows', 'package', 'ready']) assert.match(text, new RegExp(`^  ${job}:`, 'm'), `job ${job}`);
   assert.match(text, /fromJSON\(needs\.seed\.outputs\.keys\)/, 'the businesses come from the manifest, not from the workflow');
   assert.match(text, /needs:\s*seed/);
-  assert.match(text, /needs:\s*\[seed, build\]/);
-  assert.match(text, /--driver local/, 'the local driver: no build service account');
+  assert.match(text, /needs:\s*\[seed, android\]/);
   assert.doesNotMatch(text, /\$\{\{\s*secrets\./, 'no secret is read');
   assert.doesNotMatch(text, /EXPO_TOKEN|ANDROID_KEYSTORE_BASE64|GOOGLE_SERVICES|ASC_KEY|PLAY_SERVICE/i, 'no store or build-service credential');
-  assert.match(text, /keytool -genkeypair/, 'the signing key is made in the job');
-  assert.match(text, /rm -f .*keystore/, 'and thrown away');
-  assert.match(text, /--export-brands/, 'the brand files are made from the seeded database at build time');
-  assert.match(text, /showcase-e2e\.mjs/, 'the emulator job runs the order test');
-  assert.match(text, /test "\$\{\{ needs\.build\.result \}\}" = success/, 'the run fails if any build fails');
-  assert.match(text, /test "\$\{\{ needs\.emulator\.result \}\}" = success/, 'or any emulator flow fails');
+  assert.match(text, /showcase-build\/index\.mjs brands /, 'the brand files are made from the seeded database at build time');
+  assert.match(text, /showcase-build\/run-flows\.sh/, 'the emulator jobs run the flows');
+  assert.match(text, /ready:[\s\S]*RESULTS: \$\{\{ toJSON\(needs\) \}\}/, 'the run fails if any job fails');
   assert.match(text, /workflow_dispatch/);
   assert.match(text, /seed\/\*\*/);
-  assert.doesNotMatch(text, /\|\|\s*true\b|continue-on-error:\s*true/, 'a failing step is never swallowed');
-  assert.equal(exists('tools/showcase-e2e.mjs'), true, 'the emulator step calls a file that exists');
+  assert.doesNotMatch(text, /continue-on-error:\s*true/, 'a failing step is never swallowed');
+  // The local driver and the one-run signing key (made, never printed, deleted) are the build tool's, which the workflow calls.
+  const tool = read('tools/showcase-build/index.mjs');
+  assert.match(tool, /'--driver', 'local'/, 'the local driver: no build service account');
+  assert.match(tool, /'-genkeypair'/, 'the signing key is made for the build');
+  assert.match(tool, /dispose: \(\) => fs\.rmSync\(dir/, 'and thrown away');
+  for (const file of ['tools/showcase-build/run-flows.sh', 'tools/showcase-build/server.mjs']) assert.equal(exists(file), true, `${file} exists`);
 });
 
 test('Q-11: the shopper flows cover browse, a link from a DM, a paid test order, a cash on delivery order and tracking; the owner flows cover sign-in, both businesses and confirming the COD order', () => {

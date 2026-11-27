@@ -21,10 +21,16 @@ import { reportError } from './log.js';
  *       (a job with no business is in none), sorted by tenantId: ops-metrics samples each business's queue depth from it.
  *   lastFinished(queue) -> Date | null when the newest job of that queue finished well (done / completed), null when none is kept
  *       (finished jobs are kept 14 days in both drivers: pg by cleanup, BullMQ by removeOnComplete): the go-live backup check reads it.
+ *   declare(...names) a process that enqueues to queues but runs none (the web app) names the ones it knows: stats() lists each, with zeros,
+ *       from the first scrape, so queue_jobs is served on a fresh process. A queue a process works is declared by work().
  *   onRun(listener) listener({ queue, result: 'ok' | 'failed' }) after every run of a job in this process (metrics).
  *   close()
  * A job that throws is reported (reportError 'job.failed') by the one run path both drivers share (runJob).
  */
+/** The platform's own queues (the worker registers their jobs); the web app declares them at start. */
+export const HOUSEKEEPING = 'system.housekeeping';
+export const BACKUP = 'system.backup';
+
 export function createQueue(config = {}, { db, bullmq, redis } = {}) {
   const driver = config.queueDriver || 'pg';
   if (driver === 'pg') return pgQueue(db?.platform ?? db, config); // the queue serves every business from one table
@@ -81,6 +87,7 @@ function pgQueue(db, config) {
   const leaseMs = config.queueLeaseMs ?? 5 * 60_000;
   const loops = [];
   const listeners = runListeners();
+  const declared = new Set();
   let closed = false;
 
   // How the work loops find work. A loop with nothing to run waits here, and one probe every pollMs asks the jobs table once
@@ -211,7 +218,11 @@ function pgQueue(db, config) {
       await recoverStale();
       return runReady(queue, handler, limit);
     },
+    declare(...names) {
+      for (const name of names.flat()) declared.add(String(name));
+    },
     work(queue, handler, { concurrency = 1 } = {}) {
+      declared.add(queue);
       const loop = async () => {
         while (!closed) {
           let ran = 0;
@@ -237,6 +248,7 @@ function pgQueue(db, config) {
            FROM jobs WHERE status IN ('queued', 'running', 'failed', 'unknown') GROUP BY 1, 2`,
       );
       const out = {};
+      for (const name of declared) out[name] = emptyCounts();
       for (const r of rows) (out[r.queue] ??= emptyCounts())[r.status] = r.n;
       return out;
     },
@@ -345,6 +357,9 @@ function redisQueue(config, injected = {}) {
         removeOnFail: false,
       });
       return String(job.id);
+    },
+    async declare(...names) {
+      await Promise.all(names.flat().map((name) => register(String(name))));
     },
     work(queue, handler, { concurrency = 1 } = {}) {
       const start = (async () => {

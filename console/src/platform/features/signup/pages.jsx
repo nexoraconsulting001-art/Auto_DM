@@ -1,50 +1,15 @@
 import { useState } from 'react';
 import { Copy } from 'lucide-react';
-import { Badge, Banner, Button, ListCard, PageHeader, Panel, SelectField, TextField } from '../../../design/index.jsx';
-import { ActionSheet, Can, Facts, PagedRows, QueryState, Secret, When, useAct, useOne, usePlatformList } from '../../kit.jsx';
-import { word } from '../../lib/rules.js';
+import { Badge, Banner, Button, ListCard, PageHeader, TextField } from '../../../design/index.jsx';
+import { ActionSheet, PagedRows, Secret, When, useAct, usePlatformList } from '../../kit.jsx';
 import { api } from '../../api.js';
+import { SignupSwitch } from './switch.jsx';
 
-const MODES = ['closed', 'invite', 'public'];
 const MODE_NOTE = {
   closed: 'Nobody can sign up. Businesses are created by Bhava’s team only.',
   invite: 'Only people with an invite code can sign up.',
   public: 'Anyone can sign up.',
 };
-
-function ModePanel() {
-  const act = useAct();
-  const query = useOne(['signup'], () => api.signup());
-  const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState('invite');
-  return (
-    <QueryState query={query} label="Loading sign-up">
-      {(signup) => (
-        <Panel title="Who can sign up" action={<Badge tone={signup.mode === 'public' ? 'warn' : 'good'}>{word('signup', signup.mode)}</Badge>}>
-          <div className="stack">
-            <p>{MODE_NOTE[signup.mode]}</p>
-            <Facts rows={[['Free businesses per Instagram account', String(signup.freePerInstagram)], ['Changed', <When key="u" value={signup.updatedAt} />]]} />
-            <Can route="platform.setSignupMode">
-              <Button variant="outline" onClick={() => { setMode(signup.mode); setOpen(true); }}>Change who can sign up</Button>
-              <ActionSheet
-                open={open}
-                title="Change who can sign up"
-                submitLabel="Change"
-                valid={mode !== signup.mode}
-                onClose={() => setOpen(false)}
-                onSubmit={(reason) => act(() => api.setSignupMode({ body: { mode, reason } }), 'The sign-up mode is changed.')}
-              >
-                <SelectField label="Sign-up is" value={mode} onChange={(event) => setMode(event.target.value)}>
-                  {MODES.map((item) => <option key={item} value={item}>{word('signup', item)}</option>)}
-                </SelectField>
-              </ActionSheet>
-            </Can>
-          </div>
-        </Panel>
-      )}
-    </QueryState>
-  );
-}
 
 function InviteSheet({ open, onClose, onCreated }) {
   const act = useAct();
@@ -109,7 +74,7 @@ export function SignupPage() {
   return (
     <div className="stack">
       <PageHeader eyebrow="Bhava Console" title="Sign-up" actions={<Button onClick={() => setOpen(true)}>New invite code</Button>} />
-      <ModePanel />
+      <SignupSwitch note={MODE_NOTE} facts={(signup) => [['Free businesses per Instagram account', String(signup.freePerInstagram)]]} />
       {created && (
         <Banner tone="good">
           <div className="stack" data-testid="new-invite">

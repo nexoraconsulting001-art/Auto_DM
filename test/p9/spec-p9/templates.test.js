@@ -55,14 +55,17 @@ test('G-01: the Dockerfile has a target for the web server and one for the worke
 
 test('G-01: the base images are pinned, nothing is copied that holds a secret, and the production image carries no dev tools or simulators', () => {
   const text = dockerfile();
+  // A base can be an ARG (`FROM ${NODE_IMAGE}`), so one recipe takes a mirror or a digest: the pin is the ARG's default, and an ARG with no default is not a pin.
+  const args = Object.fromEntries([...text.matchAll(/^ARG\s+(\w+)=(\S+)[ \t]*$/gm)].map((m) => [m[1], m[2]]));
   for (const s of stages()) {
     if (stages().some((x) => x.name === s.image)) continue;
-    assert.ok(!/:latest$/.test(s.image) && /:/.test(s.image), `${s.image}: a version or digest`);
+    const image = s.image.replace(/^\$\{(\w+)\}$|^\$(\w+)$/, (whole, a, b) => args[a ?? b] ?? whole);
+    assert.ok(!/:latest$/.test(image) && /:/.test(image) && !image.startsWith('$'), `${s.image}: a version or digest`);
   }
   assert.doesNotMatch(text, /COPY[^\n]*\.env(\s|$)/, 'no env file');
   assert.match(text, /(npm ci[^\n]*--omit=dev|--production|NODE_ENV=production)/, 'production dependencies only');
   const ignore = exists('.dockerignore') ? read('.dockerignore') : '';
-  for (const name of ['.env', 'node_modules', '.git', 'test', 'e2e', 'apps']) assert.ok(new RegExp(`^/?${name.replace('.', '\\.')}/?\\*{0,2}$`, 'm').test(ignore), `.dockerignore leaves out ${name}`);
+  for (const name of ['.env', 'node_modules', '.git', 'test', 'e2e', 'apps']) assert.ok(new RegExp(`^(\\*\\*/)?/?${name.replace('.', '\\.')}/?\\*{0,2}$`, 'm').test(ignore), `.dockerignore leaves out ${name}`);
   assert.ok(!/ENV\s+[A-Z_]*(SECRET|PASSWORD|TOKEN|KEY)[A-Z_]*=\S+/.test(text), 'no secret in an ENV line');
   assert.match(text, /(tini|dumb-init|--init|init\b)/i, 'a signal-forwarding init so SIGTERM reaches node');
 });
@@ -114,9 +117,13 @@ test('G-08: the compose file has two web servers, a worker and a balancer, each 
     assert.equal(String(env.DEPLOY_ENV), 'production', `${name}: DEPLOY_ENV`);
     assert.equal(String(env.SECRETS_DRIVER), 'file', `${name}: secrets from files`);
     assert.ok(seconds(s.stop_grace_period) > Number(env.SHUTDOWN_SECONDS ?? SHUTDOWN), `${name}: the grace period is longer than SHUTDOWN_SECONDS`);
-    assert.ok(JSON.stringify(s.secrets ?? []).length > 2, `${name}: secrets are mounted`);
+    // Mounted as files: a `secrets:` entry, or a read-only folder at SECRETS_DIR (the built compose file mounts a host folder, one file per setting).
+    const folder = (s.volumes ?? []).find((v) => (v.target ?? String(v).split(':')[1]) === String(env.SECRETS_DIR));
+    assert.ok(JSON.stringify(s.secrets ?? []).length > 2 || (folder && (folder.read_only === true || /:ro$/.test(String(folder)))), `${name}: secrets are mounted`);
   }
-  for (const name of ['postgres', 'redis', 'clickhouse', 'minio', 'db']) assert.equal(name in services, false, `${name} is an outside address, not a service of this file`);
+  // Postgres and object storage are outside addresses; Redis and the analytics database are the file's own data services (on a network with no way out).
+  for (const name of ['postgres', 'minio', 'objects', 'db']) assert.equal(name in services, false, `${name} is an outside address, not a service of this file`);
+  assert.ok(services.redis && services.analytics, 'the queue and the analytics database are services of this file');
   const webHealth = JSON.stringify(services['web-1'].healthcheck);
   assert.match(webHealth, /healthz|readyz/);
 });
@@ -133,13 +140,15 @@ test('G-08: the CI override adds the services for the readiness checks and the m
   const ci = walk(`${PROD}/compose`).find((f) => /compose\.ci\.ya?ml$/.test(f));
   assert.ok(ci, 'compose.ci.yaml');
   const services = Object.keys(docsOf(ci)[0].services ?? {});
-  for (const need of ['postgres', 'redis']) assert.ok(services.some((s) => s.includes(need)), `a ${need} service`);
+  // The two outside services the main file leaves to managed ones: Postgres and an S3-compatible store.
+  for (const need of ['postgres', 'objects']) assert.ok(services.some((s) => s.includes(need)), `a ${need} service`);
 });
 
 test('G-08: docker compose accepts the file', { skip: hasTool('docker') ? false : needsCi('docker') }, async () => {
   const file = composeFile();
   assert.ok(file);
-  const res = await run('docker', ['compose', '-f', file, 'config', '-q'], { timeoutMs: 120_000 });
+  // The file's settings come from an env file (the placeholders in .env.example), as the README and the prod workflow run it.
+  const res = await run('docker', ['compose', '--env-file', '.env.example', '-f', path.basename(file), 'config', '-q'], { timeoutMs: 120_000, cwd: path.join(ROOT, path.dirname(file)) });
   assert.equal(res.code, 0, res.out.slice(-600));
 });
 

@@ -193,8 +193,12 @@ test('G-03: SIGTERM during a slow webhook: the request in flight is answered, ne
     await pause(300);
     proc.child.kill('SIGTERM');
     await pause(500);
-    const refused = await request(port, { path: '/healthz' }).then((r) => r.status, () => 'refused');
+    // A new request for work is refused or answered 503 (the server keeps listening a moment, DRAIN_GRACE_SECONDS, so a balancer moves on).
+    // The liveness probe is the one path that stays 200 while draining (G-03), so it is not what a new request is measured by.
+    const refused = await request(port, { path: '/store' }).then((r) => r.status, () => 'refused');
     assert.ok(refused === 'refused' || refused === 503, `a new request after the signal got ${refused}`);
+    const live = await request(port, { path: '/healthz' }).then((r) => r.status, () => 'refused');
+    assert.ok(live === 'refused' || live === 200, `liveness during the drain got ${live}`);
     socket.write(body.slice(10));
     await waitFor(() => /HTTP\/1\.1 \d{3}/.test(reply), 8000);
     assert.match(reply, /HTTP\/1\.1 (200|4\d\d)/, 'the request in flight got an answer, not a reset');

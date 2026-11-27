@@ -123,6 +123,8 @@ variable "origin_tls_secret_name" {
   description = "The TLS Secret with the origin certificate for the platform hosts (Cloudflare in front)."
   type        = string
   default     = "bhava-origin-tls"
+  # A name that points at a secret: kept out of plans and logs like every other reference to one (G-08).
+  sensitive = true
 }
 
 # ---- the managed services' addresses (no credentials: those are in the secret store) --------------------------------

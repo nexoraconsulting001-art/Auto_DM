@@ -118,14 +118,14 @@ test('G-18: a pack section for a permission deleted from the documents fails the
 
 const STORE = 'docs/go-live/store';
 const LIMITS = [
-  { store: 'Play', field: 'Title', match: /^(play[^a-z]*)?(app )?title$/i, max: 30 },
-  { store: 'Play', field: 'Short description', match: /^(play[^a-z]*)?short description$/i, max: 80 },
-  { store: 'Play', field: 'Full description', match: /^(play[^a-z]*)?full description$/i, max: 4000 },
-  { store: 'App Store', field: 'Name', match: /^(app store[^a-z]*)?(app )?name$/i, max: 30 },
-  { store: 'App Store', field: 'Subtitle', match: /^subtitle$/i, max: 30 },
-  { store: 'App Store', field: 'Promotional text', match: /^promotional text$/i, max: 170 },
-  { store: 'App Store', field: 'Description', match: /^description$/i, max: 4000 },
-  { store: 'App Store', field: 'Keywords', match: /^keywords$/i, max: 100 },
+  { store: 'Play', field: 'Title', key: 'title', match: /^(play[^a-z]*)?(app )?title$/i, max: 30 },
+  { store: 'Play', field: 'Short description', key: 'shortDescription', match: /^(play[^a-z]*)?short description$/i, max: 80 },
+  { store: 'Play', field: 'Full description', key: 'fullDescription', match: /^(play[^a-z]*)?full description$/i, max: 4000 },
+  { store: 'App Store', field: 'Name', key: 'name', match: /^(app store[^a-z]*)?(app )?name$/i, max: 30 },
+  { store: 'App Store', field: 'Subtitle', key: 'subtitle', match: /^subtitle$/i, max: 30 },
+  { store: 'App Store', field: 'Promotional text', key: 'promotionalText', match: /^promotional text$/i, max: 170 },
+  { store: 'App Store', field: 'Description', key: 'description', match: /^description$/i, max: 4000 },
+  { store: 'App Store', field: 'Keywords', key: 'keywords', match: /^keywords$/i, max: 100 },
   { store: 'App Store', field: 'What\'s new', match: /^(what['’]?s new|release notes)$/i, max: 4000 },
 ];
 
@@ -173,6 +173,15 @@ test('G-19: the listing text is found for both stores and each field is within i
   for (const required of ['Short description', 'Subtitle', 'Promotional text']) assert.ok(fields.some((f) => f.rule.field === required), `${required} is missing`);
 });
 
+/** Where a listing field is written by hand: a JSON listing's own key, or the JSON a generated document says it is written from. */
+function sourceOf(f) {
+  const store = { Play: 'play', 'App Store': 'appStore' }[f.rule.store];
+  if (!store || !f.rule.key) return null;
+  const json = /\.json$/.test(f.file) ? f.file : /Written from (\S+\.json)/.exec(read(f.file).split('\n')[0])?.[1];
+  if (!json || !exists(json)) return null;
+  return typeof JSON.parse(read(json))?.[store]?.[f.rule.key] === 'string' ? { json, store, key: f.rule.key } : null;
+}
+
 test('G-19: a listing field one character over its limit fails the checker, and one at the limit does not, for each field', async () => {
   assert.ok(exists(checkerCommand()[0]), 'the checker is not built');
   const fields = listingFields();
@@ -187,10 +196,20 @@ test('G-19: a listing field one character over its limit fails the checker, and 
     for (const [extra, mustPass] of [[0, true], [1, false]]) {
       const size = f.rule.max + extra;
       const value = 'a'.repeat(Math.max(0, size - 1)) + (extra ? 'b' : 'c');
-      const original = fs.readFileSync(path.join(dir, f.file), 'utf8');
-      editIn(dir, f.file, (s) => s.replace(f.value, value.slice(0, size)));
-      const res = await runChecker(dir);
-      fs.writeFileSync(path.join(dir, f.file), original);
+      // The text is changed where it is written: a generated document ("Written from <source>. Edit the source, not this file") is
+      // made again from its source, so a run that edited the document would only learn that it is stale, not what is over.
+      const source = sourceOf(f);
+      const target = source?.json ?? f.file;
+      const original = fs.readFileSync(path.join(dir, target), 'utf8');
+      if (source) {
+        const doc = JSON.parse(original);
+        doc[source.store][source.key] = value.slice(0, size);
+        fs.writeFileSync(path.join(dir, target), JSON.stringify(doc, null, 2));
+      } else editIn(dir, f.file, (s) => s.replace(f.value, () => value.slice(0, size)));
+      const regenerated = source && target !== f.file ? await runChecker(dir, ['--write']) : null;
+      const res = regenerated ?? (await runChecker(dir));
+      fs.writeFileSync(path.join(dir, target), original);
+      if (source && target !== f.file) await runChecker(dir, ['--write']);
       if (mustPass && res.code !== 0 && !new RegExp(id.split('/')[1], 'i').test(res.stdout + res.stderr)) continue;
       if (mustPass && res.code !== 0) problems.push(`${id}: ${size} characters is at the limit and was refused`);
       if (!mustPass && res.code === 0) problems.push(`${id}: ${size} characters is one over the limit and was accepted`);
