@@ -28,6 +28,9 @@ export const defaultSharedNotice = (contact) => ({
 /** The label from refused cash-on-delivery parcels in the last six months. How it is scored is still to be confirmed (9.22). */
 export const riskLabel = (refused) => (refused >= 3 ? 'high' : refused >= 2 ? 'elevated' : 'none');
 
+/** How long an order event's COD outcome is remembered as counted: longer than any retry of its delivery. */
+const COD_EVENT_GUARD_MS = 400 * 24 * 3_600_000;
+
 export function createSharedProfiles({ db, config, platform }) {
   const pdb = db.platform ?? db;
   const phoneHash = (phone) => keyedHash(config, 'shared:phone', phone);
@@ -196,17 +199,26 @@ export function createSharedProfiles({ db, config, platform }) {
       return (await profileOf(tenantId, shopperId))?.cod_risk ?? 'none';
     },
 
-    /** One cash-on-delivery parcel reached its end: delivered, or refused at the door. The row names no business. */
-    async recordCodOutcome(tenantId, shopperId, { refused }) {
-      await pdb.tx(async (t) => {
+    /**
+     * One cash-on-delivery parcel reached its end: delivered, or refused at the door. The row names no business.
+     * `eventId` (the order event that said so) is counted once: its guard is taken in the same transaction as the count, so
+     * a delivery that fails after the guard rolls both back and its retry still counts. Returns whether it was counted.
+     */
+    async recordCodOutcome(tenantId, shopperId, { refused, eventId = null }) {
+      return pdb.tx(async (t) => {
         const profile = await profileOf(tenantId, shopperId, t);
-        if (!profile) return;
+        if (!profile) return false;
+        if (eventId !== null) {
+          const first = await platform.rateLimit.hit('shared_cod_event', String(eventId), { limit: 1, windowMs: COD_EVENT_GUARD_MS }, { via: t });
+          if (!first.allowed) return false;
+        }
         await t.query(
           `INSERT INTO shared_cod_signals (profile_id, month, delivered, refused) VALUES ($1, date_trunc('month', now())::date, $2, $3)
            ON CONFLICT (profile_id, month) DO UPDATE SET delivered = shared_cod_signals.delivered + EXCLUDED.delivered, refused = shared_cod_signals.refused + EXCLUDED.refused`,
           [profile.id, refused ? 0 : 1, refused ? 1 : 0],
         );
         await refreshRisk(t, profile.id);
+        return true;
       });
     },
 

@@ -263,7 +263,13 @@ test('S-103: three COD refusals at A show at B as "high refusal risk" only: no s
     await a.track(s.awb, 'RTO DELIVERED');
     await a.orderWhen(order.order_number, (o) => o.fulfilment_status === 'rto_delivered');
   }
-  const signals = await sharedRows('shared_cod_signals');
+  // A refusal is counted by an order event listener, which runs after the courier's scan has been stored (and may be running in
+  // the web app's own dispatch while the worker's tick finds it leased): the order reaching rto_delivered doesn't mean it ran.
+  const counted = async () => {
+    const rows = await sharedRows('shared_cod_signals');
+    return rows.some((s) => s.refused >= 3) ? rows : null;
+  };
+  const signals = (await world.until(counted)) ?? await sharedRows('shared_cod_signals');
   assert.ok(signals.some((s) => s.refused >= 3), 'The refusals were not counted for the shared profile');
   assert.ok(signals.every((s) => !('tenant_id' in s)));
   const atB = buyer(world, b);
