@@ -59,6 +59,35 @@ test('over 20% send errors across 50 sends trips it', async () => {
   assert.equal((await w.breakerState()).trip_reason, 'error_rate');
 });
 
+test('over 20% trips it when the errors came first: weighed after every send, not only after a failure (R5-GATE-1)', async () => {
+  const unknown = () => metaError({ status: 500, kind: 'server_error', delivery: 'unknown' });
+  const script = [...Array.from({ length: 11 }, unknown), ...Array.from({ length: 39 }, () => null)];
+  const w = await world({ ig: scriptedIg(script), limits: { privateRepliesPerHour: 1_000_000 } });
+  for (let i = 0; i < 50; i++) await newJob(w, i);
+  await w.settle();
+  assert.equal(w.ig.calls.length, 50);
+  assert.equal((await w.breakerState()).state, 'open');
+  assert.equal((await w.breakerState()).trip_reason, 'error_rate');
+  assert.deepEqual((await w.alerts()).map((al) => al.kind), ['breaker.open'], 'tripped once');
+});
+
+test('the sends that tripped it are not counted again once its probe has closed it (R5-GATE-1)', async () => {
+  const unknown = () => metaError({ status: 500, kind: 'server_error', delivery: 'unknown' });
+  const script = [...Array.from({ length: 39 }, () => null), ...Array.from({ length: 11 }, unknown)];
+  const w = await world({ ig: scriptedIg(script), limits: { privateRepliesPerHour: 1_000_000 } });
+  for (let i = 0; i < 50; i++) await newJob(w, i);
+  await w.settle();
+  assert.equal((await w.breakerState()).state, 'open');
+  w.clock.advance(31 * MINUTE);
+  await newJob(w, 'probe');
+  await w.turn();
+  assert.equal((await w.breakerState()).state, 'closed', 'the probe closed it');
+  for (let i = 0; i < 3; i++) await newJob(w, `after${i}`);
+  await w.settle();
+  assert.equal(w.ig.calls.length, 54);
+  assert.equal((await w.breakerState()).state, 'closed', 'the old 50 sends do not reopen it');
+});
+
 test('at exactly 20% it stays closed', async () => {
   const unknown = () => metaError({ status: 500, kind: 'server_error', delivery: 'unknown' });
   const script = [...Array.from({ length: 40 }, () => null), ...Array.from({ length: 10 }, unknown)];

@@ -117,6 +117,37 @@ test('C-32: at most 20 on a media in an hour, and never the same reply twice run
   assert.ok((await w.reasons()).includes('cap.public_reply_media_h'));
 });
 
+test('C-32: replies sent in another order than they were made still never repeat back to back (R5-GATE-2)', async () => {
+  const w = await liveWorld({ limits: { privateRepliesPerHour: 1_000_000 } });
+  for (let i = 0; i < 3; i++) await enqueue(w, dmToSend(w, { personId: `p${i}` }));
+  await w.settle();
+  const made = await replies(w);
+  assert.equal(made.length, 3);
+  // Random delays: the third one made goes second.
+  const order = [made[0], made[2], made[1]];
+  for (const [i, job] of order.entries()) await w.inTenant('UPDATE outbound_jobs SET run_at = $3::timestamptz WHERE tenant_id = $1 AND id = $2', [w.tenant.id, job.id, new Date(w.clock.t + 20_000 + i * 1000)]);
+  w.clock.advance(30_000);
+  await w.settle();
+  const seen = w.ig.calls.filter((c) => c.kind === 'reply').map((c) => c.args[1]);
+  assert.equal(seen.length, 3);
+  for (let i = 1; i < seen.length; i++) assert.notEqual(seen[i], seen[i - 1], `reply ${i} repeats the one before`);
+  const sent = (await replies(w)).filter((j) => j.status === 'sent').sort((a, b) => +new Date(a.sent_at) - +new Date(b.sent_at) || a.id - b.id);
+  assert.deepEqual(sent.map((j) => j.payload.message.text).sort(), [...seen].sort(), 'each job records the text it really went with');
+});
+
+test('C-32: a public reply waits while another on the same media is being sent (R5-GATE-2)', async () => {
+  const w = await liveWorld({ random: 0, limits: { privateRepliesPerHour: 1_000_000 } });
+  for (let i = 0; i < 2; i++) await enqueue(w, dmToSend(w, { personId: `p${i}` }));
+  await w.settle();
+  const [first, second] = await replies(w);
+  // Another worker has the first one in hand at Meta.
+  await w.inTenant(`UPDATE outbound_jobs SET status = 'sending', locked_by = 'other', lease_until = $3::timestamptz WHERE tenant_id = $1 AND id = $2`, [w.tenant.id, first.id, new Date(w.clock.t + HOUR)]);
+  w.clock.advance(limits.publicReplyMinDelayMs);
+  await w.settle();
+  assert.equal(w.ig.calls.filter((c) => c.kind === 'reply').length, 0, 'not while the other is in flight');
+  assert.equal((await replies(w)).find((j) => j.id === second.id).status, 'queued');
+});
+
 test('at most 60 for a business in an hour, across media', async () => {
   const w = await liveWorld({ limits: { privateRepliesPerHour: 1_000_000, publicRepliesPerTenantHour: 5, publicRepliesPerMediaHour: 100 } });
   for (let i = 0; i < 7; i++) await enqueue(w, dmToSend(w, { personId: `p${i}`, mediaId: `M${i}` }));

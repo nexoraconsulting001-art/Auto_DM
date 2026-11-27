@@ -577,14 +577,10 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
         if (job.subject_hash) await lock(t, `${business}:${action.channel}:${job.subject_hash}`);
         await lock(t, `public:${business}:${action.mediaId ?? ''}`);
         await lock(t, `public:${business}`);
-        const [last] = await t.query(
-          `SELECT payload FROM outbound_jobs WHERE tenant_id = $1 AND channel = $2 AND media_id = $3 AND kind = 'public_reply' ORDER BY id DESC LIMIT 1`,
-          [business, action.channel, action.mediaId ?? ''],
-        );
-        const lastText = last?.payload?.message?.text;
-        const choices = variants.filter((v) => v !== lastText);
-        text = choices[Math.floor(random() * choices.length)];
-        const fields = { action: { ...reply, message: { text } }, status: decided.status, reason: decided.reason, subject: job.subject_hash, runAt: new Date(+at + delay), at, payload: { message: { text } }, isTest: reply.isTest };
+        // Only a first choice: replies go out in the order of their random delays, not of their making, so the text is chosen again
+        // against the reply that really went last on this media when this one is sent (claimPublicReply). The variants go with the job.
+        text = variants[Math.floor(random() * variants.length)];
+        const fields = { action: { ...reply, message: { text } }, status: decided.status, reason: decided.reason, subject: job.subject_hash, runAt: new Date(+at + delay), at, payload: { message: { text }, variants }, isTest: reply.isTest };
         const row = await insertJob(t, fields);
         if (!row) return null;
         const refused = await claimCaps(t, capsFor(fields.action, {}, job.subject_hash, limits), { action: fields.action, jobId: row.id, at, overrides, readOnly: reply.isTest });
@@ -693,6 +689,50 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     return job ?? null;
   }
 
+  /** The public reply that went out last on this media (or is going now), other than this job. */
+  async function lastPublicReply(q, job, at) {
+    const [row] = await q.query(
+      `SELECT payload->'message'->>'text' AS text, (status = 'sending' AND lease_until > $5::timestamptz) AS in_flight FROM outbound_jobs
+       WHERE tenant_id = $1 AND channel = $2 AND media_id = $3 AND kind = 'public_reply' AND id <> $4 AND status IN ('sending', 'sent', 'sent_fallback', 'unknown')
+       ORDER BY (status = 'sending' AND lease_until > $5::timestamptz) DESC, COALESCE(sent_at, updated_at) DESC, id DESC LIMIT 1`,
+      [tenantId(), job.channel, job.media_id, job.id, at],
+    );
+    return row ?? null;
+  }
+
+  /**
+   * PRD 4.9: never the same reply twice running on a media. Weighed on what was really sent, not on what was made last: a reply made
+   * later can go first (its delay was shorter). A job made before the variants travelled with it keeps its own text (and waits, in
+   * claimPublicReply, while that text is the one that went last).
+   */
+  async function publicReplyText(job, at) {
+    const current = job.payload?.message?.text ?? '';
+    const variants = Array.isArray(job.payload?.variants) ? job.payload.variants : [current];
+    const last = (await lastPublicReply(db, job, at))?.text;
+    const choices = variants.filter((v) => v !== last);
+    return choices.length ? choices[Math.floor(random() * choices.length)] : current;
+  }
+
+  /**
+   * The 'sending' write for a public reply, made under the media's lock: one reply in flight on a media at a time, and only if the one
+   * that went last is still not this text. Any other process that sent on this media between the choice and here makes it wait a turn
+   * (null), so two workers can never send the same text back to back.
+   */
+  async function claimPublicReply(job, text, tokenVersion, at) {
+    return db.tx(async (t) => {
+      await lock(t, `public:${tenantId()}:${job.media_id}`);
+      const last = await lastPublicReply(t, job, at);
+      if (last?.in_flight || (last && last.text === text)) return null;
+      const [row] = await t.query(
+        `UPDATE outbound_jobs SET status = 'sending', attempts = attempts + 1, token_version = $4, lease_until = $5::timestamptz, updated_at = $6::timestamptz,
+           payload = jsonb_set(payload, '{message}', COALESCE(payload->'message', '{}'::jsonb) || jsonb_build_object('text', $7::text))
+         WHERE tenant_id = $1 AND id = $2 AND status = 'queued' AND locked_by = $3 RETURNING id`,
+        [tenantId(), job.id, workerId, tokenVersion, new Date(+at + limits.leaseMs), at, text],
+      );
+      return row ?? false;
+    });
+  }
+
   const unlease = (job) => db.query(`UPDATE outbound_jobs SET lease_until = NULL, locked_by = NULL WHERE tenant_id = $1 AND id = $2 AND status = 'queued'`, [tenantId(), job.id]);
 
   /** Decides and sends one claimed job. { stop: true } means this account has no budget left this tick. */
@@ -707,6 +747,8 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
       if (probe) state.breakerBlocks = false;
     }
     const at = now();
+    // The text a public reply goes with is chosen now, so the gate weighs the very text that is sent.
+    if (action.kind === 'public_reply') action.message = { ...action.message, text: await publicReplyText(job, at) };
     const verdict = evaluate(action, state, { at: +at, limits, trigger });
     if (!verdict.allow) {
       if (probe) await breaker.probeUnused(action.channel);
@@ -732,11 +774,22 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     }
 
     // From here on the call to Meta may happen, so a crash can only mean "unknown". This is the only write that opens that door.
-    const [claimed] = await db.query(
-      `UPDATE outbound_jobs SET status = 'sending', attempts = attempts + 1, token_version = $4, lease_until = $5::timestamptz, updated_at = $6::timestamptz
-       WHERE tenant_id = $1 AND id = $2 AND status = 'queued' AND locked_by = $3 RETURNING id`,
-      [tenantId(), job.id, workerId, state.account.tokenVersion ?? null, new Date(+at + limits.leaseMs), at],
-    );
+    let claimed;
+    if (action.kind === 'public_reply') {
+      claimed = await claimPublicReply(job, action.message.text, state.account.tokenVersion ?? null, at);
+      if (claimed === null) {
+        // Another reply on this media is going, or just went with this text: this one waits for the next turn and chooses again.
+        if (probe) await breaker.probeUnused(action.channel);
+        await unlease(job);
+        return { stop: true };
+      }
+    } else {
+      [claimed] = await db.query(
+        `UPDATE outbound_jobs SET status = 'sending', attempts = attempts + 1, token_version = $4, lease_until = $5::timestamptz, updated_at = $6::timestamptz
+         WHERE tenant_id = $1 AND id = $2 AND status = 'queued' AND locked_by = $3 RETURNING id`,
+        [tenantId(), job.id, workerId, state.account.tokenVersion ?? null, new Date(+at + limits.leaseMs), at],
+      );
+    }
     if (!claimed) {
       if (probe) await breaker.probeUnused(action.channel);
       return { sent: false };
