@@ -95,7 +95,9 @@ export async function runLoad({ budgets, parts, seconds, out, say = (m) => conso
       const stormed = createRecorder();
       const since = new Date();
       const plan = [...mixPlan(stormed, 's1', SEED + 3), stormPlan({ world, rec: stormed, shopIndex: STORM_SHOP, comments, seconds: overSeconds, tag: 's2' })];
-      await drive({ client: world.client, plan, seconds: overSeconds, onResult: stormed.onResult });
+      // The storm is `comments` over `overSeconds`; the other businesses' traffic goes on for the whole run, so a short run still gives
+      // their send delay and pages enough samples to judge (MIN_SAMPLES): a p95 over a handful of DMs proves nothing.
+      await drive({ client: world.client, plan, seconds: short ? Math.max(overSeconds, seconds) : overSeconds, onResult: stormed.onResult });
       const stormTenant = world.shops[STORM_SHOP].tenantId;
       const otherTenants = world.shops.filter((_, i) => i !== STORM_SHOP).map((s) => s.tenantId);
       // A DM of another business that is still not out after twice the p95 limit is not a slow DM but a missing one.

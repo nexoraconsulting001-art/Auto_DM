@@ -176,5 +176,5 @@ export function classPlans({ world, rec, rps, mix, rng, tag, skipWebhookShop = -
 export function stormPlan({ world, rec, shopIndex, comments, seconds, tag }) {
   const shop = world.shops[shopIndex];
   let index = 0;
-  return { name: 'storm', rate: comments / seconds, make: () => webhookRequest({ world, rec, shop, index: 5_000_000 + index++, field: 'comments', tag, name: 'storm' }) };
+  return { name: 'storm', rate: comments / seconds, make: () => (index < comments ? webhookRequest({ world, rec, shop, index: 5_000_000 + index++, field: 'comments', tag, name: 'storm' }) : null) };
 }

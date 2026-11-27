@@ -21,7 +21,7 @@ export function judgeMix({ budgets, byClass }) {
   const checks = [];
   const failed = Object.values(byClass).reduce((sum, c) => sum + c.failed, 0);
   const requests = Object.values(byClass).reduce((sum, c) => sum + c.requests, 0);
-  checks.push({ id: 'Q-05', name: 'failed requests', ok: failed <= budgets.failedRequests && requests > 0, measured: `${failed} of ${requests}`, limit: `${budgets.failedRequests}` });
+  checks.push({ id: 'Q-05', name: 'failed requests', ok: failed <= budgets.failedRequests && requests > 0, measured: `${failed}`, limit: `${budgets.failedRequests} (of ${requests} requests)` });
   for (const { class: name } of budgets.mix) {
     const c = byClass[name];
     const limit = budgets.p95Ms[name];
@@ -35,7 +35,7 @@ export function judgeMix({ budgets, byClass }) {
 export function judgeMemory({ budgets, peaks }) {
   return ['web', 'worker', 'postgres'].map((role) => {
     const peak = peaks.memoryMb[role];
-    return { id: 'Q-05', name: `peak memory ${role}`, ok: peak !== null && peak <= budgets.memoryMb[role], measured: peak === null ? 'could not be read' : `${peak} MB`, limit: `${budgets.memoryMb[role]} MB` };
+    return { id: 'Q-05', name: `peak memory ${role}`, ok: peak !== null && peak <= budgets.memoryMb[role], measured: peak === null ? 'could not be read' : `${peak}`, limit: `${budgets.memoryMb[role]} MB` };
   });
 }
 
@@ -54,7 +54,7 @@ export function judgeStorm({ budgets, baselinePageP95, baselinePages, stormPageP
   return [
     { id: 'Q-06', name: `storm accepted (${budgets.storm.comments} comments on one business)`, ok: stormAccepted === stormExpected && stormExpected > 0, measured: `${stormAccepted} of ${stormExpected} answered 200`, limit: 'all' },
     { id: 'Q-06', name: 'other businesses: page p95 during the storm', ok: stormPageP95 !== null && stormPages >= MIN_SAMPLES && baselinePages >= MIN_SAMPLES && stormPageP95 <= pageLimit, measured: `${unitless(stormPageP95)} ms over ${stormPages} pages (before: ${unitless(baselinePageP95)} ms over ${baselinePages})`, limit: `${pageLimit} ms (${rule.pageP95Factor} x max(before, ${BASELINE_FLOOR_MS} ms))` },
-    { id: 'Q-06', name: 'other businesses: send delay p95', ok: delayP95 !== null && delays.length >= MIN_SAMPLES && delayP95 <= rule.sendDelayP95Seconds, measured: delayP95 === null ? 'no DMs went out' : `${Math.round(delayP95 * 10) / 10} s over ${delays.length} DMs`, limit: `${rule.sendDelayP95Seconds} s` },
+    { id: 'Q-06', name: 'other businesses: send delay p95', ok: delayP95 !== null && delays.length >= MIN_SAMPLES && delayP95 <= rule.sendDelayP95Seconds, measured: delayP95 === null ? 'no DMs went out' : `${Math.round(delayP95 * 10) / 10}`, limit: `${rule.sendDelayP95Seconds} s (${delays.length} DMs measured)` },
     { id: 'Q-06', name: 'other businesses: every DM went out (none left waiting or failed)', ok: others.unsent === 0 && delays.length > 0, measured: `${others.unsent} not sent${others.unsentDetail ? ` (${others.unsentDetail})` : ''}, ${delays.length} sent`, limit: '0 not sent' },
     { id: 'Q-06', name: 'other businesses: every webhook stored and handled', ok: others.accepted > 0 && others.handled === others.accepted, measured: `${others.handled} of ${others.accepted} handled`, limit: 'all' },
   ];
@@ -64,7 +64,7 @@ export function judgeStorm({ budgets, baselinePageP95, baselinePages, stormPageP
 export function judgeRestart({ budgets, verify, timing, failedAfterBack }) {
   const rule = budgets.restart;
   return [
-    { id: 'Q-07', name: 'lost webhooks (answered 200, not stored)', ok: verify.accepted > 0 && verify.lost <= rule.lostWebhooks, measured: `${verify.lost} of ${verify.accepted} accepted`, limit: `${rule.lostWebhooks}` },
+    { id: 'Q-07', name: 'lost webhooks (answered 200, not stored)', ok: verify.accepted > 0 && verify.lost <= rule.lostWebhooks, measured: `${verify.lost}`, limit: `${rule.lostWebhooks} (of ${verify.accepted} accepted)` },
     { id: 'Q-07', name: 'webhooks stored but never handled', ok: verify.unhandled === 0, measured: `${verify.unhandled}`, limit: '0' },
     { id: 'Q-07', name: 'sends twice', ok: verify.duplicateSends <= rule.duplicateSends, measured: `${verify.duplicateSends}`, limit: `${rule.duplicateSends}` },
     { id: 'Q-07', name: 'back after the restart', ok: timing.backMs !== null && timing.backMs <= rule.backWithinSeconds * 1000, measured: timing.backMs === null ? 'did not come back' : `${Math.round(timing.backMs / 100) / 10} s`, limit: `${rule.backWithinSeconds} s` },
