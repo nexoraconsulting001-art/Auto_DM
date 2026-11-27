@@ -4,6 +4,7 @@ import path from 'node:path';
 import { after } from 'node:test';
 import { APP_ROLE, MIGRATIONS_DIR, openDb } from '../src/db/index.js';
 import { bindTenant, createRepos } from '../src/repos/index.js';
+import { currentTenant } from '../src/tenancy.js';
 import { createApp } from '../src/server.js';
 import { config } from '../src/config.js';
 import { createPlatform } from '../src/platform/index.js';
@@ -129,8 +130,41 @@ export function appLoginUrl(ownerUrl) {
  * TEST_DB_LOGINS=2 makes that the default for every test, to see what still leans on the owner outside db.platform.
  * `poolSize` is the connections a Postgres handle may open (3; with two logins the owner gets half, at least 2): a test
  * that holds many statements waiting at once needs more.
+ *
+ * One login works like two outside a business (R5-PP-4): the business handle (db.query/exec/tx) with no business selected
+ * runs as the app role with no business set, exactly what the restricted app login is in production, so a test or a product
+ * path that leans on the owner outside db.platform fails in every run, not only on the production profile (check:r05).
+ * db.platform stays the owner. `restricted: false` gives the bare one-login handle (whose business handle outside a
+ * business is the owner); it is for the few tests about that handle itself. A database opened without its migrations has
+ * no app role yet, so it is not restricted unless asked.
  */
-export async function openTestDb({ migrate = true, logins = DEFAULT_LOGINS, poolSize = 3 } = {}) {
+export async function openTestDb({ migrate = true, logins = DEFAULT_LOGINS, poolSize = 3, restricted = migrate } = {}) {
+  const db = await openTestDbOnce({ migrate, logins, poolSize });
+  return restricted ? asAppLoginOutsideBusiness(db) : db;
+}
+
+/**
+ * The one-login handle made to work as the app login does outside withTenant(): each statement, or transaction, outside a
+ * business steps down to the app role with app.tenant_id empty for that transaction only. Inside a business the handle's own
+ * fence already does the same with the business set. A two-login handle already is this, and is returned as it is.
+ */
+export function asAppLoginOutsideBusiness(db) {
+  if (db.logins !== 1) return db;
+  const stepDown = `SET LOCAL ROLE ${APP_ROLE}; SELECT set_config('app.tenant_id', '', true)`;
+  const outside = (fn) => db.tx(async (t) => {
+    await t.exec(stepDown);
+    return fn(t);
+  });
+  return {
+    ...db,
+    restricted: true,
+    query: (sql, params = []) => (currentTenant() ? db.query(sql, params) : outside((t) => t.query(sql, params))),
+    exec: (sql) => (currentTenant() ? db.exec(sql) : outside((t) => t.exec(sql))),
+    tx: (fn) => (currentTenant() ? db.tx(fn) : outside(fn)),
+  };
+}
+
+async function openTestDbOnce({ migrate, logins, poolSize }) {
   const url = process.env.TEST_DATABASE_URL;
   if (logins === 2 && !url) throw new Error('A two-login test database needs TEST_DATABASE_URL');
   if (!url) return openDb({ migrate });

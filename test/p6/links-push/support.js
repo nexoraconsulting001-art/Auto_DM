@@ -47,7 +47,8 @@ export const iosToken = () => crypto.randomBytes(32).toString('hex');
 export async function startWorld({ credentials = true, platforms = ['android', 'ios'], overrides = {} } = {}) {
   const sim = createPushSim({ project: SIM_PROJECT, topic: BUNDLE, keyId: 'KESARKEY01', teamId: 'KESARTEAM1' });
   await sim.start();
-  const app = await startApp({ modules: modulesWithGate(), overrides: { fcmBaseUrl: sim.url, apnsBaseUrl: sim.apnsUrl, providerTimeoutMs: 700, ...overrides } });
+  // The test is the worker (it runs the queue's jobs with drain(), which only the pg queue has), so the queue is pg on every profile (R5-PP-2).
+  const app = await startApp({ modules: modulesWithGate(), overrides: { fcmBaseUrl: sim.url, apnsBaseUrl: sim.apnsUrl, providerTimeoutMs: 700, queueDriver: 'pg', ...overrides } });
   await enableApp(app, { platforms, config: { ios_bundle_id: BUNDLE } });
   const clock = testClock();
   const service = shopperPushFor(app.ctx);

@@ -60,7 +60,12 @@ const within = (ms, work) => {
   return Promise.race([Promise.resolve().then(work), late]).finally(() => clearTimeout(timer));
 };
 
-/** A Redis client for the queue's ping: fails at once while disconnected (no offline queue) and reconnects by itself. */
+/**
+ * A Redis client for the queue's ping: fails at once while disconnected (no offline queue) and reconnects by itself.
+ * It is handed out only once its first connection attempt has ended (made or refused): with no offline queue, a ping sent
+ * while that first connection is still being made is refused at once, so every process's first readiness answer said the
+ * queue was down although Redis was up (R5-PP-1).
+ */
 async function defaultRedis(url) {
   const { default: Redis } = await import('ioredis');
   const client = new Redis(url, { lazyConnect: true, enableOfflineQueue: false, maxRetriesPerRequest: 1, connectTimeout: 2000, retryStrategy: (n) => Math.min(200 * n, 2000) });
@@ -68,7 +73,8 @@ async function defaultRedis(url) {
   client.on('error', () => {});
   // The probe's connection never holds a process open on its own (a test, a tool).
   client.on('connect', () => client.stream?.unref?.());
-  client.connect().catch(() => {});
+  // A refused first attempt is answered by the ping ('down'); ioredis goes on reconnecting by its retry strategy.
+  await client.connect().catch(() => {});
   return client;
 }
 
