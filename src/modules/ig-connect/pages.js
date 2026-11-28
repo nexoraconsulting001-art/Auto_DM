@@ -24,7 +24,7 @@ a{color:var(--primary)}
 .bad{color:var(--bad);font-weight:600}
 table{border-collapse:collapse;width:100%;font-size:15px}
 th,td{text-align:left;padding:8px 6px;border-top:1px solid var(--line);vertical-align:top}
-th{font-weight:600;white-space:nowrap}
+th{font-weight:600}
 .scope{display:block;font-weight:600}
 label{display:block;margin:0 0 12px;font-weight:600}
 input{display:block;width:100%;min-height:44px;margin-top:4px;padding:8px 12px;border:1px solid var(--muted);border-radius:10px;font:inherit}
