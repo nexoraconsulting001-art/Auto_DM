@@ -25,6 +25,9 @@ import { CHANNELS, META_CHANNELS } from '../../contracts/compliance.js';
  *       business's; a status other than 'active', or an empty token, holds the job with paused.reconnect.
  *   tokenRejected?(action)
  *       Called when send() threw kind 'token_invalid': mark the account for reconnecting.
+ *   refusal?(err) -> err
+ *       A provider error in the words send() throws (kind 'token_invalid', 'throttled', ...), for reportSend(): a message to the
+ *       channel that a sender outside the queue made reports its answer through the same rules.
  *   textBytes?
  *       The longest text the channel takes, in bytes, for content.too_long. Without it a message is held to Instagram's limit.
  */
@@ -40,6 +43,7 @@ export function createChannels() {
         if (typeof definition?.[key] !== 'function') throw new Error(`The ${name} channel needs ${key}()`);
       }
       if (definition.tokenRejected !== undefined && typeof definition.tokenRejected !== 'function') throw new Error(`The ${name} channel's tokenRejected is a function`);
+      if (definition.refusal !== undefined && typeof definition.refusal !== 'function') throw new Error(`The ${name} channel's refusal is a function`);
       if (definition.textBytes !== undefined && !(Number.isInteger(definition.textBytes) && definition.textBytes > 0)) throw new Error(`The ${name} channel's textBytes is a whole number of bytes`);
       registered.set(name, Object.freeze({ ...definition }));
     },
