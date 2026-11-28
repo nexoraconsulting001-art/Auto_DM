@@ -14,9 +14,10 @@ export const WISHLIST_CSS = [
   '.wish-card{position:relative;display:flex;flex-direction:column}.wish-card>.tile{flex:1}',
   '.wish{position:absolute;top:14px;right:14px;width:40px;height:40px;border-radius:999px;border:1px solid var(--line-strong,#ccc);background:var(--card,#fff);color:var(--primary,#333);font-size:20px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}',
   '.wish[aria-pressed="true"]{color:var(--accent,#c33)}',
-  '.wish.wish-page{position:static;width:auto;height:44px;padding:0 16px;gap:8px;font-size:15px;font-weight:600}',
-  // The accent is for a heart on its own, not for words: the product page's button keeps its words in the primary colour.
-  '.wish.wish-page[aria-pressed="true"]{color:var(--primary,#333)}',
+  '.wish.wish-page{position:static;width:auto;height:44px;padding:0 16px;gap:8px;font-size:15px;font-weight:600;color:var(--ink,#222)}',
+  // The accent and primary are for a heart on its own, not for words (a dark look's neon primary fails contrast on its
+  // card): the product page's button keeps its words in the text colour, saved or not.
+  '.wish.wish-page[aria-pressed="true"]{color:var(--ink,#222)}',
   '.wish-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}',
   '.wish-row{display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:center}',
   '.wish-row img,.wish-row .ph{width:64px;height:76px;object-fit:cover;border-radius:8px;background:var(--chip,#eee)}',
