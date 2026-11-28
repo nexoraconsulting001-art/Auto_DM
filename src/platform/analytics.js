@@ -56,14 +56,15 @@ function clickhouseAnalytics(config) {
   if (!config.clickhouseUrl) throw new Error('CLICKHOUSE_URL is required when ANALYTICS_DRIVER=clickhouse');
   const base = new URL(config.clickhouseUrl);
   const database = config.clickhouseDb || 'bhava';
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(database)) throw new Error(`CLICKHOUSE_DB "${database}" is not a plain database name`);
   const auth = base.username ? `Basic ${Buffer.from(`${decodeURIComponent(base.username)}:${decodeURIComponent(base.password)}`).toString('base64')}` : undefined;
   base.username = '';
   base.password = '';
 
-  async function run(sql, { body, params = {} } = {}) {
+  async function send(sql, { body, params = {}, inDatabase = true } = {}) {
     const url = new URL(base);
     url.searchParams.set('query', sql);
-    url.searchParams.set('database', database);
+    if (inDatabase) url.searchParams.set('database', database);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(`param_${k}`, String(v));
     const res = await fetch(url, { method: 'POST', body, headers: auth ? { authorization: auth } : {}, signal: AbortSignal.timeout(10_000) });
     const text = await res.text();
@@ -71,17 +72,25 @@ function clickhouseAnalytics(config) {
     return text;
   }
 
+  // The database is made before the first statement of any kind: the rollups make their own tables in it, and before this only
+  // the events table's first use made the database, so rollups on a new ClickHouse failed until an event had been tracked.
+  let made;
+  const ensureDatabase = () =>
+    (made ??= send(`CREATE DATABASE IF NOT EXISTS ${database}`, { inDatabase: false }).catch((err) => {
+      made = undefined;
+      throw err;
+    }));
+
+  async function run(sql, options) {
+    await ensureDatabase();
+    return send(sql, options);
+  }
+
   let ready;
   const ensureTable = () =>
-    (ready ??= (async () => {
-      const db = new URL(base);
-      db.searchParams.set('query', `CREATE DATABASE IF NOT EXISTS ${database}`);
-      const res = await fetch(db, { method: 'POST', headers: auth ? { authorization: auth } : {} });
-      if (!res.ok) throw new Error(`ClickHouse error ${res.status}: ${(await res.text()).slice(0, 300)}`);
-      await run(`CREATE TABLE IF NOT EXISTS events (
+    (ready ??= run(`CREATE TABLE IF NOT EXISTS events (
         tenant_id UInt32, name LowCardinality(String), props String, at DateTime64(3, 'UTC')
-      ) ENGINE = MergeTree ORDER BY (tenant_id, name, at)`);
-    })().catch((err) => {
+      ) ENGINE = MergeTree ORDER BY (tenant_id, name, at)`).catch((err) => {
       ready = undefined;
       throw err;
     }));

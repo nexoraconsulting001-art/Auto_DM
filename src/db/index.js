@@ -48,11 +48,15 @@ export const ensureAppRole = (db) => db.exec(ENSURE_APP_ROLE);
  * With one login (`logins` is 1) the connection is the owner's and steps down to APP_ROLE for each business
  * transaction. With two (`logins` is 2) business work is on a connection that was never the owner, so nothing
  * it runs can step back up; and its work outside withTenant() sees no business rows at all.
+ *
+ * `idleMs` is how long a Postgres connection nobody is using stays open before it goes back to the server (pg's own
+ * 10 seconds by default, right for a long-lived process). A handle that is used for a moment and then left, as a test's
+ * database is, sets it short, so its connections don't hold server slots after its work is done.
  */
-export async function openDb({ url = '', ownerUrl = '', dataDir, migrate = true, poolSize = 10 } = {}) {
+export async function openDb({ url = '', ownerUrl = '', dataDir, migrate = true, poolSize = 10, idleMs } = {}) {
   if (ownerUrl && !url) throw new Error('DATABASE_OWNER_URL is set without DATABASE_URL: set DATABASE_URL to the app login.');
-  if (ownerUrl && ownerUrl !== url) return openTwoLogins({ url, ownerUrl, migrate, poolSize });
-  const driver = url ? await openPg(url, poolSize) : await openPglite(dataDir);
+  if (ownerUrl && ownerUrl !== url) return openTwoLogins({ url, ownerUrl, migrate, poolSize, idleMs });
+  const driver = url ? await openPg(url, poolSize, idleMs) : await openPglite(dataDir);
   const db = fenced(driver, driver);
   if (migrate) await runMigrations(db);
   return db;
@@ -80,11 +84,11 @@ export async function openRuntimeDb(config, env = process.env) {
 // The owner pool only serves routing, the job queue and the Platform Console, so it is the smaller one.
 const ownerPoolSize = (poolSize) => Math.max(2, Math.ceil(poolSize / 2));
 
-async function openTwoLogins({ url, ownerUrl, migrate, poolSize }) {
-  const owner = await openPg(ownerUrl, ownerPoolSize(poolSize));
+async function openTwoLogins({ url, ownerUrl, migrate, poolSize, idleMs }) {
+  const owner = await openPg(ownerUrl, ownerPoolSize(poolSize), idleMs);
   try {
     if (migrate) await runMigrations(owner);
-    return fenced(await openAppLogin(owner, url, poolSize), owner);
+    return fenced(await openAppLogin(owner, url, poolSize, idleMs), owner);
   } catch (err) {
     await owner.close();
     throw err;
@@ -95,9 +99,9 @@ async function openTwoLogins({ url, ownerUrl, migrate, poolSize }) {
 const CANNOT_LOG_IN = new Set(['28P01', '28000']);
 
 /** Connects as the app login. The first time on a server (or after a restore onto a new one) the owner makes the login. */
-async function openAppLogin(owner, url, poolSize) {
+async function openAppLogin(owner, url, poolSize, idleMs) {
   for (let attempt = 0; ; attempt++) {
-    const app = await openPg(url, poolSize);
+    const app = await openPg(url, poolSize, idleMs);
     try {
       await assertRestrictedLogin(app);
       return app;
@@ -245,10 +249,11 @@ function pgTypes(pg) {
   };
 }
 
-async function openPg(url, poolSize) {
+async function openPg(url, poolSize, idleMs) {
   const { default: pg } = await import('pg');
   const ssl = /sslmode=disable|localhost|127\.0\.0\.1|@postgres[:/]/.test(url) ? false : { rejectUnauthorized: false };
-  const pool = new pg.Pool({ connectionString: url, ssl, max: poolSize, allowExitOnIdle: true, types: pgTypes(pg) });
+  const idle = idleMs > 0 ? { idleTimeoutMillis: idleMs } : {};
+  const pool = new pg.Pool({ connectionString: url, ssl, max: poolSize, allowExitOnIdle: true, types: pgTypes(pg), ...idle });
   // Postgres restarting or killing a connection is an error event, which would end the process with no listener.
   const connectionLost = (err) => log.warn('db.connection_lost', { code: err?.code });
   pool.on('error', connectionLost);

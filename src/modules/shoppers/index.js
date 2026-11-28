@@ -68,11 +68,10 @@ export const shoppers = {
       if (!shared.available) return;
       const [order] = await ctx.db.query('SELECT shopper_id, payment_mode FROM orders WHERE tenant_id = $1 AND id = $2', [tenantId(), event.orderId]);
       if (!order?.shopper_id || order.payment_mode !== 'cod') return;
-      // At least once: the event id is the guard against counting one parcel twice.
-      const first = await ctx.platform.rateLimit.hit('shared_cod_event', String(event.id), { limit: 1, windowMs: 400 * 24 * HOUR });
-      if (!first.allowed) return;
-      await shared.recordCodOutcome(tenantId(), order.shopper_id, { refused: event.type === 'order.rto_initiated' });
-      log.info('shoppers.cod_signal', { orderId: event.orderId, refused: event.type === 'order.rto_initiated' });
+      // At least once: the event id is the guard against counting one parcel twice, taken with the count itself (recordCodOutcome).
+      // Taken on its own first, a delivery that then failed left its retry refused by the guard, and the parcel was never counted.
+      const counted = await shared.recordCodOutcome(tenantId(), order.shopper_id, { refused: event.type === 'order.rto_initiated', eventId: event.id });
+      if (counted) log.info('shoppers.cod_signal', { orderId: event.orderId, refused: event.type === 'order.rto_initiated' });
     });
   },
 
