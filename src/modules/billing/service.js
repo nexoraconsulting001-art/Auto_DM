@@ -398,7 +398,9 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
           if (s.status === 'suspended') throw new ApiError('conflict', 'Pay what is due first, then change your plan.', { reason: 'suspended' });
           if (!s.current_period_end) {
             await provider().cancel(s.provider_subscription_id, { atCycleEnd: false });
-            await t.query(`UPDATE subscriptions SET status = 'cancelled', cancelled_at = now(), next_plan = NULL, next_cycle = NULL, updated_at = now() WHERE id = $1`, [s.id]);
+            // Never paid: the offer place it held goes back (M-8).
+            if (s.offer_code) await t.query('SELECT release_offer_hold($1, false)', [s.offer_code]);
+            await t.query(`UPDATE subscriptions SET status = 'cancelled', cancelled_at = now(), next_plan = NULL, next_cycle = NULL, offer_code = NULL, updated_at = now() WHERE id = $1`, [s.id]);
             await audit('now');
             return { effective: 'now', checkoutUrl: null };
           }
@@ -412,8 +414,9 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
 
         const offerCode = live ? s.offer_code : null;
         if (!live) {
-          // A first paying subscription (or one after a cancelled one): the offer is claimed here, under the offer row's lock,
-          // and comes back if anything below fails, because the claim is part of this transaction.
+          // A first paying subscription (or one after a cancelled one): a place in the offer is held here, under the offer
+          // row's lock, and comes back if anything below fails, because the hold is part of this transaction. The first
+          // captured payment makes it final (applyCharge); unpaid, it is given back (releaseOfferHolds, M-8).
           const open = await offerOpen(t);
           let claimed = null;
           if (open && ids[open.code]) {
@@ -448,7 +451,8 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
         if (!planId) throw new ApiError('conflict', 'Prices just changed. Please try again.', { reason: 'retry' });
         if (s.status === 'suspended') throw new ApiError('conflict', 'Pay what is due first, then change your plan.', { reason: 'suspended' });
         if (!s.current_period_end) {
-          // Not paid yet: the subscription waiting for its first payment is changed in place.
+          // Not paid yet: the subscription waiting for its first payment is changed in place, and its offer hold renewed.
+          if (s.offer_code) await t.query('SELECT claim_offer($1)', [s.offer_code]);
           const changed = await provider().changeSubscription(s.provider_subscription_id, { planId, at: 'now' });
           await t.query('UPDATE subscriptions SET plan = $2, cycle = $3, next_plan = NULL, next_cycle = NULL, updated_at = now() WHERE id = $1', [s.id, target, cycle]);
           await audit('now');
@@ -847,6 +851,10 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       // The payment method is noted before any plan change of this charge, so a method shared with the referrer blocks the referral before it is credited (F-129).
       await notePaymentMethod(t, { tenantId: business, fingerprint: ev.payment.methodMark });
       await recordPayment(t, { s, payment: ev.payment, status: 'captured', invoiceId: invoice?.id ?? null });
+      // Paid: the offer place held for this business becomes its own (M-8). Already given back and none left, the charge
+      // was still at the offer price, so the invoice says so and ops decides.
+      let offerFull = null;
+      if (s.offer_code && !(await t.query('SELECT confirm_offer($1) AS ok', [s.offer_code]))[0].ok) offerFull = s.offer_code;
 
       let resumed = false;
       if (!stale(eventAtMs, lastMs)) {
@@ -870,10 +878,13 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
       }
       await writeAudit(t, { actor: 'billing', action: 'billing.charged', target: invoice ? `invoice:${invoice.id}` : 'payment', details: { amountPaise: ev.payment.amountPaise ?? 0, invoice: invoice?.number ?? null } });
       const removedCharged = queued.filter((i) => i.ends_at).map((i) => Number(i.id));
-      return { outcome: 'processed', resumed, removedCharged, mismatch: expected !== Number(ev.payment.amountPaise ?? 0) ? { expected, got: Number(ev.payment.amountPaise) } : null, invoiceId: invoice?.id ?? null };
+      return { outcome: 'processed', resumed, removedCharged, offerFull, mismatch: expected !== Number(ev.payment.amountPaise ?? 0) ? { expected, got: Number(ev.payment.amountPaise) } : null, invoiceId: invoice?.id ?? null };
     });
     if (outcome.removedCharged?.length) {
       await opsAlert(platformDb, { tenantId: business, kind: 'billing.removed_item_charged', message: `A Bhava charge included ${outcome.removedCharged.length} add-on line(s) the business had removed before it could be taken back (invoice ${outcome.invoiceId}). Issue a credit note.`, target: `invoice:${outcome.invoiceId}`, dedupeKey: `billing-removed:${outcome.invoiceId}` });
+    }
+    if (outcome.offerFull) {
+      await opsAlert(platformDb, { tenantId: business, kind: 'billing.offer_full', message: `A business paid at the ${outcome.offerFull} offer price after its held place was given back, and no place is left (invoice ${outcome.invoiceId}). Keep the offer for it or move its subscription to the full price.`, target: `invoice:${outcome.invoiceId}`, dedupeKey: `billing-offer-full:${business}:${outcome.offerFull}` });
     }
     if (outcome.mismatch) {
       log.warn('billing.amount_mismatch', { tenantId: business, invoice: outcome.invoiceId, expected: outcome.mismatch.expected, got: outcome.mismatch.got });
@@ -923,7 +934,10 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
         await t.query('UPDATE subscriptions SET cancelled_at = COALESCE(cancelled_at, now()), updated_at = now() WHERE id = $1', [s.id]);
         return 'processed';
       }
-      await t.query(`UPDATE subscriptions SET status = 'cancelled', cancelled_at = now(), next_plan = NULL, next_cycle = NULL, grace_until = NULL, updated_at = now() WHERE id = $1`, [s.id]);
+      // Ended before it was ever paid: the offer place it held goes back (M-8).
+      const unpaidOffer = !s.current_period_end && s.offer_code ? s.offer_code : null;
+      if (unpaidOffer) await t.query('SELECT release_offer_hold($1, false)', [unpaidOffer]);
+      await t.query(`UPDATE subscriptions SET status = 'cancelled', cancelled_at = now(), next_plan = NULL, next_cycle = NULL, grace_until = NULL, offer_code = CASE WHEN $2 THEN NULL ELSE offer_code END, updated_at = now() WHERE id = $1`, [s.id, Boolean(unpaidOffer)]);
       await writeAudit(t, { actor: 'billing', action: 'billing.cancelled', target: `subscription:${s.id}` });
       return 'processed';
     });
@@ -1001,6 +1015,40 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
   }
 
   /**
+   * M-8: an offer place held for an owner who never paid is given back once its hold has run out. The unpaid subscription
+   * that was priced with the offer is ended with it (at Razorpay too, owed until it is: provider_cancel_pending), so its
+   * payment page can no longer be paid at the offer price; the owner can pick a plan again. A business that has paid keeps
+   * its place (confirm_offer made it final). -> how many places were given back
+   */
+  async function releaseOfferHolds(done) {
+    const rows = await platformDb.query('SELECT tenant_id, offer_code FROM offer_claims WHERE hold_until IS NOT NULL AND hold_until <= now() ORDER BY tenant_id');
+    let released = 0;
+    for (const { tenant_id: business, offer_code: code } of rows) {
+      try {
+        const ended = await withTenant(business, () => locked(async (t) => {
+          const s = await subOf(t, { forUpdate: true });
+          if (s?.current_period_end) return null;
+          if (!(await t.query('SELECT release_offer_hold($1, true) AS ok', [code]))[0].ok) return null;
+          released += 1;
+          if (!s || s.offer_code !== code || s.status === 'cancelled') return null;
+          await t.query(
+            `UPDATE subscriptions SET status = 'cancelled', cancelled_at = now(), next_plan = NULL, next_cycle = NULL, grace_until = NULL, offer_code = NULL,
+               provider_cancel_pending = provider_subscription_id, updated_at = now() WHERE id = $1`,
+            [s.id],
+          );
+          await writeAudit(t, { actor: 'billing', action: 'billing.offer_hold_released', target: `subscription:${s.id}`, details: { offer: code } });
+          return business;
+        }));
+        if (ended) await withTenant(ended, () => settleProviderCancel());
+      } catch (err) {
+        done.failed += 1;
+        reportError(err, { msg: 'billing.offer_release_failed', tenantId: business });
+      }
+    }
+    return released;
+  }
+
+  /**
    * Queues what the next charge must carry, for every live subscription: each new add-on line not yet queued (the retry of a
    * line whose provider answer was lost: always with its first key), each running monthly line once its period is within a
    * day of renewing, and the last months' WhatsApp and AI costs at cost with their counts (F-114). Ended add-ons lose their
@@ -1010,6 +1058,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     const settings = await settingsOf(platformDb);
     const done = { queued: 0, passThrough: 0, failed: 0, fellBack: 0 };
     done.fellBack = await fallBackEnded(done);
+    done.offerHoldsReleased = await releaseOfferHolds(done);
     if (!complete(settings)) return done;
     // Cancelled subscriptions: lines still open, or a paid period that has since ended with its feature still on (money-10).
     const ending = await platformDb.query(

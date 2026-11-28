@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { ProviderError } from '../../adapters/http.js';
 import { ApiError } from '../../contracts/api/index.js';
-import { PINCODE } from '../../contracts/orders.js';
+import { PINCODE, STORE_LIMITS } from '../../contracts/orders.js';
 import { STORE_PROVIDER_PATHS } from '../../contracts/store-routes.js';
 import { log } from '../../platform/log.js';
 import { tenantId, withTenant } from '../../tenancy.js';
@@ -332,7 +332,11 @@ export function createSettings({ db, repos, config, providers, secrets }) {
       const options = toOptions(current);
       const allowed = await repos.entitlements.can('store.payments');
       const online = allowed && options.onlineReady && (options.upi || options.card || options.netbanking || options.wallet);
-      const modes = [{ mode: 'prepaid', available: online, reason: online ? '' : 'Online payment isn’t available at this store right now.' }];
+      // As the checkout quote has it (M-9): nothing to pay is confirmed when placed; under the gateway's least is not offered.
+      const total = Number(orderPaise);
+      let prepaidReason = online ? '' : 'Online payment isn’t available at this store right now.';
+      if (online && total > 0 && total < STORE_LIMITS.onlineMinPaise) prepaidReason = `Online payment needs an order of at least ${rupees(STORE_LIMITS.onlineMinPaise)}.`;
+      const modes = [{ mode: 'prepaid', available: !prepaidReason, reason: prepaidReason }];
 
       // What the door may collect: the cap, the PINs and the refusal history hold for cash on delivery and for the balance
       // of a part-advance order alike.

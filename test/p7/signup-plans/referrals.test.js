@@ -40,6 +40,10 @@ test('F-129: the link carries the code to the sign-up page; a referred account i
   assert.equal(started.status, 201);
   const referred = started.json.tenantId;
   assert.deepEqual(Object.values(await referralOf(referred)).slice(0, 2), [ravi.tenantId, 'pending']);
+  // User decision 2026-11-27 (M-10): a referral is credited only once the referred business has connected an Instagram
+  // account of its own (not the referrer's) and paid. Here it connects one first; test/final/money/referral-credit.test.js
+  // covers paying first and the referrer's own account.
+  await w.connectInstagram(referred, 'IG-FRIEND-SHOP');
 
   // A gift from the console is not a paid plan.
   await w.changePlan(referred, 't1', { source: 'console' });

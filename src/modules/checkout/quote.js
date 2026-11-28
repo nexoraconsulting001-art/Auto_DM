@@ -160,8 +160,13 @@ export async function buildQuote(q, ctx, { lines: linesIn, address = null, phone
   else if (!online) advanceReason = 'Online payment isn’t available at this store yet.';
   else if (doorReason) advanceReason = doorReason;
   else if (!split) advanceReason = 'Part payment isn’t available for this order.';
+  // Paid in full online: nothing to pay (0) is confirmed when placed (place.js); a total under the gateway's least can never
+  // be paid, so it is not offered (M-9).
+  let prepaidReason = '';
+  if (!online) prepaidReason = 'Online payment isn’t available at this store yet.';
+  else if (beforeFees > 0 && beforeFees < STORE_LIMITS.onlineMinPaise) prepaidReason = `Online payment needs an order of at least ${formatRupees(STORE_LIMITS.onlineMinPaise)}.`;
   const paymentModes = [
-    { mode: 'prepaid', available: online, reason: online ? '' : 'Online payment isn’t available at this store yet.' },
+    { mode: 'prepaid', available: !prepaidReason, reason: prepaidReason },
     { mode: 'cod', available: !codReason, reason: codReason },
     { mode: 'part_advance', available: !advanceReason, reason: advanceReason },
   ];
