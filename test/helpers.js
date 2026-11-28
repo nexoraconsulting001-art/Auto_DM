@@ -65,6 +65,37 @@ async function dropCreatedDatabases() {
 // Registered while the file loads, so it belongs to the file and not to whichever test happens to open the first database.
 if (process.env.TEST_DATABASE_URL) after(dropCreatedDatabases);
 
+// The same for ClickHouse (the CI production profile). Every test app has a fresh Postgres database, so business ids start again at 1,
+// while the ClickHouse server outlives it: on one shared analytics database a new business 2 would read the rollups an earlier test's
+// business 2 wrote (R6-P2-6, downloads N-61 rowCount). So each test app gets an analytics database of its own, dropped with the file.
+const createdAnalyticsDatabases = new Set();
+
+async function clickhouseRequest(sql) {
+  const url = new URL(process.env.CLICKHOUSE_URL);
+  const auth = url.username ? `Basic ${Buffer.from(`${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`).toString('base64')}` : undefined;
+  url.username = '';
+  url.password = '';
+  url.searchParams.set('query', sql);
+  const res = await fetch(url, { method: 'POST', headers: auth ? { authorization: auth } : {}, signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) throw new Error(`ClickHouse error ${res.status}: ${(await res.text()).slice(0, 300)}`);
+}
+
+async function ownAnalyticsDatabase() {
+  const name = `${process.env.CLICKHOUSE_DB || 'bhava'}_w${crypto.randomUUID().replace(/-/g, '')}`;
+  await clickhouseRequest(`CREATE DATABASE ${name}`);
+  createdAnalyticsDatabases.add(name);
+  return name;
+}
+
+async function dropAnalyticsDatabases() {
+  for (const name of [...createdAnalyticsDatabases]) {
+    await clickhouseRequest(`DROP DATABASE IF EXISTS ${name}`);
+    createdAnalyticsDatabases.delete(name);
+  }
+}
+
+if (process.env.ANALYTICS_DRIVER === 'clickhouse' && process.env.CLICKHOUSE_URL) after(dropAnalyticsDatabases);
+
 // Every test needs a database with all the migrations applied, and applying them one by one (one transaction each, a hundred or so)
 // is most of what a test costs on a real server: it is why the whole suite on the production drivers did not fit in 40 minutes.
 // So the migrated database is made once per server and per set of migration files (a template named from a hash of their
@@ -235,7 +266,9 @@ export async function startApp({ ig = fakeIg(), overrides = {}, modules, logins 
   await repos.igAccounts.setToken(IG_ACCOUNT.igUserId, IG_ACCOUNT.token);
   if (releaseGates) await passReleaseGates(db, tenant.id);
   // Drivers follow the environment, so the CI production profile runs the whole app on Redis, S3 and ClickHouse.
-  const appConfig = { ...config, storageDriver: process.env.STORAGE_DRIVER || 'memory', queueDriver: process.env.QUEUE_DRIVER || 'pg', analyticsDriver: process.env.ANALYTICS_DRIVER || 'pg', cacheDriver: process.env.CACHE_DRIVER || 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', passwordLogin: true, adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dataKey: TEST_DATA_KEY, dryRun: false, oneDmPerUser: false, ...overrides };
+  const analyticsDriver = overrides.analyticsDriver ?? (process.env.ANALYTICS_DRIVER || 'pg');
+  const analyticsDb = analyticsDriver === 'clickhouse' && !overrides.clickhouseDb ? { clickhouseDb: await ownAnalyticsDatabase() } : {};
+  const appConfig = { ...config, ...analyticsDb, storageDriver: process.env.STORAGE_DRIVER || 'memory', queueDriver: process.env.QUEUE_DRIVER || 'pg', analyticsDriver: process.env.ANALYTICS_DRIVER || 'pg', cacheDriver: process.env.CACHE_DRIVER || 'memory', defaultTenant: 'default', platformDomain: 'bhava.test', passwordLogin: true, adminPhone: OWNER.phone, adminPassword: OWNER.password, sessionSecret: 'test-secret', verifyToken: 'vt', appSecret: 'secret', publicBaseUrl: 'https://shop.test', dataKey: TEST_DATA_KEY, dryRun: false, oneDmPerUser: false, ...overrides };
   const drivers = createPlatform(appConfig, { db });
   const app = createApp({ db, ig, config: appConfig, platform: { ...drivers, cache: ownCacheKeys(drivers.cache) }, ...(modules ? { modules } : {}) });
   const server = app.listen(0);
