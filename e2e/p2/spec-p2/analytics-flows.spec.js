@@ -127,7 +127,9 @@ test('N-36: tapping Refresh now twice says how old the figures are', async ({ pa
   await openAnalytics(page);
   await page.getByRole('button', { name: /Refresh now/i }).click();
   await page.getByRole('button', { name: /Refresh now/i }).click();
-  await expect(page.getByText(/Updated \d+ min/)).toBeVisible();
+  // The two taps come seconds after the last poll, so the age is under a minute: insights/api.js says "Updated just now"
+  // then, and "Updated N min ago" from a minute on (test/p2/spec-p2/polling.test.js holds the minutes with a moved clock).
+  await expect(page.getByRole('status').filter({ hasText: /^Updated (just now|\d+ min ago)$/ })).toBeVisible();
 });
 
 test('N-14: the funnel lists each step with its label, and a one-tap Amazon reel says why a step is empty', async ({ page }) => {
