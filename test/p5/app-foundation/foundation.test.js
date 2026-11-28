@@ -271,7 +271,7 @@ test('Devices, notifications and Your account cover their routes, and the allowa
   const byName = Object.fromEntries(found.features.map((f) => [f.name, f.routeIds.filter((id) => !id.startsWith('console:'))]));
   assert.deepEqual(byName.devices, ['auth.devices', 'auth.revokeDevice']);
   assert.deepEqual(byName.notifications, ['notifications.list', 'notifications.markRead', 'notifications.prefs', 'notifications.savePrefs']);
-  assert.deepEqual(byName.account, ['auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.reauthStart', 'auth.reauthVerify', 'auth.deleteAccount']);
+  assert.deepEqual(byName.account, ['auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.acceptInvite', 'auth.reauthStart', 'auth.reauthVerify', 'auth.deleteAccount']);
   const pending = JSON.parse(read('tools/parity-pending.json'));
   for (const id of [...byName.devices, ...byName.notifications, ...byName.account]) {
     assert.ok(routes[id], `${id} is a route`);

@@ -240,6 +240,7 @@ export default function AccountScreen({ native = { crypto: Crypto, browser: WebB
 
       {signOutFailed ? <Banner tone="bad" testID="account-sign-out-failed">{t('account.signOutFailed')}</Banner> : null}
       <Button testID="account-sign-out" kind="secondary" label={t('account.signOut')} onPress={() => { signOut(); }} />
+      <Button testID="account-join" kind="secondary" label={t('account.join')} onPress={() => navigation.navigate('account.join')} />
       <Button testID="account-delete" kind="danger" label={t('account.delete')} onPress={() => navigation.navigate('account.delete')} />
       <AddPhoneSheet visible={phoneOpen} onClose={() => setPhoneOpen(false)} linking={linking} onLinked={linked} />
     </Screen>
