@@ -154,7 +154,8 @@ export function insightsRepo(db) {
 
     /**
      * Adds or refreshes media and returns { mediaId: ref }. A story found on the edge replaces what a reply told us about it, including when it was posted. A reply
-     * adds nothing to a story already known, and a not-tracked story stays not tracked.
+     * adds nothing to a story already known, and a not-tracked story stays not tracked. Once known, when a post or story went up stays as first read: Meta
+     * never changes it, and a listing without a timestamp (the story list then says "now") must not push a story's age back to 0 and keep it from its final.
      */
     async upsertMedia(ref, items) {
       if (!items.length) return new Map();
@@ -175,8 +176,9 @@ export function insightsRepo(db) {
          ON CONFLICT (tenant_id, account_ref, media_id) DO UPDATE SET
            caption = COALESCE(NULLIF(EXCLUDED.caption, ''), insight_media.caption), permalink = COALESCE(NULLIF(EXCLUDED.permalink, ''), insight_media.permalink),
            thumbnail_url = COALESCE(NULLIF(EXCLUDED.thumbnail_url, ''), insight_media.thumbnail_url),
-           posted_at = COALESCE(EXCLUDED.posted_at, insight_media.posted_at),
-           story_expires_at = COALESCE(EXCLUDED.story_expires_at, insight_media.story_expires_at),
+           posted_at = COALESCE(insight_media.posted_at, EXCLUDED.posted_at),
+           story_expires_at = CASE WHEN insight_media.posted_at IS NOT NULL AND insight_media.story_expires_at IS NOT NULL THEN insight_media.story_expires_at
+                                   ELSE COALESCE(EXCLUDED.story_expires_at, insight_media.story_expires_at) END,
            story_tracking = CASE WHEN insight_media.story_tracking = 'not_tracked' OR EXCLUDED.story_tracking = 'seen_only' THEN insight_media.story_tracking ELSE EXCLUDED.story_tracking END
          RETURNING id, media_id`,
         [tenantId(), ref, JSON.stringify([...new Map(records.map((r) => [r.media_id, r])).values()])],

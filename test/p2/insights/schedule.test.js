@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ANALYTICS_LIMITS as L } from '../../../src/contracts/analytics.js';
 import {
-  ACCOUNT_JOBS, accountDaysToFetch, accountJitterSeconds, addDays, eachDay, firstDueAt, mediaEveryMs, mediaJitterSeconds, nextDueAfter, nextOnPhase, nextStoryDue, onlineFollowerCells, pollOffsetSeconds, retryDelayMs, storyPhase, zonedTime,
+  ACCOUNT_JOBS, accountJitterSeconds, accountRecentDays, addDays, backfillDaysToFetch, eachDay, firstDueAt, mediaEveryMs, mediaJitterSeconds, nextDueAfter, nextOnPhase, nextStoryDue, onlineFollowerCells, pollOffsetSeconds, retryDelayMs, storyPhase, zonedTime,
 } from '../../../src/modules/insights/schedule.js';
 
 const HOUR = 3_600_000;
@@ -94,20 +94,25 @@ test('a late story poll aims for the next step, and never past 22h', () => {
   assert.equal(nextStoryDue(START, START + 21 * HOUR), START + 22 * HOUR);
 });
 
-test('the last 3 days are always fetched, then what is missing, newest first, within Meta\'s 90', () => {
+test('the daily poll fetches the last 3 days; the backfill what is missing before them, newest first, within the 90 Meta keeps (N-38)', () => {
   const today = '2026-11-10';
-  const all = accountDaysToFetch(today, [], 200);
-  assert.deepEqual(all.days.slice(0, 3), ['2026-11-09', '2026-11-08', '2026-11-07']);
+  assert.deepEqual(accountRecentDays(today), ['2026-11-09', '2026-11-08', '2026-11-07']);
+
+  const all = backfillDaysToFetch(today, [], 200);
+  assert.equal(all.days[0], '2026-11-06');
   assert.equal(all.days.at(-1), addDays(today, -89));
-  assert.equal(all.days.length, 89);
+  assert.equal(all.days.length, 86);
   assert.equal(all.more, false);
 
-  const firstRun = accountDaysToFetch(today, [], 30);
-  assert.equal(firstRun.days.length, 33);
+  const firstRun = backfillDaysToFetch(today, [], 30);
+  assert.equal(firstRun.days.length, 30);
   assert.equal(firstRun.more, true);
+  assert.deepEqual(backfillDaysToFetch(today, [], 86).more, false, 'Exactly the days owed is the last run');
 
   const stored = eachDay(addDays(today, -89), addDays(today, -1));
-  assert.deepEqual(accountDaysToFetch(today, stored), { days: ['2026-11-09', '2026-11-08', '2026-11-07'], more: false });
+  assert.deepEqual(backfillDaysToFetch(today, stored), { days: [], more: false }, 'Nothing missing: the backfill is done');
+  const gap = stored.filter((d) => d !== '2026-10-01');
+  assert.deepEqual(backfillDaysToFetch(today, gap), { days: ['2026-10-01'], more: false });
 });
 
 test('a retry waits longer each time, up to 6 hours', () => {
