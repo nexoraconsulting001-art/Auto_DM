@@ -3,6 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { createCompliance } from '../../../src/modules/compliance/index.js';
 import { json, need, one, openBillingWorld, shopOn, sql, unique } from '../spec-p7/support.js';
 import { HOUR, bodyOf, delivery, feature, hash, inbound, keywordsFor, linkSet, post, sentTo, shopper, threadOf, useWorld, waShop } from './support.js';
 
@@ -108,6 +109,30 @@ test('with the add-on off, messages are stored for the inbox and nothing is sent
   assert.equal((await sentTo(queued)).length, 0);
   const [job] = await shop.jobs(`channel = 'whatsapp' AND subject_hash = $2`, [await hash(shop, queued)]);
   assert.deepEqual([job.status, job.reason], ['held', 'paused.reconnect']);
+});
+
+test('r6-money: a reply held because the add-on lapsed stays held through the release round, and goes back to the queue when the add-on is back', async () => {
+  const shop = await waShop();
+  await keywordsFor(shop, [linkSet('saree', 'https://lapse.example/saree')]);
+  const person = shopper();
+  world.stopWorker();
+  try {
+    await inbound(shop, person, 'saree');
+    await feature(shop, false);
+  } finally {
+    world.startWorker();
+  }
+  await shop.settle();
+  const where = [`channel = 'whatsapp' AND subject_hash = $2`, [await hash(shop, person)]];
+  assert.deepEqual((await shop.jobs(...where)).map((j) => [j.status, j.reason]), [['held', 'paused.reconnect']]);
+  // The account row is still active: only the add-on is off, so the release round must not lift the hold. The engine's
+  // release round is run on its own here (the worker's turn would hold the job again straight after, hiding a lift).
+  const engine = createCompliance({ db: world.db, repos: world.platform, ig: world.ig, config: world.config, platform: { metrics: { inc() {} } } });
+  await engine.release();
+  assert.deepEqual((await shop.jobs(...where)).map((j) => [j.status, j.reason]), [['held', 'paused.reconnect']], 'still held while the add-on is off');
+  await feature(shop, true);
+  await engine.release();
+  assert.deepEqual((await shop.jobs(...where)).map((j) => j.status), ['queued'], 'back in the queue once the add-on is back');
 });
 
 test('A-66: embedded signup takes the owner, the add-on and a state that works once; the seller’s name shows and no token or number id ever does', async () => {
