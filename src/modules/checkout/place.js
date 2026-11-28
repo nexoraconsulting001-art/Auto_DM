@@ -116,7 +116,7 @@ function sameAttempt(order, phone) {
 }
 
 async function startPayment(ctx, order, req) {
-  if (order.payment_mode === 'cod' || typeof ctx.payments?.start !== 'function') return null;
+  if (order.payment_mode === 'cod' || order.payment_status !== 'unpaid' || typeof ctx.payments?.start !== 'function') return null;
   try {
     const started = await ctx.payments.start(order.id, { baseUrl: `${req.protocol}://${req.get('host')}`, actor: 'system' });
     return started?.gateway ?? null;
@@ -170,7 +170,9 @@ export async function placeOrder(ctx, req, body) {
       if (priced.couponRefused) throw new CheckoutRefused(priced.couponRefused.message, quote, { couponCode: priced.couponRefused.message });
       if (body.redeemPoints > 0 && quote.pointsUsed === 0) throw new CheckoutRefused('Points can’t be used on this order. Remove them to continue.', quote, { redeemPoints: 'Not available' });
 
-      const prepaid = body.paymentMode !== 'cod';
+      // Nothing to pay online (a coupon or points covered it all, M-9): the order is confirmed here and never sent to the gateway.
+      const nothingDue = body.paymentMode === 'prepaid' && quote.totalPaise === 0;
+      const prepaid = body.paymentMode !== 'cod' && !nothingDue;
       const holdUntil = prepaid ? new Date(Date.now() + priced.options.holdMinutes * 60_000) : null;
       const [{ n }] = await t.query('UPDATE tenants SET next_order_number = next_order_number + 1 WHERE id = $1 RETURNING next_order_number - 1 AS n', [tenantId()]);
       const snapshot = addressSnapshot(address);
@@ -213,6 +215,9 @@ export async function placeOrder(ctx, req, body) {
       if (body.paymentMode === 'cod') {
         // Cash on delivery is confirmed when placed, and its stock is taken at once (9.12).
         ({ order: result } = await changeOrder(t, created.id, { payment: 'cod_due', fulfilment: 'new', actor: CHECKOUT_ACTOR(shopper), reason: 'Cash on delivery, phone verified' }));
+        ({ low } = await commit(t, created.id, { actor: CHECKOUT_ACTOR(shopper), events: ctx.orderEvents }));
+      } else if (nothingDue) {
+        ({ order: result } = await changeOrder(t, created.id, { payment: 'paid', fulfilment: 'new', actor: CHECKOUT_ACTOR(shopper), reason: 'Nothing to pay online', set: { paid_paise: 0 } }));
         ({ low } = await commit(t, created.id, { actor: CHECKOUT_ACTOR(shopper), events: ctx.orderEvents }));
       }
       if (platform.consent?.built) {

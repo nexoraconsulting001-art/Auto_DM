@@ -195,6 +195,7 @@ export const STORE_LIMITS = Object.freeze({
   searchQueryChars: 80, // 9.1
   holdMinutes: 30, // 9.12: an unpaid prepaid order keeps its stock this long (payment_settings.hold_minutes overrides)
   pendingCheckAfterMinutes: 15, // 9.7: ask the gateway about orders still pending
+  onlineMinPaise: 100, // 9.6: the least the gateway takes; a prepaid order with nothing to pay (0) is confirmed when placed (M-9)
   orderAttempts: Object.freeze({ limit: 20, windowMs: 10 * 60_000 }), // 9.5, per IP, across every instance (platform.rateLimit)
   otp: Object.freeze({ digits: 6, validMs: 5 * 60_000, wrongTries: 3, sendsPerHour: 5, sendsPerIpPerHour: 20 }), // 9.3
   reminders: Object.freeze({ max: 2, afterMs: Object.freeze([3_600_000, 24 * 3_600_000]), quietFromHour: 21, quietToHour: 9 }), // 9.15, shopper time
