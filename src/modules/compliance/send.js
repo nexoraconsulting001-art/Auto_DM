@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import os from 'node:os';
+import { ADDON_FEATURES } from '../../contracts/addons.js';
 import { DM_LIMIT_REASON, METERED_SEND_KINDS, UNMETERED_HOLD_PURPOSES, dmUsageKey } from '../../contracts/billing.js';
 import { ACCOUNT_COLUMNS, COMPLIANCE_LIMITS, ComplianceAction } from '../../contracts/compliance.js';
 import { log as logger, reportError } from '../../platform/log.js';
@@ -990,12 +991,17 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
          AND a.tenant_id = j.tenant_id AND a.page_id = j.fb_page_id AND a.status = 'active' AND a.access_token_enc <> ''`,
       [business, at],
     );
-    await db.query(
-      `UPDATE outbound_jobs j SET ${queuedAgain} FROM whatsapp_accounts a
-       WHERE j.tenant_id = $1 AND j.status = 'held' AND j.reason = 'paused.reconnect' AND j.channel = 'whatsapp'
-         AND a.tenant_id = j.tenant_id AND a.phone_number_id = j.wa_phone_number_id AND a.status = 'active' AND a.access_token_enc <> ''`,
-      [business, at],
-    );
+    // The WhatsApp channel reads its account as 'disabled' while the add-on is off (whatsapp-automation/channel.js), which
+    // holds a job with paused.reconnect whatever the account row says; so the row being active lifts nothing until the add-on
+    // is back. Without this a job held for a lapsed add-on went back to the queue every round and was held again (r6-money).
+    if (!repos?.entitlements || await repos.entitlements.can(ADDON_FEATURES.whatsapp)) {
+      await db.query(
+        `UPDATE outbound_jobs j SET ${queuedAgain} FROM whatsapp_accounts a
+         WHERE j.tenant_id = $1 AND j.status = 'held' AND j.reason = 'paused.reconnect' AND j.channel = 'whatsapp'
+           AND a.tenant_id = j.tenant_id AND a.phone_number_id = j.wa_phone_number_id AND a.status = 'active' AND a.access_token_enc <> ''`,
+        [business, at],
+      );
+    }
     await db.query(
       `UPDATE outbound_jobs j SET ${queuedAgain}
        WHERE j.tenant_id = $1 AND j.status = 'held' AND j.reason = 'paused.breaker'
