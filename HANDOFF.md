@@ -4,14 +4,13 @@ Bhava is a white-label platform for Instagram and Facebook commerce. Many busine
 
 The requirements (PRD) and build plan live outside this repo, because the repo is public. Work happens on `bhava/build`.
 
-## Status (28 Nov 2026)
+## Status (28 Nov 2026, evening)
 
 - **Built:** Phases 0 to 10 (store, reels, DMs, checkout, delivery, WhatsApp, owner and shopper apps, billing, Platform Console, production setup).
 - **Final stage: GitHub fix rounds, web first.** Mobile (apps/, p5/p6 app tests, brand builds) waits until the website is green.
   - Failing test files on GitHub: 220 at the start, 54 at `99a8a15` (31 web). `c66e5d4` adds the round-6 load, importer and analytics fixes.
-  - All fix branches up to round 5 are merged. Round 6 (`fix/r6-*`) is in progress: sending rules (p1), analytics (p2, incl. a one-time 90-day history job), browser tests (e2e), production-only failures (connection slots, duplicate inserts, shutdown, shared COD refusal risk).
-  - Read-only reviews running: test-weakening audit, design reviews of business separation/sign-in and money/Meta compliance. Their findings go to the private notes.
-- **Open high items:** the owner app's sign-out wipe and the branded app icon on real Postgres (both mobile, deferred). The compliance gate re-check is done.
+  - All round-6 branches are merged and pushed (sending rules, analytics with a one-time 90-day history job, browser tests, production-only failures, billing fixes, invite accept).
+- **Open high items:** listed in the private notes (they wait on product decisions), plus the two mobile ones (owner-app sign-out wipe, branded app icon).
 - **Next:**
   1. Merge the round-6 branches (keep LF line endings), secret scan, push, read the new GitHub results.
   2. More rounds until web is green.
