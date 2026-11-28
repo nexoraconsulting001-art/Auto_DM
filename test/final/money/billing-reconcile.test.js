@@ -121,3 +121,38 @@ test('M-3: a charge that failed every try (Bhava’s SAC not set) is applied by 
   const charged = await eventsOf(w, 'subscription.charged');
   assert.deepEqual(charged.filter((e) => e.event_id.startsWith('reconcile:')).map((e) => [e.status, e.outcome]), [['processed', 'processed']]);
 });
+
+test('M-5: a charge that fails once and is retried is not overtaken by a later event of its subscription and dropped as stale', async (t) => {
+  const w = await openBilling(t);
+  const shop = await w.business({ state: '29' });
+  await shop.subscribe('t1');
+  const s = await shop.sub();
+  await w.rzp.post('/clock', { advanceMs: 5_000 });
+  await w.rzp.post('/subscriptions/charge', { id: s.provider_subscription_id, outcome: 'failed' });
+  await w.settle();
+  assert.equal((await shop.sub()).status, 'grace');
+
+  // Razorpay's retry succeeds, but working its event fails once (here: Bhava's SAC is briefly not set).
+  await w.sql(`UPDATE billing_settings SET sac = ''`);
+  await w.rzp.post('/clock', { advanceMs: 5_000 });
+  const retry = await w.rzp.post('/subscriptions/charge', { id: s.provider_subscription_id, outcome: 'charged' });
+  await w.settle();
+  const [charged] = (await eventsOf(w, 'subscription.charged')).slice(-1);
+  assert.deepEqual([charged.status, charged.attempts], ['received', 1]);
+
+  // A later event of the same subscription comes in while the charge waits for its retry.
+  const sub = retry.subscription;
+  const later = { entity: 'event', event: 'subscription.updated', created_at: retry.payment.created_at + 10, payload: { subscription: { entity: { ...sub, current_end: sub.current_end + 60 } } } };
+  assert.equal((await w.hook(later)).status, 200);
+  await w.settle();
+
+  // The fault clears and the charge is tried again after its back-off.
+  await w.sql(`UPDATE billing_settings SET sac = '998314'`);
+  await w.sql(`UPDATE provider_webhook_events SET last_attempt_at = now() - interval '1 minute' WHERE id = $1`, [charged.id]);
+  await w.settle();
+  const after = await shop.sub();
+  assert.deepEqual([after.status, after.grace_until], ['active', null], 'paid: out of grace, not left there to be suspended');
+  const [c, u] = [await w.one('SELECT status, outcome FROM provider_webhook_events WHERE id = $1', [charged.id]), (await eventsOf(w, 'subscription.updated')).at(-1)];
+  assert.deepEqual([c.status, c.outcome], ['processed', 'processed'], 'the charge is applied, not stale');
+  assert.equal(u.status, 'processed', 'and the later event after it');
+});

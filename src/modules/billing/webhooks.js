@@ -20,7 +20,7 @@ import { createWebhookDrain } from '../../platform/webhook-drain.js';
  * (platform/webhook-drain.js): a drainer first takes an event (while 'received', processed_at is when a drainer took it;
  * LEASE for one that died), and an event whose subscription has an earlier event in another drainer's hands waits for it,
  * so events are applied in the order they came and each one is finished (and so counted by lastApplied) before the next is
- * weighed (R4-MONEY-2, R4-WH-1).
+ * weighed (R4-MONEY-2, R4-WH-1). The order is 'strict': an earlier event waiting for its retry holds the later ones too (M-5).
  */
 const BATCH = 50;
 const MAX_ATTEMPTS = 8;
@@ -193,6 +193,10 @@ export function createBillingWebhooks(ctx, service) {
   // Only the billing scope's rows: the store's managed account is provider 'razorpay' too.
   const { dispatch, drain, kick, settle } = createWebhookDrain({
     db: platformDb, name: 'billing.webhooks', providers: [BILLING_WEBHOOK.provider], scopes: [BILLING_WEBHOOK.scope], lease: LEASE, batch: BATCH, process: processOne,
+    // 'strict' (M-5, R6-RECON-3): an event waiting for its retry still holds back the later events of its subscription. With
+    // 'in_hand' a later event went first and was counted by lastApplied, and the retried charge was then 'stale': paid, but
+    // left in grace until graceSweep suspended the business.
+    order: 'strict',
     subjects: { sql: `array_remove(ARRAY[payload->'subscription'->>'id'], NULL)`, of: (row) => [row.payload?.subscription?.id] },
   });
 
