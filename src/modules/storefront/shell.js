@@ -77,7 +77,7 @@ const header = (req) => {
   return html`<nav class="row" aria-label="Store">
 <a class="chip" href="/search" aria-label="Search">Search</a>
 <a class="chip" href="${chip.href}" aria-label="${chip.aria}">${chip.label}</a>
-<a class="chip bag-link" href="/cart" aria-label="Your bag">Bag<span data-bag-count></span></a>
+<a class="chip bag-link" href="/cart">Bag <span data-bag-count></span></a>
 </nav>`;
 };
 

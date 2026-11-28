@@ -8,13 +8,15 @@ import { STORE_LIMITS } from '../../contracts/orders.js';
  * The page tells the script what it needs in <script type="application/json" id="wish-data">: { signedIn, saved }.
  */
 export const WISHLIST_SCRIPT = '/store/wishlist.js';
-export const WISHLIST_ASSET_VERSION = '2';
+export const WISHLIST_ASSET_VERSION = '3';
 
 export const WISHLIST_CSS = [
   '.wish-card{position:relative;display:flex;flex-direction:column}.wish-card>.tile{flex:1}',
   '.wish{position:absolute;top:14px;right:14px;width:40px;height:40px;border-radius:999px;border:1px solid var(--line-strong,#ccc);background:var(--card,#fff);color:var(--primary,#333);font-size:20px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}',
   '.wish[aria-pressed="true"]{color:var(--accent,#c33)}',
   '.wish.wish-page{position:static;width:auto;height:44px;padding:0 16px;gap:8px;font-size:15px;font-weight:600}',
+  // The accent is for a heart on its own, not for words: the product page's button keeps its words in the primary colour.
+  '.wish.wish-page[aria-pressed="true"]{color:var(--primary,#333)}',
   '.wish-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}',
   '.wish-row{display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:center}',
   '.wish-row img,.wish-row .ph{width:64px;height:76px;object-fit:cover;border-radius:8px;background:var(--chip,#eee)}',
@@ -62,7 +64,8 @@ export const WISHLIST_JS = `(() => {
       const what = b.dataset.wishName ? b.dataset.wishName + ' ' : '';
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
       b.setAttribute('aria-label', on ? 'Remove ' + what + 'from wishlist' : 'Save ' + what + 'to wishlist');
-      b.textContent = b.classList.contains('wish-page') ? (on ? '\\u2665 Saved' : '\\u2661 Save') : (on ? '\\u2665' : '\\u2661');
+      // The product page's button shows the words it is read aloud with, so the two never differ (WCAG 2.5.3).
+      b.textContent = b.classList.contains('wish-page') ? (on ? '\\u2665 Remove from wishlist' : '\\u2661 Save to wishlist') : (on ? '\\u2665' : '\\u2661');
     });
   }
   function fromAnswer(res) {
