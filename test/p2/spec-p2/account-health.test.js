@@ -165,6 +165,25 @@ test('N-31: a reconnected account gets its score back', async () => {
   assert.equal((await recompute(shop)).score, 100);
 });
 
+test('N-31: a score worked out just before the token was refused is not shown after it, and a reconnect shows at once (e2e N-31)', async () => {
+  const shop = await addP2Shop(world);
+  await shop.poll();
+  const before = await recompute(shop);
+  assert.ok(before.score > 0 && !code(before, 'token_rejected'), 'a working connection, scored and saved');
+  await world.meta.post('/tokens/revoke', { igUserId: shop.igUserId });
+  await shop.poll();
+  await shop.settle();
+  const health = await shop.health();
+  assert.equal(health.score, 0, 'the stored connection says the token was refused, whatever the score cached minutes ago says');
+  assert.match(text(code(health, 'token_rejected')), /Reconnect Instagram/);
+  const { token } = await world.meta.post('/tokens', { igUserId: shop.igUserId });
+  await shop.repos.igAccounts.setToken(shop.igUserId, token);
+  await shop.sql(`UPDATE ig_accounts SET status = 'active', status_reason = '', token_expires_at = now() + interval '50 days', refresh_failures = 0 WHERE tenant_id = $1 AND ig_user_id = $2`, [shop.tenantId, shop.igUserId]);
+  const back = await shop.health();
+  assert.equal(code(back, 'token_rejected'), undefined, 'the reconnect shows without waiting for the next look');
+  assert.ok(back.score > 0);
+});
+
 test('N-32: 30 of 100 calls failing costs 30, with "API errors 30%"', async () => {
   const shop = await addP2Shop(world);
   await callStats(shop, { calls: 100, errors: 30 });
