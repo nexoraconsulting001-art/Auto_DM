@@ -86,6 +86,20 @@ async function eachAtOnce(items, limit, fn) {
  *   token refused (190)            the token is written off as everywhere else, and polls wait for a reconnect
  *   anything else                  backs off, up to 6 hours
  */
+/** What enrolling an Instagram account writes: where in the hour the business polls, and its account jobs, each first due at its own place. */
+export function enrolmentOf(tenantId, igUserId, at) {
+  const offsetSec = pollOffsetSeconds(tenantId);
+  return {
+    igUserId: String(igUserId),
+    collectingSince: dayOf(at),
+    offsetSec,
+    polls: ACCOUNT_JOBS.map((job) => {
+      const jitterSeconds = accountJitterSeconds(offsetSec, job);
+      return { job, jitterSeconds, dueAt: firstDueAt(at, jitterSeconds) };
+    }),
+  };
+}
+
 export function createInsightsPoller(ctx) {
   const { db, repos, meta, compliance, platform, config } = ctx;
   const clock = config?.complianceNow ?? Date.now;
@@ -112,18 +126,7 @@ export function createInsightsPoller(ctx) {
     );
     for (const account of accounts) {
       try {
-        await withTenant(account.tenant_id, async () => {
-          const offsetSec = pollOffsetSeconds(account.tenant_id);
-          await repos.insights.enrol({
-            igUserId: account.ig_user_id,
-            collectingSince: dayOf(at),
-            offsetSec,
-            polls: ACCOUNT_JOBS.map((job) => {
-              const jitterSeconds = accountJitterSeconds(offsetSec, job);
-              return { job, jitterSeconds, dueAt: firstDueAt(at, jitterSeconds) };
-            }),
-          });
-        });
+        await withTenant(account.tenant_id, () => repos.insights.enrol(enrolmentOf(account.tenant_id, account.ig_user_id, at)));
       } catch (err) {
         reportError(err, { msg: 'insights.enrol_failed', igUserId: account.ig_user_id });
       }

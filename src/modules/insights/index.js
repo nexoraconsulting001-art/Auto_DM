@@ -1,7 +1,8 @@
 import { notBuilt } from '../not-built.js';
 import { ANALYTICS_LIMITS as L } from '../../contracts/analytics.js';
 import { insightsApi } from './api.js';
-import { createInsightsPoller } from './poller.js';
+import { tenantId } from '../../tenancy.js';
+import { createInsightsPoller, enrolmentOf } from './poller.js';
 import { insightsRepo } from './repo.js';
 
 const POLL_QUEUE = 'insights.poll';
@@ -13,9 +14,17 @@ const MINUTE = 60_000;
  */
 async function trackRepliedStory(event, ctx) {
   if (event.type !== 'story_reply' || event.channel !== 'instagram' || !event.storyId) return;
-  const account = await ctx.repos.insights.accountForIg(event.accountId);
-  if (!account || account.stories_edge === 'available') return;
   const seen = +new Date(event.receivedAt ?? Date.now());
+  let account = await ctx.repos.insights.accountForIg(event.accountId);
+  if (!account) {
+    // A reply can come before the worker's next minute has enrolled a just-connected account; enrolling it here (as the worker would, and
+    // only for an account with a working connection) keeps the story instead of losing it.
+    const ig = await ctx.repos.igAccounts.get(event.accountId);
+    if (!ig?.token) return;
+    await ctx.repos.insights.enrol(enrolmentOf(tenantId(), event.accountId, seen));
+    account = await ctx.repos.insights.accountForIg(event.accountId);
+  }
+  if (!account || account.stories_edge === 'available') return;
   const refs = await ctx.repos.insights.upsertMedia(account.id, [{ id: String(event.storyId), kind: 'story', caption: '', permalink: '', thumbnailUrl: '', postedAt: null, storyExpiresAt: seen + L.storyLifeMs, storyTracking: 'seen_only' }]);
   await ctx.repos.insights.ensureMediaPolls(account.id, [{ job: 'story', mediaRef: refs.get(String(event.storyId)), jitterSeconds: 0, dueAt: seen }]);
 }
