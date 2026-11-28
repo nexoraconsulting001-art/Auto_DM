@@ -83,8 +83,8 @@ test('a second Save updates the same automation; it never makes another', async 
   await page.getByLabel('Name').fill('Renamed');
   await page.getByRole('button', { name: /^Save/ }).click();
   await expect(toast(page, 'Saved.')).toBeVisible();
-  const { items } = await shop.call('/automations', 200);
-  expect(items.map((a) => a.name)).toEqual(['Renamed']);
+  // "Saved." can still be showing from the first Save (toasts last 4 s), so it doesn't say this one is done: wait for the name.
+  await expect.poll(async () => (await shop.call('/automations', 200)).items.map((a) => a.name)).toEqual(['Renamed']);
 });
 
 test('the builder keeps its schedule, variants and follow-up across a reload', async ({ page }) => {
@@ -141,7 +141,8 @@ test('C-31: with 5 public replies in the brand kit the toggle is simply on', asy
   await savePublicReplies(shop, 5);
   await shop.reel();
   await signIn(page, '/automations/new');
-  await expect(page.getByRole('button', { name: /^Reel/ })).toBeVisible();
+  // The reel's own tile ("Reel: <caption>"), not the picker's "Reels" filter.
+  await expect(page.getByRole('button', { name: /^Reel:/ })).toBeVisible();
   await page.getByLabel(/Public repl/i).check();
   await page.waitForLoadState('networkidle');
   await expect(page.getByText('Add at least 5 replies')).toHaveCount(0);
