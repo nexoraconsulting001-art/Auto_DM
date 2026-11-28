@@ -61,7 +61,9 @@ test('F-75: the API gives the owner app the seller\'s logo as workspace identity
   const { token } = await login.json();
   const me = await (await fetch(`${app.base}/api/v1/auth/me`, { headers: { authorization: `Bearer ${token}` } })).json();
   expect(me.business.logoUrl).toBe(logoUrl);
-  expect(Object.keys(me.business).sort()).toEqual(['id', 'logoUrl', 'name', 'plan', 'slug']);
+  // The workspace identity and nothing of the theme: SessionBusiness in src/contracts/api/auth.js, whose accountType
+  // (seller or creator, P-69, Phase 5) says which screens the app shows.
+  expect(Object.keys(me.business).sort()).toEqual(['accountType', 'id', 'logoUrl', 'name', 'plan', 'slug']);
 });
 
 test('U-10: no screen of the seller console offers a raw event log export', async ({ page }) => {
