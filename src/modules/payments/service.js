@@ -344,7 +344,11 @@ export function createPayments(ctx) {
       const claim = await db.tx(async (t) => {
         await lockOrder(t, orderId);
         const online = await t.query(`SELECT * FROM payments WHERE tenant_id = $1 AND order_id = $2 AND mode = 'managed' AND status = 'captured' ORDER BY id DESC FOR UPDATE`, [tenantId(), orderId]);
-        if (!online.length) return null;
+        if (!online.length) {
+          // No managed online payment (cash on delivery, or the seller's own account): no payout to take it from (M-7).
+          await writeGap(t, { kind: 'settlement_missing', ref, details: { reason: 'shipping_uncollected', amountPaise: amount, noOnlinePayment: true } });
+          return null;
+        }
         if (online.some((p) => !p.transfer_id && !p.needs_review)) return null; // taken once the transfer is made
         const p = online.find((x) => x.transfer_id && Number(x.transfer_paise) - Number(x.reversed_paise) >= amount);
         if (!p) {

@@ -84,10 +84,14 @@ export function createReconcile(ctx, service) {
       }
     }
     const untaken = await platformDb.query(
-      `SELECT DISTINCT l.tenant_id, l.order_id FROM settlement_lines l JOIN payments p ON p.tenant_id = l.tenant_id AND p.order_id = l.order_id AND p.mode = 'managed' AND p.status = 'captured' AND p.transfer_id IS NOT NULL
+      // A charge with a transferred managed payment to take it from, or with no managed payment at all (cash on delivery):
+      // takeShipping takes the first and makes the second a gap for ops (M-7).
+      `SELECT DISTINCT l.tenant_id, l.order_id FROM settlement_lines l
        LEFT JOIN shipping_settings s ON s.tenant_id = l.tenant_id
        WHERE l.kind = 'shipping_charge' AND COALESCE(s.charge_billing, 'payout') = 'payout' AND l.occurred_at > now() - interval '7 days' AND l.occurred_at < now() - interval '2 minutes'
          AND NOT EXISTS (SELECT 1 FROM settlement_lines r WHERE r.tenant_id = l.tenant_id AND r.kind = 'transfer_reversal' AND r.ref = l.ref)
+         AND (EXISTS (SELECT 1 FROM payments p WHERE p.tenant_id = l.tenant_id AND p.order_id = l.order_id AND p.mode = 'managed' AND p.status = 'captured' AND p.transfer_id IS NOT NULL)
+           OR NOT EXISTS (SELECT 1 FROM payments p WHERE p.tenant_id = l.tenant_id AND p.order_id = l.order_id AND p.mode = 'managed' AND p.status = 'captured'))
        LIMIT $1`,
       [limit],
     );
