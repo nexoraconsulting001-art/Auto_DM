@@ -81,3 +81,45 @@ test('money-10: a business moving to Free buys nothing more, and what it bought 
   const more = await shop.api('POST', '/billing/items', item('dm_pack'));
   assert.equal(more.status, 409, more.text);
 });
+
+// r6-money: "removed" is ends_at being set, never ends_at compared with now(). On Postgres now() is a transaction's start,
+// which comes before it waits on the billing lock, so a concurrent removal saw the winner's ends_at as still ahead and
+// removed the line again (two 204s). A paid line removed to its period end has ends_at ahead of now() for every caller, so
+// it shows the same predicate without needing two connections.
+test('r6-money: a paid add-on removed to the end of its period is removed once; removing it again is 404 and asks the provider nothing', async (t) => {
+  const w = await openBilling(t);
+  const shop = await w.business({ state: '29' });
+  await shop.subscribe('t1');
+  const res = await shop.api('POST', '/billing/items', item('reel_management'));
+  assert.equal(res.status, 201, res.text);
+  await shop.charge();
+  const paid = await w.one('SELECT billed_through FROM subscription_items WHERE id = $1', [res.json.item.id]);
+  assert.ok(paid.billed_through, 'the line was charged with the plan');
+
+  assert.equal((await shop.api('DELETE', `/billing/items/${res.json.item.id}`)).status, 204);
+  const row = await w.one('SELECT ends_at FROM subscription_items WHERE id = $1', [res.json.item.id]);
+  assert.ok(new Date(row.ends_at) > new Date(), 'a paid line runs to the end of its period');
+  const again = await shop.api('DELETE', `/billing/items/${res.json.item.id}`);
+  assert.equal(again.status, 404, again.text);
+  const audits = await w.sql(`SELECT count(*)::int AS n FROM audit_log WHERE tenant_id = $1 AND action = 'billing.item_removed'`, [shop.tenant.id]);
+  assert.equal(audits[0].n, 1, 'removed once');
+  const after = await w.one('SELECT ends_at FROM subscription_items WHERE id = $1', [res.json.item.id]);
+  assert.equal(new Date(after.ends_at).getTime(), new Date(row.ends_at).getTime(), 'its end is unchanged');
+});
+
+test('r6-money: a line whose end another removal set ahead of this caller’s clock is never queued, removed or ended again', async (t) => {
+  const w = await openBilling(t);
+  const shop = await w.business({ state: '29' });
+  await shop.subscribe('t1');
+  const res = await shop.api('POST', '/billing/items', item('reel_management'));
+  assert.equal(res.status, 201, res.text);
+  assert.equal((await shop.api('DELETE', `/billing/items/${res.json.item.id}`)).status, 204);
+  // What a caller whose transaction began before the winner's sees on Postgres: the winner's ends_at is after its now().
+  await w.sql(`UPDATE subscription_items SET ends_at = now() + interval '1 minute', provider_item_id = NULL WHERE id = $1`, [res.json.item.id]);
+  assert.equal((await shop.api('DELETE', `/billing/items/${res.json.item.id}`)).status, 404);
+  await w.sql(`UPDATE subscriptions SET current_period_end = now() + interval '1 hour' WHERE tenant_id = $1`, [shop.tenant.id]);
+  assert.equal((await w.billing.renewals()).queued, 0, 'a removed line is never queued');
+  assert.equal((await providerAddons(w, shop)).length, 0, 'nothing is charged for it');
+  const audits = await w.sql(`SELECT count(*)::int AS n FROM audit_log WHERE tenant_id = $1 AND action = 'billing.item_removed'`, [shop.tenant.id]);
+  assert.equal(audits[0].n, 1, 'removed once');
+});

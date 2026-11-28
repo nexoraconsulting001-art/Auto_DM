@@ -533,13 +533,14 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     return locked(async (t) => {
       const s = await subOf(t);
       if (!s?.provider_subscription_id || s.status === 'cancelled') return null;
-      // Still waiting to be queued, as the caller saw it; a line removed in the meantime is never queued (money-4). The caller
+      // Still waiting to be queued, as the caller saw it; a line removed or ended in the meantime (ends_at set, compared with
+      // nothing: now() is this transaction's start, from before it waited on the lock) is never queued (money-4). The caller
       // saw billed_through through the driver, which keeps milliseconds and drops the microseconds Postgres stores, so the
       // check is made at that resolution: an exact match on a value set by SQL (now(), a period copied from the provider's
       // row) would never hold, and the line would never be charged again.
       const [now] = await t.query(
         `SELECT * FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NULL AND date_trunc('milliseconds', billed_through) IS NOT DISTINCT FROM $3::timestamptz
-           AND (ends_at IS NULL OR ends_at > now())`,
+           AND ends_at IS NULL`,
         [tenantId(), item.id, iso(item.billed_through)],
       );
       if (!now) return null;
@@ -564,20 +565,26 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
    * failure is left for the renewals job, which tries again. -> true once nothing is pending
    */
   async function dropPending(item, s) {
-    const pid = item.provider_item_id;
-    if (pid?.startsWith('free:')) return true;
-    if (!pid && item.billed_through) return true; // charged already, and nothing queued since
-    if (s?.provider_subscription_id) {
-      try {
-        await provider().removeCharge(s.provider_subscription_id, pid ? { addonId: pid } : { idempotencyKey: `item:${item.id}:first`, since: item.created_at });
-      } catch (err) {
-        if (!(err instanceof ProviderError)) throw err;
-        log.warn('billing.drop_deferred', { item: Number(item.id), kind: err.kind, delivery: err.delivery });
-        return false;
+    // Under the billing lock, on the line as it is now: removeItem, endUnpaid, endWithSubscription and the renewals job can
+    // each reach the same line, and only the first may ask the provider; the others find it marked free:<id> (r6-money).
+    return locked(async (t) => {
+      const [line] = await t.query('SELECT * FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND ends_at IS NOT NULL', [tenantId(), item.id]);
+      if (!line) return true;
+      const pid = line.provider_item_id;
+      if (pid?.startsWith('free:')) return true;
+      if (!pid && line.billed_through) return true; // charged already, and nothing queued since
+      if (s?.provider_subscription_id) {
+        try {
+          await provider().removeCharge(s.provider_subscription_id, pid ? { addonId: pid } : { idempotencyKey: `item:${line.id}:first`, since: line.created_at });
+        } catch (err) {
+          if (!(err instanceof ProviderError)) throw err;
+          log.warn('billing.drop_deferred', { item: Number(line.id), kind: err.kind, delivery: err.delivery });
+          return false;
+        }
       }
-    }
-    await db.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NOT DISTINCT FROM $4', [tenantId(), item.id, `free:${item.id}`, pid ?? null]);
-    return true;
+      await t.query('UPDATE subscription_items SET provider_item_id = $3 WHERE tenant_id = $1 AND id = $2 AND provider_item_id IS NOT DISTINCT FROM $4', [tenantId(), line.id, `free:${line.id}`, pid ?? null]);
+      return true;
+    });
   }
 
   /** Lines that ended with a charge still pending at the provider: removed ones, and never-paid ones of an ending subscription. */
@@ -643,13 +650,20 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
   async function removeItem(id, user) {
     let removed = null;
     const done = await locked(async (t) => {
-      const [item] = await t.query('SELECT * FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND (ends_at IS NULL OR ends_at > now()) FOR UPDATE', [tenantId(), id]);
+      // A line is removed once: "not removed yet" is ends_at IS NULL, never a comparison with now(). In Postgres now() is the
+      // transaction's start, and every caller's transaction starts before it waits on the billing lock, so a caller that began
+      // before the winner saw the winner's ends_at (the winner's now()) as still ahead and removed the line again (r6-money).
+      const [item] = await t.query('SELECT * FROM subscription_items WHERE tenant_id = $1 AND id = $2 AND ends_at IS NULL FOR UPDATE', [tenantId(), id]);
       if (!item) return null;
       if (item.cycle === 'one_time') throw new ApiError('conflict', 'A one-time purchase can’t be removed. Ask us if something went wrong.', { reason: 'one_time' });
       const s = await subOf(t);
       // A paid period runs to its end; with nothing paid yet it ends now.
       const end = s?.current_period_end && new Date(s.current_period_end) > at() && item.billed_through ? s.current_period_end : null;
-      await t.query('UPDATE subscription_items SET ends_at = GREATEST(starts_at, COALESCE($3::timestamptz, now())) WHERE tenant_id = $1 AND id = $2', [tenantId(), id, end ? iso(end) : null]);
+      const claimed = await t.query(
+        'UPDATE subscription_items SET ends_at = GREATEST(starts_at, COALESCE($3::timestamptz, now())) WHERE tenant_id = $1 AND id = $2 AND ends_at IS NULL RETURNING id',
+        [tenantId(), id, end ? iso(end) : null],
+      );
+      if (!claimed.length) return null;
       await switchOffEnded(t);
       await writeAudit(t, { actor: `user:${user.id}`, action: 'billing.item_removed', target: `item:${id}`, details: { code: item.addon_code } });
       removed = { item, s };
@@ -668,7 +682,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
   async function endUnpaid(actor) {
     const ended = await locked(async (t) => {
       const rows = await t.query(
-        `UPDATE subscription_items SET ends_at = GREATEST(starts_at, now()) WHERE tenant_id = $1 AND billed_through IS NULL AND (ends_at IS NULL OR ends_at > now()) RETURNING *`,
+        `UPDATE subscription_items SET ends_at = GREATEST(starts_at, now()) WHERE tenant_id = $1 AND billed_through IS NULL AND ends_at IS NULL RETURNING *`,
         [tenantId()],
       );
       if (rows.length) {
@@ -993,7 +1007,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
           const s = await subOf(db);
           const months = monthsOf(s.cycle);
           for (const item of await pendingEnded(db)) await dropPending(item, s);
-          const fresh = await db.query(`SELECT * FROM subscription_items WHERE tenant_id = $1 AND provider_item_id IS NULL AND billed_through IS NULL AND (ends_at IS NULL OR ends_at > now()) ORDER BY id`, [tenantId()]);
+          const fresh = await db.query(`SELECT * FROM subscription_items WHERE tenant_id = $1 AND provider_item_id IS NULL AND billed_through IS NULL AND ends_at IS NULL ORDER BY id`, [tenantId()]);
           for (const item of fresh) if (await queueItem(item, `item:${item.id}:first`, { settings, months })) done.queued += 1;
           const end = s.current_period_end ? new Date(s.current_period_end) : null;
           if (end && end - at() <= QUEUE_AHEAD_MS) {
