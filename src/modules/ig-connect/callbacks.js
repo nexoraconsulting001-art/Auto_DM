@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { verifySignedRequest } from '../../adapters/meta/index.js';
 import { DeletionStatus, PROVIDER_PATHS, SignedRequestBody, SignedRequestPayload } from '../../contracts/api/provider.js';
 import { log, reportError } from '../../platform/log.js';
+import { opsAlert } from '../payments/util.js';
 import { RELEASED_BY_OWNER } from '../../repos/connections.js';
 import { withTenant } from '../../tenancy.js';
 import { HEALTH_PROBE } from './gates.js';
@@ -60,29 +61,52 @@ export function createCallbacks({ db, repos, config, gates }) {
     res.json({ success: true });
   }
 
-  /** The request stays open until the data is gone, so a repeat from Meta gets the same code. */
-  async function openDeletionRequest(account, userId) {
+  /**
+   * The request for this callback. The same signed_request again (Meta repeating a call it did not see answered, even at the
+   * same moment, even after the data is gone) gets the same request and code: its digest is unique. Another signed_request
+   * for the account joins the request still open, if any.
+   */
+  async function openDeletionRequest(account, userId, signedRequest) {
     const accountId = account?.ig_user_id ?? String(userId);
+    const digest = crypto.createHash('sha256').update(String(signedRequest)).digest('hex');
     const [open] = await platformDb.query(
-      `SELECT * FROM data_deletion_requests WHERE channel = 'instagram' AND account_id = $1 AND status = 'requested' ORDER BY id DESC LIMIT 1`,
-      [accountId],
+      `SELECT * FROM data_deletion_requests WHERE channel = 'instagram'
+         AND (request_digest = $2 OR (account_id = $1 AND status IN ('requested', 'needs_review')))
+       ORDER BY (request_digest = $2) DESC, id DESC LIMIT 1`,
+      [accountId, digest],
     );
     if (open) return open;
     const [created] = await platformDb.query(
-      `INSERT INTO data_deletion_requests (confirmation_code, tenant_id, channel, account_id) VALUES ($1, $2, 'instagram', $3) RETURNING *`,
-      [crypto.randomBytes(16).toString('hex'), account?.tenant_id ?? null, accountId],
+      `INSERT INTO data_deletion_requests (confirmation_code, tenant_id, channel, account_id, request_digest) VALUES ($1, $2, 'instagram', $3, $4)
+       ON CONFLICT (channel, request_digest) WHERE request_digest <> '' DO NOTHING RETURNING *`,
+      [crypto.randomBytes(16).toString('hex'), account?.tenant_id ?? null, accountId, digest],
     );
-    return created;
+    if (created) return created;
+    // The same callback, at the same moment, made it first.
+    const [same] = await platformDb.query(`SELECT * FROM data_deletion_requests WHERE channel = 'instagram' AND request_digest = $1`, [digest]);
+    return same;
   }
 
-  /** Removes the account's data and closes the request. Safe to run again. With no business behind the account, there is nothing to remove. */
+  /**
+   * Removes the account's data and closes the request. Safe to run again. 'completed' is written only after an erasure ran.
+   * A request that matched no connected account (a stranger, or a Facebook user: no Facebook user id is stored to match on)
+   * is not done just because nothing was found here: it goes to needs_review and ops is told, to check it by hand (review C-3).
+   */
   async function completeDeletion(request) {
-    if (request.tenant_id) {
-      await withTenant(request.tenant_id, async () => {
-        await repos.igAccounts.eraseAccount(request.account_id);
-        await reEvaluateGates();
-      });
+    if (!request.tenant_id) {
+      const [held] = await platformDb.query(`UPDATE data_deletion_requests SET status = 'needs_review' WHERE id = $1 AND status = 'requested' RETURNING id`, [request.id]);
+      if (held) {
+        await opsAlert(platformDb, {
+          kind: 'meta.deletion_unmatched', severity: 'warning', target: `deletion:${request.id}`, dedupeKey: `deletion-unmatched:${request.id}`,
+          message: `A Meta data deletion request (${request.channel} id ${request.account_id}) matched no connected account. Check whether any business holds this person's data and erase it.`,
+        });
+      }
+      return;
     }
+    await withTenant(request.tenant_id, async () => {
+      await repos.igAccounts.eraseAccount(request.account_id);
+      await reEvaluateGates();
+    });
     await platformDb.query(`UPDATE data_deletion_requests SET status = 'completed', completed_at = now() WHERE id = $1 AND status = 'requested'`, [request.id]);
   }
 
@@ -92,7 +116,7 @@ export function createCallbacks({ db, repos, config, gates }) {
     const payload = verified(req.body);
     if (!payload) return refuse(req, res, 'deletion');
     const account = await findAccount(payload.user_id);
-    const request = await openDeletionRequest(account, payload.user_id);
+    const request = await openDeletionRequest(account, payload.user_id, req.body.signed_request);
     if (account) await withTenant(account.tenant_id, () => repos.igAccounts.stopForDeletion(account.ig_user_id));
     res.json({ url: statusUrl(req, request.confirmation_code), confirmation_code: request.confirmation_code });
     // After the answer, so a large account can't make Meta wait. The sweep finishes anything this doesn't.

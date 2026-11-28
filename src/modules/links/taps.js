@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { COMPLIANCE_LIMITS as L } from '../../contracts/compliance.js';
 import { isRowId } from '../admin-api/paging.js';
-import { parseTwoTapPayload, render } from '../automations/message.js';
+import { firstNameFrom, parseTwoTapPayload, render } from '../automations/message.js';
 import { directLink } from './rules.js';
 
 const DEFAULT_LINK_MESSAGE = 'Here is the link you asked for.';
@@ -23,7 +23,7 @@ async function firstNameOf(event, { repos, meta }) {
     const account = event.channel === 'facebook' ? await repos.fbPages?.get(event.accountId) : await repos.igAccounts.get(event.accountId);
     if (!account?.token || !meta?.client) return '';
     const person = await meta.client.forAccount(account).getPerson(event.personId);
-    return String(person?.name ?? '').replaceAll('\0', '').trim().split(/\s+/)[0] ?? '';
+    return firstNameFrom(person?.name);
   } catch {
     return ''; // Meta won't always say (PRD 4.10), and the message reads correctly without it
   }

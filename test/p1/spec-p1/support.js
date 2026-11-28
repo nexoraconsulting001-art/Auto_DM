@@ -333,6 +333,8 @@ export async function openWorld({ overrides = {}, worker = true, proxy = false, 
       closed = true;
       world.startWorker();
       await Promise.all(workers.map((w) => w.drivers.queue.close()));
+      // registerJobs starts the notifications poll; left running, it polls this world's closed database for the rest of the file.
+      await Promise.all(workers.map((w) => w.schedule.context?.notify?.close?.()));
       await new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); });
       await webDrivers.queue.close();
       await graph?.close();

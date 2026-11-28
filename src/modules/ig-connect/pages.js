@@ -135,6 +135,15 @@ export function sellerPrivacyPage({ settings }) {
 /** What Meta links to from a deletion request. */
 export function deletionStatusPage({ status, requestedAt, completedAt }) {
   const done = status === 'completed';
+  if (status === 'needs_review') {
+    const day = (at) => new Date(at).toUTCString().slice(5, 16);
+    return bhavaPage({ title: 'Data deletion | Bhava', body: html`
+<h1>Data deletion</h1>
+<div class="card">
+  <p>We’ve received your request and are checking which of your data it covers.</p>
+  <p class="muted">Requested on ${day(requestedAt)}. It is finished within 30 days.</p>
+</div>` });
+  }
   const day = (at) => new Date(at).toUTCString().slice(5, 16);
   const body = html`
 <h1>Data deletion</h1>

@@ -103,7 +103,8 @@ test('C-05: a refresh that keeps failing alerts at 14, 7, 3 and 1 days, once eac
   await setTokenAge(shop, { issuedDaysAgo: 45, expiresInDays: 15 });
   await refuseAllRefreshes();
   try {
-    for (let day = 0; day < 15; day++) {
+    // 14 days, from 15 left to just under 1: the 15th would reach the expiry itself, which ends the token (its own C-05 test), not warns.
+    for (let day = 0; day < 14; day++) {
       await world.travel(DAY - 60 * MINUTE);
       await world.tick();
       await world.travel(60 * MINUTE);
@@ -446,14 +447,21 @@ test('C-08: someone else\'s Instagram account can\'t be connected over this busi
 test('C-49: a valid deletion request answers 200 with a url and code, deletes the token and stops automations', async () => {
   const shop = await addShop(world);
   const reel = await shop.automate();
+  assert.notEqual((await shop.account())?.access_token_enc ?? '', '', 'The account and its token are there before the request');
   const out = await world.meta.post('/deletion', { igUserId: shop.igUserId });
   assert.equal(out.status, 200);
   assert.equal(out.valid, true, JSON.stringify(out.body));
+  // The callback's contract: answer Meta first, then erase inline in the same process (the sweep finishes any it didn't).
+  // Once that has run, the request is completed and the account's row is gone with its token.
+  await shop.settle();
   const [row] = await shop.sql('SELECT * FROM data_deletion_requests WHERE confirmation_code = $1', [out.body.confirmation_code]);
   assert.equal(row.tenant_id, shop.tenantId);
-  assert.equal(row.status, 'requested');
+  assert.equal(row.status, 'completed');
   assert.ok(Math.abs(new Date(row.due_at) - Date.now() - 30 * DAY) < 60_000, 'Due within 30 days');
-  assert.equal((await shop.account()).access_token_enc, '');
+  // Erasure deletes the account's row (ig-accounts eraseAccount), token included: the lookup that found it above now finds
+  // nothing, and the erasure itself is on record.
+  assert.equal(await shop.account(), undefined, 'The account and its token are erased');
+  await assertReason(shop, 'deletion.completed');
   await assertReason(shop, 'deletion.requested');
   await world.switchLag();
   await shop.commentDirect(reel.mediaId);
@@ -465,8 +473,9 @@ test('C-49: the status address shows the request by its code, and only that', as
   const shop = await addShop(world);
   const out = await world.meta.post('/deletion', { igUserId: shop.igUserId });
   const code = out.body.confirmation_code;
+  await shop.settle(); // the inline erasure after the answer has run
   const status = need(await hit(world, `/meta/deletion/${code}`), 200, 'The status page').json();
-  assert.equal(status.status, 'requested');
+  assert.equal(status.status, 'completed');
   assert.doesNotMatch(JSON.stringify(status), new RegExp(shop.igUserId));
   for (const bad of ['nope', `${code}x`, `' OR '1'='1`, '../../etc/passwd']) {
     assert.equal((await hit(world, `/meta/deletion/${encodeURIComponent(bad)}`)).status, 404, bad);
@@ -479,8 +488,11 @@ test('C-49: the same deletion request twice answers both times and deletes once'
   const answers = await Promise.all([world.callback('/meta/deletion', signed), world.callback('/meta/deletion', signed)]);
   assert.deepEqual(answers.map((r) => r.status), [200, 200]);
   for (const answer of answers) assert.ok(answer.json().confirmation_code);
-  const rows = await shop.sql(`SELECT * FROM data_deletion_requests WHERE tenant_id = $1 AND status = 'requested'`, [shop.tenantId]);
+  assert.equal(answers[0].json().confirmation_code, answers[1].json().confirmation_code, 'One request, one code');
+  await shop.settle(); // the inline erasure after the answer has run
+  const rows = await shop.sql(`SELECT * FROM data_deletion_requests WHERE tenant_id = $1`, [shop.tenantId]);
   assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'completed');
 });
 
 test('C-49: a deletion for an account nobody has still gets its url and code, and touches no business', async () => {
@@ -489,6 +501,12 @@ test('C-49: a deletion for an account nobody has still gets its url and code, an
   assert.equal(res.status, 200);
   assert.ok(res.json().url && res.json().confirmation_code);
   assert.notEqual((await shop.account()).access_token_enc, '');
+  // Review C-3: nothing was erased, so it is never reported done; it waits for ops.
+  await shop.settle();
+  const [row] = await shop.sql('SELECT status, completed_at FROM data_deletion_requests WHERE confirmation_code = $1', [res.json().confirmation_code]);
+  assert.deepEqual([row.status, row.completed_at], ['needs_review', null]);
+  const page = need(await hit(world, `/meta/deletion/${res.json().confirmation_code}`), 200, 'The status page').json();
+  assert.equal(page.status, 'needs_review');
 });
 
 test('C-49: within 30 days the account\'s Platform Data is gone, deletion.completed is logged, another business keeps its data', async () => {

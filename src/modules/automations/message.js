@@ -15,6 +15,16 @@ const KNOWN_VARIABLES = new Set(['{first_name}', '{url}']);
 /** Variables a template uses that don't exist (PRD 4.10). */
 export const unknownVariables = (template) => (String(template).match(VARIABLE) ?? []).filter((v) => !KNOWN_VARIABLES.has(v));
 
+/**
+ * The {first_name} to use from a Meta profile name, or '' (PRD 4.10: if it is missing it renders empty). A name holding
+ * template syntax, such as "{url}", is not a name: filled in, it would read as a variable the gate refuses
+ * (content.bad_variable) and the person would get no DM at all (A-28).
+ */
+export function firstNameFrom(name) {
+  const first = (typeof name === 'string' ? name : '').replaceAll('\0', '').trim().split(/\s+/)[0] ?? '';
+  return /[{}]/.test(first) ? '' : first;
+}
+
 /** What an empty {first_name} or {url} leaves behind: "Hi , here it is" reads "Hi, here it is". */
 const tidy = (text) => text.replace(/[^\S\n]+([,.!?:;])/g, '$1').replace(/[^\S\n]{2,}/g, ' ').replace(/^[\s,;:.!?-]+/, '').trim();
 

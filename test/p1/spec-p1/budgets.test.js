@@ -1,7 +1,7 @@
 // PRD 4.3: budgets and throttling. C-09 to C-13. C-47 from 4.13.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COMPLIANCE_LIMITS, HOUR, MINUTE, SECOND, addShop, assertReason, commentPayload, need, pause, savePublicReplies, secondsBetween, openWorld, useWorld } from './support.js';
+import { COMPLIANCE_LIMITS, HOUR, INSIDE_MS, MINUTE, SECOND, addShop, assertReason, commentPayload, need, pause, savePublicReplies, secondsBetween, openWorld, useWorld } from './support.js';
 
 const world = useWorld();
 const HALF = COMPLIANCE_LIMITS.reducedBudgetMultiplier;
@@ -296,10 +296,16 @@ test('C-11: slow mode halves the private-reply budget to 300 an hour, and a seco
       const { comment } = await world.meta.post('/comments', { igUserId: shop.igUserId, mediaId, from, text: 'price', deliver: false });
       entries.push(commentPayload(shop, { id: comment.id, mediaId, from }).entry[0]);
     }
+    // The bucket refills on the engine's clock, which is the travelled minutes plus the real time the run itself takes. Count
+    // both, so what is measured is one hour of the engine's time, as the budget is (59 travelled minutes plus a slow run's
+    // two real minutes made 61, and 301 sends in them were right).
+    const started = Date.now();
     need(await world.webhook({ object: 'instagram', entry: entries }), 200, 'One comment on each of 350 reels');
     await shop.settle({ ms: 40_000, roundMs: 2000, only: 'compliance' });
-    for (let minute = 0; minute < 59 && !t.signal.aborted; minute++) {
+    let travelled = 0;
+    while (travelled + (Date.now() - started) + MINUTE + INSIDE_MS <= HOUR && !t.signal.aborted) {
       await world.travel(MINUTE);
+      travelled += MINUTE;
       await shop.settle({ ms: 1500, roundMs: 500, only: 'compliance' });
     }
     const sent = (await shop.dms()).length;

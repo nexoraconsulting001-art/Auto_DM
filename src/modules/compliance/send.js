@@ -50,6 +50,13 @@ class CapRefused extends Error {
   }
 }
 
+/**
+ * A wait that holds the account itself, not this one job: Meta throttled its messaging (C-10) or its reads (80002, the usage
+ * header). Every job behind it in the stream would get the same answer until the same time, so the stream stops at the first
+ * (C-47): going on rewrote and logged up to a tick's whole slice of one throttled business's queue, every tick.
+ */
+const ACCOUNT_WAITS = new Set(['rate.throttled', 'rate.usage_header']);
+
 const budgetFor = (kind) => ({ private_reply: 'private_reply', dm: 'send_api' }[kind] ?? null);
 
 /** Which caps a job claims, in the transaction that creates it (PRD 4.7). scope means once-only; limit and windowMs a rolling count. */
@@ -753,7 +760,7 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
     if (!verdict.allow) {
       if (probe) await breaker.probeUnused(action.channel);
       await settle(job, action, { ...blank, outcome: verdict.outcome, reason: verdict.reason, retryAt: verdict.retryAt, jobId: Number(job.id) });
-      return { sent: false };
+      return { sent: false, stop: verdict.outcome === 'queued' && ACCOUNT_WAITS.has(verdict.reason) };
     }
     if (state.dryRun) {
       if (probe) await breaker.probeUnused(action.channel);
