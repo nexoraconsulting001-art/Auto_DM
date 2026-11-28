@@ -447,17 +447,21 @@ test('C-08: someone else\'s Instagram account can\'t be connected over this busi
 test('C-49: a valid deletion request answers 200 with a url and code, deletes the token and stops automations', async () => {
   const shop = await addShop(world);
   const reel = await shop.automate();
+  assert.notEqual((await shop.account())?.access_token_enc ?? '', '', 'The account and its token are there before the request');
   const out = await world.meta.post('/deletion', { igUserId: shop.igUserId });
   assert.equal(out.status, 200);
   assert.equal(out.valid, true, JSON.stringify(out.body));
+  // The callback's contract: answer Meta first, then erase inline in the same process (the sweep finishes any it didn't).
+  // Once that has run, the request is completed and the account's row is gone with its token.
+  await shop.settle();
   const [row] = await shop.sql('SELECT * FROM data_deletion_requests WHERE confirmation_code = $1', [out.body.confirmation_code]);
   assert.equal(row.tenant_id, shop.tenantId);
-  // Decision R3-DMS-E2 (2026-11-27): the erasure runs inline, straight after the answer, so it may be finished already.
-  assert.ok(['requested', 'completed'].includes(row.status), row.status);
+  assert.equal(row.status, 'completed');
   assert.ok(Math.abs(new Date(row.due_at) - Date.now() - 30 * DAY) < 60_000, 'Due within 30 days');
-  // With the erasure finished inline (R3-DMS-E2) the account's row is gone with its token.
-  const account = await shop.account();
-  assert.ok(!account || account.access_token_enc === '', 'The token is deleted');
+  // Erasure deletes the account's row (ig-accounts eraseAccount), token included: the lookup that found it above now finds
+  // nothing, and the erasure itself is on record.
+  assert.equal(await shop.account(), undefined, 'The account and its token are erased');
+  await assertReason(shop, 'deletion.completed');
   await assertReason(shop, 'deletion.requested');
   await world.switchLag();
   await shop.commentDirect(reel.mediaId);
@@ -469,9 +473,9 @@ test('C-49: the status address shows the request by its code, and only that', as
   const shop = await addShop(world);
   const out = await world.meta.post('/deletion', { igUserId: shop.igUserId });
   const code = out.body.confirmation_code;
+  await shop.settle(); // the inline erasure after the answer has run
   const status = need(await hit(world, `/meta/deletion/${code}`), 200, 'The status page').json();
-  // Decision R3-DMS-E2 (2026-11-27): the erasure runs inline, so the page may already say it is done.
-  assert.ok(['requested', 'completed'].includes(status.status), status.status);
+  assert.equal(status.status, 'completed');
   assert.doesNotMatch(JSON.stringify(status), new RegExp(shop.igUserId));
   for (const bad of ['nope', `${code}x`, `' OR '1'='1`, '../../etc/passwd']) {
     assert.equal((await hit(world, `/meta/deletion/${encodeURIComponent(bad)}`)).status, 404, bad);
@@ -485,9 +489,10 @@ test('C-49: the same deletion request twice answers both times and deletes once'
   assert.deepEqual(answers.map((r) => r.status), [200, 200]);
   for (const answer of answers) assert.ok(answer.json().confirmation_code);
   assert.equal(answers[0].json().confirmation_code, answers[1].json().confirmation_code, 'One request, one code');
-  // Decision R3-DMS-E2 (2026-11-27): the erasure runs inline, so the one request may be open or done already.
+  await shop.settle(); // the inline erasure after the answer has run
   const rows = await shop.sql(`SELECT * FROM data_deletion_requests WHERE tenant_id = $1`, [shop.tenantId]);
   assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'completed');
 });
 
 test('C-49: a deletion for an account nobody has still gets its url and code, and touches no business', async () => {
