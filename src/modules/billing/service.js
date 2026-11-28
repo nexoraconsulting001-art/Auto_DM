@@ -420,6 +420,10 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
             const [{ ok }] = await t.query('SELECT claim_offer($1) AS ok', [open.code]);
             if (ok) claimed = open.code;
           }
+          // The old subscription Bhava ended must be ended at the provider first, or both would charge (M-6).
+          if (s?.provider_cancel_pending && !(await settleProviderCancel(t))) {
+            throw new ApiError('conflict', 'Your previous Bhava subscription is still being closed. Please try again in a few minutes.', { reason: 'provider' });
+          }
           const planId = ids[claimed ?? ''];
           const [owner] = await t.query(`SELECT name, phone, email FROM users WHERE tenant_id = $1 AND role = 'owner' ORDER BY id LIMIT 1`, [tenantId()]);
           const customerId = s?.provider_customer_id ?? (await provider().createCustomer({ name: tNow.legal_name || tNow.name, email: owner?.email ?? '', phone: owner?.phone ?? '', reference: `tenant:${tenantId()}` })).id;
@@ -932,6 +936,26 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
     });
   }
 
+  /**
+   * Ends at the provider the subscription this business's row says Bhava already ended (provider_cancel_pending, M-6). A
+   * cancel that fails is left owed, unless the provider shows that subscription ended anyway. -> true when nothing is owed
+   */
+  async function settleProviderCancel(q = db) {
+    const [s] = await q.query('SELECT id, provider_cancel_pending FROM subscriptions WHERE tenant_id = $1', [tenantId()]);
+    if (!s?.provider_cancel_pending) return true;
+    try {
+      await provider().cancel(s.provider_cancel_pending, { atCycleEnd: false });
+    } catch (err) {
+      const ended = await provider().fetch(s.provider_cancel_pending).then((sub) => ['cancelled', 'completed', 'expired'].includes(sub?.status), () => false);
+      if (!ended) {
+        reportError(err, { msg: 'billing.cancel_failed', tenantId: tenantId() });
+        return false;
+      }
+    }
+    await q.query('UPDATE subscriptions SET provider_cancel_pending = NULL, updated_at = now() WHERE id = $1 AND provider_cancel_pending = $2', [s.id, s.provider_cancel_pending]);
+    return true;
+  }
+
   // ---- the jobs ----
 
   /** Each business with a live subscription, as { tenantId, ... } rows (a platform read: it looks across businesses). */
@@ -1100,7 +1124,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
             if (settings.after_grace === 'move_to_free') {
               // The period that went unpaid is not a paid period: it ends now, so the plan falls back at once (F-51).
               await t.query(`UPDATE subscriptions SET status = 'cancelled', cancelled_at = now(), grace_until = NULL, next_plan = NULL, next_cycle = NULL,
-                current_period_end = LEAST(current_period_end, $2::timestamptz), updated_at = now() WHERE id = $1`, [s.id, iso(nowAt)]);
+                current_period_end = LEAST(current_period_end, $2::timestamptz), provider_cancel_pending = provider_subscription_id, updated_at = now() WHERE id = $1`, [s.id, iso(nowAt)]);
               await writeAudit(t, { actor: 'billing', action: 'billing.moved_to_free', target: `subscription:${s.id}` });
               return { s, how: 'free' };
             }
@@ -1115,7 +1139,8 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
             done.freed += 1;
             await endWithSubscription();
             await syncPlan(tenantId());
-            await provider().cancel(moved.s.provider_subscription_id, { atCycleEnd: false }).catch((err) => reportError(err, { msg: 'billing.cancel_failed' }));
+            // Owed until Razorpay has it ended; the billing reconcile tries again (M-6).
+            await settleProviderCancel();
           } else {
             done.suspended += 1;
             await syncStatus(tenantId());
@@ -1231,7 +1256,7 @@ export function createBilling(ctx, { now = () => new Date() } = {}) {
 
   return {
     plan, catalog, change, addItem, removeItem, invoices, issue, syncPlan, renewals, graceSweep, platform, settingsOf, complete, planByProviderId, lastApplied,
-    applyCharge, applyFailure, applyCancel, applyPeriod, queueItem, holdSends, releaseSends, financialYearOf, buyerOf, sellerOf, at,
+    applyCharge, applyFailure, applyCancel, applyPeriod, settleProviderCancel, queueItem, holdSends, releaseSends, financialYearOf, buyerOf, sellerOf, at,
     newRequestKey: () => crypto.randomUUID(),
   };
 }

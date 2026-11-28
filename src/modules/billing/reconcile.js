@@ -1,5 +1,6 @@
 import { opsAlert } from '../payments/util.js';
 import { log, reportError } from '../../platform/log.js';
+import { withTenant } from '../../tenancy.js';
 import { cleanBillingEvent } from './webhooks.js';
 
 /**
@@ -25,6 +26,9 @@ import { cleanBillingEvent } from './webhooks.js';
  * is now, or the last applied event's time if Razorpay's clock is ahead. A reconcile event that failed for good is put back
  * by the next run that still finds the disagreement (after billing_not_ready is cleared, say). Every event found is told to
  * Bhava's team: each one is a webhook we missed.
+ *
+ * Each run also settles every Razorpay cancel Bhava still owes (provider_cancel_pending, M-6: a subscription ended here
+ * after grace whose cancel call failed), so an ended subscription does not go on charging; one still owed is told to ops.
  */
 const PAID_INVOICES_READ = 10;
 const ENDED = new Set(['cancelled', 'completed', 'expired']);
@@ -72,9 +76,29 @@ export function createBillingReconcile(ctx, service, webhooks) {
     return found;
   }
 
-  /** One run over every due subscription. -> { checked, stored, failed } */
+  /** Razorpay cancels still owed, tried again. -> how many are still owed */
+  async function settleCancels() {
+    let owed = 0;
+    const rows = await platformDb.query('SELECT tenant_id, id, provider_cancel_pending FROM subscriptions WHERE provider_cancel_pending IS NOT NULL ORDER BY tenant_id');
+    for (const row of rows) {
+      const business = Number(row.tenant_id);
+      const settled = await withTenant(business, () => service.settleProviderCancel()).catch((err) => {
+        reportError(err, { msg: 'billing.cancel_retry_failed', tenantId: business });
+        return false;
+      });
+      if (settled) continue;
+      owed += 1;
+      await opsAlert(platformDb, {
+        tenantId: business, kind: 'billing.cancel_pending', target: `subscription:${row.id}`, dedupeKey: `billing-cancel-pending:${row.provider_cancel_pending}`,
+        message: `Bhava ended subscription ${row.provider_cancel_pending} but Razorpay has not cancelled it yet; it is tried again every run. Cancel it in Razorpay if this stays.`,
+      });
+    }
+    return owed;
+  }
+
+  /** One run over every due subscription. -> { checked, stored, failed, cancelsOwed } */
   async function run() {
-    const done = { checked: 0, stored: 0, failed: 0 };
+    const done = { checked: 0, stored: 0, failed: 0, cancelsOwed: await settleCancels() };
     for (const s of await due()) {
       done.checked += 1;
       try {

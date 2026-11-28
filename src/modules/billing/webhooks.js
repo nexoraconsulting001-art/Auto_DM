@@ -177,6 +177,10 @@ export function createBillingWebhooks(ctx, service) {
     try {
       const routed = await route(row);
       if (routed.ignore) {
+        if (routed.ignore === 'unknown_subscription' && BILLING_EVENTS[row.event_type] === 'charged' && row.payload?.payment?.status === 'captured') {
+          // Money taken on a subscription no business holds (an old one Razorpay never cancelled, M-6): ops must refund or cancel it.
+          await opsAlert(platformDb, { tenantId: null, kind: 'billing.unknown_subscription_charged', message: `Razorpay charged subscription ${row.payload.subscription?.id ?? ''} (payment ${row.payload.payment.id ?? ''}), which no business holds. Check it in Razorpay, cancel it and refund (event ${row.id}).`, target: `webhook:${row.id}`, dedupeKey: `billing-unknown-charged:${row.id}` });
+        }
         if (routed.security) {
           log.warn('billing.webhook_security', { event: Number(row.id), type: row.event_type });
           await opsAlert(platformDb, { tenantId: routed.tenantId ?? null, kind: 'billing.webhook_mismatch', message: `A billing event named one business’s subscription and another business in its notes. It was stored and ignored (event ${row.id}).`, target: `webhook:${row.id}`, dedupeKey: `billing-webhook-mismatch:${row.id}` });

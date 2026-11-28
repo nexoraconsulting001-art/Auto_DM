@@ -4,7 +4,8 @@
 // through the same webhook path, once, however often it runs and alongside the webhooks themselves.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openBilling } from '../../p7/billing/support.js';
+import { createBilling } from '../../../src/modules/billing/service.js';
+import { DAY, openBilling } from '../../p7/billing/support.js';
 
 const eventsOf = (w, type) => w.sql(`SELECT id, event_id, status, outcome, attempts, last_error FROM provider_webhook_events WHERE scope = 'billing' AND event_type = $1 ORDER BY id`, [type]);
 
@@ -155,4 +156,51 @@ test('M-5: a charge that fails once and is retried is not overtaken by a later e
   const [c, u] = [await w.one('SELECT status, outcome FROM provider_webhook_events WHERE id = $1', [charged.id]), (await eventsOf(w, 'subscription.updated')).at(-1)];
   assert.deepEqual([c.status, c.outcome], ['processed', 'processed'], 'the charge is applied, not stale');
   assert.equal(u.status, 'processed', 'and the later event after it');
+});
+
+const later = (w, ms) => createBilling(w.app.ctx, { now: () => new Date(Date.now() + ms) });
+
+test('M-6: a Razorpay cancel that fails when grace moves a business to Free is owed: no second subscription until it is done, and the reconcile retries it', async (t) => {
+  const w = await openBilling(t);
+  await w.sql(`UPDATE billing_settings SET after_grace = 'move_to_free', grace_days = 3`);
+  const shop = await w.business({ state: '29' });
+  await shop.subscribe('t2');
+  const old = (await shop.sub()).provider_subscription_id;
+  await w.rzp.post('/clock', { advanceMs: 1000 });
+  await w.rzp.post('/subscriptions/charge', { id: old, outcome: 'failed' });
+  await w.settle();
+
+  // Grace runs out; Razorpay's cancel answers 500 (and keeps doing so for a while).
+  await w.rzp.post('/faults', { kind: 'server_error', times: 2, match: { method: 'POST', path: `/v1/subscriptions/${old}/cancel` } });
+  assert.equal((await later(w, 4 * DAY).graceSweep()).freed, 1);
+  const ended = await shop.sub();
+  assert.deepEqual([ended.status, ended.provider_cancel_pending], ['cancelled', old], 'ended here, the cancel at Razorpay owed');
+  const atRazorpay = async (id) => (await w.rzp.get('/state')).subscriptions.find((x) => x.id === id).status;
+  assert.notEqual(await atRazorpay(old), 'cancelled', 'still live at Razorpay');
+
+  // The owner picks a paid plan again while the old cancel still fails: refused, so two subscriptions never both charge.
+  const refused = await shop.change('t1');
+  assert.equal(refused.status, 409, refused.text);
+  assert.equal((await shop.sub()).provider_subscription_id, old, 'no new subscription was made');
+
+  // The reconcile tries the cancel again; once Razorpay takes it nothing is owed and a new subscription can be made.
+  const run = await w.billing.reconcile.run();
+  assert.equal(run.cancelsOwed, 0);
+  assert.equal(await atRazorpay(old), 'cancelled');
+  assert.equal((await shop.sub()).provider_cancel_pending, null);
+  const again = await shop.change('t1');
+  assert.equal(again.status, 200, again.text);
+  assert.notEqual((await shop.sub()).provider_subscription_id, old);
+});
+
+test('M-6: a captured charge on a subscription no business holds is told to Bhava’s team', async (t) => {
+  const w = await openBilling(t);
+  const body = { entity: 'event', event: 'subscription.charged', created_at: 1_800_000_000, payload: { subscription: { entity: { id: 'sub_gone0000001', status: 'active' } }, payment: { entity: { id: 'pay_gone0000001', status: 'captured', amount: 49900, currency: 'INR' } } } };
+  assert.equal((await w.hook(body)).status, 200);
+  await w.settle();
+  const [event] = await eventsOf(w, 'subscription.charged');
+  assert.deepEqual([event.status, event.outcome], ['ignored', 'unknown_subscription']);
+  const alerts = await alertsOf(w, 'billing.unknown_subscription_charged');
+  assert.equal(alerts.length, 1);
+  assert.match(alerts[0].message, /sub_gone0000001/);
 });
