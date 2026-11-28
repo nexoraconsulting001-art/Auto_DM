@@ -18,6 +18,8 @@
  *   POST /v1/subscriptions { plan_id, customer_id, total_count, notes }      GET /v1/subscriptions/:id
  *   PATCH /v1/subscriptions/:id { plan_id, schedule_change_at: 'now' | 'cycle_end' }                 POST /v1/subscriptions/:id/cancel
  *   POST /v1/subscriptions/:id/addons { item: { name, amount }, quantity, notes }    DELETE /v1/addons/:id (only one not yet charged)
+ *   GET  /v1/invoices?subscription_id=&count=&skip=   a subscription's invoices, newest first: one per renewal, 'paid' with its
+ *        payment_id, or 'issued' while the charge has failed (Razorpay retries it)
  *   GET  /v1/addons?count=&skip=&from=&to=   as Razorpay documents it: every add-on of the account, newest first, `count`
  *        (default 10, at most 100) from `skip`. It takes no subscription filter: a caller filters by subscription_id itself
  *   GET  /v1/settlements/recon/combined?year=&month=    with X-Razorpay-Account: what was settled to one linked account in a month
@@ -65,6 +67,7 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
   let plans;
   let subscriptions;
   let addons;
+  let invoices;
   let billingUrl = billingWebhookUrl;
   let orders;
   let payments;
@@ -92,6 +95,7 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
     plans = new Map();
     subscriptions = new Map();
     addons = new Map();
+    invoices = new Map();
     billingUrl = billingWebhookUrl;
     seq = 0;
   };
@@ -302,6 +306,14 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
         subscriptions.set(id, subscription);
         return subscriptionView(subscription);
       });
+      on('GET', '/v1/invoices', (req) => {
+        billingOnly(req);
+        const count = Math.min(100, Math.max(1, Number(req.query?.count ?? 10) || 10));
+        const skip = Math.max(0, Number(req.query?.skip ?? 0) || 0);
+        const all = [...invoices.values()].filter((i) => !req.query?.subscription_id || i.subscription_id === req.query.subscription_id).sort((x, y) => y.created_at - x.created_at || (x.id < y.id ? 1 : -1));
+        const items = all.slice(skip, skip + count);
+        return { entity: 'collection', count: items.length, items };
+      });
       on('GET', '/v1/subscriptions/:id', (req) => {
         billingOnly(req);
         return subscriptionView(subscriptionOf(req.params.id));
@@ -441,14 +453,18 @@ export function createRazorpay({ keyId = 'rzp_test_sim', keySecret = 'sim-key-se
           captured: outcome === 'charged', error_code: outcome === 'failed' ? 'BAD_REQUEST_ERROR' : null, error_description: outcome === 'failed' ? 'Payment failed' : null, created_at: now,
         };
         payments.set(payment.id, { ...payment, amount_refunded: 0, refund_status: null, fee: 0, tax: 0, owner: 'platform' });
+        const end = new Date(now * 1000);
+        if (plan.period === 'yearly') end.setUTCFullYear(end.getUTCFullYear() + plan.interval);
+        else end.setUTCMonth(end.getUTCMonth() + plan.interval);
+        invoices.set(invoiceId, {
+          id: invoiceId, entity: 'invoice', type: 'invoice', subscription_id: subscription.id, customer_id: subscription.customer_id, payment_id: payment.id, amount, amount_paid: outcome === 'charged' ? amount : 0,
+          currency: 'INR', status: outcome === 'charged' ? 'paid' : 'issued', billing_start: now, billing_end: seconds(+end), paid_at: outcome === 'charged' ? now : null, created_at: now,
+        });
         if (outcome === 'failed') {
           subscription.status = 'pending';
           return { subscription: subscriptionView(subscription), payment, webhooks: [await subscriptionEvent('subscription.pending', subscription, payment, body)] };
         }
         for (const addon of waiting) addon.invoice_id = invoiceId;
-        const end = new Date(now * 1000);
-        if (plan.period === 'yearly') end.setUTCFullYear(end.getUTCFullYear() + plan.interval);
-        else end.setUTCMonth(end.getUTCMonth() + plan.interval);
         Object.assign(subscription, { status: 'active', paid_count: subscription.paid_count + 1, current_start: now, current_end: seconds(+end) });
         const webhooks = [];
         if (subscription.paid_count === 1) webhooks.push(await subscriptionEvent('subscription.activated', subscription, null, body));

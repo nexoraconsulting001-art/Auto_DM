@@ -112,7 +112,7 @@ test('a refund waits for the capture it refunds while that capture is still to b
   assert.equal((await shop.refunds(order.id)).length, 0);
 
   // Its back-off over, the capture applies, and then the refund.
-  await world.db.platform.query(`UPDATE provider_webhook_events SET received_at = received_at - interval '1 minute' WHERE id = $1`, [capture]);
+  await world.db.platform.query(`UPDATE provider_webhook_events SET received_at = received_at - interval '1 minute', last_attempt_at = last_attempt_at - interval '1 minute' WHERE id = $1`, [capture]);
   await service.webhooks.drain();
   assert.deepEqual(await state(capture), { status: 'processed', outcome: 'processed', attempts: 2 });
   assert.deepEqual(await state(refund), { status: 'processed', outcome: 'processed', attempts: 1 });

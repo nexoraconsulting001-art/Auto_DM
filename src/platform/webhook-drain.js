@@ -70,18 +70,24 @@ export function createWebhookDrain({ db, name, providers, scopes, subjects, orde
     if (!mark) return null;
     try {
       if (await waitsBehind(row)) return null;
+      // The back-off of a failure runs from here, the start of this attempt (R6-RECON-2).
+      await handle().query('UPDATE provider_webhook_events SET last_attempt_at = now() WHERE id = $1', [row.id]);
       return (await process(row)) ?? { id: Number(row.id) };
     } finally {
       await letGo(row, mark);
     }
   }
 
-  /** One pass over what is waiting and nobody has in hand, oldest first; a failure waits longer before each try. */
+  /**
+   * One pass over what is waiting and nobody has in hand, oldest first. A failure waits longer before each try, measured
+   * from its last attempt (5 s, 20 s, 80 s, 320 s, 1,280 s, then an hour each), so its tries are spread over hours, not
+   * used up in the first hour after it arrived (R6-RECON-2, M-3).
+   */
   async function dispatch({ limit = batch, tried = new Set() } = {}) {
     const rows = await handle().query(
       `SELECT * FROM provider_webhook_events
        WHERE ${mine} AND status = 'received'
-         AND (attempts = 0 OR received_at < now() - make_interval(secs => least(3600, 5 * power(4, attempts - 1))))
+         AND (attempts = 0 OR COALESCE(last_attempt_at, received_at) < now() - make_interval(secs => least(3600, 5 * power(4, attempts - 1))))
          AND (processed_at IS NULL OR processed_at < now() - $4::interval) AND NOT (id = ANY($5::bigint[]))
        ORDER BY id LIMIT $3`,
       [providers, scopes, limit, lease, [...tried]],

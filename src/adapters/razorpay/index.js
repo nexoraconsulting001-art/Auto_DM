@@ -54,6 +54,11 @@ import { DEFAULT_TIMEOUT_MS, createHttp, hmac, providerUrl, sameBytes } from '..
  *                                                                                                  among add-ons made from `since` (the first attempt) on
  *   cancel(id, { atCycleEnd? })                                             -> subscription
  *   fetch(id)                                                               -> subscription
+ *   entity(id)                                                              -> Razorpay's subscription entity as a webhook carries it
+ *   invoices(id, { count? })                                                -> [invoice entity], newest first: one per renewal, with its
+ *                                                                                                  payment_id and status ('paid', 'issued', ...)
+ *   fetchPayment(paymentId)                                                 -> Razorpay's payment entity as a webhook carries it
+ *                                                                                                  (the last three for the billing reconcile, R6-RECON-1)
  *   verifyWebhook(rawBody, signatureHeader)                                 with RAZORPAY_BILLING_WEBHOOK_SECRET; false on anything missing
  *
  * subscription is { id, status, planId, customerId, currentStart, currentEnd, paidCount, hostedUrl, notes }. hostedUrl is Razorpay's
@@ -356,6 +361,18 @@ function createBilling(config, request) {
     async fetch(id) {
       const { body } = await request('GET', sub(id), { headers: auth(), retries: 2 });
       return toSubscription(body);
+    },
+    async entity(id) {
+      const { body } = await request('GET', sub(id), { headers: auth(), retries: 2 });
+      return body;
+    },
+    async invoices(id, { count = 10 } = {}) {
+      const { body } = await request('GET', '/v1/invoices', { headers: auth(), query: { subscription_id: need(id, 'a subscription id'), count: Math.min(100, Math.max(1, count)) }, retries: 2 });
+      return Array.isArray(body?.items) ? body.items : [];
+    },
+    async fetchPayment(paymentId) {
+      const { body } = await request('GET', `/v1/payments/${encodeURIComponent(need(paymentId, 'a payment id'))}`, { headers: auth(), retries: 2 });
+      return body;
     },
     verifyWebhook: (rawBody, signatureHeader) => verifyWebhook(rawBody, signatureHeader, config.razorpayBillingWebhookSecret),
   };

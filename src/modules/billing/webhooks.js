@@ -20,7 +20,7 @@ import { createWebhookDrain } from '../../platform/webhook-drain.js';
  * (platform/webhook-drain.js): a drainer first takes an event (while 'received', processed_at is when a drainer took it;
  * LEASE for one that died), and an event whose subscription has an earlier event in another drainer's hands waits for it,
  * so events are applied in the order they came and each one is finished (and so counted by lastApplied) before the next is
- * weighed (R4-MONEY-2, R4-WH-1).
+ * weighed (R4-MONEY-2, R4-WH-1). The order is 'strict': an earlier event waiting for its retry holds the later ones too (M-5).
  */
 const BATCH = 50;
 const MAX_ATTEMPTS = 8;
@@ -84,11 +84,7 @@ export function createBillingWebhooks(ctx, service) {
       const payload = cleanBillingEvent(body);
       const header = req.get(SIGNATURE_HEADERS.razorpayEventId);
       const eventId = typeof header === 'string' && EVENT_ID.test(header) ? header : `sha256:${crypto.createHash('sha256').update(raw).digest('hex')}`;
-      const [row] = await platformDb.query(
-        `INSERT INTO provider_webhook_events (provider, scope, event_id, event_type, payload) VALUES ('razorpay', $1, $2, $3, $4::jsonb)
-         ON CONFLICT (provider, scope, event_id) DO NOTHING RETURNING id`,
-        [BILLING_WEBHOOK.scope, eventId, payload.event.slice(0, 100), JSON.stringify(payload)],
-      );
+      const row = await store(eventId, payload);
       res.status(200).json({ ok: true });
       countWebhookStored(metrics, 'razorpay_billing');
       metrics?.inc?.('billing_webhooks_total', { result: row ? 'stored' : 'duplicate' });
@@ -100,6 +96,24 @@ export function createBillingWebhooks(ctx, service) {
       if (!res.headersSent) res.status(503).json({ error: 'Try again.' });
       return undefined;
     }
+  }
+
+  /**
+   * Keeps one cleaned event to be worked from the table: the webhook's, or one the reconcile read from the provider
+   * (reconcile.js). The same event id again is a duplicate. With `redrive`, an event of that id that failed for good is put
+   * back to be tried again from its first back-off (the reconcile still finds the provider disagreeing with what is kept).
+   * -> { id } when stored or put back, else null
+   */
+  async function store(eventId, payload, { redrive = false } = {}) {
+    const [row] = await platformDb.query(
+      `INSERT INTO provider_webhook_events (provider, scope, event_id, event_type, payload) VALUES ('razorpay', $1, $2, $3, $4::jsonb)
+       ON CONFLICT (provider, scope, event_id) DO ${redrive
+    ? `UPDATE SET status = 'received', outcome = '', attempts = 0, processed_at = NULL, last_attempt_at = NULL, payload = EXCLUDED.payload
+         WHERE provider_webhook_events.status = 'failed'`
+    : 'NOTHING'} RETURNING id`,
+      [BILLING_WEBHOOK.scope, eventId, payload.event.slice(0, 100), JSON.stringify(payload)],
+    );
+    return row ?? null;
   }
 
   async function finish(row, { status, outcome, security = false, tenantId = null }) {
@@ -163,6 +177,10 @@ export function createBillingWebhooks(ctx, service) {
     try {
       const routed = await route(row);
       if (routed.ignore) {
+        if (routed.ignore === 'unknown_subscription' && BILLING_EVENTS[row.event_type] === 'charged' && row.payload?.payment?.status === 'captured') {
+          // Money taken on a subscription no business holds (an old one Razorpay never cancelled, M-6): ops must refund or cancel it.
+          await opsAlert(platformDb, { tenantId: null, kind: 'billing.unknown_subscription_charged', message: `Razorpay charged subscription ${row.payload.subscription?.id ?? ''} (payment ${row.payload.payment.id ?? ''}), which no business holds. Check it in Razorpay, cancel it and refund (event ${row.id}).`, target: `webhook:${row.id}`, dedupeKey: `billing-unknown-charged:${row.id}` });
+        }
         if (routed.security) {
           log.warn('billing.webhook_security', { event: Number(row.id), type: row.event_type });
           await opsAlert(platformDb, { tenantId: routed.tenantId ?? null, kind: 'billing.webhook_mismatch', message: `A billing event named one business’s subscription and another business in its notes. It was stored and ignored (event ${row.id}).`, target: `webhook:${row.id}`, dedupeKey: `billing-webhook-mismatch:${row.id}` });
@@ -179,8 +197,12 @@ export function createBillingWebhooks(ctx, service) {
   // Only the billing scope's rows: the store's managed account is provider 'razorpay' too.
   const { dispatch, drain, kick, settle } = createWebhookDrain({
     db: platformDb, name: 'billing.webhooks', providers: [BILLING_WEBHOOK.provider], scopes: [BILLING_WEBHOOK.scope], lease: LEASE, batch: BATCH, process: processOne,
+    // 'strict' (M-5, R6-RECON-3): an event waiting for its retry still holds back the later events of its subscription. With
+    // 'in_hand' a later event went first and was counted by lastApplied, and the retried charge was then 'stale': paid, but
+    // left in grace until graceSweep suspended the business.
+    order: 'strict',
     subjects: { sql: `array_remove(ARRAY[payload->'subscription'->>'id'], NULL)`, of: (row) => [row.payload?.subscription?.id] },
   });
 
-  return { receive, dispatch, drain, kick, settle, route };
+  return { receive, store, dispatch, drain, kick, settle, route };
 }
