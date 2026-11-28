@@ -78,3 +78,64 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION release_offer_hold(text, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION release_offer_hold(text, boolean) TO bhava_app;
+
+-- R7-MONEY-3 (M-10, user decision 2026-11-27): a seller referral is credited only once the referred business has paid (a
+-- paid plan started by the owner's change or the billing provider's, never a console gift) AND has connected an Instagram
+-- account the referrer never had. Before, the first paid plan credited it even with no Instagram connected, so one owner
+-- could refer a second business of their own and be credited before any account showed it was a different business. Both
+-- events now ask the same question, so the order they come in does not matter; only a pending row is credited, once.
+CREATE FUNCTION credit_referral_when_ready(p_tenant_id integer) RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+  n integer;
+BEGIN
+  UPDATE seller_referrals r
+     SET state = 'credited', credited_at = now(), reward_paise = COALESCE((SELECT referral_reward_paise FROM billing_settings LIMIT 1), 0)
+   WHERE r.referred_tenant_id = p_tenant_id AND r.state = 'pending'
+     AND EXISTS (SELECT 1 FROM plan_changes c WHERE c.tenant_id = p_tenant_id AND c.to_plan <> 'free' AND c.source IN ('owner', 'billing'))
+     AND EXISTS (SELECT 1 FROM instagram_tenants m WHERE m.tenant_id = p_tenant_id
+                  AND NOT EXISTS (SELECT 1 FROM instagram_tenants o WHERE o.ig_user_id = m.ig_user_id AND o.tenant_id = r.tenant_id));
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END $$;
+REVOKE ALL ON FUNCTION credit_referral_when_ready(integer) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION plan_change_referrals() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  IF NEW.to_plan <> 'free' AND NEW.source IN ('owner', 'billing') THEN
+    PERFORM credit_referral_when_ready(NEW.tenant_id);
+  END IF;
+  IF NEW.to_plan = 'free' AND NEW.from_plan <> 'free' THEN
+    INSERT INTO instagram_tenants (ig_user_id, tenant_id, free_claim)
+      SELECT ig_user_id, tenant_id, true FROM ig_accounts WHERE tenant_id = NEW.tenant_id
+      ON CONFLICT (ig_user_id, tenant_id) DO UPDATE SET free_claim = true;
+  END IF;
+  RETURN NULL;
+END $$;
+
+-- As in 741, and then the credit: a pending referral this connection did not block may now be ready.
+CREATE OR REPLACE FUNCTION instagram_connected() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+  is_free boolean;
+  allowed integer;
+  taken integer;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('instagram_tenants:' || NEW.ig_user_id));
+  SELECT plan = 'free' INTO is_free FROM tenants WHERE id = NEW.tenant_id;
+  is_free := COALESCE(is_free, false);
+  IF is_free AND NOT EXISTS (SELECT 1 FROM instagram_tenants WHERE ig_user_id = NEW.ig_user_id AND tenant_id = NEW.tenant_id AND free_claim) THEN
+    SELECT free_per_instagram INTO allowed FROM signup_settings;
+    SELECT count(*) INTO taken FROM instagram_tenants WHERE ig_user_id = NEW.ig_user_id AND tenant_id <> NEW.tenant_id AND free_claim;
+    IF taken >= COALESCE(allowed, 1) THEN
+      RAISE EXCEPTION 'signup.free_taken' USING ERRCODE = 'unique_violation', DETAIL = 'This Instagram account already has a Free plan.';
+    END IF;
+  END IF;
+  INSERT INTO instagram_tenants (ig_user_id, tenant_id, free_claim) VALUES (NEW.ig_user_id, NEW.tenant_id, is_free)
+    ON CONFLICT (ig_user_id, tenant_id) DO UPDATE SET free_claim = instagram_tenants.free_claim OR EXCLUDED.free_claim;
+  UPDATE seller_referrals r SET state = 'blocked', block_reason = 'same_instagram'
+   WHERE r.state = 'pending'
+     AND ((r.referred_tenant_id = NEW.tenant_id AND EXISTS (SELECT 1 FROM instagram_tenants m WHERE m.ig_user_id = NEW.ig_user_id AND m.tenant_id = r.tenant_id))
+       OR (r.tenant_id = NEW.tenant_id AND EXISTS (SELECT 1 FROM instagram_tenants m WHERE m.ig_user_id = NEW.ig_user_id AND m.tenant_id = r.referred_tenant_id)));
+  PERFORM credit_referral_when_ready(NEW.tenant_id);
+  RETURN NULL;
+END $$;
