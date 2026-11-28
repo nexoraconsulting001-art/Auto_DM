@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { verifySignedRequest } from '../../adapters/meta/index.js';
 import { DeletionStatus, PROVIDER_PATHS, SignedRequestBody, SignedRequestPayload } from '../../contracts/api/provider.js';
 import { log, reportError } from '../../platform/log.js';
+import { opsAlert } from '../payments/util.js';
 import { RELEASED_BY_OWNER } from '../../repos/connections.js';
 import { withTenant } from '../../tenancy.js';
 import { HEALTH_PROBE } from './gates.js';
@@ -70,7 +71,7 @@ export function createCallbacks({ db, repos, config, gates }) {
     const digest = crypto.createHash('sha256').update(String(signedRequest)).digest('hex');
     const [open] = await platformDb.query(
       `SELECT * FROM data_deletion_requests WHERE channel = 'instagram'
-         AND (request_digest = $2 OR (account_id = $1 AND status = 'requested'))
+         AND (request_digest = $2 OR (account_id = $1 AND status IN ('requested', 'needs_review')))
        ORDER BY (request_digest = $2) DESC, id DESC LIMIT 1`,
       [accountId, digest],
     );
@@ -86,14 +87,26 @@ export function createCallbacks({ db, repos, config, gates }) {
     return same;
   }
 
-  /** Removes the account's data and closes the request. Safe to run again. With no business behind the account, there is nothing to remove. */
+  /**
+   * Removes the account's data and closes the request. Safe to run again. 'completed' is written only after an erasure ran.
+   * A request that matched no connected account (a stranger, or a Facebook user: no Facebook user id is stored to match on)
+   * is not done just because nothing was found here: it goes to needs_review and ops is told, to check it by hand (review C-3).
+   */
   async function completeDeletion(request) {
-    if (request.tenant_id) {
-      await withTenant(request.tenant_id, async () => {
-        await repos.igAccounts.eraseAccount(request.account_id);
-        await reEvaluateGates();
-      });
+    if (!request.tenant_id) {
+      const [held] = await platformDb.query(`UPDATE data_deletion_requests SET status = 'needs_review' WHERE id = $1 AND status = 'requested' RETURNING id`, [request.id]);
+      if (held) {
+        await opsAlert(platformDb, {
+          kind: 'meta.deletion_unmatched', severity: 'warning', target: `deletion:${request.id}`, dedupeKey: `deletion-unmatched:${request.id}`,
+          message: `A Meta data deletion request (${request.channel} id ${request.account_id}) matched no connected account. Check whether any business holds this person's data and erase it.`,
+        });
+      }
+      return;
     }
+    await withTenant(request.tenant_id, async () => {
+      await repos.igAccounts.eraseAccount(request.account_id);
+      await reEvaluateGates();
+    });
     await platformDb.query(`UPDATE data_deletion_requests SET status = 'completed', completed_at = now() WHERE id = $1 AND status = 'requested'`, [request.id]);
   }
 

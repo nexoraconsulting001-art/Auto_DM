@@ -60,7 +60,7 @@ export const SignedRequestBody = z.object({ signed_request: z.string().max(10_00
 /** A signed_request's payload, once verifySignedRequest has passed it. */
 export const SignedRequestPayload = z.object({ algorithm: z.literal('HMAC-SHA256'), user_id: ObjectId, issued_at: z.number().optional() });
 export const DeletionAnswer = z.object({ url: z.string(), confirmation_code: z.string() });
-export const DeletionStatus = z.object({ status: z.enum(['requested', 'completed']), requestedAt: Timestamp, completedAt: Timestamp.nullable() });
+export const DeletionStatus = z.object({ status: z.enum(['requested', 'needs_review', 'completed']), requestedAt: Timestamp, completedAt: Timestamp.nullable() });
 export const TlsAskQuery = z.object({ domain: text(253) });
 
 export const PROVIDER_PATHS = Object.freeze({

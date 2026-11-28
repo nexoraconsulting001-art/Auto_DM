@@ -194,16 +194,19 @@ test('C-50: a deletion with a bad signature is a 400 and deletes nothing', async
   for (const table of INSTAGRAM_DATA) assert.ok((await count(slice, table, business.tenant.id)) > 0);
 });
 
-test('a deletion for an account nobody has is acknowledged with a code, and closed', async (t) => {
+// Review C-3: nothing matched is not "deleted". The request waits for ops (needs_review, an ops alert), never 'completed'.
+test('a deletion for an account nobody has is acknowledged with a code, and goes to ops for review, not completed', async (t) => {
   const slice = await startSlice(t);
   const res = await post(slice, '/meta/deletion', signed({ user_id: 'stranger-1' }));
   assert.equal(res.status, 200);
   const body = await res.json();
   const [row] = await until(async () => {
-    const rows = await slice.q('SELECT * FROM data_deletion_requests WHERE status = $1', ['completed']);
+    const rows = await slice.q('SELECT * FROM data_deletion_requests WHERE status = $1', ['needs_review']);
     return rows.length ? rows : null;
   });
-  assert.deepEqual([row.tenant_id, row.account_id, row.confirmation_code], [null, 'stranger-1', body.confirmation_code]);
+  assert.deepEqual([row.tenant_id, row.account_id, row.confirmation_code, row.completed_at], [null, 'stranger-1', body.confirmation_code, null]);
+  const alerts = await slice.q(`SELECT * FROM alerts WHERE audience = 'ops' AND kind = 'meta.deletion_unmatched'`);
+  assert.equal(alerts.length, 1);
 });
 
 test('the status page says how a request is going, and tells a stranger nothing', async (t) => {

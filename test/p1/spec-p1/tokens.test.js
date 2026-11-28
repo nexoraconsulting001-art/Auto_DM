@@ -501,6 +501,12 @@ test('C-49: a deletion for an account nobody has still gets its url and code, an
   assert.equal(res.status, 200);
   assert.ok(res.json().url && res.json().confirmation_code);
   assert.notEqual((await shop.account()).access_token_enc, '');
+  // Review C-3: nothing was erased, so it is never reported done; it waits for ops.
+  await shop.settle();
+  const [row] = await shop.sql('SELECT status, completed_at FROM data_deletion_requests WHERE confirmation_code = $1', [res.json().confirmation_code]);
+  assert.deepEqual([row.status, row.completed_at], ['needs_review', null]);
+  const page = need(await hit(world, `/meta/deletion/${res.json().confirmation_code}`), 200, 'The status page').json();
+  assert.equal(page.status, 'needs_review');
 });
 
 test('C-49: within 30 days the account\'s Platform Data is gone, deletion.completed is logged, another business keeps its data', async () => {
