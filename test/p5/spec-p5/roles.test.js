@@ -181,7 +181,7 @@ test('F-47: removal needs a fresh owner, and staff or managers cannot remove any
   assert.equal((await owner.send('DELETE', `/team/${staff.userId}`)).status, 204);
 });
 
-test('F-47: an invitation becomes an account only when the invited number signs in, with the role and permissions chosen', async () => {
+test('F-47: an invitation becomes an account only when the person with the invited number verified accepts it, with the role and permissions chosen', async () => {
   const shop = await addSeller(world, { name: 'Invite Works' });
   const owner = await ownerApp(world, shop);
   const phone = newSellerPhone();
@@ -190,8 +190,14 @@ test('F-47: an invitation becomes an account only when the invited number signs 
   assert.ok(!invite.text.includes(local10(phone)), 'The invitation shows the whole number');
   const [row] = await shop.sql('SELECT * FROM team_invites WHERE tenant_id = $1 ORDER BY id DESC LIMIT 1', [shop.tenantId]);
   assert.ok(row && !JSON.stringify(row).includes(local10(phone)), 'team_invites holds the number');
-  // Typing the number made nobody: there is no account until the person signs in.
+  // Typing the number made nobody: there is no account until the person accepts.
   assert.equal((await shop.sql('SELECT count(*)::int AS n FROM users WHERE tenant_id = $1 AND phone = $2', [shop.tenantId, local10(phone)]))[0].n, 0);
+  // Signing in alone joins nothing and tells the owner nothing (R6-SEC); the person accepts with the code the owner passed on.
+  const first = await appSignIn(world, phone);
+  assert.notEqual(first.business.id, shop.tenantId, 'Signing in alone joined the inviting business');
+  assert.equal((await shop.sql('SELECT count(*)::int AS n FROM users WHERE tenant_id = $1 AND phone = $2', [shop.tenantId, local10(phone)]))[0].n, 0, 'Signing in alone made an account');
+  const accepted = await first.send('POST', '/auth/invites/accept', { code: invite.data.code });
+  assert.equal(accepted.status, 201, `Accepting: ${accepted.status} ${accepted.text.slice(0, 200)}`);
   const s = await appSignIn(world, phone, { tenantId: shop.tenantId });
   assert.equal(s.business.id, shop.tenantId);
   assert.equal(s.user.role, 'staff');

@@ -19,7 +19,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const readJson = (file) => JSON.parse(fs.readFileSync(path.join(repoRoot, file), 'utf8'));
 
 /** Which module answers each Phase 5 route. */
-const ACCOUNTS = ['auth.start', 'auth.verify', 'auth.exchange', 'auth.apple', 'auth.refresh', 'auth.devices', 'auth.revokeDevice', 'auth.reauthStart', 'auth.reauthVerify', 'auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.deleteAccount', 'app.requirements'];
+const ACCOUNTS = ['auth.start', 'auth.verify', 'auth.exchange', 'auth.apple', 'auth.refresh', 'auth.devices', 'auth.revokeDevice', 'auth.reauthStart', 'auth.reauthVerify', 'auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.acceptInvite', 'auth.deleteAccount', 'app.requirements'];
 const TEAM = ['team.list', 'team.invite', 'team.update', 'team.remove'];
 const PHASE0_AUTH = ['auth.login', 'auth.me', 'auth.logout', 'auth.businesses'];
 // Phase 7 adds self-serve sign-up: the person has signed in on this host and has no business yet.

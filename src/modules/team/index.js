@@ -7,7 +7,7 @@ import { pageOfFetched, readCursor, isRowId } from '../admin-api/paging.js';
 import { maskedAccountPhone } from '../accounts/shared.js';
 import { revokeFamilies } from '../accounts/tokens.js';
 
-export { acceptInvites, linkMemberships } from './invites.js';
+export { acceptInvite, linkMemberships } from './invites.js';
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/;
 const LAST_OWNER = 'A business needs at least one owner. Make someone else an owner first.';
@@ -50,10 +50,10 @@ const invitation = (row) => ({
  * a fresh re-auth; the router enforces both from the contract (src/contracts/api/team.js), and staff reach any other
  * route only through its named permission (src/contracts/api/access.js). This module adds no second rule.
  *
- * - Nobody joins by having their number typed in. team.invite stores a keyed hash of the phone or email and a hashed
- *   token, for INVITE_DAYS; the account appears when the person next signs in with that identity proved (acceptInvites,
- *   called by src/modules/accounts at every sign-in). Never at once: typing someone's number must not put an account of
- *   theirs in another business without them doing anything.
+ * - Nobody joins by having their number typed in, nor without saying yes. team.invite stores a keyed hash of the phone
+ *   or email and a hashed code, for INVITE_DAYS, and gives the owner the code once to pass on; the account appears only
+ *   when the person, signed in with that identity proved, accepts with the code (auth.acceptInvite -> acceptInvite).
+ *   Until then team.list shows the invitation only (kind of contact, role, dates): nothing about the person.
  * - A business always has at least one owner: the last owner cannot be demoted or removed, by themselves or anyone
  *   (F-49). The owners' rows are locked while the check and the change are made.
  * - team.remove sets removed_at, deletes the switcher pairs naming the account, and revokes every session it has and
@@ -131,8 +131,8 @@ export const team = {
           return made;
         });
         log.info('team.invited', { inviteId: row.id, role: body.role });
-        // Taken up at the person's next sign-in with this identity proved, never here.
-        return invitation(row);
+        // Taken up only when the person accepts with this code, signed in with this identity proved; never here.
+        return { ...invitation(row), code: token };
       },
 
       'team.update': async ({ params, body, user }) => {

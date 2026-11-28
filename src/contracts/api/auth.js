@@ -155,6 +155,11 @@ export const LinkIdentity = z.discriminatedUnion('kind', [
 export const Identity = z.object({ kind: z.enum(IDENTITY_KINDS), label: z.string(), verifiedAt: Timestamp });
 export const Identities = z.object({ identities: z.array(Identity), pending: z.boolean().default(false) });
 
+/** auth.acceptInvite: the code an owner passed on with their invitation (team.invite). */
+export const AcceptInvite = z.object({ code: text(200) });
+/** The business the person just joined; it is also in their switcher (auth.businesses) from now on. */
+export const InviteAccepted = z.object({ business: Membership });
+
 export const DeleteAccount = z.object({ confirm: z.literal('DELETE', { error: 'Type DELETE to confirm' }) });
 /** The timeline shown after the request (P-26): when it was asked, and when the account will be gone unless it is cancelled by signing in again. */
 export const DeletionRequest = z.object({ status: z.enum(['requested', 'cancelled', 'completed']), requestedAt: Timestamp, dueAt: Timestamp });
@@ -179,5 +184,6 @@ export const authRoutes = {
   'auth.reauthVerify': { method: 'POST', path: '/auth/reauth/verify', access: SIGNED_IN, body: ReauthVerify, response: Fresh },
   'auth.enableDeviceUnlock': { method: 'POST', path: '/auth/device-unlock', access: SIGNED_IN, fresh: true, status: 201, response: DeviceUnlock },
   'auth.linkIdentity': { method: 'POST', path: '/auth/identities', access: SIGNED_IN, fresh: true, body: LinkIdentity, response: Identities },
+  'auth.acceptInvite': { method: 'POST', path: '/auth/invites/accept', access: SIGNED_IN, body: AcceptInvite, status: 201, response: InviteAccepted },
   'auth.deleteAccount': { method: 'POST', path: '/auth/delete-account', access: SIGNED_IN, fresh: true, body: DeleteAccount, status: 202, response: DeletionRequest },
 };

@@ -5,7 +5,7 @@ import { SELLER_ROLES } from '../../contracts/api/access.js';
 import { log } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { writeAudit } from '../audit/index.js';
-import { acceptInvites, linkMemberships } from '../team/invites.js';
+import { acceptInvite, linkMemberships } from '../team/invites.js';
 import { NO_PASSWORD, accountPhone, platformOf } from './shared.js';
 
 const UNIQUE_VIOLATION = /unique|duplicate/i;
@@ -13,7 +13,7 @@ const UNIQUE_VIOLATION = /unique|duplicate/i;
 /**
  * People (PRD 5.11, 10.3): one row per human, and the identities that prove who they are. A verified identity
  * (kind, subject) is exactly one person. What ties a person to seller accounts is only ever proof: a verified phone
- * equal to the account's phone, or an invitation taken up with a verified identity (src/modules/team). A Google or
+ * equal to the account's phone, or an invitation the person accepted with its code and a verified identity (src/modules/team). A Google or
  * Apple identity reaches accounts only through a person already tied to them, or an invitation to its verified email.
  * Everything here is about no single business, so it runs on the platform path.
  */
@@ -67,8 +67,8 @@ export function peopleService(ctx) {
 
   /**
    * Brings the person's accounts up to date with what they have proved: every seller account whose phone equals one of
-   * their verified numbers and that nobody has proved yet becomes theirs; every open invitation to one of their verified
-   * numbers or emails is taken up; and the switcher pairs are written between every two of their accounts.
+   * their verified numbers and that nobody has proved yet becomes theirs, and the switcher pairs are written between every
+   * two of their accounts. Invitations are never taken up here: only by the person accepting one (takeInvite).
    */
   async function reconcile(personId) {
     const all = await identities(personId);
@@ -92,9 +92,18 @@ export function peopleService(ctx) {
         [personId, number, `person:${personId}`],
       );
     }
-    const me = await person(personId);
-    await acceptInvites(ctx, { personId, name: me?.name ?? '', phones, emails });
     await linkMemberships(ctx.db, personId);
+  }
+
+  /** The person accepts an invitation with its code (auth.acceptInvite). { tenantId, userId }, or null when it isn't theirs to take. */
+  async function takeInvite(personId, code) {
+    const all = await identities(personId);
+    const phones = all.filter((i) => i.kind === 'phone').map((i) => i.subject);
+    const emails = [...new Set(all.filter((i) => i.kind !== 'phone' && i.email).map((i) => i.email.toLowerCase()))];
+    const me = await person(personId);
+    const taken = await acceptInvite(ctx, { personId, code, name: me?.name ?? '', phones, emails });
+    if (taken) await linkMemberships(ctx.db, personId);
+    return taken;
   }
 
   /** The person's live seller accounts, the one used last first. */
@@ -175,5 +184,5 @@ export function peopleService(ctx) {
     });
   }
 
-  return { findOrMake, identityOwner, person, identities, phonesOf, reconcile, accounts, accountIn, makeFirstBusiness, attach };
+  return { findOrMake, identityOwner, person, identities, phonesOf, reconcile, takeInvite, accounts, accountIn, makeFirstBusiness, attach };
 }

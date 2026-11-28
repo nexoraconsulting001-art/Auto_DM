@@ -38,7 +38,10 @@ test('auth-4: inviting the owner of another business does not make an account fo
   assert.equal(open.accepted_at, null, 'the invitation is still open');
   assert.equal((await call(app, '/api/v1/auth/me', { headers: as(mine) })).status, 200);
 
-  // Signing in is what takes it up.
+  // Signing in does not take it up (R6-SEC): the person accepts it, with the code the owner passed on.
+  await reset();
+  await assert.rejects(() => codeSignIn(app, { phone, tenantId: app.tenant.id, device: testDevice('Their phone 2') }), /403/, 'signing in alone joined the inviting business');
+  assert.equal((await call(app, '/api/v1/auth/invites/accept', { method: 'POST', headers: as(mine), body: { code: invite.json.code } })).status, 201);
   await reset();
   const joined = await codeSignIn(app, { phone, tenantId: app.tenant.id, device: testDevice('Their phone 2') });
   assert.equal(joined.user.role, 'staff');
@@ -55,6 +58,7 @@ test('auth-4: removing someone ends their sessions in this business only, never 
 
   const invite = await call(app, '/api/v1/team/invites', { method: 'POST', headers: as(owner), body: { contact: phone, role: 'staff', permissions: ['orders'] } });
   assert.equal(invite.status, 201, invite.text);
+  assert.equal((await call(app, '/api/v1/auth/invites/accept', { method: 'POST', headers: as(inTheirs), body: { code: invite.json.code } })).status, 201);
   await reset();
   const inMine = await codeSignIn(app, { phone, tenantId: app.tenant.id, device: testDevice('Kept phone 2') });
   assert.equal(inMine.user.role, 'staff');

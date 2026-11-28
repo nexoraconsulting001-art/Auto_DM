@@ -308,6 +308,10 @@ describe('owners (F-49) under concurrency', () => {
     const invited = await call(app, '/api/v1/team/invites', { method: 'POST', headers: owner.auth, body: { contact: phone, role: 'owner' } });
     assert.equal(invited.status, 201, invited.text);
     await reset();
+    // The invitee accepts with the invitation's code (R6-SEC), then opens this business.
+    const own = await codeSignIn(app, { phone });
+    assert.equal((await call(app, '/api/v1/auth/invites/accept', { method: 'POST', headers: own.auth, body: { code: invited.json.code } })).status, 201);
+    await reset();
     const second = await codeSignIn(app, { phone, tenantId: app.tenant.id });
     assert.equal(second.business.id, app.tenant.id);
     assert.equal(second.user.role, 'owner');
@@ -332,6 +336,10 @@ describe('owners (F-49) under concurrency', () => {
     const phone = random10();
     const invited = await call(app, '/api/v1/team/invites', { method: 'POST', headers: owner.auth, body: { contact: phone, role: 'owner' } });
     assert.equal(invited.status, 201, invited.text);
+    await reset();
+    // The invitee accepts with the invitation's code (R6-SEC), then opens this business.
+    const own = await codeSignIn(app, { phone });
+    assert.equal((await call(app, '/api/v1/auth/invites/accept', { method: 'POST', headers: own.auth, body: { code: invited.json.code } })).status, 201);
     await reset();
     const second = await codeSignIn(app, { phone, tenantId: app.tenant.id });
     try {
