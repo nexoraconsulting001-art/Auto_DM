@@ -84,11 +84,7 @@ export function createBillingWebhooks(ctx, service) {
       const payload = cleanBillingEvent(body);
       const header = req.get(SIGNATURE_HEADERS.razorpayEventId);
       const eventId = typeof header === 'string' && EVENT_ID.test(header) ? header : `sha256:${crypto.createHash('sha256').update(raw).digest('hex')}`;
-      const [row] = await platformDb.query(
-        `INSERT INTO provider_webhook_events (provider, scope, event_id, event_type, payload) VALUES ('razorpay', $1, $2, $3, $4::jsonb)
-         ON CONFLICT (provider, scope, event_id) DO NOTHING RETURNING id`,
-        [BILLING_WEBHOOK.scope, eventId, payload.event.slice(0, 100), JSON.stringify(payload)],
-      );
+      const row = await store(eventId, payload);
       res.status(200).json({ ok: true });
       countWebhookStored(metrics, 'razorpay_billing');
       metrics?.inc?.('billing_webhooks_total', { result: row ? 'stored' : 'duplicate' });
@@ -100,6 +96,24 @@ export function createBillingWebhooks(ctx, service) {
       if (!res.headersSent) res.status(503).json({ error: 'Try again.' });
       return undefined;
     }
+  }
+
+  /**
+   * Keeps one cleaned event to be worked from the table: the webhook's, or one the reconcile read from the provider
+   * (reconcile.js). The same event id again is a duplicate. With `redrive`, an event of that id that failed for good is put
+   * back to be tried again from its first back-off (the reconcile still finds the provider disagreeing with what is kept).
+   * -> { id } when stored or put back, else null
+   */
+  async function store(eventId, payload, { redrive = false } = {}) {
+    const [row] = await platformDb.query(
+      `INSERT INTO provider_webhook_events (provider, scope, event_id, event_type, payload) VALUES ('razorpay', $1, $2, $3, $4::jsonb)
+       ON CONFLICT (provider, scope, event_id) DO ${redrive
+    ? `UPDATE SET status = 'received', outcome = '', attempts = 0, processed_at = NULL, last_attempt_at = NULL, payload = EXCLUDED.payload
+         WHERE provider_webhook_events.status = 'failed'`
+    : 'NOTHING'} RETURNING id`,
+      [BILLING_WEBHOOK.scope, eventId, payload.event.slice(0, 100), JSON.stringify(payload)],
+    );
+    return row ?? null;
   }
 
   async function finish(row, { status, outcome, security = false, tenantId = null }) {
@@ -182,5 +196,5 @@ export function createBillingWebhooks(ctx, service) {
     subjects: { sql: `array_remove(ARRAY[payload->'subscription'->>'id'], NULL)`, of: (row) => [row.payload?.subscription?.id] },
   });
 
-  return { receive, dispatch, drain, kick, settle, route };
+  return { receive, store, dispatch, drain, kick, settle, route };
 }

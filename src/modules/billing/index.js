@@ -8,6 +8,7 @@ import { reportError } from '../../platform/log.js';
 import { tenantId } from '../../tenancy.js';
 import { BILLING_FILE_PATH, fileLink, fileLinkValid, fileNameOf, invoicePdf, statementCsv, statementPdf } from './files.js';
 import { registerBillingPlatformRoutes } from './platform.js';
+import { createBillingReconcile } from './reconcile.js';
 import { createBilling, providerFailure } from './service.js';
 import { createStatements } from './statements.js';
 import { createBillingWebhooks } from './webhooks.js';
@@ -22,6 +23,7 @@ import { createBillingWebhooks } from './webhooks.js';
  *
  *   service.js     the plan, add-ons, invoices and credit notes, what each provider event does, renewals and grace
  *   webhooks.js    BILLING_WEBHOOK: verified on the raw bytes (a bad signature is 400, nothing stored), stored, then worked
+ *   reconcile.js   reads live subscriptions from the provider and puts what no webhook brought through the same path (M-3)
  *   statements.js  the monthly settlement statement on the default payment and shipping path
  *   files.js       Bhava-branded PDFs and the CSV, behind signed links that last minutes
  *   platform.js    the Platform Console's routes
@@ -34,7 +36,7 @@ import { createBillingWebhooks } from './webhooks.js';
  */
 const API = BILLING_ROUTE_OWNERS.billing;
 const PLATFORM = BILLING_PLATFORM_OWNERS.billing;
-export const BILLING_JOBS = Object.freeze({ webhooks: BILLING_QUEUE, renewals: 'billing.renewals', grace: 'billing.grace', statements: 'billing.statements' });
+export const BILLING_JOBS = Object.freeze({ webhooks: BILLING_QUEUE, renewals: 'billing.renewals', grace: 'billing.grace', statements: 'billing.statements', reconcile: 'billing.reconcile' });
 const MINUTE = 60_000;
 
 const built = new WeakMap();
@@ -45,6 +47,7 @@ export function billingFor(ctx) {
     const core = createBilling(ctx);
     service = Object.assign(core, { statements: createStatements(ctx, { at: core.at }), secret: ctx.config?.sessionSecret || ctx.config?.dataKey || crypto.randomBytes(32).toString('hex') });
     service.webhooks = createBillingWebhooks(ctx, service);
+    service.reconcile = createBillingReconcile(ctx, service, service.webhooks);
     built.set(ctx, service);
   }
   return service;
@@ -100,7 +103,7 @@ export const billing = {
     api: API,
     store: [],
     platform: PLATFORM,
-    jobs: ['billing.webhooks', 'billing.renewals', 'billing.grace', 'billing.statements'],
+    jobs: ['billing.webhooks', 'billing.renewals', 'billing.grace', 'billing.statements', 'billing.reconcile'],
   },
 
   setup(ctx) {
@@ -181,11 +184,13 @@ export const billing = {
     queue.work(BILLING_JOBS.renewals, () => service.renewals());
     queue.work(BILLING_JOBS.grace, () => service.graceSweep());
     queue.work(BILLING_JOBS.statements, () => service.statements.monthly());
+    queue.work(BILLING_JOBS.reconcile, () => service.reconcile.run());
     return async function schedule() {
       await queue.every(BILLING_JOBS.webhooks, MINUTE);
       await queue.every(BILLING_JOBS.renewals, 15 * MINUTE);
       await queue.every(BILLING_JOBS.grace, 15 * MINUTE);
       await queue.every(BILLING_JOBS.statements, 60 * MINUTE);
+      await queue.every(BILLING_JOBS.reconcile, 30 * MINUTE);
     };
   },
 };
