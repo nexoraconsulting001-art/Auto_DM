@@ -118,7 +118,7 @@ test('events stored but not worked through are picked up by the sweep; one that 
   // An event the code can't work through: tried with backoff, then failed for a person.
   await webhooks.store({ provider: 'razorpay', scope: 'managed', eventId: 'evt_broken', eventType: 'payment.captured', payload: { event: 'payment.captured', payment: { id: paid.payment.id, orderId: placed.gateway.gatewayOrderId, status: 'captured', amountPaise: 30000, currency: 'INR' }, linked: 5 } });
   for (let i = 0; i < 8; i++) {
-    await world.db.platform.query(`UPDATE provider_webhook_events SET received_at = received_at - interval '2 hours' WHERE event_id = 'evt_broken'`);
+    await world.db.platform.query(`UPDATE provider_webhook_events SET received_at = received_at - interval '2 hours', last_attempt_at = last_attempt_at - interval '2 hours' WHERE event_id = 'evt_broken'`);
     await webhooks.drain();
   }
   const [broken] = await world.db.platform.query(`SELECT * FROM provider_webhook_events WHERE event_id = 'evt_broken'`);

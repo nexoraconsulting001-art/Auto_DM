@@ -196,8 +196,8 @@ test('F-54: no paid plan is sold and no invoice is issued while Bhava has no leg
   } finally {
     await sql(world, `UPDATE billing_settings SET sac = '998439'`);
   }
-  // The kept event is retried on its backoff (5 s, then 20 s ...): move its clock past that rather than wait for it.
-  await sql(world, `UPDATE provider_webhook_events SET received_at = received_at - interval '1 hour' WHERE scope = 'billing' AND status = 'received'`);
+  // The kept event is retried on its backoff from its last try (5 s, then 20 s ...): move its clock past that rather than wait for it.
+  await sql(world, `UPDATE provider_webhook_events SET received_at = received_at - interval '1 hour', last_attempt_at = last_attempt_at - interval '1 hour' WHERE scope = 'billing' AND status = 'received'`);
   assert.ok(await world.until(async () => (await invoicesOf(world, shop)).length === 2, 6000), 'the kept charge is invoiced once the SAC is set');
   assert.equal((await paymentsOf(world, shop)).length, 2, 'both charges are recorded');
   await world.quiet(600);
