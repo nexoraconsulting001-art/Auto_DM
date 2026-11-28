@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useFeedback } from '../../components/feedback.jsx';
 import { Avatar, Badge, Banner, Button, FieldGroup, Loadable, PageHeader, Panel, Sheet, TextField } from '../../design/index.jsx';
@@ -97,10 +97,46 @@ function Businesses() {
                 );
               })}
             </div>
-            {businesses.length <= 1 && <p className="acct-footnote">When someone invites you to their business, it shows here and you can switch to it.</p>}
+            {businesses.length <= 1 && <p className="acct-footnote">When you accept someone’s invitation to their business, it shows here and you can switch to it.</p>}
           </>
         )}
       </Loadable>
+    </Panel>
+  );
+}
+
+/**
+ * Joining a team (PRD 5.11): the person enters the invitation code the owner passed on. It works only for the number
+ * or email that was invited, verified on this account; until then the owner sees nothing about them.
+ */
+function JoinTeam() {
+  const { toast } = useFeedback();
+  const queries = useQueryClient();
+  const [code, setCode] = useState('');
+  const [problem, setProblem] = useState('');
+  const join = useMutation({
+    mutationFn: (body) => api.auth.acceptInvite(body),
+    onSuccess: async ({ business }) => {
+      setCode('');
+      toast(`You joined ${business.name}. Switch to it under Your businesses.`);
+      await queries.invalidateQueries({ queryKey: ['auth-businesses'] });
+    },
+    onError: (error) => setProblem(error.message),
+  });
+  function submit(event) {
+    event.preventDefault();
+    setProblem('');
+    if (!code.trim()) return setProblem('Enter the invitation code you were sent.');
+    return join.mutate({ code: code.trim() });
+  }
+  return (
+    <Panel title="Join a team">
+      <p className="muted">Someone invited you to their business? Enter the invitation code they sent you. It works only with the number or email they invited.</p>
+      <form className="stack" onSubmit={submit} noValidate>
+        {problem && <Banner tone="bad">{problem}</Banner>}
+        <TextField label="Invitation code" name="inviteCode" autoComplete="off" maxLength={200} value={code} onChange={(e) => setCode(e.target.value)} />
+        <Button type="submit" loading={join.isPending}>Join</Button>
+      </form>
     </Panel>
   );
 }
@@ -314,6 +350,7 @@ export default function AccountPage() {
       <PageHeader eyebrow="Settings" title="Your account" />
       <AboutYou />
       <Businesses />
+      <JoinTeam />
       <WaysIn google={google} fresh={fresh} />
       <DeleteAccount fresh={fresh} />
     </>

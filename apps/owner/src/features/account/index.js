@@ -2,6 +2,7 @@ import UserRound from 'lucide-react-native/icons/user-round';
 import { SIGNED_IN } from '@bhava/app-core/access';
 import AccountScreen from './AccountScreen.js';
 import DeleteAccountScreen from './DeleteAccountScreen.js';
+import JoinTeamScreen from './JoinTeamScreen.js';
 
 /**
  * Your account (PRD 5.11, 10.3, 10.6): who you are here, fingerprint or face unlock, the ways you sign in, the app's
@@ -12,10 +13,11 @@ export default {
   name: 'account',
   access: SIGNED_IN,
   feature: null,
-  routeIds: ['auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.reauthStart', 'auth.reauthVerify', 'auth.deleteAccount', 'console:/settings/account', 'console:/settings/install'],
+  routeIds: ['auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.acceptInvite', 'auth.reauthStart', 'auth.reauthVerify', 'auth.deleteAccount', 'console:/settings/account', 'console:/settings/install'],
   screens: [
     { name: 'index', path: 'settings/account', title: 'account.title', component: AccountScreen },
     { name: 'delete', path: 'settings/account/delete', title: 'account.delete.title', component: DeleteAccountScreen },
+    { name: 'join', path: 'settings/account/join', title: 'account.join.title', component: JoinTeamScreen },
   ],
   nav: { label: 'account.title', order: 78, icon: UserRound },
   strings: {
@@ -60,6 +62,14 @@ export default {
       'account.delete.signedOutBody': 'This phone signs out when you tap Done.',
       'account.delete.due': 'Deleted on {date}',
       'account.delete.dueBody': 'Sign in again before then if you change your mind.',
+      'account.join': 'Join a team',
+      'account.join.title': 'Join a team',
+      'account.join.body': 'Someone invited you to their business? Enter the invitation code they sent you. It works only with the number or email they invited.',
+      'account.join.code': 'Invitation code',
+      'account.join.action': 'Join',
+      'account.join.done': 'You joined {business}. Switch to it from your businesses.',
+      'account.join.notYours': 'That invitation isn’t for this account, or it has expired. Ask the owner to invite you again.',
+      'account.join.failed': 'That didn’t work. Try again.',
     },
     hi: {
       'account.title': 'आपका अकाउंट',
@@ -102,6 +112,14 @@ export default {
       'account.delete.signedOutBody': 'हो गया दबाने पर यह फ़ोन साइन आउट हो जाएगा।',
       'account.delete.due': '{date} को डिलीट',
       'account.delete.dueBody': 'अगर आपका मन बदले, तो उससे पहले फिर साइन इन करें।',
+      'account.join': 'टीम से जुड़ें',
+      'account.join.title': 'टीम से जुड़ें',
+      'account.join.body': 'किसी ने आपको अपने बिज़नेस में बुलाया है? उनका भेजा न्योता कोड डालें। यह सिर्फ़ उसी नंबर या ईमेल के साथ काम करता है जिसे बुलाया गया था।',
+      'account.join.code': 'न्योता कोड',
+      'account.join.action': 'जुड़ें',
+      'account.join.done': 'आप {business} से जुड़ गए। अपने बिज़नेस की सूची से उसमें जाएँ।',
+      'account.join.notYours': 'यह न्योता इस अकाउंट के लिए नहीं है, या इसकी समय-सीमा खत्म हो गई है। मालिक से फिर से बुलाने को कहें।',
+      'account.join.failed': 'यह काम नहीं किया। फिर कोशिश करें।',
     },
   },
 };

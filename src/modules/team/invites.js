@@ -1,6 +1,6 @@
-import { localPhone, subjectHash } from '../../contracts/accounts.js';
+import { localPhone, subjectHash, tokenHash } from '../../contracts/accounts.js';
 import { SELLER_ROLES } from '../../contracts/api/access.js';
-import { log, reportError } from '../../platform/log.js';
+import { log } from '../../platform/log.js';
 import { withTenant } from '../../tenancy.js';
 import { writeAudit } from '../audit/index.js';
 
@@ -8,39 +8,36 @@ const NO_PASSWORD = null; // no password: NULL (migration 976), as accounts/shar
 const placeholderPhone = (personId) => `person:${Number(personId)}`;
 
 /**
- * Taking up invitations (PRD 5.11). src/modules/accounts calls this whenever a person proves an identity: with the
- * numbers and emails they have verified, it finds every open invitation in every business whose contact hashes to one
- * of them, and gives the person an account there. Nobody joins because someone typed their number: the invitation holds
- * only a hash, and only a verified identity reaches it.
+ * Taking up an invitation (PRD 5.11) is an act of the invitee: auth.acceptInvite calls this with the code the owner was
+ * given by team.invite and passed on, for the person signed in. It joins only when the code is an open invitation's AND
+ * the invitation's contact hashes to one of the numbers or emails this person has verified: the code alone is the
+ * owner's, and a verified identity alone is not consent. Nothing joins at sign-in, so a business that types someone's
+ * number learns nothing about them (not their name, not that they use Bhava) unless they accept.
  *
  * In a business where the person already has an account on the team, the invitation is simply marked taken; their role
  * stays what it is (team.update changes roles). A row there with the same verified number that is a shopper's, or an
  * account removed earlier, becomes the team account with the invitation's role, and every session it had ends first:
  * a session opened as a shopper never turns into a team member's.
  *
- * Returns [{ tenantId, userId }] for the invitations taken.
+ * Returns { tenantId, userId }, or null when the code is unknown, used, revoked, expired or for someone else (one answer
+ * for all of them, so the code says nothing about whom it was for).
  */
-export async function acceptInvites({ db, config }, { personId, name = '', phones = [], emails = [], onlyTenant = null }) {
+export async function acceptInvite({ db, config }, { personId, code, name = '', phones = [], emails = [] }) {
   const platform = db.platform ?? db;
   const contacts = [
     ...phones.map((p) => ['phone', subjectHash(config.sessionSecret, 'phone', p)]),
-    ...emails.filter(Boolean).map((e) => ['email', subjectHash(config.sessionSecret, 'email', e)]),
+    ...emails.filter(Boolean).map((e) => ['email', subjectHash(config.sessionSecret, 'email', String(e).toLowerCase())]),
   ];
-  if (!contacts.length || !personId) return [];
-  const open = await platform.query(
+  if (!contacts.length || !personId || typeof code !== 'string' || !code) return null;
+  const [invite] = await platform.query(
     `SELECT i.id, i.tenant_id FROM team_invites i JOIN unnest($1::text[], $2::text[]) AS c(kind, hash) ON c.kind = i.contact_kind AND c.hash = i.contact_hash
-     WHERE i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now() AND ($3::int IS NULL OR i.tenant_id = $3::int)
-     ORDER BY i.id`,
-    [contacts.map((c) => c[0]), contacts.map((c) => c[1]), onlyTenant],
+     WHERE i.token_hash = $3 AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()
+     LIMIT 1`,
+    [contacts.map((c) => c[0]), contacts.map((c) => c[1]), tokenHash(code)],
   );
-  const taken = [];
-  for (const invite of open) {
-    // A sign-in never fails because one invitation could not be taken up: it stays open for the next one.
-    const userId = await withTenant(invite.tenant_id, () => acceptOne(db, { inviteId: invite.id, tenantId: invite.tenant_id, personId, name, phones }))
-      .catch((err) => reportError(err, { msg: 'team.invite_not_taken', inviteId: invite.id }));
-    if (userId) taken.push({ tenantId: invite.tenant_id, userId });
-  }
-  return taken;
+  if (!invite) return null;
+  const userId = await withTenant(invite.tenant_id, () => acceptOne(db, { inviteId: invite.id, tenantId: invite.tenant_id, personId, name, phones }));
+  return userId ? { tenantId: invite.tenant_id, userId } : null;
 }
 
 async function acceptOne(db, { inviteId, tenantId, personId, name, phones }) {

@@ -2,6 +2,7 @@ import { AUTH_LIMITS, maskEmail, maskPhone, toE164 } from '../../contracts/accou
 import { ApiError } from '../../contracts/api/index.js';
 import { log } from '../../platform/log.js';
 import { writeAudit } from '../audit/index.js';
+import { businessesOf } from './describe.js';
 import { verifyApple } from './sign-in.js';
 import { limit } from './shared.js';
 
@@ -35,6 +36,27 @@ export function linkHandlers(ctx, { people, codes, handoffs, sendCode }) {
   }
 
   return {
+    /**
+     * The signed-in person accepts a team invitation with the code its owner passed on (PRD 5.11). It works only when
+     * the invitation is for a phone or email this person has verified; any other case is one not_found, so a code says
+     * nothing about whom it was for. The new business joins their switcher; this session stays where it is.
+     */
+    'auth.acceptInvite': async ({ body, user, req }) => {
+      const personId = user.person_id;
+      if (!personId) throw new ApiError('conflict', 'Sign in with a WhatsApp code or Google first.');
+      await limit(ctx.platform, AUTH_LIMITS.codeTriesPerAddress, req.ip);
+      const taken = await people.takeInvite(personId, body.code);
+      if (!taken) throw new ApiError('not_found', 'That invitation isn’t for this account, or it has expired. Ask the owner to invite you again.');
+      const listed = (await businessesOf(ctx.repos, user)).find((b) => b.id === taken.tenantId);
+      if (listed) return { business: listed };
+      const [row] = await (ctx.db.platform ?? ctx.db).query(
+        `SELECT t.id, t.slug, t.name, u.role, COALESCE(k.logo_url, '') AS logo_url FROM tenants t JOIN users u ON u.tenant_id = t.id AND u.id = $2
+         LEFT JOIN brand_kits k ON k.tenant_id = t.id WHERE t.id = $1`,
+        [taken.tenantId, taken.userId],
+      );
+      return { business: { id: row.id, slug: row.slug, name: row.name, role: row.role, logoUrl: row.logo_url, current: false } };
+    },
+
     'auth.linkIdentity': async ({ body, user, req }) => {
       const personId = user.person_id;
       if (!personId) throw new ApiError('conflict', 'Sign in with a WhatsApp code or Google first.');

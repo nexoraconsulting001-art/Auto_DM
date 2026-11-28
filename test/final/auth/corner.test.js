@@ -376,6 +376,10 @@ describe('auth-7 and auth-4 corners', () => {
     await sql(`UPDATE team_invites SET expires_at = now() - interval '1 second' WHERE id = $1`, [invite.json.id]);
     await reset();
     await codeSignIn(app, { phone, tenantId: app.tenant.id, device: testDevice('Invitee phone') }).catch(() => null);
+    // Nor by accepting it with its code (R6-SEC: accepting is the only way an invitation is taken up).
+    await reset();
+    const mine = await codeSignIn(app, { phone, tenantId: theirs.id, device: testDevice('Invitee phone') });
+    assert.equal((await call(app, '/api/v1/auth/invites/accept', { method: 'POST', headers: as(mine), body: { code: invite.json.code } })).status, 404);
     const made = await sql('SELECT u.id FROM users u JOIN person_identities i ON i.person_id = u.person_id WHERE u.tenant_id = $1 AND i.subject LIKE $2', [app.tenant.id, `%${phone}`]);
     assert.deepEqual(made, [], 'an expired invitation made an account');
   });

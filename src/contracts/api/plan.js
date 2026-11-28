@@ -52,7 +52,7 @@ export const PLAN_NOT_ENFORCED = Object.freeze({
 });
 
 export const ALWAYS_ON = Object.freeze([
-  'auth.login', 'auth.start', 'auth.verify', 'auth.exchange', 'auth.apple', 'auth.refresh', 'auth.me', 'auth.logout', 'auth.businesses', 'auth.devices', 'auth.revokeDevice', 'auth.reauthStart', 'auth.reauthVerify', 'auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.deleteAccount',
+  'auth.login', 'auth.start', 'auth.verify', 'auth.exchange', 'auth.apple', 'auth.refresh', 'auth.me', 'auth.logout', 'auth.businesses', 'auth.devices', 'auth.revokeDevice', 'auth.reauthStart', 'auth.reauthVerify', 'auth.enableDeviceUnlock', 'auth.linkIdentity', 'auth.acceptInvite', 'auth.deleteAccount',
   'products.list', 'products.get', 'products.update', 'products.remove', 'products.recheck',
   'catalogSettings.get',
   'categories.list', 'categories.reorder', 'categories.get', 'categories.update', 'categories.remove', 'categories.reels', 'categories.rules',

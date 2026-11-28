@@ -150,12 +150,14 @@ export function createApiClient({ baseUrl = '/api/v1', getToken, getTenantId, ap
       linkIdentity: (body) => post('/auth/identities', body),
       /** @param body { confirm: 'DELETE' } @returns { status, requestedAt, dueAt } */
       deleteAccount: (body) => post('/auth/delete-account', body),
+      /** @param body { code }: the code an owner passed on with their invitation @returns { business }: now in the switcher */
+      acceptInvite: (body) => post('/auth/invites/accept', body),
     },
     // The team (5.11): owner only, and every change needs a fresh session.
     team: {
       /** @param query { cursor?, limit? } @returns { items, nextCursor, invites }: members, and every open invitation */
       list: (query) => get('/team', query),
-      /** @param body { contact, role, permissions? } */
+      /** @param body { contact, role, permissions? } @returns the invitation, with its `code` given this once to pass on */
       invite: (body) => post('/team/invites', body),
       update: (memberId, body) => patch(`/team/${id(memberId)}`, body),
       remove: (memberId) => del(`/team/${id(memberId)}`),

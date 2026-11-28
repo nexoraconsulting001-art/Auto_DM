@@ -85,13 +85,27 @@ function InviteSheet({ onClose }) {
   const problem = useProblem(form.problems);
   const action = useAction([TEAM]);
   const { values, set } = form;
+  const [code, setCode] = useState('');
 
   async function send() {
     const built = inviteBody(values);
     form.setProblems(built.problems ?? {});
     if (built.problems) return;
     const done = await action.run('invite', () => api.team.invite(built.body), { fresh: true, done: 'team.invited' });
-    if (done) onClose();
+    // The code is shown this once, for the owner to pass on: the person joins only by entering it (R6-SEC).
+    if (done?.code) setCode(done.code);
+    else if (done) onClose();
+  }
+
+  if (code) {
+    return (
+      <Sheet testID="team-invite-sheet" visible onClose={onClose} closeLabel={t('common.done')} title={t('team.invite')}
+        footer={<Button testID="team-invite-done" label={t('common.done')} onPress={onClose} />}
+      >
+        <Text variant="body">{t('team.inviteCode')}</Text>
+        <Text testID="team-invite-code" variant="body" selectable>{code}</Text>
+      </Sheet>
+    );
   }
 
   return (

@@ -88,7 +88,9 @@ test('a change to the team asks for a fresh WhatsApp code first, and closing tha
   await expect(sheet.getByRole('alert')).toContainText('didn’t match');
   await confirmItsYou(page, world, owner.phone);
 
-  await expect(toast(page, 'Invitation saved. They join when they next sign in with it.')).toBeVisible();
+  // R6-SEC: joining is the invitee's act, so the owner gets a code to pass on, shown this once.
+  await expect(toast(page, 'Invitation saved. Pass the code on: they join only when they accept it.')).toBeVisible();
+  await expect(invite.getByTestId('invite-code')).toHaveText(/^\S{20,}$/);
   const waiting = panel(page, 'Waiting to join');
   await expect(waiting.getByText('Phone number')).toBeVisible();
   await expect(waiting.getByText('Orders, Inbox')).toBeVisible();

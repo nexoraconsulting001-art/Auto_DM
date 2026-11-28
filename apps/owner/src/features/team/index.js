@@ -14,7 +14,8 @@ export default {
     en: {
       'team.title': 'Team',
       'team.invite': 'Invite someone',
-      'team.inviteIntro': 'They join when they sign in with this phone number or email. Nobody joins just by having their number typed here.',
+      'team.inviteIntro': 'You get an invitation code to pass on. They join only when they sign in with this phone number or email and enter the code under Your account. Nobody joins just by having their number typed here.',
+      'team.inviteCode': 'Send this invitation code to them. It is shown only now. They enter it under Your account, Join a team.',
       'team.contact': 'Phone number or email',
       'team.role': 'Role',
       'team.role.owner': 'Owner',
@@ -56,7 +57,8 @@ export default {
     hi: {
       'team.title': 'टीम',
       'team.invite': 'किसी को बुलाएँ',
-      'team.inviteIntro': 'वे इस फ़ोन नंबर या ईमेल से साइन इन करने पर जुड़ते हैं। सिर्फ़ नंबर यहाँ लिखने से कोई नहीं जुड़ता।',
+      'team.inviteIntro': 'आपको एक न्योता कोड मिलेगा। वे तभी जुड़ते हैं जब इस फ़ोन नंबर या ईमेल से साइन इन करके आपका अकाउंट में यह कोड डालते हैं। सिर्फ़ नंबर यहाँ लिखने से कोई नहीं जुड़ता।',
+      'team.inviteCode': 'यह न्योता कोड उन्हें भेजें। यह सिर्फ़ अभी दिखेगा। वे इसे आपका अकाउंट, टीम से जुड़ें में डालते हैं।',
       'team.contact': 'फ़ोन नंबर या ईमेल',
       'team.role': 'भूमिका',
       'team.role.owner': 'मालिक',

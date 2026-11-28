@@ -52,11 +52,13 @@ function InvitePanel({ fresh }) {
   const [permissions, setPermissions] = useState(['orders']);
   const [problems, setProblems] = useState({});
   const [refusal, setRefusal] = useState('');
+  const [made, setMade] = useState(null);
   const invite = useMutation({
     mutationFn: (body) => fresh.run(() => api.team.invite(body)),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       setContact('');
-      toast('Invitation saved. They join when they next sign in with it.');
+      setMade(result?.code ? { code: result.code, contact: result.contact } : null);
+      toast('Invitation saved. Pass the code on: they join only when they accept it.');
       await queries.invalidateQueries({ queryKey: TEAM_KEY });
     },
     onError: (error) => {
@@ -69,6 +71,7 @@ function InvitePanel({ fresh }) {
   function submit(event) {
     event.preventDefault();
     setRefusal('');
+    setMade(null);
     const found = inviteProblems({ contact, role, permissions });
     setProblems(found);
     if (Object.keys(found).length) return;
@@ -77,9 +80,15 @@ function InvitePanel({ fresh }) {
 
   return (
     <Panel title="Invite someone">
-      <p className="muted">Add a phone number or the email of their Google account. They join this business when they sign in to Bhava with it. Nothing is sent to them, so let them know.</p>
+      <p className="muted">Add a phone number or the email of their Google account. You get an invitation code to pass on: they sign in to Bhava with that number or email and enter the code under Settings, Your account. Nothing is sent to them, and you see nothing about them until they accept.</p>
       <form className="stack" onSubmit={submit} noValidate>
         {refusal && <Banner tone="bad">{refusal}</Banner>}
+        {made && (
+          <Banner tone="good">
+            <span>{`Invitation code for the ${made.contact.toLowerCase()} you entered. It is shown only now, so copy it and send it to them:`}</span>{' '}
+            <code className="acct-code" data-testid="invite-code">{made.code}</code>
+          </Banner>
+        )}
         <FieldGroup>
           <TextField label="Phone number or email" name="contact" autoComplete="off" maxLength={200} value={contact} error={problems.contact} onChange={(e) => setContact(e.target.value)} />
           <SelectField label="Role" name="role" value={role} hint={ROLE_HELP[role]} error={problems.role} onChange={(e) => setRole(e.target.value)}>
@@ -249,7 +258,7 @@ function Invites({ invites }) {
           <p className="acct-footnote">An invitation is open for 7 days. Inviting the same number or email again replaces it.</p>
         </>
       ) : (
-        <EmptyState title="No open invitations">People you invite show here until they sign in.</EmptyState>
+        <EmptyState title="No open invitations">People you invite show here until they accept.</EmptyState>
       )}
     </Panel>
   );

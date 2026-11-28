@@ -31,15 +31,27 @@ async function placeOrder(tenant) {
   return repos.orders.create({ items: [{ productId: product.id, qty: 1 }], customer: SHOPPER }, await repos.settings.getAll());
 }
 
-/** Invites `contact` as `role` from the owner's session, then signs the invitee in with a code to `phone`. */
+/** The invitee, signed in, accepts with the code the owner passed on (R6-SEC: joining is the invitee's own act). */
+async function accept(session, code) {
+  const res = await call(app, '/api/v1/auth/invites/accept', { method: 'POST', headers: session.auth, body: { code } });
+  assert.equal(res.status, 201, res.text);
+  return res.json;
+}
+
+/**
+ * Invites `contact` as `role` from the owner's session; the invitee signs in with a code to `phone`, accepts with the
+ * invitation's code, and signs in to this business.
+ */
 async function invited({ contact, role = 'staff', permissions = [], phone = contact }) {
   const res = await call(app, '/api/v1/team/invites', { method: 'POST', headers: as(owner), body: { contact, role, permissions } });
   assert.equal(res.status, 201, res.text);
   await reset();
-  return { invite: res.json, session: await codeSignIn(app, { phone, device: testDevice('Staff phone') }) };
+  await accept(await codeSignIn(app, { phone, device: testDevice('Staff phone') }), res.json.code);
+  await reset();
+  return { invite: res.json, session: await codeSignIn(app, { phone, device: testDevice('Staff phone'), tenantId: app.tenant.id }) };
 }
 
-test('an invitation holds only hashes, and the account appears when the invited number is verified', async () => {
+test('an invitation holds only hashes, and the account appears when the person with the invited number verified accepts it', async () => {
   const phone = random10();
   const res = await call(app, '/api/v1/team/invites', { method: 'POST', headers: as(owner), body: { contact: phone, role: 'staff', permissions: ['orders'] } });
   assert.equal(res.status, 201);
@@ -53,7 +65,10 @@ test('an invitation holds only hashes, and the account appears when the invited 
 
   await reset();
   const session = await codeSignIn(app, { phone });
-  const here = session.businesses.find((b) => b.id === app.tenant.id);
+  // Signing in joins nothing (R6-SEC): the person accepts with the code the owner passed on.
+  assert.equal(session.businesses.some((b) => b.id === app.tenant.id), false, 'not before they accept');
+  await accept(session, res.json.code);
+  const here = (await call(app, '/api/v1/auth/businesses', { headers: session.auth })).json.businesses.find((b) => b.id === app.tenant.id);
   assert.ok(here, 'the business is in their switcher');
   assert.equal(here.role, 'staff');
   const team = await call(app, '/api/v1/team', { headers: as(owner) });
@@ -99,22 +114,27 @@ test('a shopper\'s session never becomes a team member\'s when their number is i
   const shopper = await app.repos.users.create({ name: 'Shopper', phone, password: 'shop-pass', role: 'customer' });
   const shopperSession = await withTenant(app.tenant, () => app.platform.sessions.create(shopper.id, 30, 'bearer'));
   assert.equal((await call(app, '/api/v1/auth/me', { headers: { authorization: `Bearer ${shopperSession}` }, host: null })).status, 200);
-  await call(app, '/api/v1/team/invites', { method: 'POST', headers: as(owner), body: { contact: phone, role: 'manager' } });
+  const invite = await call(app, '/api/v1/team/invites', { method: 'POST', headers: as(owner), body: { contact: phone, role: 'manager' } });
+  await reset();
+  await accept(await codeSignIn(app, { phone }), invite.json.code);
   await reset();
   const session = await codeSignIn(app, { phone, tenantId: app.tenant.id });
   assert.equal(session.user.role, 'manager');
   assert.equal((await call(app, '/api/v1/auth/me', { headers: { authorization: `Bearer ${shopperSession}` }, host: null })).status, 401, 'the old session ended when the account changed hands');
 });
 
-test('an invitation to an email is taken up by a verified Google email when that person next signs in, never at once', async () => {
+test('an invitation to an email is taken up by a person with that Google email verified when they accept it, never at once or at sign-in', async () => {
   const [person] = await app.db.platform.query(`INSERT INTO people (name) VALUES ('Meera') RETURNING id`);
   await app.db.platform.query(`INSERT INTO person_identities (person_id, kind, subject, email, verified_at) VALUES ($1, 'google', 'g-meera', 'meera@example.com', now())`, [person.id]);
   const res = await call(app, '/api/v1/team/invites', { method: 'POST', headers: as(owner), body: { contact: 'Meera@Example.com', role: 'manager' } });
   assert.equal(res.status, 201);
-  // The team contract: the account appears when the person signs in with that identity verified, not when it is typed.
+  // The team contract: the account appears when the person with that identity verified accepts, not when it is typed.
   assert.deepEqual(await app.db.platform.query('SELECT 1 FROM users WHERE tenant_id = $1 AND person_id = $2', [app.tenant.id, person.id]), [], 'not at once');
-  // What every sign-in runs for the person (src/modules/accounts/session.js open -> people.reconcile).
+  // Nor at sign-in: what every sign-in runs for the person (src/modules/accounts/session.js open -> people.reconcile) joins nothing (R6-SEC).
   await accountsFor(app.ctx).people.reconcile(Number(person.id));
+  assert.deepEqual(await app.db.platform.query('SELECT 1 FROM users WHERE tenant_id = $1 AND person_id = $2', [app.tenant.id, person.id]), [], 'not at sign-in');
+  // What auth.acceptInvite runs for the person, with the invitation's code.
+  assert.ok(await accountsFor(app.ctx).people.takeInvite(Number(person.id), res.json.code));
   const [account] = await app.db.platform.query('SELECT role, phone FROM users WHERE tenant_id = $1 AND person_id = $2', [app.tenant.id, person.id]);
   assert.deepEqual(account, { role: 'manager', phone: `person:${person.id}` });
 });
