@@ -85,12 +85,10 @@ export function settingsApi({ repos, config }, setup) {
     },
 
     'settings.setup': async ({ req }) => {
-      const [settings, kit, stats, reels, client] = await Promise.all([
-        repos.settings.getAll(), repos.brandKit.get(), repos.stats.dashboard(), repos.reels.list(), setup.igClient(),
+      const [settings, kit, stats, reels, instagram] = await Promise.all([
+        repos.settings.getAll(), repos.brandKit.get(), repos.stats.dashboard(), repos.reels.list(), setup.instagramStatus(),
       ]);
-      // One after the other, so the checklist's Instagram check fills the cache and this answer reuses it.
-      const checklist = await setup.setupChecklist(settings, kit, stats, reels, client);
-      const instagram = await setup.instagramStatus(client);
+      const checklist = await setup.setupChecklist(settings, kit, stats, reels);
       return { storeUrl: storeBaseUrl(req, config), testMode: config.dryRun, instagram, checklist };
     },
 
