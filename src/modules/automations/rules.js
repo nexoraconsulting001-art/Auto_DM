@@ -171,6 +171,24 @@ export async function checkLaunch(automation, deps) {
   if (automation.linkStatus === 'failed') throw refuse('The link failed its check. Fix it before going live.', 'linkUrl', 'link.check_failed');
 }
 
+// What an edit of a test or live automation can change that a launch check is about (C-1): what it sends, and where and on what it fires.
+const SENT_FIELDS = ['linkMode', 'linkType', 'linkUrl', 'tapButtonTitle', 'linkButtonTitle', 'publicReplyEnabled', 'followupEnabled', 'followupText', 'linkMessage'];
+const REACH_FIELDS = ['triggerType', 'matchMode', 'includeReactions'];
+const sentVariants = (variants = []) => variants.map((v) => [v.label, v.body, v.buttonTitle ?? '', v.fallbackText ?? '', (v.quickReplies ?? []).map((q) => [q.title, q.payload])]);
+const reachTriggers = (triggers = []) => triggers.map((t) => [t.channel ?? 'instagram', t.targetType, t.mediaId ?? ''].join(' ')).sort();
+const sameKeywords = (a = [], b = []) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * What an edit changes, by value, so the builder's full-body resave of the same values is no change: `sends` when a message,
+ * button or link is different, `reach` when the trigger, its posts or its keywords are. Either one is a launch in all but name.
+ */
+export function launchChanges(current, after) {
+  const reach = REACH_FIELDS.some((f) => after[f] !== current[f]) || !sameKeywords(current.keywords, after.keywords) || !same(reachTriggers(current.triggers), reachTriggers(after.triggers));
+  const sends = SENT_FIELDS.some((f) => after[f] !== current[f]) || !same(sentVariants(current.variants), sentVariants(after.variants));
+  return { sends, reach };
+}
+
 /** A story mention isn't tied to one post, and a target with no media of its own has no media id. */
 export function normalizeTriggers(triggerType, triggers) {
   return triggers.map((trigger) => {
