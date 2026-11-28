@@ -112,7 +112,7 @@ export function createIgConnect({ fetchImpl, now } = {}) {
       if (review) reviewRoutes(app, { repos: ctx.repos, auth: ctx.auth, config: ctx.config, services: services(ctx), review });
     },
 
-    /** Called by automations.setState before Test or Live: an automation goes out only when every release gate passes (PRD 4.15). */
+    /** Called before Test or Live, and on an edit of what a test or live automation sends (C-1): it goes out only when every release gate passes (PRD 4.15). */
     async beforeAutomationLaunch(_automation, ctx) {
       const result = await services(ctx).gates.check();
       if (result.passed) return;

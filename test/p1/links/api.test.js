@@ -370,12 +370,18 @@ test('with no way to reach the internet, the daily check pauses nothing', async 
   assert.deepEqual(await shop.alerts(), []);
 });
 
-test('PRD 4.11: a live automation whose link is edited is checked without waiting a day', async () => {
+// C-1 (R7-COMP-1): the edit runs the launch link check, so a redirecting link is refused when it is saved. It used to be
+// saved and the automation paused by the daily job, after DMs could already carry it.
+test('PRD 4.11, C-1: a live automation whose link is edited is checked without waiting a day', async () => {
   const shop = await addShop(world);
-  const auto = await shop.automate({ linkUrl: siteOf(shop) });
-  await shop.call(`/automations/${auto.id}`, 200, { method: 'PATCH', body: { linkUrl: redirectingSite(shop) } });
+  const good = siteOf(shop);
+  const auto = await shop.automate({ linkUrl: good });
+  const res = await shop.api(`/automations/${auto.id}`, { method: 'PATCH', body: { linkUrl: redirectingSite(shop) } });
+  assert.deepEqual([res.status, res.json().reason], [400, 'link.redirect']);
   await shop.settle();
-  assert.equal((await shop.call(`/automations/${auto.id}`, 200)).state, 'paused');
+  const after = await shop.call(`/automations/${auto.id}`, 200);
+  assert.deepEqual([after.state, after.linkUrl], ['live', good], 'it keeps running on the link that passed');
+  assert.ok((await checksOf(shop)).some((row) => !row.ok && row.reason === 'link.redirect'), 'the refused check is on record');
 });
 
 test('an answer about a link the owner has since changed changes nothing', async () => {

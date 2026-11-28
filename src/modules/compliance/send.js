@@ -1268,6 +1268,23 @@ export function createCompliance({ db, repos, ig, meta, config = {}, platform })
       if (outcome === 'failed') return breaker.probeFailed(channel);
       return breaker.probeUnused(channel);
     },
+    /**
+     * What the provider answered a sender outside this queue (ctx.shopperMessages: order updates, cart reminders, login codes), reported
+     * as a job of this queue reports it (C-2): logged as a send, a refused token marks the account for reconnecting, alerts the owner
+     * once and opens the breaker, a throttle counts towards the three in a row, and every outcome is weighed by the counted rules. So
+     * the breaker, the reconnect state and the owner's alert are one mechanism for the channel, whoever sent. `error` is the provider's
+     * error (the registered channel's refusal() puts it in the gate's words) and null for a delivered message; `probe` when this send
+     * was the breaker's probe (takeBreakerProbe), whose outcome then closes or reopens it.
+     */
+    async reportSend(channel, accountId, { purpose, error = null, messageId = null, probe = false } = {}) {
+      tenantId();
+      const action = { channel, accountId, kind: 'dm', purpose };
+      const refusal = error ? channels.get(channel)?.refusal?.(error) ?? error : null;
+      const result = refusal ? await mapError(refusal, action, null) : delivered({ messageId });
+      await writeLog(action, result, { errorClass: result.errorClass });
+      await observe(action, result, { probe });
+      return { outcome: result.outcome, reason: result.reason };
+    },
 
     /** Failures are thrown here, because that is what src/handler.js is written against. Nothing in production calls it any more. */
     clientFor(account) {

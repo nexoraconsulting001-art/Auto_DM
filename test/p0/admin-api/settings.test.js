@@ -89,20 +89,21 @@ test('a logo alone counts as store details, and test mode is reported', withApp(
   assert.deepEqual(status.checklist.steps[1], { key: 'store_details', done: true });
 }));
 
-test('a token Instagram refuses shows as not connected, and the answer is cached per business', async () => {
+// e2e N-01: the setup status reads the stored connection, which the token keeper, the insights poller and the send gate keep
+// current; it used to ask Instagram on every load (cached per process). A refused token is one marked as refused.
+test('a token Instagram refused shows as not connected, and the setup status never calls Instagram', async () => {
   const ig = fakeIg();
   let checks = 0;
-  ig.getAccount = async () => { checks++; throw new Error('expired'); };
+  ig.getAccount = async () => { checks++; return { username: 'shop', user_id: 'ME' }; };
   await withApp({ ig }, async ({ api, db, tenant }) => {
-    const first = await ok(await api('GET', '/settings/setup'));
-    assert.deepEqual(first.instagram, { connected: false, username: '' });
-    assert.equal(first.checklist.steps[0].done, false);
-    assert.equal(checks, 1);
-    await ok(await api('GET', '/settings/setup'));
-    assert.equal(checks, 1);
-    await db.platform.query(`UPDATE ig_accounts SET access_token_enc = '' WHERE tenant_id = $1`, [tenant.id]);
+    assert.deepEqual((await ok(await api('GET', '/settings/setup'))).instagram, { connected: true, username: 'shop' });
+    await db.platform.query(`UPDATE ig_accounts SET status = 'reconnect_needed', status_reason = 'token.rejected' WHERE tenant_id = $1`, [tenant.id]);
+    const refusedToken = await ok(await api('GET', '/settings/setup'));
+    assert.deepEqual(refusedToken.instagram, { connected: false, username: '' });
+    assert.equal(refusedToken.checklist.steps[0].done, false);
+    await db.platform.query(`UPDATE ig_accounts SET status = 'active', status_reason = '', access_token_enc = '' WHERE tenant_id = $1`, [tenant.id]);
     assert.deepEqual((await ok(await api('GET', '/settings/setup'))).instagram, { connected: false, username: '' });
-    assert.equal(checks, 1);
+    assert.equal(checks, 0, 'opening Home asks Instagram nothing');
   })();
 });
 

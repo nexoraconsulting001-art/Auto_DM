@@ -17,6 +17,7 @@ import { checkDraft } from '../../../src/modules/ai-replies/rules.js';
 import { brandKitRepo } from '../../../src/modules/brand/repo.js';
 import { ValidationError } from '../../../src/util.js';
 import { createShopperMessages } from '../../../src/modules/shopper-messages/index.js';
+import { whatsappChannel } from '../../../src/modules/whatsapp-automation/channel.js';
 import { createSecrets } from '../../../src/platform/secrets.js';
 import { TEST_DATA_KEY } from '../../helpers.js';
 import { world } from '../../p1/compliance/support.js';
@@ -203,4 +204,56 @@ test('same cause: once the WhatsApp breaker\'s wait is over, one order update go
   assert.equal(await breakerState(), 'closed', 'a delivered probe closes the breaker');
   assert.equal((await send()).outcome, 'sent');
   assert.equal(sends.length, 2);
+});
+
+/** A shopper-message gate on world w whose WhatsApp provider answers with `answer()`: a message id, or a thrown ProviderError. */
+async function shopperWorld(answer) {
+  const w = await world({ fresh: true });
+  const secrets = createSecrets({ dataKey: TEST_DATA_KEY });
+  const whatsapp = { sendTemplate: async () => answer() };
+  const platform = { consent: { allows: async () => ({ granted: true }) }, secrets };
+  // As the app's whatsapp-automation module does in setup().
+  w.compliance.registerChannel('whatsapp', whatsappChannel({ db: w.db, platform, providers: { whatsapp } }));
+  const gate = createShopperMessages({ db: w.db, platform, providers: { whatsapp }, config: {}, compliance: w.compliance });
+  const phoneNumberId = `8${w.tenant.id}00004`;
+  await w.db.platform.query(`INSERT INTO whatsapp_accounts (tenant_id, waba_id, phone_number_id, access_token_enc) VALUES ($1, 'WABA-C2', $2, $3)`, [w.tenant.id, phoneNumberId, secrets.encrypt('t')]);
+  await w.inTenant(`INSERT INTO whatsapp_templates (tenant_id, purpose, category, name, status) VALUES ($1, 'order_shipped', 'utility', 'order_shipped', 'approved')`, [w.tenant.id]);
+  const update = { channel: 'whatsapp', purpose: 'order_update', to: { phone: '+91 98765 43210' }, template: { purpose: 'order_shipped', params: ['#1001'] } };
+  const send = async () => {
+    w.compliance.invalidateSwitches();
+    return w.inBusiness(() => gate.send(update));
+  };
+  const breaker = async () => (await w.db.platform.query(`SELECT state, trip_reason FROM breakers WHERE tenant_id = $1 AND channel = 'whatsapp'`, [w.tenant.id]))[0] ?? {};
+  return { w, send, breaker, phoneNumberId };
+}
+
+test('C-2: a WhatsApp token refused on an order update marks the number for reconnecting, tells the owner once and opens the breaker', async () => {
+  const { w, send, breaker, phoneNumberId } = await shopperWorld(() => { throw new ProviderError({ provider: 'whatsapp', kind: 'auth', status: 401, code: '190', delivery: 'none' }); });
+  assert.equal((await send()).outcome, 'failed');
+  const [account] = await w.db.platform.query('SELECT status FROM whatsapp_accounts WHERE tenant_id = $1 AND phone_number_id = $2', [w.tenant.id, phoneNumberId]);
+  assert.equal(account.status, 'reconnect');
+  assert.deepEqual(await breaker(), { state: 'open', trip_reason: 'token.rejected' });
+  const alerts = await w.db.platform.query(`SELECT kind FROM alerts WHERE tenant_id = $1 AND kind = 'token.rejected'`, [w.tenant.id]);
+  assert.equal(alerts.length, 1);
+  assert.notEqual((await send()).outcome, 'sent', 'nothing more is tried on the refused token');
+});
+
+test('C-2: three throttled WhatsApp order updates in a row open the breaker', async () => {
+  const { send, breaker } = await shopperWorld(() => { throw new ProviderError({ provider: 'whatsapp', kind: 'throttled', status: 429, delivery: 'none' }); });
+  for (let i = 0; i < 3; i++) assert.equal((await send()).outcome, 'failed');
+  assert.deepEqual(await breaker(), { state: 'open', trip_reason: 'throttle' });
+  assert.equal((await send()).reason, 'paused.breaker');
+});
+
+test('C-2: WhatsApp shopper messages count toward the 20%-of-50 error rule as gate sends do', async () => {
+  let n = 0;
+  const { w, send, breaker } = await shopperWorld(() => {
+    n += 1;
+    if (n <= 11) throw new ProviderError({ provider: 'whatsapp', kind: 'rejected', status: 400, code: '131000', delivery: 'none' });
+    return { messageId: `wamid.${n}` };
+  });
+  for (let i = 0; i < 50; i++) await send();
+  assert.deepEqual(await breaker(), { state: 'open', trip_reason: 'error_rate' });
+  const [{ logged }] = await w.db.platform.query(`SELECT count(*)::int AS logged FROM compliance_events WHERE tenant_id = $1 AND channel = 'whatsapp' AND decision IN ('sent', 'failed')`, [w.tenant.id]);
+  assert.equal(logged, 50);
 });

@@ -28,7 +28,7 @@ export const checkerFor = ({ config, platform }) => createLinkChecker({ fetch: c
 
 const clockOf = (config) => () => new Date((config?.complianceNow ?? Date.now)());
 
-/** Called by automations.setState before an automation goes to Test or Live. Throwing refuses it. */
+/** Called before an automation goes to Test or Live, and when an edit changes what a test or live one sends (C-1). Throwing refuses it. */
 export async function beforeAutomationLaunch(automation, ctx) {
   if (!automation.linkUrl) return;
   const { repos } = ctx;

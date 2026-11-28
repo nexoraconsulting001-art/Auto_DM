@@ -49,6 +49,9 @@ const toTripView = (trip, overriddenAt = trip.overrideAt) => ({
 
 const NO_ACCOUNT_MESSAGE = 'Reach Guard starts once an account is connected and its insights are being collected.';
 
+/** The deductions that come from the stored connection alone: a saved score whose set of these differs from the row's is out of date. */
+const CONNECTION_CODES = new Set(['token_rejected', 'token_refresh_failed', 'token_3d', 'token_14d', 'scope_missing']);
+
 /** Reach Guard and Account Health for one app. Runs inside withTenant(), except sweep(), which finds the accounts and enters each business itself. */
 export function createReachGuard({ db, repos, compliance }) {
   const rg = () => repos.reachGuard;
@@ -238,10 +241,32 @@ export function createReachGuard({ db, repos, compliance }) {
     return { ...result, computedAt: at };
   }
 
+  /**
+   * Whether a saved score still matches the account's stored connection (status, token, expiry, refresh failures, permissions).
+   * The token jobs, the insights poller and the send gate keep that row current, and reading it calls nobody. A score saved
+   * before the token was refused, or before a reconnect, is about a connection that is gone, so it is worked out again (e2e N-31).
+   */
+  async function connectionUnchanged(account, saved) {
+    const connection = await connectionOf(account);
+    if (!connection) return false;
+    const { deductions } = scoreHealth({
+      channel: account.channel,
+      active: connection.status === 'active',
+      hasToken: connection.hasToken,
+      tokenExpiresAt: connection.tokenExpiresAt,
+      refreshFailures: connection.refreshFailures ?? 0,
+      missingScopes: missingScopes(account, connection),
+      insightsDenied: insightsDenied(account, connection),
+      tripDropPercent: null,
+    }, now());
+    const codes = (list) => list.map((d) => d.code).filter((c) => CONNECTION_CODES.has(c)).sort().join();
+    return codes(deductions) === codes(saved.deductions);
+  }
+
   async function currentHealth(account) {
     if (account.id) {
       const saved = await rg().health(account.id);
-      if (saved && +now() - +new Date(saved.computedAt) < HEALTH_EVERY_MS) return saved;
+      if (saved && +now() - +new Date(saved.computedAt) < HEALTH_EVERY_MS && (await connectionUnchanged(account, saved))) return saved;
     }
     return computeHealth(account);
   }

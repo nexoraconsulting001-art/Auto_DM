@@ -183,6 +183,46 @@ test('another module can refuse an automation going live, and it stays where it 
   })();
 });
 
+test('C-1: editing what a live automation sends runs every module\'s launch check; a rename or a resave of the same values does not', () => {
+  const seen = [];
+  const probe = { name: 'probe', beforeAutomationLaunch(automation) {
+    seen.push(automation.linkUrl);
+    if (automation.linkUrl.includes('redirects')) throw new ApiError('validation_failed', 'That link redirects to another site.', { reason: 'link.redirect' });
+  } };
+  return withApp({ extra: [probe] }, async (app) => {
+    const saved = await save(app);
+    await ok(await app.api('POST', `/automations/${saved.id}/state`, { state: 'live' }));
+    assert.equal(seen.length, 1);
+    const res = await refused(await app.api('PATCH', `/automations/${saved.id}`, { linkUrl: 'https://seller.test/redirects' }), 400, 'validation_failed');
+    assert.equal(res.reason, 'link.redirect');
+    const after = await ok(await app.api('GET', `/automations/${saved.id}`));
+    assert.deepEqual([after.state, after.linkUrl], ['live', 'https://seller.test/p']);
+    assert.equal(seen.length, 2);
+    await ok(await app.api('PATCH', `/automations/${saved.id}`, { name: 'Renamed' }));
+    await ok(await app.api('PATCH', `/automations/${saved.id}`, body({ name: 'Renamed again' })));
+    assert.equal(seen.length, 2, 'Nothing that is sent changed');
+    await ok(await app.api('PATCH', `/automations/${saved.id}`, { variants: [{ label: 'A', body: 'Here it is, today only' }] }));
+    assert.equal(seen.length, 3);
+  })();
+});
+
+test('C-1, C-48: while activations are frozen a live automation can\'t be moved to new posts or keywords, but its words can change', withApp(async (app) => {
+  const saved = await save(app);
+  await ok(await app.api('POST', `/automations/${saved.id}/state`, { state: 'live' }));
+  await app.db.platform.query(`UPDATE platform_switches SET engaged = true WHERE key = 'activations_frozen'`);
+  try {
+    const moved = await refused(await app.api('PATCH', `/automations/${saved.id}`, { triggers: [{ targetType: 'reel', mediaId: 'R9' }] }), 409, 'conflict');
+    assert.equal(moved.reason, 'activations.frozen');
+    await refused(await app.api('PATCH', `/automations/${saved.id}`, { keywords: ['price', 'offer'] }), 409, 'conflict');
+    const after = await ok(await app.api('GET', `/automations/${saved.id}`));
+    assert.deepEqual([after.triggers.map((t) => t.mediaId), after.keywords], [['R1'], ['price']]);
+    await ok(await app.api('PATCH', `/automations/${saved.id}`, { variants: [{ label: 'A', body: 'Here it is, today only' }] }));
+    await ok(await app.api('PATCH', `/automations/${saved.id}`, body({ variants: [{ label: 'A', body: 'Here it is, today only' }] })));
+  } finally {
+    await app.db.platform.query(`UPDATE platform_switches SET engaged = false WHERE key = 'activations_frozen'`);
+  }
+}));
+
 test('A live automation can\'t be edited into one that couldn\'t go live', withApp(async (app) => {
   const saved = await save(app);
   await ok(await app.api('POST', `/automations/${saved.id}/state`, { state: 'live' }));

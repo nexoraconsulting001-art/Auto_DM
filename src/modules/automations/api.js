@@ -7,7 +7,7 @@ import { directLink } from '../links/rules.js';
 import { engineFor } from './engine.js';
 import { windowOpen } from './inbox.js';
 import { faqPayload, render } from './message.js';
-import { checkLaunch, checkSave, checkWrittenLinks, contentProblems, normalizeTriggers, warningsFor } from './rules.js';
+import { checkLaunch, checkSave, checkWrittenLinks, contentProblems, launchChanges, normalizeTriggers, warningsFor } from './rules.js';
 
 const SAMPLE_NAME = 'Asha';
 const META_ACCESS_REFUSAL = 'Meta is not accepting your business’s connection right now, so replies can’t be sent. Fix the connection on the Connect page, then try again.';
@@ -30,6 +30,17 @@ export function automationsApi(ctx) {
 
   /** The body with a trigger's fields in the shape they are stored in. */
   const stored = (body, triggerType) => (body.triggers ? { ...body, triggers: normalizeTriggers(triggerType, body.triggers) } : body);
+
+  /**
+   * May this automation run as it is about to be (C-1): the builder's launch rules, then every module's beforeAutomationLaunch
+   * (the link check before going live PRD 4.11, the referral link rule 4.10, the release gates 4.15, the plan limit, the
+   * activations freeze 4.12). Used when an automation goes to Test or Live, and when an edit changes what a test or live one
+   * sends or where it fires. `edit` is { sends, reach } for an edit and undefined for a switch-on. A module refuses by throwing an ApiError.
+   */
+  async function mayRun(automation, edit) {
+    await checkLaunch(automation, deps);
+    for (const module of ctx.modules ?? []) await module.beforeAutomationLaunch?.(automation, ctx, { edit });
+  }
 
   async function pushIceBreakers(items) {
     const account = await repos.igAccounts.current();
@@ -73,8 +84,12 @@ export function automationsApi(ctx) {
       const triggerType = body.triggerType ?? current.triggerType;
       const change = stored(body, triggerType);
       const after = { ...current, ...change };
-      if (['test', 'live'].includes(current.state)) await checkLaunch(after, deps);
-      else await checkSave(after, deps);
+      if (!['test', 'live'].includes(current.state)) await checkSave(after, deps);
+      else {
+        const edit = launchChanges(current, after);
+        if (edit.sends || edit.reach) await mayRun(after, edit);
+        else await checkLaunch(after, deps);
+      }
       return present(await repos.automations.update(params.id, change, { actor: actorOf(user) }));
     },
 
@@ -85,11 +100,7 @@ export function automationsApi(ctx) {
     async 'automations.setState'({ params, body, user }) {
       const current = await repos.automations.get(params.id);
       if (!current) return null;
-      if (['test', 'live'].includes(body.state)) {
-        await checkLaunch(current, deps);
-        // The link check before going live (PRD 4.11) belongs to the links module. A module refuses by throwing an ApiError.
-        for (const module of ctx.modules ?? []) await module.beforeAutomationLaunch?.(current, ctx);
-      }
+      if (['test', 'live'].includes(body.state)) await mayRun(current);
       return present(await repos.automations.setState(params.id, body.state, { actor: actorOf(user) }));
     },
 

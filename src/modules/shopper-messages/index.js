@@ -16,7 +16,7 @@ import { secretBinding } from '../../contracts/secrets.js';
  * everything else; PRD 4.12); the shopper has not said yes to that purpose on that channel (a login code needs no yes); it is
  * marketing inside quiet hours (deferred, not dropped); there is no address; the business has no account for the channel;
  * the WhatsApp template isn't approved. Once the breaker's wait is over, one send that passed every other rule goes as its probe
- * and its outcome closes or reopens the breaker. Only then is the provider called, once: a send whose answer was lost is reported
+ * and its outcome closes or reopens the breaker. Every WhatsApp answer is reported to compliance.reportSend (C-2). Only then is the provider called, once: a send whose answer was lost is reported
  * as failed with reason 'unknown_delivery' and retryable false, so nobody sends it twice on a guess.
  *
  * Logs carry ids and reasons only: never a number, an address or a word of the message.
@@ -103,24 +103,34 @@ export function createShopperMessages({ db, platform, providers, config = {}, co
     return { verdict: result('sent', R.ok), ready, address, probing };
   }
 
+  /**
+   * Every WhatsApp answer, delivered or not, is reported to the compliance engine as a gate send's is (C-2): the breaker's counted
+   * rules, three throttles in a row, a refused token (the number is marked for reconnecting and the owner told once), and the probe.
+   */
   async function send(message) {
     const decided = await decide(message, { takeProbe: true });
-    if (!decided.probing) return deliver(message, decided);
-    let outcome = 'unused';
+    const reports = message?.channel === 'whatsapp' && compliance && decided.verdict.outcome === 'sent';
+    if (!reports) return (await deliver(message, decided)).answer;
+    let delivery;
     try {
-      const answer = await deliver(message, decided);
-      outcome = answer.outcome === 'sent' ? 'sent' : 'failed';
-      return answer;
-    } finally {
-      await compliance.breakerProbeDone('whatsapp', outcome).catch((err) => log.warn('shopper_message.probe_report_failed', { kind: err?.name ?? 'error' }));
+      delivery = await deliver(message, decided);
+    } catch (err) {
+      // Not the provider's answer: it may never have been called, so the probe is left for the next sender.
+      if (decided.probing) await compliance.breakerProbeDone('whatsapp', 'unused').catch((e) => log.warn('shopper_message.probe_report_failed', { kind: e?.name ?? 'error' }));
+      throw err;
     }
+    const { answer, error } = delivery;
+    await compliance.reportSend('whatsapp', decided.ready.account.phoneNumberId, { purpose: message.purpose, error, messageId: answer.messageId ?? null, probe: decided.probing })
+      .catch((err) => log.warn('shopper_message.report_failed', { kind: err?.name ?? 'error' }));
+    return answer;
   }
 
+  /** { answer, error }: what the caller is told, and the provider's error when it refused. */
   async function deliver(message, { verdict, ready, address }) {
     const ids = { channel: message?.channel, purpose: message?.purpose, orderId: message?.orderId ?? null };
     if (verdict.outcome !== 'sent') {
       log.info('shopper_message.not_sent', { ...ids, outcome: verdict.outcome, reason: verdict.reason });
-      return verdict;
+      return { answer: verdict, error: null };
     }
     try {
       const sent = message.channel === 'whatsapp'
@@ -142,12 +152,12 @@ export function createShopperMessages({ db, platform, providers, config = {}, co
           idempotencyKey: message.dedupeKey,
         });
       log.info('shopper_message.sent', ids);
-      return result('sent', R.ok, { messageId: sent.messageId });
+      return { answer: result('sent', R.ok, { messageId: sent.messageId }), error: null };
     } catch (err) {
       if (!(err instanceof ProviderError)) throw err;
       const unknown = err.delivery === 'unknown';
       log.warn('shopper_message.failed', { ...ids, kind: err.kind, status: err.status, code: err.code, delivery: err.delivery });
-      return result('failed', unknown ? R.unknownDelivery : R.provider, { retryable: !unknown && err.retryable, kind: err.kind, code: err.code });
+      return { answer: result('failed', unknown ? R.unknownDelivery : R.provider, { retryable: !unknown && err.retryable, kind: err.kind, code: err.code }), error: err };
     }
   }
 

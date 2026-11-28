@@ -52,13 +52,18 @@ export const compliance = {
   api: (ctx) => complianceApi(ctx),
 
   /**
-   * Called by automations.setState before Test or Live. Three breakers in an hour freeze new activations across every business (PRD 4.12, C-48)
-   * until a super admin unfreezes them: nothing that isn't already live goes to Test or Live. What is live keeps sending.
+   * Called before an automation goes to Test or Live, and when an edit changes a test or live one (C-1). Three breakers in an hour
+   * freeze new activations across every business (PRD 4.12, C-48) until a super admin unfreezes them: nothing that isn't already
+   * live goes to Test or Live, and a running one can't be moved to other posts, keywords or triggers, which would be a new launch
+   * in all but name. What is live keeps sending, and its words can still be edited.
    */
-  async beforeAutomationLaunch(automation, ctx) {
-    if (automation.state === 'live' || !ctx.compliance || !(await ctx.compliance.activationsFrozen())) return;
-    const message = 'New automations can’t go live right now: our team has paused new launches while they check a problem. What is already live keeps running.';
-    throw new ApiError('conflict', message, { fields: { state: message }, reason: 'activations.frozen' });
+  async beforeAutomationLaunch(automation, ctx, { edit } = {}) {
+    const launching = edit ? edit.reach : automation.state !== 'live';
+    if (!launching || !ctx.compliance || !(await ctx.compliance.activationsFrozen())) return;
+    const message = edit
+      ? 'A running automation can’t be moved to other posts or keywords right now: our team has paused new launches while they check a problem. Its messages can still be changed.'
+      : 'New automations can’t go live right now: our team has paused new launches while they check a problem. What is already live keeps running.';
+    throw new ApiError('conflict', message, { fields: { [edit ? 'triggers' : 'state']: message }, reason: 'activations.frozen' });
   },
 
   /**

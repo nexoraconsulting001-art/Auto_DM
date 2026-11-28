@@ -74,6 +74,9 @@ export function whatsappChannel({ db, platform, providers, repos }) {
       }
     },
 
+    /** The same words for a template a sender outside the gate sent (ctx.shopperMessages), when it reports the answer (C-2). */
+    refusal: (err) => (err instanceof ProviderError ? refusal(err) : err),
+
     async tokenRejected(action) {
       await db.query(`UPDATE whatsapp_accounts SET status = 'reconnect', updated_at = now() WHERE tenant_id = $1 AND phone_number_id = $2 AND status = 'active'`, [tenantId(), action.accountId]);
     },
