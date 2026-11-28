@@ -90,7 +90,7 @@ const HIGHLIGHT = {
 const TICKER = {
   rule: ['border-top:1px solid var(--accent);border-bottom:1px solid var(--accent)', 'text-transform:uppercase;letter-spacing:.12em;color:var(--primary)', 'transform:rotate(45deg);background:var(--accent)'],
   pill: ['margin-left:20px;margin-right:20px;border-radius:999px;background:var(--card);border:1px solid var(--line)', 'color:var(--primary)', 'border-radius:999px;background:var(--accent)'],
-  tilted: ['background:var(--ink);transform:rotate(-2deg);margin-left:-10px;margin-right:-10px', 'text-transform:uppercase;font-family:var(--display);font-weight:800;color:var(--accent)', 'border-radius:999px;background:var(--primary)'],
+  tilted: ['background:var(--ink);transform:rotate(-2deg);margin-left:4px;margin-right:4px', 'text-transform:uppercase;font-family:var(--display);font-weight:800;color:var(--accent)', 'border-radius:999px;background:var(--primary)'],
   band: ['background:var(--accent)', 'text-transform:uppercase;font-family:var(--mono);font-weight:700;color:var(--on-accent)', 'background:var(--on-accent)'],
   stitched: ['border-top:1.5px dashed var(--line-strong);border-bottom:1.5px dashed var(--line-strong)', 'font-family:var(--display);font-style:italic;color:var(--primary)', 'border-radius:6px 1px 6px 1px;background:var(--eyebrow)'],
 };

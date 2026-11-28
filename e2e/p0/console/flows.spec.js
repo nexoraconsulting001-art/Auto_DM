@@ -247,7 +247,8 @@ test('an order is found, opened and moved along; cancelling restocks and can\'t 
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(status(page, 'Order updated.')).toBeVisible();
   await expect(page.getByLabel('Status')).toHaveValue('cancelled');
-  expect((await app.repos.products.get(products[0].id)).stock).toBe(5);
+  // "Order updated." is still on screen from the save before, so it doesn't say this save is done: wait for the stock itself.
+  await expect.poll(async () => (await app.repos.products.get(products[0].id)).stock).toBe(5);
 
   await page.getByLabel('Status').selectOption('paid');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -374,8 +375,9 @@ test('the brand kit changes the look, refuses unreadable colours, and only the w
   await expect(page.getByRole('img', { name: 'Logo', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Save brand kit' }).click();
   await expect(status(page, 'Brand kit saved.')).toBeVisible();
+  // "Brand kit saved." can still be on screen from the first save, so it doesn't say this save is done: wait for the colour itself.
+  await expect.poll(async () => (await app.repos.brandKit.get()).colors.primary).toBe('#234D33');
   const kit = await app.repos.brandKit.get();
-  expect(kit.colors.primary).toBe('#234D33');
   expect(kit.logoUrl).toMatch(/^\/media\//);
 
   await expect(page.locator('.shell-top .avatar img')).toHaveAttribute('src', kit.logoUrl);
@@ -388,8 +390,9 @@ test('U-02: staff get only what they are allowed: the menu is empty and a direct
   await open(page, app, '', { phone: '9000000003', password: 'secret1' });
   await expect(page.getByRole('heading', { name: 'Your console is ready' })).toBeVisible();
   await expect(page.locator('.tabbar').getByRole('link', { name: 'Orders' })).toHaveCount(0);
+  // Automations is built now (Phase 1, staffWith('automations')): a staff member without that permission is refused.
   await page.goto(`${app.base}/admin/automations`);
-  await expect(page.getByRole('heading', { name: 'We couldn’t find that page' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'You don’t have access to this' })).toBeVisible();
   await page.goto(`${app.base}/admin/reels`);
   await expect(page.getByRole('heading', { name: 'You don’t have access to this' })).toBeVisible();
   await page.goto(`${app.base}/admin/settings`);

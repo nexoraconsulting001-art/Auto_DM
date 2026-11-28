@@ -186,7 +186,8 @@ test('the wishlist: a heart saved while signed out is in the account after the W
   await page.goto(`${world.base}/wishlist`);
   await expect(page.getByText('Terracotta planter')).toBeVisible();
   await checkScreen(page, 'The wishlist, signed out');
-  await page.getByRole('link', { name: 'Sign in' }).click();
+  // The wishlist's own "Sign in to keep them on every device", not the header's Sign in chip (both come back here).
+  await page.getByRole('main').getByRole('link', { name: 'Sign in' }).click();
   await expect(page).toHaveURL(/\/login\?next=%2Fwishlist$|\/login\?next=\/wishlist$/);
   await page.getByLabel('WhatsApp number').fill(phone.slice(3));
   await page.getByRole('button', { name: 'Send code on WhatsApp' }).click();

@@ -10,6 +10,13 @@ import { messagePage } from './pages.js';
 import { SCOPES_TO_GO_LIVE, SCOPE_INSIGHTS, READ_RECEIPTS_FIELD, WEBHOOK_FIELD_SCOPES, nextRefreshAt } from './rules.js';
 import { secretBinding } from '../../contracts/secrets.js';
 
+/** The address the console started from, port and all: normalizeHost's lower case and no trailing dot, but the port kept. */
+const startHostOf = (req) => {
+  const host = String(req.host || '').trim().toLowerCase();
+  const port = /:\d+$/.exec(host)?.[0] ?? '';
+  return `${normalizeHost(host)}${port}`;
+};
+
 const STATE_TTL_MS = 10 * 60_000;
 const DEFAULT_RETURN = '/admin/settings';
 const MANAGER_ROLES = new Set(['owner', 'manager']);
@@ -60,7 +67,9 @@ export function createConnect({ db, repos, meta, config, platform, gates }) {
       returnTo: safeNext(returnTo, DEFAULT_RETURN),
       expiresAt: new Date(Date.now() + STATE_TTL_MS),
       via: req.bearer ? 'bearer' : 'cookie',
-      startHost: req.bearer ? '' : normalizeHost(req.hostname),
+      // The host with its port (Express 5's req.host): the finish step goes back to exactly this address, and a server on
+      // a port other than the scheme's own (a self-hosted install, a local run) would otherwise be sent to the wrong one.
+      startHost: req.bearer ? '' : startHostOf(req),
     });
     return { authorizeUrl };
   }

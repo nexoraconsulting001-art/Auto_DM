@@ -59,7 +59,8 @@ test('N-01: the analytics screen on a phone shows the cached days, the last 2 fl
   await shop.clearMetaCalls();
   await openAnalytics(page);
   await expect(page.getByText(/may still change/i).first()).toBeVisible();
-  await expect(page.getByText(/Views \(replaces impressions\)/)).toBeVisible();
+  // The headline metric's title (its tile in the grid shows the same label).
+  await expect(page.locator('#account-hero').filter({ hasText: /Views \(replaces impressions\)/ })).toBeVisible();
   await expect(page.getByText(/last updated/i).first()).toBeVisible();
   await expect(page.getByText(/From Instagram\/Facebook/).first()).toBeVisible();
   expect(await sideways(page)).toBe(0);
@@ -126,7 +127,9 @@ test('N-36: tapping Refresh now twice says how old the figures are', async ({ pa
   await openAnalytics(page);
   await page.getByRole('button', { name: /Refresh now/i }).click();
   await page.getByRole('button', { name: /Refresh now/i }).click();
-  await expect(page.getByText(/Updated \d+ min/)).toBeVisible();
+  // The two taps come seconds after the last poll, so the age is under a minute: insights/api.js says "Updated just now"
+  // then, and "Updated N min ago" from a minute on (test/p2/spec-p2/polling.test.js holds the minutes with a moved clock).
+  await expect(page.getByRole('status').filter({ hasText: /^Updated (just now|\d+ min ago)$/ })).toBeVisible();
 });
 
 test('N-14: the funnel lists each step with its label, and a one-tap Amazon reel says why a step is empty', async ({ page }) => {
@@ -137,7 +140,8 @@ test('N-14: the funnel lists each step with its label, and a one-tap Amazon reel
   await signIn(page);
   await page.goto(`${world.base}/admin/analytics/funnels/${auto.mediaId}`);
   await expect(page.getByText('Measured by Bhava').first()).toBeVisible();
-  await expect(page.getByText('not available for this link type')).toBeVisible();
+  // A one-tap Amazon reel has more than one step it can't measure; each says why.
+  await expect(page.getByText('not available for this link type').first()).toBeVisible();
   await expect(page.getByText(/one tap/i).first()).toBeVisible();
   expect(await seriousFindings(page)).toEqual([]);
 });
@@ -158,7 +162,7 @@ test('N-54: a pinned view appears on the dashboard', async ({ page }) => {
   const view = await shop.post('/saved-views', { name: 'My pinned view', definition: { metrics: ['sessions'], range: '7' } }, 201);
   await shop.post(`/saved-views/${view.id}/pin`, {}, 200);
   await signIn(page);
-  await expect(page.getByText('My pinned view')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'My pinned view' })).toBeVisible();
 });
 
 test('N-58: a tier 2 funnel with an add-to-cart step says Needs tier 3', async ({ page }) => {

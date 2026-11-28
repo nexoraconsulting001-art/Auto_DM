@@ -245,5 +245,6 @@ test('A-35: the shared tracking id warning reaches the seller', async ({ page })
   await page.getByText(/Automation/).first().click();
   await page.getByLabel(/tracking id/i).fill('shared-21');
   await page.getByRole('button', { name: /^Save/i }).click();
-  await expect(page.getByText('Earnings cannot be split by reel')).toBeVisible();
+  // The save's own warning banner (the link field shows the same words as a hint once the id is saved).
+  await expect(page.getByRole('status').filter({ hasText: 'Earnings cannot be split by reel' })).toBeVisible();
 });

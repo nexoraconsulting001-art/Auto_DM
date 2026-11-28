@@ -134,14 +134,16 @@ function showHint() {
 }
 
 /**
- * The worker's scope is /admin/, so a page opened as /admin (no slash) is outside it and would run without the worker. Say
- * /admin/ in the address bar before the router starts; the console's own routes are the same either way.
+ * The worker's scope is /admin/, so a page opened as /admin (no slash) is outside it and would run without the worker. The
+ * browser picks a page's worker by the address the page was loaded from, and rewriting the address bar later
+ * (history.replaceState) does not change that, so the page is loaded again as /admin/ before the router starts. The
+ * server still answers /admin with the page itself (the Phase 0 contract); the console's own routes are the same either way.
  */
 function stayInScope() {
   try {
     const { pathname, search, hash } = globalThis.location;
     const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-    if (base && pathname === base) globalThis.history.replaceState(globalThis.history.state, '', `${base}/${search}${hash}`);
+    if (base && pathname === base) globalThis.location.replace(`${base}/${search}${hash}`);
   } catch {
     // the address stays as it was
   }

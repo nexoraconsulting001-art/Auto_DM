@@ -49,7 +49,7 @@ export const status = (page, text) => page.getByRole('status').filter({ hasText:
 
 export async function goToMore(page, name) {
   await page.getByRole('button', { name: 'More' }).click();
-  await page.getByRole('link', { name }).click();
+  await page.getByRole('link', { name, exact: true }).click(); // exact: the dashboard can also offer "Open settings"
 }
 
 export const placeOrder = (app, { productId, name = 'Asha K', phone = '9876543210', qty = 1 }) => app.repos.orders.create({
